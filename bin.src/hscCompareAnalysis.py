@@ -1,3 +1,3 @@
 #!/usr/bin/env python
-from lsst.pipe.tasks.analysis import CompareAnalysisTask
+from lsst.pipe.analysis.analysis import CompareAnalysisTask
 CompareAnalysisTask.parseAndRun()
