@@ -838,7 +838,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                              patchList=patchList, hscRun=hscRun,
                                              matchRadius=matchRadius, zpLabel=zpLabel)
 
-    def plotCentroidXY(self, catalog, filenamer, dataId, camera=None, ccdList=None, skymap=None,
+    def plotCentroidXY(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, skymap=None,
                        patchList=None, hscRun=None, matchRadius=None, zpLabel=None):
         enforcer = None # Enforcer(requireLess={"star": {"stdev": 0.02}})
         for col in ["base_SdssCentroid_x", "base_SdssCentroid_y"]:
@@ -854,7 +854,7 @@ class CoaddAnalysisTask(CmdLineTask):
                     patchList=None, hscRun=None, matchRadius=None, zpLabel=None):
         enforcer = None
         self.AnalysisClass(catalog, deconvMomStarGal, "pStar", "pStar", self.config.analysis,
-                           qMin=-0.1, qMax=1.3, labeller=StarGalaxyLabeller()
+                           qMin=-0.1, qMax=1.39, labeller=StarGalaxyLabeller()
                            ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler, camera=camera,
                                      ccdList=ccdList, skymap=skymap, patchList=patchList, hscRun=hscRun,
                                      matchRadius=matchRadius, zpLabel=zpLabel)
@@ -1045,11 +1045,12 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             self.plotMags(catalog, filenamer, dataId, butler=butler, camera=camera, ccdList=ccdList,
                           hscRun=hscRun, zpLabel=self.zpLabel)
         if self.config.doPlotCentroids:
-            self.plotCentroidXY(catalog, filenamer, dataId, camera=camera, ccdList=ccdList, hscRun=hscRun,
-                                zpLabel=self.zpLabel)
+            self.plotCentroidXY(catalog, filenamer, dataId, butler=butler, camera=camera, ccdList=ccdList,
+                                hscRun=hscRun, zpLabel=self.zpLabel)
         if self.config.doPlotStarGalaxy:
             if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
-                self.plotStarGal(catalog, filenamer, dataId, hscRun=hscRun, zpLabel=self.zpLabel)
+                self.plotStarGal(catalog, filenamer, dataId, butler=butler, camera=camera, ccdList=ccdList,
+                                 hscRun=hscRun, zpLabel=self.zpLabel)
             else:
                 self.log.warn("Cannot run plotStarGal: ext_shapeHSM_HsmSourceMoments_xx not in catalog.schema")
         if self.config.doPlotMatches:
