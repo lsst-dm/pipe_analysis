@@ -1,3 +1,3 @@
 #!/usr/bin/env python
-from lsst.pipe.analysis.analysis import ColorAnalysisTask
+from lsst.pipe.analysis.colorAnalysis import ColorAnalysisTask
 ColorAnalysisTask.parseAndRun()
