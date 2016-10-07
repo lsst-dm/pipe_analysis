@@ -3,23 +3,25 @@
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from matplotlib.ticker import NullFormatter, AutoMinorLocator
 import numpy as np
 np.seterr(all="ignore")
-from eups import Eups
-eups = Eups()
 import functools
 
 from collections import defaultdict
 
-import lsst.afw.table as afwTable
-
-from lsst.daf.persistence.butler import Butler
 from lsst.pex.config import Config, Field, ConfigField, ListField, DictField, ConfigDictField
-from lsst.pipe.base import Struct, CmdLineTask, ArgumentParser, TaskRunner, TaskError
+from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner
 from lsst.coadd.utils import TractDataIdContainer
 from .analysis import Analysis, AnalysisConfig
+from .coaddAnalysis import CoaddAnalysisTask
+from .utils import *
+
+import lsst.afw.table as afwTable
+
+__all__ = ["ColorTransform", "ivezicTransforms", "straightTransforms", "NumStarLabeller",
+           "ColorValueInRange", "GalaxyColor", "ColorAnalysisConfig", "ColorAnalysisRunner",
+           "ColorAnalysisTask", "ColorColorDistance", "SkyAnalysisRunner", "SkyAnalysisTask"]
+
 
 class ColorTransform(Config):
     description = Field(dtype=str, doc="Description of the color transform")
@@ -29,6 +31,7 @@ class ColorTransform(Config):
                                doc="Minimum values for colors so that this is useful")
     requireLess = DictField(keytype=str, itemtype=float, default={},
                             doc="Maximum values for colors so that this is useful")
+
     @classmethod
     def fromValues(cls, description, plot, coeffs, requireGreater={}, requireLess={}):
         self = cls()
@@ -54,7 +57,7 @@ ivezicTransforms = {
     "xPara": ColorTransform.fromValues("Ivezic x parallel", False, {"HSC-R": 1.0, "HSC-I": -1.0}),
     "yPara": ColorTransform.fromValues("Ivezic y parallel", False,
                                        {"HSC-R": 0.895, "HSC-I": -0.448, "HSC-Z": -0.447, "": -0.600}),
-    }
+}
 
 straightTransforms = {
     "g": ColorTransform.fromValues("HSC-G", True, {"HSC-G": 1.0}),
@@ -65,6 +68,7 @@ straightTransforms = {
     "n921": ColorTransform.fromValues("NB0921", True, {"NB0921": 1.0}),
 }
 
+
 class NumStarLabeller(object):
     labels = {"star": 0, "maybe": 1, "notStar": 2}
     plot = ["star"]
@@ -72,7 +76,8 @@ class NumStarLabeller(object):
         self.numBands = numBands
     def __call__(self, catalog):
         return np.array([0 if nn == self.numBands else 2 if nn == 0 else 1 for
-                            nn in catalog["numStarFlags"]])
+                         nn in catalog["numStarFlags"]])
+
 
 class ColorValueInRange(object):
     """Functor to produce color value if in the appropriate range"""
@@ -80,6 +85,7 @@ class ColorValueInRange(object):
         self.column = column
         self.requireGreater = requireGreater
         self.requireLess = requireLess
+
     def __call__(self, catalog):
         good = np.ones(len(catalog), dtype=bool)
         for col, value in self.requireGreater.iteritems():
@@ -95,11 +101,11 @@ class GalaxyColor(object):
         self.alg2 = alg2
         self.prefix1 = prefix1
         self.prefix2 = prefix2
+
     def __call__(self, catalog):
         color1 = -2.5*np.log10(catalog[self.prefix1 + self.alg1]/catalog[self.prefix2 + self.alg1])
         color2 = -2.5*np.log10(catalog[self.prefix1 + self.alg2]/catalog[self.prefix2 + self.alg2])
         return color1 - color2
-
 
 
 class ColorAnalysisConfig(Config):
@@ -115,13 +121,14 @@ class ColorAnalysisConfig(Config):
     def setDefaults(self):
         Config.setDefaults(self)
         self.transforms = ivezicTransforms
-        self.analysis.flags = [] # We remove bad source ourself
+        self.analysis.flags = []  # We remove bad source ourself
+
 
 class ColorAnalysisRunner(TaskRunner):
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
-        FilterRefsDict = functools.partial(defaultdict, list) # Dict for filter-->dataRefs
-        tractFilterRefs = defaultdict(FilterRefsDict) # tract-->filter-->dataRefs
+        FilterRefsDict = functools.partial(defaultdict, list)  # Dict for filter-->dataRefs
+        tractFilterRefs = defaultdict(FilterRefsDict)  # tract-->filter-->dataRefs
         for patchRef in sum(parsedCmd.id.refList, []):
             if patchRef.datasetExists("deepCoadd_forced_src"):
                 tract = patchRef.dataId["tract"]
@@ -138,13 +145,14 @@ class ColorAnalysisRunner(TaskRunner):
                 parsedCmd.log.warn("No input data found for tract %d" % tract)
                 bad.append(tract)
                 continue
-            keep = set.intersection(*patchesForFilters) # Patches with full colour coverage
+            keep = set.intersection(*patchesForFilters)  # Patches with full colour coverage
             tractFilterRefs[tract] = {ff: [patchRef for patchRef in filterRefs[ff] if
                                            patchRef.dataId["patch"] in keep] for ff in filterRefs}
         for tract in bad:
             del tractFilterRefs[tract]
 
         return [(filterRefs, kwargs) for filterRefs in tractFilterRefs.itervalues()]
+
 
 class ColorAnalysisTask(CmdLineTask):
     ConfigClass = ColorAnalysisConfig
@@ -169,7 +177,7 @@ class ColorAnalysisTask(CmdLineTask):
         filenamer = Filenamer(butler, "plotColor", dataId)
         catalogsByFilter = {ff: self.readCatalogs(patchRefList, "deepCoadd_forced_src") for
                             ff, patchRefList in patchRefsByFilter.iteritems()}
-#        self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
+        # self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
         catalog = self.transformCatalogs(catalogsByFilter, self.config.transforms)
         self.plotStarColors(catalog, filenamer, NumStarLabeller(len(catalogsByFilter)), dataId)
         self.plotStarColorColor(catalogsByFilter, filenamer, dataId)
@@ -205,7 +213,7 @@ class ColorAnalysisTask(CmdLineTask):
                 continue
             value = np.ones(num)*transform.coeffs[""] if "" in transform.coeffs else np.zeros(num)
             for ff, coeff in transform.coeffs.iteritems():
-                if ff == "": # Constant: already done
+                if ff == "":  # Constant: already done
                     continue
                 cat = catalogs[ff]
                 mag = self.config.analysis.zp - 2.5*np.log10(cat[self.config.analysis.fluxColumn])
@@ -253,7 +261,6 @@ class ColorAnalysisTask(CmdLineTask):
                                flags=["modelfit_CModel_flag", "slot_CalibFlux_flag"], prefix="i_",
                                labeller=OverlapsStarGalaxyLabeller("g_", "i_"),
                                qMin=-0.5, qMax=0.5,).plotAll(dataId, filenamer, self.log)
-
 
     def plotStarColors(self, catalog, filenamer, labeller, dataId):
         for col, transform in self.config.transforms.iteritems():
@@ -329,8 +336,8 @@ class ColorAnalysisTask(CmdLineTask):
         return None
 
 
-def colorColorPlot(filename, xx, yy, xLabel, yLabel, xRange=None, yRange=None, order=1, iterations=1, rej=3.0,
-                   xFitRange=None, numBins=51):
+def colorColorPlot(filename, xx, yy, xLabel, yLabel, xRange=None, yRange=None, order=1, iterations=1,
+                   rej=3.0, xFitRange=None, numBins=51):
     fig, axes = plt.subplots(1, 2)
     if xRange:
         axes[0].set_xlim(*xRange)
@@ -359,7 +366,7 @@ def colorColorPlot(filename, xx, yy, xLabel, yLabel, xRange=None, yRange=None, o
     axes[0].scatter(xx[~keep], yy[~keep], c="black", label="other", **kwargs)
     axes[0].set_xlabel(xLabel)
     axes[0].set_ylabel(yLabel)
-    axes[0].legend(loc="upper left") # usually blank in color-color plots...
+    axes[0].legend(loc="upper left")  # usually blank in color-color plots...
     axes[0].plot(xLine, yLine, "r-")
 
     # Determine quality of locus
@@ -387,6 +394,7 @@ def colorColorPlot(filename, xx, yy, xLabel, yLabel, xRange=None, yRange=None, o
 
     return poly
 
+
 class ColorColorDistance(object):
     """Functor to calculate distance from stellar locus in color-color plot"""
     def __init__(self, band1, band2, band3, poly, xMin=None, xMax=None):
@@ -396,6 +404,7 @@ class ColorColorDistance(object):
         self.poly = poly
         self.xMin = xMin
         self.xMax = xMax
+
     def __call__(self, catalog):
         xx = catalog[self.band1] - catalog[self.band2]
         yy = catalog[self.band2] - catalog[self.band3]
@@ -419,13 +428,14 @@ class SkyAnalysisRunner(TaskRunner):
         kwargs["cosmos"] = parsedCmd.cosmos
 
         # Partition all inputs by filter
-        filterRefs = defaultdict(list) # filter-->dataRefs
+        filterRefs = defaultdict(list)  # filter-->dataRefs
         for patchRef in sum(parsedCmd.id.refList, []):
             if patchRef.datasetExists("deepCoadd_meas"):
                 filterName = patchRef.dataId["filter"]
                 filterRefs[filterName].append(patchRef)
 
         return [(refList, kwargs) for refList in filterRefs.itervalues()]
+
 
 class SkyAnalysisTask(CoaddAnalysisTask):
     """Version of CoaddAnalysisTask that runs on all inputs simultaneously
@@ -435,4 +445,3 @@ class SkyAnalysisTask(CoaddAnalysisTask):
     _DefaultName = "skyAnalysis"
     RunnerClass = SkyAnalysisRunner
     outputDataset = "plotSky"
-
