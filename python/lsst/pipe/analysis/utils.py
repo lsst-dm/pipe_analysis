@@ -15,8 +15,8 @@ import lsst.afw.table as afwTable
 __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCompare",
            "ApCorrDiffCompare", "AstrometryDiff", "psfSdssTraceSizeDiff", "psfHsmTraceSizeDiff", "MagDiffErr",
            "ApCorrDiffErr", "CentroidDiff", "CentroidDiffErr", "deconvMom", "deconvMomStarGal",
-           "concatenateCatalogs", "joinMatches", "joinCatalogs", "getFluxKeys", "addApertureFluxesHSC",
-           "addFpPoint", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
+           "concatenateCatalogs", "joinMatches", "checkIdLists", "joinCatalogs", "getFluxKeys",
+           "addApertureFluxesHSC", "addFpPoint", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
            "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
            "andCatalog"]
 
@@ -244,8 +244,8 @@ def joinMatches(matches, first="first_", second="second_"):
         row.set(distanceKey, mm.distance*afwGeom.radians)
     return catalog
 
-def joinCatalogs(catalog1, catalog2, prefix1="cat1_", prefix2="cat2_"):
-    # Make sure catalogs entries are all associated with the same object
+def checkIdLists(catalog1, catalog2):
+    # Check to see if two catalogs have an identical list of objects by id
     idStrList = ["", ""]
     for i, cat in enumerate((catalog1, catalog2)):
         if "id" in cat.schema:
@@ -255,7 +255,12 @@ def joinCatalogs(catalog1, catalog2, prefix1="cat1_", prefix2="cat2_"):
         else:
             raise RuntimeError("Cannot identify object id field (tried id and objectId)")
 
-    if not np.all(catalog1[idStrList[0]] == catalog2[idStrList[1]]):
+    return np.all(catalog1[idStrList[0]] == catalog2[idStrList[1]])
+
+def joinCatalogs(catalog1, catalog2, prefix1="cat1_", prefix2="cat2_"):
+    # Make sure catalogs entries are all associated with the same object
+
+    if not checkIdLists(catalog1, catalog2):
         raise RuntimeError("Catalogs with different sets of objects cannot be joined")
 
     mapperList = afwTable.SchemaMapper.join(afwTable.SchemaVector([catalog1[0].schema, catalog2[0].schema]),
