@@ -463,9 +463,11 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         return concatenateCatalogs(catList)
 
     def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, hscRun=None,
-                 matchRadius=None, zpLabel=None):
+                 matchRadius=None, zpLabel=None, fluxToPlotList=None, postFix=""):
+        if fluxToPlotList is None:
+            fluxToPlotList = self.config.fluxToPlotList
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02}})
-        for col in self.config.fluxToPlotList:
+        for col in fluxToPlotList:
             # ["base_CircularApertureFlux_12_0"]:
             if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
                 if "CircularAperture" in col:
@@ -500,9 +502,11 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                    matchRadius=matchRadius, zpLabel=zpLabel)
 
     def plotApCorrs(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, hscRun=None,
-                    matchRadius=None, zpLabel=None):
+                    matchRadius=None, zpLabel=None, fluxToPlotList=None):
+        if fluxToPlotList is None:
+            fluxToPlotList = self.config.fluxToPlotList
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02}})
-        for col in self.config.fluxToPlotList:
+        for col in fluxToPlotList:
             if "first_" + col + "_apCorr" in catalog.schema and "second_" + col + "_apCorr" in catalog.schema:
                 Analysis(catalog, ApCorrDiffCompare(col + "_apCorr"),
                          "Run Comparison: apCorr difference (%s)" % col, "diff_" + col + "_apCorr",

@@ -260,9 +260,11 @@ class CoaddAnalysisTask(CmdLineTask):
         return calibrated
 
     def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, skymap=None,
-                 patchList=None, hscRun=None, matchRadius=None, zpLabel=None):
+                 patchList=None, hscRun=None, matchRadius=None, zpLabel=None, fluxToPlotList=None):
+        if fluxToPlotList is None:
+            fluxToPlotList = self.config.fluxToPlotList
         enforcer = Enforcer(requireLess={"star": {"stdev": 0.02}})
-        for col in self.config.fluxToPlotList:
+        for col in fluxToPlotList:
         # ["base_GaussianFlux", ]: # "ext_photometryKron_KronFlux", "modelfit_Cmodel", "slot_CalibFlux"]:
             if col + "_flux" in catalog.schema:
                 self.AnalysisClass(catalog, MagDiff(col + "_flux", "base_PsfFlux_flux"), "Mag(%s) - PSFMag"
@@ -325,13 +327,16 @@ class CoaddAnalysisTask(CmdLineTask):
                                      hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
 
     def plotCompareUnforced(self, forced, unforced, filenamer, dataId, butler=None, camera=None, ccdList=None,
-                            skymap=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None):
+                            skymap=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
+                            fluxToPlotList=None):
+        if fluxToPlotList is None:
+            fluxToPlotList = self.config.fluxToPlotList
         enforcer = None
         catalog = joinMatches(afwTable.matchRaDec(forced, unforced,
                                                   self.config.matchRadius*afwGeom.arcseconds),
                               "forced_", "unforced_")
         catalog.writeFits(dataId["filter"] + ".fits")
-        for col in self.config.fluxToPlotList:
+        for col in fluxToPlotList:
             # ["base_PsfFlux", "base_GaussianFlux", "slot_CalibFlux", "ext_photometryKron_KronFlux",
             # "modelfit_Cmodel", "modelfit_Cmodel_exp_flux", "modelfit_Cmodel_dev_flux"]:
             if "forced_" + col in catalog.schema:
@@ -349,9 +354,12 @@ class CoaddAnalysisTask(CmdLineTask):
         return joinMatches(matches, "first_", "second_")
 
     def plotOverlaps(self, overlaps, filenamer, dataId, butler=None, camera=None, ccdList=None,
-                     skymap=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None):
+                     skymap=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
+                     fluxToPlotList=None):
+        if fluxToPlotList is None:
+            fluxToPlotList = self.config.fluxToPlotList
         magEnforcer = Enforcer(requireLess={"star": {"stdev": 0.003}})
-        for col in self.config.fluxToPlotList:
+        for col in fluxToPlotList:
             # ["base_PsfFlux", "base_GaussianFlux", "ext_photometryKron_KronFlux", "modelfit_Cmodel"]:
             if "first_" + col + "_flux" in overlaps.schema:
                 self.AnalysisClass(overlaps, MagDiff("first_" + col + "_flux", "second_" + col + "_flux"),
