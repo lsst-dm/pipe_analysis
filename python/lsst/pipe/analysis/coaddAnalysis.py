@@ -58,9 +58,8 @@ class CoaddAnalysisConfig(Config):
     fluxToPlotList = ListField(dtype=str, default=["base_GaussianFlux", ],
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(base_PsfFlux)")
     # "ext_photometryKron_KronFlux", "modelfit_Cmodel", "slot_CalibFlux"]:
-    doApplyUberCal = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input?")
-    doApplyCalexpZp = Field(dtype=bool, default=True,
-                            doc="Apply FLUXMAG0 zeropoint to sources? Ignored if doApplyUberCal is True")
+    doApplyUberCal = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input?" +
+                           " FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
 
     def saveToStream(self, outfile, root="root"):
         """Required for loading colorterms from a Config outside the 'lsst' namespace"""
@@ -260,7 +259,8 @@ class CoaddAnalysisTask(CmdLineTask):
         return calibrated
 
     def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, skymap=None,
-                 patchList=None, hscRun=None, matchRadius=None, zpLabel=None, fluxToPlotList=None):
+                 patchList=None, hscRun=None, matchRadius=None, zpLabel=None, fluxToPlotList=None,
+                 postFix=""):
         if fluxToPlotList is None:
             fluxToPlotList = self.config.fluxToPlotList
         enforcer = Enforcer(requireLess={"star": {"stdev": 0.02}})
@@ -273,7 +273,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                    ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, skymap=skymap,
                                              patchList=patchList, hscRun=hscRun,
-                                             matchRadius=matchRadius, zpLabel=zpLabel)
+                                             matchRadius=matchRadius, zpLabel=zpLabel, postFix=postFix)
 
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, skymap=None,
                   patchList=None, hscRun=None, matchRadius=None, zpLabel=None):
@@ -474,9 +474,8 @@ class CompareCoaddAnalysisConfig(Config):
     fluxToPlotList = ListField(dtype=str, default=["base_PsfFlux", "base_GaussianFlux"],
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(base_PsfFlux)")
     # "ext_photometryKron_KronFlux", "modelfit_Cmodel", "slot_CalibFlux"]:
-    doApplyUberCal = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input?")
-    doApplyCalexpZp = Field(dtype=bool, default=True,
-                            doc="Apply FLUXMAG0 zeropoint to sources? Ignored if doApplyUberCal is True")
+    doApplyUberCal = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input?" +
+                           " FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
 
 
 class CompareCoaddAnalysisRunner(TaskRunner):
@@ -517,6 +516,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         catalog1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_forced_src")
         catalog2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_forced_src")
         catalog = self.matchCatalogs(catalog1, catalog2)
+        catalog = self.calibrateCatalogs(catalog)
         if self.config.doPlotMags:
             self.plotMags(catalog, filenamer, dataId)
         if self.config.doPlotCentroids:
@@ -535,31 +535,9 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             raise TaskError("No matches found")
         return joinMatches(matches, "first_", "second_")
 
-    def calibrateCatalogs(self, dataRef, catalog, metadata):
-        self.zp = 0.0
-        try:
-            self.zpLabel = self.zpLabel
-        except:
-            self.zpLabel = None
-        if self.config.doApplyUberCal:
-            calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
-            self.zpLabel = "MEAS_MOSAIC"
-            if self.zpLabel is None:
-                self.log.info("Applying meas_mosaic calibration to catalog")
-        else:
-            if self.config.doApplyCalexpZp:
-                # Scale fluxes to measured zeropoint
-                self.zp = 2.5*np.log10(metadata.get("FLUXMAG0"))
-                if self.zpLabel is None:
-                    self.log.info("Using 2.5*log10(FLUXMAG0) = %.4f from FITS header for zeropoint" % self.zp)
-                self.zpLabel = "FLUXMAG0"
-            else:
-                # Scale fluxes to common zeropoint
-                self.zp = 33.0
-                if self.zpLabel is None:
-                    self.log.info("Using common value of %.4f for zeropoint" % (self.zp))
-                self.zpLabel = "common (" + str(self.zp) + ")"
-            calibrated = calibrateSourceCatalog(catalog, self.zp)
+    def calibrateCatalogs(self, catalog):
+        self.zpLabel = "common (" + str(self.config.analysis.zp) + ")"
+        calibrated = calibrateCoaddSourceCatalog(catalog, self.config.analysis.zp)
         return calibrated
 
     def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, hscRun=None,

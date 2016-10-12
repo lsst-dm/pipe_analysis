@@ -27,18 +27,20 @@ import lsst.afw.table as afwTable
 
 class CcdAnalysis(Analysis):
     def plotAll(self, dataId, filenamer, log, enforcer=None, forcedMean=None, butler=None, camera=None,
-                ccdList=None, skymap=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None):
+                ccdList=None, skymap=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
+                postFix=""):
         stats = self.stats(forcedMean=forcedMean)
-        self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd"), stats=stats,
+        self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd"+postFix), stats=stats,
                      hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
         if self.config.doPlotFP:
-            self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa"), stats=stats,
+            self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa"+postFix),
+                                stats=stats,
                                 camera=camera, ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
                                 zpLabel=zpLabel)
 
         return Analysis.plotAll(self, dataId, filenamer, log, enforcer=enforcer, forcedMean=forcedMean,
                                 butler=butler, camera=camera, ccdList=ccdList, hscRun=hscRun,
-                                matchRadius=matchRadius, zpLabel=zpLabel)
+                                matchRadius=matchRadius, zpLabel=zpLabel, postFix=postFix)
 
     def plotFP(self, dataId, filenamer, log, enforcer=None, forcedMean=None, camera=None, ccdList=None,
                hscRun=None, matchRadius=None, zpLabel=None):
@@ -170,14 +172,12 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         self.log.info("dataId: %s" % (dataId,))
         filterName = dataId["filter"]
         filenamer = Filenamer(butler, "plotVisit", dataRefList[0].dataId)
-        if (self.config.doPlotMags or self.config.doPlotSizes or self.config.doPlotStarGalaxy or
-            self.config.doPlotOverlaps or cosmos or self.config.externalCatalogs):
-            catalog = self.readCatalogs(dataRefList, "src")
-        calexp = None
-        if (self.config.doPlotSizes):
-            calexp = butler.get("calexp", dataId)
+        # calexp = None
+        # if self.config.doPlotSizes:
+        #     calexp = butler.get("calexp", dataId)
         # Check metadata to see if stack used was HSC
         metadata = butler.get("calexp_md", dataRefList[0].dataId)
+        catalog = self.readCatalogs(dataRefList, "src")
         # Set an alias map for differing src naming conventions of different stacks (if any)
         hscRun = checkHscStack(metadata)
         if hscRun is not None and self.config.doAddAperFluxHsc:
@@ -187,6 +187,18 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             aliasMap = catalog.schema.getAliasMap()
             for lsstName, otherName in self.config.srcSchemaMap.iteritems():
                 aliasMap.set(lsstName, otherName)
+
+        # Scale fluxes to common zeropoint to make basic comparison plots without calibrated ZP influence
+        self.zp = 33.0
+        self.zpLabel = "common (" + str(self.zp) + ")"
+        commonZpCat = catalog.copy(True)
+        commonZpCat = calibrateSourceCatalog(commonZpCat, self.zp)
+        # Create mag comparison plots using common ZP
+        self.plotMags(commonZpCat, filenamer, dataId, butler=butler, camera=camera, ccdList=ccdList,
+                      hscRun=hscRun, zpLabel=self.zpLabel, fluxToPlotList=["base_GaussianFlux", ],
+                      postFix="_commonZp")
+        # Now calibrate source catalog to either FLUXMAG0 or meas_mosaic result for remainder of plots
+        catalog = self.calibrateCatalogs(dataRef, catalog, metadata)
         if self.config.doPlotSizes:
             if "base_SdssShape_psf_xx" in catalog.schema:
                 self.plotSizes(catalog, filenamer, dataId, butler=butler, camera=camera, ccdList=ccdList,
@@ -237,8 +249,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if self.config.doBackoutApCorr:
                 catalog = backoutApCorr(catalog)
 
-            calibrated = self.calibrateCatalogs(dataRef, catalog, metadata)
-            catList.append(calibrated)
+            catList.append(catalog)
 
         if len(catList) == 0:
             raise TaskError("No catalogs read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
@@ -330,21 +341,14 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 self.log.info("Applying meas_mosaic calibration to catalog")
             self.zpLabel = "MEAS_MOSAIC"
         else:
-            if self.config.doApplyCalexpZp:
-                # Scale fluxes to measured zeropoint
-                self.zp = 2.5*np.log10(metadata.get("FLUXMAG0"))
-                if self.zpLabel is None:
-                    self.log.info("Using 2.5*log10(FLUXMAG0) = %.4f from FITS header for zeropoint" % self.zp)
-                self.zpLabel = "FLUXMAG0"
-            else:
-                # Scale fluxes to common zeropoint
-                self.zp = 33.0
-                if self.zpLabel is None:
-                    self.log.info("Using common value of %.4f for zeropoint" % (self.zp))
-                self.zpLabel = "common (" + str(self.zp) + ")"
-            calibrated = calibrateSourceCatalog(catalog, self.zp)
-        return calibrated
+            # Scale fluxes to measured zeropoint
+            self.zp = 2.5*np.log10(metadata.get("FLUXMAG0"))
+            if self.zpLabel is None:
+                self.log.info("Using 2.5*log10(FLUXMAG0) = %.4f from FITS header for zeropoint" % self.zp)
+            self.zpLabel = "FLUXMAG0"
+        calibrated = calibrateSourceCatalog(catalog, self.zp)
 
+        return calibrated
 
 class CompareVisitAnalysisRunner(TaskRunner):
     @staticmethod
@@ -410,8 +414,6 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         self.log.info("\nNumber of sources in catalogs: first = {0:d} and second = {1:d}".format(
                 len(catalog1), len(catalog2)))
         catalog = self.matchCatalogs(catalog1, catalog2)
-        self.log.info("Number of matches (maxDist = {0:.2f} arcsec) = {1:d}".format(
-                self.config.matchRadius, len(catalog)))
 
         # Set an alias map for differing src naming conventions of different stacks (if any)
         if self.config.srcSchemaMap is not None and hscRun is not None:
@@ -425,6 +427,20 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
 
         if self.config.doBackoutApCorr:
             catalog = backoutApCorr(catalog)
+        # Scale fluxes to common zeropoint to make basic comparison plots without calibrated ZP influence
+        self.zp = 33.0
+        self.zpLabel = "common (" + str(self.zp) + ")"
+        commonZpCat = catalog.copy(True)
+        commonZpCat = calibrateSourceCatalog(commonZpCat, self.zp)
+        # Create mag comparison plots using common ZP
+        self.plotMags(commonZpCat, filenamer, dataId, butler=butler1, camera=camera1, ccdList=ccdList1,
+                      hscRun=hscRun, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel,
+                      fluxToPlotList=["base_GaussianFlux", ], postFix="_commonZp")
+        # Now calibrate source catalog to either FLUXMAG0 or meas_mosaic result for remainder of plots
+        catalog = self.calibrateCatalogs(dataRef, catalog, metadata1)
+
+        self.log.info("Number of matches (maxDist = {0:.2f} arcsec) = {1:d}".format(
+                self.config.matchRadius, len(catalog)))
 
         if self.config.doPlotMags:
             self.plotMags(catalog, filenamer, dataId, butler=butler1, camera=camera1, ccdList=ccdList1,
@@ -452,15 +468,36 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             metadata = butler.get("calexp_md", dataRef.dataId)
             calexp = butler.get("calexp", dataRef.dataId)
             nQuarter = calexp.getDetector().getOrientation().getNQuarter()
-            calibrated = self.calibrateCatalogs(dataRef, srcCat, metadata)
             if hscRun is not None and hscRun1 is None:
                 if nQuarter%4 != 0:
-                    calibrated = rotatePixelCoords(calibrated, calexp.getWidth(), calexp.getHeight(), nQuarter)
-            catList.append(calibrated)
+                    srcCat = rotatePixelCoords(srcCat, calexp.getWidth(), calexp.getHeight(), nQuarter)
+            catList.append(srcCat)
 
         if len(catList) == 0:
             raise TaskError("No catalogs read: %s" % ([dataRefList[0].dataId for dataRef in dataRefList]))
         return concatenateCatalogs(catList)
+
+    def calibrateCatalogs(self, dataRef, catalog, metadata):
+        self.zp = 0.0
+        try:
+            self.zpLabel = self.zpLabel
+        except:
+            self.zpLabel = None
+        if self.config.doApplyUberCal:
+            calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
+            self.zpLabel = "MEAS_MOSAIC"
+            if self.zpLabel is None:
+                self.log.info("Applying meas_mosaic calibration to catalog")
+        else:
+            # Scale fluxes to measured zeropoint
+            self.zp = 2.5*np.log10(metadata.get("FLUXMAG0"))
+            if self.zpLabel is None:
+                self.log.info("Using 2.5*log10(FLUXMAG0) = %.4f from FITS header for zeropoint" % self.zp)
+            self.zpLabel = "FLUXMAG0"
+            calibrated = calibrateSourceCatalog(catalog, self.zp)
+
+        return calibrated
+
 
     def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, hscRun=None,
                  matchRadius=None, zpLabel=None, fluxToPlotList=None, postFix=""):
@@ -477,7 +514,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                          prefix="first_", qMin=-0.05, qMax=0.05, flags=[col + "_flag"],
                          errFunc=MagDiffErr(col + "_flux"), labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler, camera=camera,
-                                   ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
+                                   ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
+                                   postFix=postFix)
 
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, hscRun=None,
                  matchRadius=None, zpLabel=None):

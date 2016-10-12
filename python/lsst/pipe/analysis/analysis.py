@@ -364,24 +364,25 @@ class Analysis(object):
         plt.close(fig)
 
     def plotAll(self, dataId, filenamer, log, enforcer=None, forcedMean=None, butler=None, camera=None,
-                ccdList=None, skymap=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None):
+                ccdList=None, skymap=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
+                postFix=""):
         """Make all plots"""
         stats = self.stats(forcedMean=forcedMean)
-        self.plotAgainstMagAndHist(filenamer(dataId, description=self.shortName, style="psfMagHist"),
+        self.plotAgainstMagAndHist(filenamer(dataId, description=self.shortName, style="psfMagHist" + postFix),
                                    stats=stats, camera=camera, ccdList=ccdList, skymap=skymap,
                                    patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                    zpLabel=zpLabel)
 
         if self.config.doPlotOldMagsHist:
-            self.plotAgainstMag(filenamer(dataId, description=self.shortName, style="psfMag"), stats=stats,
-                                hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
-            self.plotHistogram(filenamer(dataId, description=self.shortName, style="hist"), stats=stats,
-                               hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
+            self.plotAgainstMag(filenamer(dataId, description=self.shortName, style="psfMag" + postFix),
+                                stats=stats, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
+            self.plotHistogram(filenamer(dataId, description=self.shortName, style="hist" + postFix),
+                               stats=stats, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
 
-        self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky"), stats=stats,
+        self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky" + postFix), stats=stats,
                              dataId=dataId, butler=butler, camera=camera, ccdList=ccdList, skymap=skymap,
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
-        self.plotRaDec(filenamer(dataId, description=self.shortName, style="radec"), stats=stats,
+        self.plotRaDec(filenamer(dataId, description=self.shortName, style="radec" + postFix), stats=stats,
                        hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
         log.info("Statistics from %s of %s: %s" % (dataId, self.quantityName, stats))
         if enforcer:
