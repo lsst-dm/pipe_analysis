@@ -15,6 +15,7 @@ from lsst.coadd.utils import TractDataIdContainer
 from .analysis import Analysis, AnalysisConfig
 from .coaddAnalysis import CoaddAnalysisTask
 from .utils import *
+from .plotUtils import *
 
 import lsst.afw.table as afwTable
 
@@ -93,6 +94,7 @@ class ColorValueInRange(object):
         for col, value in self.requireLess.iteritems():
             good &= catalog[col] < value
         return np.where(good, catalog[self.column], np.nan)
+
 
 class GalaxyColor(object):
     """Functor to produce difference between galaxy color calculated by different algorithms"""
@@ -175,19 +177,37 @@ class ColorAnalysisTask(CmdLineTask):
             dataId = patchRef.dataId
             break
         filenamer = Filenamer(butler, "plotColor", dataId)
-        catalogsByFilter = {ff: self.readCatalogs(patchRefList, "deepCoadd_forced_src") for
+        unforcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList, "deepCoadd_meas") for
                             ff, patchRefList in patchRefsByFilter.iteritems()}
+        for cat in unforcedCatalogsByFilter.itervalues():
+            calibrateCoaddSourceCatalog(cat, self.config.analysis.zp)
+        unforced = self.transformCatalogs(unforcedCatalogsByFilter, self.config.transforms)
+        forcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList, "deepCoadd_forced_src") for
+                            ff, patchRefList in patchRefsByFilter.iteritems()}
+        for cat in forcedCatalogsByFilter.itervalues():
+            calibrateCoaddSourceCatalog(cat, self.config.analysis.zp)
         # self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
-        catalog = self.transformCatalogs(catalogsByFilter, self.config.transforms)
-        self.plotStarColors(catalog, filenamer, NumStarLabeller(len(catalogsByFilter)), dataId)
-        self.plotStarColorColor(catalogsByFilter, filenamer, dataId)
+        forced = self.transformCatalogs(forcedCatalogsByFilter, self.config.transforms,
+                                        flagsCats=unforcedCatalogsByFilter)
+
+        self.plotStarColors(forced, filenamer, NumStarLabeller(len(forcedCatalogsByFilter)), dataId)
+        self.plotStarColorColor(forcedCatalogsByFilter, filenamer, dataId)
 
     def readCatalogs(self, patchRefList, dataset):
         catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS) for
                    patchRef in patchRefList if patchRef.datasetExists(dataset)]
         return concatenateCatalogs(catList)
 
-    def transformCatalogs(self, catalogs, transforms):
+    def transformCatalogs(self, catalogs, transforms, flagsCats=None):
+        """
+        flagsCats: The forced catalogs do not contain the flags for selecting against objects,
+                   so add this optional argument to provide a catalog list that does have these
+                   flags.  The indentity of the object lists of flagsCat vs. the catalogs will
+                   be checked.
+        """
+        if flagsCats is None:
+            flagsCats = catalogs
+
         template = catalogs.values()[0]
         num = len(template)
         assert all(len(cat) == num for cat in catalogs.itervalues())
@@ -198,9 +218,10 @@ class ColorAnalysisTask(CmdLineTask):
         for col in transforms:
             if all(ff in catalogs for ff in transforms[col].coeffs):
                 schema.addField(col, float, transforms[col].description)
-        schema.addField("numStarFlags", int, "Number of times source was flagged as star")
-        badKey = schema.addField("bad", "Flag", "Is this a bad source?")
-        schema.addField(self.config.analysis.fluxColumn, float, "Flux from filter " + self.config.fluxFilter)
+        schema.addField("numStarFlags", type=int, doc="Number of times source was flagged as star")
+        badKey = schema.addField("bad", type="Flag", doc="Is this a bad source?")
+        schema.addField(self.config.analysis.fluxColumn, type=float,
+                        doc="Flux from filter " + self.config.fluxFilter)
 
         # Copy basics (id, RA, Dec)
         new = afwTable.SourceCatalog(schema)
@@ -216,18 +237,22 @@ class ColorAnalysisTask(CmdLineTask):
                 if ff == "":  # Constant: already done
                     continue
                 cat = catalogs[ff]
-                mag = self.config.analysis.zp - 2.5*np.log10(cat[self.config.analysis.fluxColumn])
+                mag = -2.5*np.log10(cat[self.config.analysis.fluxColumn])
                 value += mag*coeff
             new[col][:] = value
 
         # Flag bad values
         bad = np.zeros(num, dtype=bool)
-        for cat in catalogs.itervalues():
+        for dataCat, flagsCat in zip(catalogs.itervalues(), flagsCats.itervalues()):
+            if not checkIdLists(dataCat, flagsCat):
+                raise RuntimeError(
+                    "Catalog being used for flags does not have the same object list as the data catalog")
             for flag in self.config.flags:
-                bad |= cat[flag]
+                if flag in flagsCat.schema:
+                    bad |= flagsCat[flag]
         # Can't set column for flags; do row-by-row
         for row, badValue in zip(new, bad):
-            row.setFlag(badKey, badValue)
+            row.setFlag(badKey, bool(badValue))
 
         # Star/galaxy
         numStarFlags = np.zeros(num)
@@ -274,12 +299,14 @@ class ColorAnalysisTask(CmdLineTask):
     def plotStarColorColor(self, catalogs, filenamer, dataId):
         num = len(catalogs.values()[0])
         zp = self.config.analysis.zp
+        zp = 0.0
         mags = {ff: zp - 2.5*np.log10(catalogs[ff][self.config.analysis.fluxColumn]) for ff in catalogs}
 
         bad = np.zeros(num, dtype=bool)
         for cat in catalogs.itervalues():
             for flag in self.config.flags:
-                bad |= cat[flag]
+                if flag in cat.schema:
+                    bad |= cat[flag]
 
         bright = np.ones(num, dtype=bool)
         for mm in mags.itervalues():
