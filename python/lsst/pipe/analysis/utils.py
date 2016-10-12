@@ -207,7 +207,7 @@ def deconvMom(catalog):
     else:
         # LSST does not have shape.sdss.psf.  Could instead add base_PsfShape to catalog using
         # exposure.getPsf().computeShape(s.getCentroid()).getIxx()
-        raise TaskError("No psf shape parameter found in catalog")
+        raise RuntimeError("No psf shape parameter found in catalog")
     return np.where(np.isfinite(hsm), hsm, sdss) - psf
 
 def deconvMomStarGal(catalog):
@@ -283,14 +283,18 @@ def getFluxKeys(schema):
                     re.search(r"^(\w+_flux)$", name) and key.getTypeString() != "Flag")
     errKeys = dict((name, schemaKeys[name + "Sigma"]) for name in fluxKeys.keys() if
                    name + "Sigma" in schemaKeys)
-    if len(fluxKeys) == 0: # The schema is likely the HSC format
-        fluxKeys = dict((name, key) for name, key in schemaKeys.items() if
-                        re.search(r"^(flux\_\w+|\w+\_flux)$", name)
-                        and not re.search(r"^(\w+\_apcorr)$", name) and name + "_err" in schemaKeys)
-        errKeys = dict((name, schemaKeys[name + "_err"]) for name in fluxKeys.keys() if
+    # Also check for any in HSC format
+    fluxKeysHSC = dict((name, key) for name, key in schemaKeys.items() if
+                       (re.search(r"^(flux\_\w+|\w+\_flux)$", name) or
+                        re.search(r"^(\w+flux\_\w+|\w+\_flux)$", name))
+                       and not re.search(r"^(\w+\_apcorr)$", name) and name + "_err" in schemaKeys)
+    errKeysHSC = dict((name, schemaKeys[name + "_err"]) for name in fluxKeysHSC.keys() if
                        name + "_err" in schemaKeys)
+    if len(fluxKeysHSC) > 0:
+        fluxKeys.update(fluxKeysHSC)
+        errKeys.update(errKeysHSC)
     if len(fluxKeys) == 0:
-        raise TaskError("No flux keys found")
+        raise RuntimeError("No flux keys found")
     return fluxKeys, errKeys
 
 def addApertureFluxesHSC(catalog, prefix=""):
