@@ -328,32 +328,36 @@ class ColorAnalysisTask(CmdLineTask):
                                   (-0.5, 2.0), (-0.5, 2.0), order=3, xFitRange=(0.3, 1.1))
             self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, 0.3, 1.1), "griPerp", "gri",
                                self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
+                               labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
-                                         Enforcer(requireLess={"all": {"stdev": 0.05}}))
+                                         Enforcer(requireLess={"star": {"stdev": 0.05}}))
         if filters.issuperset(set(("HSC-R", "HSC-I", "HSC-Z"))):
             poly = colorColorPlot(filenamer(dataId, description="riz", style="fit"),
                                   color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"), "r-i", "i-z",
                                   (-0.5, 2.0), (-0.4, 0.8), order=3)
             self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly), "rizPerp", "riz",
                                self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
+                               labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
-                                         Enforcer(requireLess={"all": {"stdev": 0.02}}))
+                                         Enforcer(requireLess={"star": {"stdev": 0.02}}))
         if filters.issuperset(set(("HSC-I", "HSC-Z", "HSC-Y"))):
             poly = colorColorPlot(filenamer(dataId, description="izy", style="fit"),
                                   color("HSC-I", "HSC-Z"), color("HSC-Z", "HSC-Y"), "i-z", "z-y",
                                   (-0.4, 0.8), (-0.3, 0.5), order=3)
             self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly), "izyPerp", "izy",
                                self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
+                               labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
-                                         Enforcer(requireLess={"all": {"stdev": 0.02}}))
+                                         Enforcer(requireLess={"star": {"stdev": 0.02}}))
         if filters.issuperset(set(("HSC-Z", "NB0921", "HSC-Y"))):
             poly = colorColorPlot(filenamer(dataId, description="z9y", style="fit"),
                                   color("HSC-Z", "NB0921"), color("NB0921", "HSC-Y"), "z-n921", "n921-y",
                                   (-0.2, 0.2), (-0.1, 0.2), order=2, xFitRange=(-0.05, 0.15))
             self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly), "z9yPerp", "z9y",
                                self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
+                               labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
-                                         Enforcer(requireLess={"all": {"stdev": 0.02}}))
+                                         Enforcer(requireLess={"star": {"stdev": 0.02}}))
 
     def _getConfigName(self):
         return None
