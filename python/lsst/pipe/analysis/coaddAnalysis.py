@@ -55,9 +55,9 @@ class CoaddAnalysisConfig(Config):
     onlyReadStars = Field(dtype=bool, default=False, doc="Only read stars (to save memory)?")
     srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
                              doc="Mapping between different stack (e.g. HSC vs. LSST) schema names")
-    fluxToPlotList = ListField(dtype=str, default=["base_GaussianFlux", ],
+    fluxToPlotList = ListField(dtype=str, default=["base_GaussianFlux", "ext_photometryKron_KronFlux",
+                                                   "modelfit_CModel", "base_CircularApertureFlux_12_0"],
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(base_PsfFlux)")
-    # "ext_photometryKron_KronFlux", "modelfit_Cmodel", "slot_CalibFlux"]:
     doApplyUberCal = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input?" +
                            " FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
 
@@ -265,7 +265,6 @@ class CoaddAnalysisTask(CmdLineTask):
             fluxToPlotList = self.config.fluxToPlotList
         enforcer = Enforcer(requireLess={"star": {"stdev": 0.02}})
         for col in fluxToPlotList:
-        # ["base_GaussianFlux", ]: # "ext_photometryKron_KronFlux", "modelfit_Cmodel", "slot_CalibFlux"]:
             if col + "_flux" in catalog.schema:
                 self.AnalysisClass(catalog, MagDiff(col + "_flux", "base_PsfFlux_flux"), "Mag(%s) - PSFMag"
                                    % col, "mag_" + col, self.config.analysis, flags=[col + "_flag"],
