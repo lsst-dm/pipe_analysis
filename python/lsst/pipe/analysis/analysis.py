@@ -58,7 +58,11 @@ class Analysis(object):
 
         self.quantityError = errFunc(catalog) if errFunc is not None else None
         # self.mag = self.config/zp - 2.5*np.log10(catalog[prefix + self.config.fluxColumn])
-        self.mag = -2.5*np.log10(catalog[prefix + self.config.fluxColumn])
+        if prefix + self.config.fluxColumn in catalog.schema:
+            self.fluxColumn = self.config.fluxColumn
+        else:
+            self.fluxColumn = "flux_psf_flux"
+        self.mag = -2.5*np.log10(catalog[prefix + self.fluxColumn])
 
         self.good = np.isfinite(self.quantity) & np.isfinite(self.mag)
         if errFunc is not None:
@@ -76,7 +80,7 @@ class Analysis(object):
                                 colorList[value], self.quantityError, name in labeller.plot) for
                      name, value in labeller.labels.iteritems()}
 
-    def plotAgainstMag(self, filename, stats=None, camera=None, ccdList=None, skymap=None, patchList=None,
+    def plotAgainstMag(self, filename, stats=None, camera=None, ccdList=None, tractInfo=None, patchList=None,
                        hscRun=None, matchRadius=None, zpLabel=None):
         """Plot quantity against magnitude"""
         fig, axes = plt.subplots(1, 1)
@@ -88,7 +92,7 @@ class Analysis(object):
                 continue
             dataPoints.append(axes.scatter(data.mag, data.quantity, s=4, marker="o", lw=0,
                                            c=data.color, label=name, alpha=0.3))
-        axes.set_xlabel("Mag from %s" % self.config.fluxColumn)
+        axes.set_xlabel("Mag from %s" % self.fluxColumn)
         axes.set_ylabel(self.quantityName)
         axes.set_ylim(self.qMin, self.qMax)
         axes.set_xlim(magMin, magMax)
@@ -102,7 +106,7 @@ class Analysis(object):
         fig.savefig(filename)
         plt.close(fig)
 
-    def plotAgainstMagAndHist(self, filename, stats=None, camera=None, ccdList=None, skymap=None,
+    def plotAgainstMagAndHist(self, filename, stats=None, camera=None, ccdList=None, tractInfo=None,
                               patchList=None, hscRun=None, matchRadius=None, zpLabel=None):
         """Plot quantity against magnitude with side histogram"""
         nullfmt = NullFormatter()  # no labels for histograms
@@ -140,10 +144,10 @@ class Analysis(object):
             axTopRight.set_aspect("equal")
             plotCameraOutline(plt, axTopRight, camera, ccdList)
 
-        if skymap is not None and len(patchList) > 0:
+        if tractInfo is not None and len(patchList) > 0:
             axTopRight = plt.axes(topRight)
             axTopRight.set_aspect("equal")
-            plotPatchOutline(axTopRight, skymap, patchList)
+            plotTractOutline(axTopRight, tractInfo, patchList)
 
         starMagMax = self.data["star"].mag.max() - 0.1
         aboveStarMagMax = self.data["star"].mag > starMagMax
@@ -179,11 +183,12 @@ class Analysis(object):
         runStats = []
         for name, data in self.data.iteritems():
             if len(data.mag) == 0:
+                print "No data for dataset: ", name
                 continue
             alpha = min(0.75, max(0.25, 1.0 - 0.2*np.log10(len(data.mag))))
             # draw mean and stdev at intervals (defined by xBins)
             histColor = "red"
-            if name == "split":
+            if name == "split" or name == "notStar":
                 histColor = "green"
             if name == "star":
                 histColor = royalBlue
@@ -222,7 +227,7 @@ class Analysis(object):
         axScatter.yaxis.set_minor_locator(minorLocator)
         axScatter.xaxis.set_minor_locator(minorLocator)
         axScatter.tick_params(which="major", length=5)
-        axScatter.set_xlabel("Mag from %s" % self.config.fluxColumn)
+        axScatter.set_xlabel("Mag from %s" % self.fluxColumn)
         axScatter.set_ylabel(self.quantityName)
 
         if stats is not None:
@@ -233,8 +238,10 @@ class Analysis(object):
         axHistx.legend(fontsize=7, loc=2)
         axHisty.legend(fontsize=7)
         # Label total number of objects of each data type
-        xLoc, yLoc = 0.16, 1.40
+        xLoc, yLoc = 0.17, 1.435
         for name, data in self.data.iteritems():
+            if len(data.mag) == 0:
+                continue
             yLoc -= 0.04
             plt.text(xLoc, yLoc, "Ntotal = " + str(len(data.mag)), ha="left", va="center",
                      fontsize=9, transform=axScatter.transAxes, color=data.color)
@@ -281,16 +288,17 @@ class Analysis(object):
         plt.close(fig)
 
     def plotSkyPosition(self, filename, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
-                        camera=None, ccdList=None, skymap=None, patchList=None, hscRun=None,
+                        camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
                         matchRadius=None, zpLabel=None):
         """Plot quantity as a function of position"""
+        pad = 0.02 # Number of degrees to pad the axis ranges
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
         dec = np.rad2deg(self.catalog[self.prefix + "coord_dec"])
-        raMin, raMax = np.round(ra.min() - 0.05, 2), np.round(ra.max() + 0.05, 2)
-        decMin, decMax = np.round(dec.min() - 0.05, 2), np.round(dec.max() + 0.05, 2)
+        raMin, raMax = np.round(ra.min() - pad, 2), np.round(ra.max() + pad, 2)
+        decMin, decMax = np.round(dec.min() - pad, 2), np.round(dec.max() + pad, 2)
         good = (self.mag < self.config.magThreshold if self.config.magThreshold > 0 else
                 np.ones(len(self.mag), dtype=bool))
-        if self.data.has_key("galaxy") and "calib_psfUsed" not in self.goodKeys:
+        if self.data.has_key("galaxy") and "calib_psfUsed" not in self.goodKeys and "pStar" not in filename:
             vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
         else:
             vMin, vMax = self.qMin, self.qMax
@@ -305,8 +313,18 @@ class Analysis(object):
             axes.scatter(ra[selection], dec[selection], s=2, marker="o", lw=0,
                          c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax)
 
-        if dataId is not None and butler is not None and len(ccdList) > 0:
+        if dataId is not None and butler is not None and ccdList is not None:
             plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=zpLabel)
+
+        if tractInfo is not None and patchList is not None:
+            for ip, patch in enumerate(tractInfo):
+                if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
+                    ra, dec = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
+                    raMin = min(np.round(min(ra) - pad, 2), raMin)
+                    raMax = max(np.round(max(ra) + pad, 2), raMax)
+                    decMin = min(np.round(min(dec) - pad, 2), decMin)
+                    decMax = max(np.round(max(dec) + pad, 2), decMax)
+            plotPatchOutline(axes, tractInfo, patchList)
 
         axes.set_xlabel("RA (deg)")
         axes.set_ylabel("Dec (deg)")
@@ -364,12 +382,12 @@ class Analysis(object):
         plt.close(fig)
 
     def plotAll(self, dataId, filenamer, log, enforcer=None, forcedMean=None, butler=None, camera=None,
-                ccdList=None, skymap=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
+                ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
                 postFix=""):
         """Make all plots"""
         stats = self.stats(forcedMean=forcedMean)
         self.plotAgainstMagAndHist(filenamer(dataId, description=self.shortName, style="psfMagHist" + postFix),
-                                   stats=stats, camera=camera, ccdList=ccdList, skymap=skymap,
+                                   stats=stats, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                    patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                    zpLabel=zpLabel)
 
@@ -380,8 +398,9 @@ class Analysis(object):
                                stats=stats, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
 
         self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky" + postFix), stats=stats,
-                             dataId=dataId, butler=butler, camera=camera, ccdList=ccdList, skymap=skymap,
+                             dataId=dataId, butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
+
         self.plotRaDec(filenamer(dataId, description=self.shortName, style="radec" + postFix), stats=stats,
                        hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
         log.info("Statistics from %s of %s: %s" % (dataId, self.quantityName, stats))

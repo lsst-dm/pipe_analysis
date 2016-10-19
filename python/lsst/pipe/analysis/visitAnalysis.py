@@ -27,16 +27,15 @@ import lsst.afw.table as afwTable
 
 class CcdAnalysis(Analysis):
     def plotAll(self, dataId, filenamer, log, enforcer=None, forcedMean=None, butler=None, camera=None,
-                ccdList=None, skymap=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
+                ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
                 postFix=""):
         stats = self.stats(forcedMean=forcedMean)
-        self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd"+postFix), stats=stats,
+        self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix), stats=stats,
                      hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
         if self.config.doPlotFP:
-            self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa"+postFix),
-                                stats=stats,
-                                camera=camera, ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
-                                zpLabel=zpLabel)
+            self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa" + postFix),
+                                stats=stats, camera=camera, ccdList=ccdList, hscRun=hscRun,
+                                matchRadius=matchRadius, zpLabel=zpLabel)
 
         return Analysis.plotAll(self, dataId, filenamer, log, enforcer=enforcer, forcedMean=forcedMean,
                                 butler=butler, camera=camera, ccdList=ccdList, hscRun=hscRun,

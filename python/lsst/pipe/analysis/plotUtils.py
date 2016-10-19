@@ -7,8 +7,8 @@ import lsst.afw.table as afwTable
 
 __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller",
            "MatchesStarGalaxyLabeller", "CosmosLabeller", "labelZp", "annotateAxes", "labelVisit",
-           "plotCameraOutline", "plotPatchOutline", "plotCcdOutline", "rotatePixelCoords", "bboxToRaDec",
-           "percent"]
+           "plotCameraOutline", "plotTractOutline", "plotPatchOutline", "plotCcdOutline",
+           "rotatePixelCoords", "bboxToRaDec", "percent"]
 
 class AllLabeller(object):
     labels = {"all": 0}
@@ -128,36 +128,36 @@ def plotCameraOutline(plt, axes, camera, ccdList):
     for x, y, t in ([-1, 0, "N"], [0, 1, "W"], [1, 0, "S"], [0, -1, "E"]):
         axes.text(1.08*camRadius*x, 1.08*camRadius*y, t, ha="center", va="center", fontsize=6)
 
-def plotPatchOutline(axes, skymap, patchList):
+def plotTractOutline(axes, tractInfo, patchList):
     buff = 0.02
     axes.tick_params(labelsize=6)
     axes.locator_params(nbins=6)
     axes.ticklabel_format(useOffset=False)
-    for tract in skymap:
-        tractRa, tractDec = bboxToRaDec(tract.getBBox(), tract.getWcs())
-        xlim = max(tractRa) + buff, min(tractRa) - buff
-        ylim = min(tractDec) - buff, max(tractDec) + buff
-        axes.fill(tractRa, tractDec, fill=True, edgecolor='k', lw=1, linestyle='dashed',
-                  color="black", alpha=0.2)
-        for ip, patch in enumerate(tract):
-            color = "k"
-            alpha = 0.05
-            if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
-                color = ("r", "b", "c", "g", "m")[ip%5]
-                alpha = 0.5
-            ra, dec = bboxToRaDec(patch.getOuterBBox(), tract.getWcs())
-            axes.fill(ra, dec, fill=True, color=color, lw=1, linestyle="solid", alpha=alpha)
-            ra, dec = bboxToRaDec(patch.getInnerBBox(), tract.getWcs())
-            axes.fill(ra, dec, fill=False, color=color, lw=1, linestyle="dashed", alpha=0.5*alpha)
-            axes.text(percent(ra), percent(dec, 0.5), str(patch.getIndex()),
-                      fontsize=5, horizontalalignment="center", verticalalignment="center")
-        axes.text(percent(tractRa, 0.5), 2.0*percent(tractDec, 0.0) - percent(tractDec, 0.18), "RA (deg)",
-                  fontsize=6, horizontalalignment="center", verticalalignment="center")
-        axes.text(2*percent(tractRa, 1.0) - percent(tractRa, 0.78), percent(tractDec, 0.5), "Dec (deg)",
-                  fontsize=6, horizontalalignment="center", verticalalignment="center",
-                  rotation="vertical")
-        axes.set_xlim(xlim)
-        axes.set_ylim(ylim)
+
+    tractRa, tractDec = bboxToRaDec(tractInfo.getBBox(), tractInfo.getWcs())
+    xlim = max(tractRa) + buff, min(tractRa) - buff
+    ylim = min(tractDec) - buff, max(tractDec) + buff
+    axes.fill(tractRa, tractDec, fill=True, edgecolor='k', lw=1, linestyle='dashed',
+              color="black", alpha=0.2)
+    for ip, patch in enumerate(tractInfo):
+        color = "k"
+        alpha = 0.05
+        if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
+            color = ("r", "b", "c", "g", "m")[ip%5]
+            alpha = 0.5
+        ra, dec = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
+        axes.fill(ra, dec, fill=True, color=color, lw=1, linestyle="solid", alpha=alpha)
+        ra, dec = bboxToRaDec(patch.getInnerBBox(), tractInfo.getWcs())
+        axes.fill(ra, dec, fill=False, color=color, lw=1, linestyle="dashed", alpha=0.5*alpha)
+        axes.text(percent(ra), percent(dec, 0.5), str(patch.getIndex()),
+                  fontsize=5, horizontalalignment="center", verticalalignment="center")
+    axes.text(percent(tractRa, 0.5), 2.0*percent(tractDec, 0.0) - percent(tractDec, 0.18), "RA (deg)",
+              fontsize=6, horizontalalignment="center", verticalalignment="center")
+    axes.text(2*percent(tractRa, 1.0) - percent(tractRa, 0.78), percent(tractDec, 0.5), "Dec (deg)",
+              fontsize=6, horizontalalignment="center", verticalalignment="center",
+              rotation="vertical")
+    axes.set_xlim(xlim)
+    axes.set_ylim(ylim)
 
 def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None):
     """!Plot outlines of CCDs in ccdList
@@ -173,7 +173,6 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None):
         wcs = calexp.getWcs()
         w = calexp.getWidth()
         h = calexp.getHeight()
-        nQuarter = calexp.getDetector().getOrientation().getNQuarter()
 
         ras = list()
         decs = list()
@@ -187,7 +186,25 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None):
         xy = afwGeom.Point2D(w/2, h/2)
         centerX = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
         centerY = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
-        axes.text(centerX, centerY, "%i" % ccd, ha="center", va= "center", fontsize=6)
+        axes.text(centerX, centerY, "%i" % ccd, ha="center", va= "center", fontsize=9)
+
+def plotPatchOutline(axes, tractInfo, patchList):
+    """!Plot outlines of patches in patchList
+    """
+    idFontSize = max(5, 10 - int(0.4*len(patchList)))
+    for ip, patch in enumerate(tractInfo):
+        if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
+            if len(patchList) < 9:
+                ra, dec = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
+                ras = ra + (ra[0], )
+                decs = dec + (dec[0], )
+                axes.plot(ras, decs, color="black", lw=1, linestyle="solid")
+            ra, dec = bboxToRaDec(patch.getInnerBBox(), tractInfo.getWcs())
+            ras = ra + (ra[0], )
+            decs = dec + (dec[0], )
+            axes.plot(ras, decs, color="black", lw=1, linestyle="dashed")
+            axes.text(percent(ras), percent(decs, 0.5), str(patch.getIndex()),
+                      fontsize=idFontSize, horizontalalignment="center", verticalalignment="center")
 
 def rotatePixelCoords(sources, width, height, nQuarter):
     """Rotate catalog (x, y) pixel coordinates such that LLC of detector in FP is (0, 0)

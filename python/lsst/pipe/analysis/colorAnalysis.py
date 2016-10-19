@@ -119,6 +119,8 @@ class ColorAnalysisConfig(Config):
     transforms = ConfigDictField(keytype=str, itemtype=ColorTransform, default={},
                                  doc="Color transformations to analyse")
     fluxFilter = Field(dtype=str, default="HSC-I", doc="Filter to use for plotting against magnitude")
+    srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
+                             doc="Mapping between different stack (e.g. HSC vs. LSST) schema names")
 
     def setDefaults(self):
         Config.setDefaults(self)
@@ -171,34 +173,50 @@ class ColorAnalysisTask(CmdLineTask):
         return parser
 
     def run(self, patchRefsByFilter):
+        patchList = []
+        for patchRefList in patchRefsByFilter.itervalues():
+            for dataRef in patchRefList:
+                if dataRef.dataId["filter"] == self.config.fluxFilter:
+                    patchList.append(dataRef.dataId["patch"] )
+
         for patchRefList in patchRefsByFilter.itervalues():
             patchRef = patchRefList[0]
             butler = patchRef.getButler()
             dataId = patchRef.dataId
             break
+
+        # Check to see if stack used was HSC...need to use deepCoadd_forced_src cat because
+        # deepCoadd_calexp is persisted to a different location in HSC stack...ughhh!
+        forcedMd = butler.get("deepCoadd_forced_src", patchRef.dataId).getMetadata()
+        hscRun = checkHscStack(forcedMd)
+
+        skymap = butler.get("deepCoadd_skyMap")
+        tractInfo = skymap[dataRef.dataId["tract"]]
         filenamer = Filenamer(butler, "plotColor", dataId)
         unforcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList, "deepCoadd_meas") for
                             ff, patchRefList in patchRefsByFilter.iteritems()}
         for cat in unforcedCatalogsByFilter.itervalues():
             calibrateCoaddSourceCatalog(cat, self.config.analysis.zp)
-        unforced = self.transformCatalogs(unforcedCatalogsByFilter, self.config.transforms)
+        unforced = self.transformCatalogs(unforcedCatalogsByFilter, self.config.transforms, hscRun=hscRun)
         forcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList, "deepCoadd_forced_src") for
                             ff, patchRefList in patchRefsByFilter.iteritems()}
         for cat in forcedCatalogsByFilter.itervalues():
             calibrateCoaddSourceCatalog(cat, self.config.analysis.zp)
         # self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
         forced = self.transformCatalogs(forcedCatalogsByFilter, self.config.transforms,
-                                        flagsCats=unforcedCatalogsByFilter)
+                                        flagsCats=unforcedCatalogsByFilter, hscRun=hscRun)
 
-        self.plotStarColors(forced, filenamer, NumStarLabeller(len(forcedCatalogsByFilter)), dataId)
-        self.plotStarColorColor(forcedCatalogsByFilter, filenamer, dataId)
+        self.plotStarColors(forced, filenamer, NumStarLabeller(len(forcedCatalogsByFilter)), dataId,
+                            tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
+        self.plotStarColorColor(forcedCatalogsByFilter, filenamer, dataId, tractInfo=tractInfo,
+                                patchList=patchList, hscRun=hscRun)
 
     def readCatalogs(self, patchRefList, dataset):
         catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS) for
                    patchRef in patchRefList if patchRef.datasetExists(dataset)]
         return concatenateCatalogs(catList)
 
-    def transformCatalogs(self, catalogs, transforms, flagsCats=None):
+    def transformCatalogs(self, catalogs, transforms, flagsCats=None, hscRun=None):
         """
         flagsCats: The forced catalogs do not contain the flags for selecting against objects,
                    so add this optional argument to provide a catalog list that does have these
@@ -215,13 +233,27 @@ class ColorAnalysisTask(CmdLineTask):
         mapper = afwTable.SchemaMapper(template.schema)
         mapper.addMinimalSchema(afwTable.SourceTable.makeMinimalSchema())
         schema = mapper.getOutputSchema()
+
+        # Only adjust the schema names necessary here (rather than attaching the full alias schema map)
+        self.fluxColumn = self.config.analysis.fluxColumn
+        self.classificationColumn = "base_ClassificationExtendedness_value"
+        self.flags = self.config.flags
+        if hscRun is not None:
+            self.fluxColumn = self.config.srcSchemaMap[self.config.analysis.fluxColumn] + "_flux"
+            self.classificationColumn = self.config.srcSchemaMap[self.classificationColumn]
+            self.flags = [self.config.srcSchemaMap[flag] for flag in self.flags]
+
         for col in transforms:
-            if all(ff in catalogs for ff in transforms[col].coeffs):
+            doAdd = True
+            for ff in transforms[col].coeffs:
+                if ff != "" and ff not in catalogs:
+                    doAdd = False
+                    # if all(ff in catalogs for ff in transforms[col].coeffs):
+            if doAdd:
                 schema.addField(col, float, transforms[col].description)
         schema.addField("numStarFlags", type=int, doc="Number of times source was flagged as star")
         badKey = schema.addField("bad", type="Flag", doc="Is this a bad source?")
-        schema.addField(self.config.analysis.fluxColumn, type=float,
-                        doc="Flux from filter " + self.config.fluxFilter)
+        schema.addField(self.fluxColumn, type=float, doc="Flux from filter " + self.config.fluxFilter)
 
         # Copy basics (id, RA, Dec)
         new = afwTable.SourceCatalog(schema)
@@ -237,7 +269,7 @@ class ColorAnalysisTask(CmdLineTask):
                 if ff == "":  # Constant: already done
                     continue
                 cat = catalogs[ff]
-                mag = -2.5*np.log10(cat[self.config.analysis.fluxColumn])
+                mag = -2.5*np.log10(cat[self.fluxColumn])
                 value += mag*coeff
             new[col][:] = value
 
@@ -247,7 +279,7 @@ class ColorAnalysisTask(CmdLineTask):
             if not checkIdLists(dataCat, flagsCat):
                 raise RuntimeError(
                     "Catalog being used for flags does not have the same object list as the data catalog")
-            for flag in self.config.flags:
+            for flag in self.flags:
                 if flag in flagsCat.schema:
                     bad |= flagsCat[flag]
         # Can't set column for flags; do row-by-row
@@ -257,11 +289,10 @@ class ColorAnalysisTask(CmdLineTask):
         # Star/galaxy
         numStarFlags = np.zeros(num)
         for cat in catalogs.itervalues():
-            numStarFlags += np.where(cat["base_ClassificationExtendedness_value"] < 0.5, 1, 0)
+            numStarFlags += np.where(cat[self.classificationColumn] < 0.5, 1, 0)
         new["numStarFlags"][:] = numStarFlags
 
-        fluxColumn = self.config.analysis.fluxColumn
-        new[fluxColumn][:] = catalogs[self.config.fluxFilter][fluxColumn]
+        new[self.fluxColumn][:] = catalogs[self.config.fluxFilter][self.fluxColumn]
 
         return new
 
@@ -287,24 +318,28 @@ class ColorAnalysisTask(CmdLineTask):
                                labeller=OverlapsStarGalaxyLabeller("g_", "i_"),
                                qMin=-0.5, qMax=0.5,).plotAll(dataId, filenamer, self.log)
 
-    def plotStarColors(self, catalog, filenamer, labeller, dataId):
+    def plotStarColors(self, catalog, filenamer, labeller, dataId, butler=None, tractInfo=None,
+                       patchList=None, hscRun=None):
         for col, transform in self.config.transforms.iteritems():
-            if not transform.plot or col not in catalog:
+            if not transform.plot or col not in catalog.schema:
                 continue
             self.AnalysisClass(catalog, ColorValueInRange(col, transform.requireGreater,
                                                           transform.requireLess),
                                col, "color_" + col, self.config.analysis, flags=["bad"], labeller=labeller,
-                               qMin=-0.2, qMax=0.2,).plotAll(dataId, filenamer, self.log)
+                               qMin=-0.2, qMax=0.2,).plotAll(dataId, filenamer, self.log, butler=butler,
+                                                             tractInfo=tractInfo, patchList=patchList,
+                                                             hscRun=hscRun)
 
-    def plotStarColorColor(self, catalogs, filenamer, dataId):
+    def plotStarColorColor(self, catalogs, filenamer, dataId, butler=None, tractInfo=None, patchList=None,
+                           hscRun=None):
         num = len(catalogs.values()[0])
         zp = self.config.analysis.zp
         zp = 0.0
-        mags = {ff: zp - 2.5*np.log10(catalogs[ff][self.config.analysis.fluxColumn]) for ff in catalogs}
+        mags = {ff: zp - 2.5*np.log10(catalogs[ff][self.fluxColumn]) for ff in catalogs}
 
         bad = np.zeros(num, dtype=bool)
         for cat in catalogs.itervalues():
-            for flag in self.config.flags:
+            for flag in self.flags:
                 if flag in cat.schema:
                     bad |= cat[flag]
 
@@ -314,50 +349,57 @@ class ColorAnalysisTask(CmdLineTask):
 
         numStarFlags = np.zeros(num)
         for cat in catalogs.itervalues():
-            numStarFlags += np.where(cat["base_ClassificationExtendedness_value"] < 0.5, 1, 0)
+            numStarFlags += np.where(cat[self.classificationColumn] < 0.5, 1, 0)
 
         good = (numStarFlags == len(catalogs)) & np.logical_not(bad) & bright
 
-        combined = self.transformCatalogs(catalogs, straightTransforms)[good].copy(True)
+        combined = self.transformCatalogs(catalogs, straightTransforms, hscRun=hscRun)[good].copy(True)
         filters = set(catalogs.keys())
         color = lambda c1, c2: (mags[c1] - mags[c2])[good]
         if filters.issuperset(set(("HSC-G", "HSC-R", "HSC-I"))):
             # Lower branch only; upper branch is noisy due to astrophysics
             poly = colorColorPlot(filenamer(dataId, description="gri", style="fit"),
-                                  color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"), "g-r", "r-i",
-                                  (-0.5, 2.0), (-0.5, 2.0), order=3, xFitRange=(0.3, 1.1))
+                                  color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"), "g - r", "r - i",
+                                  xRange=(-0.5, 2.0), yRange=(-0.5, 2.0), order=3, xFitRange=(0.3, 1.1),
+                                  hscRun=hscRun)
             self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, 0.3, 1.1), "griPerp", "gri",
                                self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
-                                         Enforcer(requireLess={"star": {"stdev": 0.05}}))
+                                         Enforcer(requireLess={"star": {"stdev": 0.05}}),
+                                         tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
         if filters.issuperset(set(("HSC-R", "HSC-I", "HSC-Z"))):
             poly = colorColorPlot(filenamer(dataId, description="riz", style="fit"),
-                                  color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"), "r-i", "i-z",
-                                  (-0.5, 2.0), (-0.4, 0.8), order=3)
+                                  color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"), "r - i", "i - z",
+                                  xRange=(-0.5, 2.0), yRange=(-0.4, 0.8), order=3, hscRun=hscRun)
             self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly), "rizPerp", "riz",
                                self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
-                                         Enforcer(requireLess={"star": {"stdev": 0.02}}))
+                                         Enforcer(requireLess={"star": {"stdev": 0.02}}),
+                                         tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
         if filters.issuperset(set(("HSC-I", "HSC-Z", "HSC-Y"))):
             poly = colorColorPlot(filenamer(dataId, description="izy", style="fit"),
-                                  color("HSC-I", "HSC-Z"), color("HSC-Z", "HSC-Y"), "i-z", "z-y",
-                                  (-0.4, 0.8), (-0.3, 0.5), order=3)
+                                  color("HSC-I", "HSC-Z"), color("HSC-Z", "HSC-Y"), "i - z", "z - y",
+                                  xRange=(-0.4, 0.8), yRange=(-0.3, 0.5), order=3, hscRun=hscRun)
             self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly), "izyPerp", "izy",
                                self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
-                                         Enforcer(requireLess={"star": {"stdev": 0.02}}))
+                                         Enforcer(requireLess={"star": {"stdev": 0.02}}),
+                                         tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
+
         if filters.issuperset(set(("HSC-Z", "NB0921", "HSC-Y"))):
             poly = colorColorPlot(filenamer(dataId, description="z9y", style="fit"),
                                   color("HSC-Z", "NB0921"), color("NB0921", "HSC-Y"), "z-n921", "n921-y",
-                                  (-0.2, 0.2), (-0.1, 0.2), order=2, xFitRange=(-0.05, 0.15))
+                                  xRange=(-0.2, 0.2), yRange=(-0.1, 0.2), order=2, xFitRange=(-0.05, 0.15))
             self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly), "z9yPerp", "z9y",
                                self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
-                                         Enforcer(requireLess={"star": {"stdev": 0.02}}))
+                                         Enforcer(requireLess={"star": {"stdev": 0.02}}),
+                                         tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
+
 
     def _getConfigName(self):
         return None
@@ -368,8 +410,11 @@ class ColorAnalysisTask(CmdLineTask):
 
 
 def colorColorPlot(filename, xx, yy, xLabel, yLabel, xRange=None, yRange=None, order=1, iterations=1,
-                   rej=3.0, xFitRange=None, numBins=51):
+                   rej=3.0, xFitRange=None, numBins=51, hscRun=None):
     fig, axes = plt.subplots(1, 2)
+    axes[0].tick_params(labelsize=9)
+    axes[1].tick_params(labelsize=9)
+
     if xRange:
         axes[0].set_xlim(*xRange)
     else:
