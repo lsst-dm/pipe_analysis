@@ -437,13 +437,21 @@ def colorColorPlot(filename, xx, yy, xLabel, yLabel, xRange=None, yRange=None, o
     xLine = np.linspace(xRange[0], xRange[1], 1000)
     yLine = np.polyval(poly, xLine)
 
-    kwargs = dict(s=2, marker="o", lw=0, alpha=0.3)
+    kwargs = dict(s=3, marker="o", lw=0, alpha=0.4)
     axes[0].scatter(xx[keep], yy[keep], c="blue", label="used", **kwargs)
     axes[0].scatter(xx[~keep], yy[~keep], c="black", label="other", **kwargs)
     axes[0].set_xlabel(xLabel)
-    axes[0].set_ylabel(yLabel)
-    axes[0].legend(loc="upper left")  # usually blank in color-color plots...
+    axes[0].set_ylabel(yLabel, labelpad=-1)
+    axes[0].legend(loc="upper left", fontsize=10)  # usually blank in color-color plots...
     axes[0].plot(xLine, yLine, "r-")
+
+    # Label total number of objects of each data type
+    xLoc, yLoc = xRange[0] + 0.38*(xRange[1] - xRange[0]), yRange[1] - 0.042*(yRange[1] - yRange[0])
+    axes[0].text(xLoc, yLoc, "Nused  = " + str(len(xx[keep])), ha="left", va="center", fontsize=9,
+                 color="blue")
+    yLoc -= 0.042*(yRange[1] - yRange[0])
+    axes[0].text(xLoc, yLoc, "Nother = " + str(len(xx[~keep])), ha="left", va="center", fontsize=9,
+                 color="black")
 
     # Determine quality of locus
     distance2 = []
@@ -458,12 +466,21 @@ def colorColorPlot(filename, xx, yy, xLabel, yLabel, xRange=None, yRange=None, o
 
     q1, median, q3 = np.percentile(distance, [25, 50, 75])
     good = np.logical_not(np.abs(distance - median) > 3.0*0.74*(q3 - q1))
-    print distance[good].mean(), distance[good].std()
-
+    print ("distance[good].mean() = %.5f (mmag)  distance[good].std() = %.5f (mmag)" % (
+            1000*distance[good].mean(), 1000*distance[good].std()))
+    meanStr = "mean = {:.4f} (mmag)".format(1000.0*distance[good].mean())
+    stdStr = "  std = {:.4f} (mmag)".format(1000.0*distance[good].std())
     axes[1].hist(distance[good], numBins, range=(-0.05, 0.05), normed=False)
     axes[1].set_xlabel("Distance to polynomial fit (mag)")
-    axes[1].set_ylabel("Number")
+    axes[1].set_ylabel("Number", labelpad=-2)
     axes[1].set_yscale("log", nonposy="clip")
+    xLoc, yLoc = -0.053, axes[1].get_ylim()[1] - 0.1*(axes[1].get_ylim()[1] - axes[1].get_ylim()[0])
+    axes[1].text(xLoc, yLoc, meanStr, ha="left", va="center", fontsize=9, color="blue")
+    yLoc -= 0.09*(axes[1].get_ylim()[1] - axes[1].get_ylim()[0])
+    axes[1].text(xLoc, yLoc, stdStr, ha="left", va="center", fontsize=9, color="blue")
+
+    if hscRun is not None:
+        axes[0].set_title("HSC stack run: " + hscRun, color="#800080")
 
     fig.savefig(filename)
     plt.close(fig)
