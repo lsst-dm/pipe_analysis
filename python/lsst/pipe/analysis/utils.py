@@ -28,6 +28,14 @@ class Filenamer(object):
         self.dataId = dataId
     def __call__(self, dataId, **kwargs):
         filename = self.butler.get(self.dataset + "_filename", self.dataId, **kwargs)[0]
+        # When trying to write to a different rerun (or output), if the given dataset exists in the _parent
+        # rerun (or input) directory, _parent is added to the filename, and thus the output files
+        # will actually oversrite those in the _parent rerun (or input) directory (which is bad if
+        # your intention is to write to a different output dir!).  So, here we check for the presence
+        # of _parent in the filename and strip it out if present.
+        if "_parent/" in filename:
+            print "Note: stripping _parent from filename: ", filename
+            filename = filename.replace("_parent/", "")
         safeMakeDir(os.path.dirname(filename))
         return filename
 
