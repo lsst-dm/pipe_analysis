@@ -289,7 +289,7 @@ class Analysis(object):
 
     def plotSkyPosition(self, filename, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
                         camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
-                        matchRadius=None, zpLabel=None):
+                        matchRadius=None, zpLabel=None, dataName="star"):
         """Plot quantity as a function of position"""
         pad = 0.02 # Number of degrees to pad the axis ranges
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
@@ -298,19 +298,21 @@ class Analysis(object):
         decMin, decMax = np.round(dec.min() - pad, 2), np.round(dec.max() + pad, 2)
         good = (self.mag < self.config.magThreshold if self.config.magThreshold > 0 else
                 np.ones(len(self.mag), dtype=bool))
-        if self.data.has_key("galaxy") and "calib_psfUsed" not in self.goodKeys and "pStar" not in filename:
+        if dataName == "star" and "calib_psfUsed" not in self.goodKeys and "pStar" not in filename:
             vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
+        elif "CModel" in filename:
+            vMin, vMax = 1.5*self.qMin, 0.5*self.qMax
         else:
-            vMin, vMax = self.qMin, self.qMax
+            vMin, vMax = 1.5*self.qMin, 1.5*self.qMax
 
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(axisbg="0.7"))
         for name, data in self.data.iteritems():
-            if not data.plot:
+            if name is not dataName:
                 continue
             if len(data.mag) == 0:
                 continue
             selection = data.selection & good
-            axes.scatter(ra[selection], dec[selection], s=2, marker="o", lw=0,
+            axes.scatter(ra[selection], dec[selection], s=2, marker="o", lw=0, label=name,
                          c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax)
 
         if dataId is not None and butler is not None and ccdList is not None:
@@ -341,6 +343,7 @@ class Analysis(object):
         labelVisit(filename, plt, axes, 0.5, 1.07)
         if zpLabel is not None:
             labelZp(zpLabel, plt, axes, 0.13, -0.09, color="green")
+        axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
         fig.savefig(filename)
         plt.close(fig)
 
@@ -397,9 +400,17 @@ class Analysis(object):
             self.plotHistogram(filenamer(dataId, description=self.shortName, style="hist" + postFix),
                                stats=stats, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
 
-        self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky" + postFix), stats=stats,
-                             dataId=dataId, butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                             patchList=patchList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
+        self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky-stars" + postFix),
+                             stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,
+                             tractInfo=tractInfo, patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
+                             zpLabel=zpLabel, dataName="star")
+
+        if "pStar" not in self.shortName and not any(ss in self.shortName
+                                                     for ss in ["gri", "riz", "izy", "z9y", "color_"]):
+            self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky-gals" + postFix),
+                                 stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,
+                                 tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
+                                 matchRadius=matchRadius, zpLabel=zpLabel, dataName="galaxy")
 
         self.plotRaDec(filenamer(dataId, description=self.shortName, style="radec" + postFix), stats=stats,
                        hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
