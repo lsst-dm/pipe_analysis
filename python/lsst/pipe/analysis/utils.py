@@ -252,7 +252,7 @@ def joinMatches(matches, first="first_", second="second_"):
         row.set(distanceKey, mm.distance*afwGeom.radians)
     return catalog
 
-def checkIdLists(catalog1, catalog2):
+def checkIdLists(catalog1, catalog2, prefix=""):
     # Check to see if two catalogs have an identical list of objects by id
     idStrList = ["", ""]
     for i, cat in enumerate((catalog1, catalog2)):
@@ -260,8 +260,13 @@ def checkIdLists(catalog1, catalog2):
             idStrList[i] = "id"
         elif "objectId" in cat.schema:
             idStrList[i] = "objectId"
+        elif prefix + "id" in cat.schema:
+            idStrList[i] = prefix + "id"
+        elif prefix + "objectId" in cat.schema:
+            idStrList[i] = prefix + "objectId"
         else:
-            raise RuntimeError("Cannot identify object id field (tried id and objectId)")
+            raise RuntimeError("Cannot identify object id field (tried id, objectId, " + prefix + "id, and " +
+                               prefix + "objectId)")
 
     return np.all(catalog1[idStrList[0]] == catalog2[idStrList[1]])
 
