@@ -34,7 +34,7 @@ class Analysis(object):
     """Centralised base for plotting"""
 
     def __init__(self, catalog, func, quantityName, shortName, config, qMin=-0.2, qMax=0.2,
-                 prefix="", flags=[], goodKeys=[], errFunc=None, labeller=AllLabeller()):
+                 prefix="", flags=[], goodKeys=[], errFunc=None, labeller=AllLabeller(), flagsCat=None):
         self.catalog = catalog
         self.func = func
         self.quantityName = quantityName
@@ -67,11 +67,19 @@ class Analysis(object):
         self.good = np.isfinite(self.quantity) & np.isfinite(self.mag)
         if errFunc is not None:
             self.good &= np.isfinite(self.quantityError)
-        for ff in list(config.flags) + flags:
-            if ff in catalog.schema:
-                self.good &= ~catalog[prefix + ff]
-            else:
-                print "NOTE: Flag (in config.flags list to ignore) " + ff + " not in catalog.schema"
+        if flagsCat is None:
+            flagsCat = catalog
+        if not checkIdLists(catalog, flagsCat, prefix=prefix):
+            raise RuntimeError(
+                "Catalog being used for flags does not have the same object list as the data catalog")
+        # Don't have flags in match and overlap catalogs (already removed in the latter)
+        if "matches" not in self.shortName and "overlap" not in self.shortName:
+            for ff in list(config.flags) + flags:
+                if prefix + ff in flagsCat.schema:
+                    self.good &= ~flagsCat[prefix + ff]
+                else:
+                    print ("NOTE: Flag (in config.flags list to ignore) " + prefix + ff +
+                           " not in flagsCat.schema")
         for kk in goodKeys:
             self.good &= catalog[prefix + kk]
 
