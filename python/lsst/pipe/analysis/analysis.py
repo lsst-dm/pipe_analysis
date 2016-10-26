@@ -39,6 +39,7 @@ class Analysis(object):
         self.func = func
         self.quantityName = quantityName
         self.shortName = shortName
+        print "shortName = ", self.shortName
         self.config = config
         self.qMin = qMin
         self.qMax = qMax
