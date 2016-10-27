@@ -4,6 +4,7 @@ import numpy as np
 import lsst.afw.cameraGeom as cameraGeom
 import lsst.afw.geom as afwGeom
 import lsst.afw.table as afwTable
+from lsst.meas.mosaic.updateExposure import applyMosaicResultsExposure
 
 __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller",
            "MatchesStarGalaxyLabeller", "CosmosLabeller", "labelZp", "annotateAxes", "labelVisit",

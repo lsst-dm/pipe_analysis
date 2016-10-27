@@ -6,6 +6,7 @@ import numpy as np
 from contextlib import contextmanager
 
 from lsst.daf.persistence.safeFileIo import safeMakeDir
+from lsst.meas.mosaic.updateExposure import applyMosaicResultsCatalog
 from lsst.pipe.base import Struct
 
 import lsst.afw.geom as afwGeom
