@@ -63,14 +63,18 @@ class CcdAnalysis(Analysis):
         fig, axes = plt.subplots(2, 1)
         axes[0].axhline(0, linestyle="--", color="0.6")
         axes[1].axhline(0, linestyle="--", color="0.6")
+        ptSize = None
         for name, data in self.data.iteritems():
             if not data.plot:
                 continue
             if len(data.mag) == 0:
                 continue
+            if ptSize is None:
+                ptSize = min(12, max(4, int(25/np.log10(len(data.mag)))))
             selection = data.selection & good
             quantity = data.quantity[good[data.selection]]
-            kwargs = {"s": 4, "marker": "o", "lw": 0, "alpha": 0.5, "cmap": cmap, "vmin": vMin, "vmax": vMax}
+            kwargs = {"s": ptSize, "marker": "o", "lw": 0, "alpha": 0.5, "cmap": cmap,
+                      "vmin": vMin, "vmax": vMax}
             axes[0].scatter(xx[selection], quantity, c=ccd[selection], **kwargs)
             axes[1].scatter(yy[selection], quantity, c=ccd[selection], **kwargs)
 

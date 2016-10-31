@@ -9,7 +9,7 @@ from lsst.meas.mosaic.updateExposure import applyMosaicResultsExposure
 __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller",
            "MatchesStarGalaxyLabeller", "CosmosLabeller", "labelZp", "annotateAxes", "labelVisit",
            "plotCameraOutline", "plotTractOutline", "plotPatchOutline", "plotCcdOutline",
-           "rotatePixelCoords", "bboxToRaDec", "percent"]
+           "rotatePixelCoords", "bboxToRaDec", "percent", "setPtSize"]
 
 class AllLabeller(object):
     labels = {"all": 0}
@@ -241,3 +241,9 @@ def percent(values, p=0.5):
     m = min(values)
     interval = max(values) - m
     return m + p*interval
+
+def setPtSize(num, ptSize=12):
+    """Set the point size according to the size of the catalog"""
+    if num > 10:
+        ptSize = min(12, max(4, int(25/np.log10(num))))
+    return ptSize

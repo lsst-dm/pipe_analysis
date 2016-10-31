@@ -96,10 +96,13 @@ class Analysis(object):
         plt.axhline(0, linestyle="--", color="0.4")
         magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
         dataPoints = []
+        ptSize = None
         for name, data in self.data.iteritems():
             if len(data.mag) == 0:
                 continue
-            dataPoints.append(axes.scatter(data.mag, data.quantity, s=4, marker="o", lw=0,
+            if ptSize is None:
+                ptSize = setPtSize(len(data.mag))
+            dataPoints.append(axes.scatter(data.mag, data.quantity, s=ptSize, marker="o", lw=0,
                                            c=data.color, label=name, alpha=0.3))
         axes.set_xlabel("Mag from %s" % self.fluxColumn)
         axes.set_ylabel(self.quantityName)
@@ -190,10 +193,13 @@ class Analysis(object):
 
         dataPoints = []
         runStats = []
+        ptSize = None
         for name, data in self.data.iteritems():
             if len(data.mag) == 0:
                 print "No data for dataset: ", name
                 continue
+            if ptSize is None:
+                ptSize = setPtSize(len(data.mag))
             alpha = min(0.75, max(0.25, 1.0 - 0.2*np.log10(len(data.mag))))
             # draw mean and stdev at intervals (defined by xBins)
             histColor = "red"
@@ -214,11 +220,11 @@ class Analysis(object):
                 meanHist = syHist/numHist
                 stdHist = np.sqrt(syHist2/numHist - meanHist*meanHist)
                 runStats.append(axScatter.errorbar((dataHist[1:] + dataHist[:-1])/2, meanHist, yerr=stdHist,
-                                                   fmt="o", mfc=cornflowerBlue, mec="k", ms=4, ecolor="k",
-                                                   label="Running stats\n(all stars)"))
+                                                   fmt="o", mfc=cornflowerBlue, mec="k", ms=4,
+                                                   ecolor="k", label="Running stats\n(all stars)"))
 
             # plot data.  Appending in dataPoints for the sake of the legend
-            dataPoints.append(axScatter.scatter(data.mag, data.quantity, s=4, marker="o", lw=0,
+            dataPoints.append(axScatter.scatter(data.mag, data.quantity, s=ptSize, marker="o", lw=0,
                                                 c=data.color, label=name, alpha=alpha))
             axHistx.hist(data.mag, bins=xBins, color=histColor, alpha=0.6, label=name)
             axHisty.hist(data.quantity, bins=yBins, color=histColor, alpha=0.6, orientation="horizontal",
@@ -315,13 +321,16 @@ class Analysis(object):
             vMin, vMax = 1.5*self.qMin, 1.5*self.qMax
 
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(axisbg="0.7"))
+        ptSize = None
         for name, data in self.data.iteritems():
             if name is not dataName:
                 continue
             if len(data.mag) == 0:
                 continue
+            if ptSize is None:
+                ptSize = setPtSize(len(data.mag))
             selection = data.selection & good
-            axes.scatter(ra[selection], dec[selection], s=2, marker="o", lw=0, label=name,
+            axes.scatter(ra[selection], dec[selection], s=ptSize, marker="o", lw=0, label=name,
                          c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax)
 
         if dataId is not None and butler is not None and ccdList is not None:
@@ -366,11 +375,14 @@ class Analysis(object):
         fig, axes = plt.subplots(2, 1)
         axes[0].axhline(0, linestyle="--", color="0.6")
         axes[1].axhline(0, linestyle="--", color="0.6")
+        ptSize = None
         for name, data in self.data.iteritems():
             if len(data.mag) == 0:
                 continue
+            if ptSize is None:
+                ptSize = setPtSize(len(data.mag))
             selection = data.selection & good
-            kwargs = {"s": 4, "marker": "o", "lw": 0, "c": data.color, "alpha": 0.5}
+            kwargs = {"s": ptSize, "marker": "o", "lw": 0, "c": data.color, "alpha": 0.5}
             axes[0].scatter(ra[selection], data.quantity[good[data.selection]], label=name, **kwargs)
             axes[1].scatter(dec[selection], data.quantity[good[data.selection]], **kwargs)
 
