@@ -237,6 +237,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
     def readCatalogs(self, dataRefList, dataset):
         catList = []
+        commonZpCatList = []
+        dataIdSubList = []
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
                 continue
@@ -339,7 +341,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if self.zpLabel is None:
                 self.log.info("Using 2.5*log10(FLUXMAG0) = %.4f from FITS header for zeropoint" % self.zp)
             self.zpLabel = "FLUXMAG0"
-        calibrated = calibrateSourceCatalog(catalog, self.zp)
+            calibrated = calibrateSourceCatalog(catalog, self.zp)
 
         return calibrated
 
@@ -421,10 +423,9 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         if self.config.doBackoutApCorr:
             catalog = backoutApCorr(catalog)
         # Scale fluxes to common zeropoint to make basic comparison plots without calibrated ZP influence
-        self.zp = 33.0
-        self.zpLabel = "common (" + str(self.zp) + ")"
+        self.zpLabel = "common (" + str(self.config.analysis.commonZp) + ")"
         commonZpCat = catalog.copy(True)
-        commonZpCat = calibrateSourceCatalog(commonZpCat, self.zp)
+        commonZpCat = calibrateSourceCatalog(commonZpCat, self.config.analysis.commonZp)
         # Create mag comparison plots using common ZP
         self.plotMags(commonZpCat, filenamer, dataId, butler=butler1, camera=camera1, ccdList=ccdList1,
                       hscRun=hscRun, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel,

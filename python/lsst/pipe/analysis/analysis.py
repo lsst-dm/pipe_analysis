@@ -25,7 +25,8 @@ class AnalysisConfig(Config):
     magPlotMin = Field(dtype=float, default=14.0, doc="Minimum magnitude to plot")
     magPlotMax = Field(dtype=float, default=28.0, doc="Maximum magnitude to plot")
     fluxColumn = Field(dtype=str, default="base_PsfFlux_flux", doc="Column to use for flux/mag plotting")
-    zp = Field(dtype=float, default=27.0, doc="Magnitude zero point to apply")
+    coaddZp = Field(dtype=float, default=27.0, doc="Magnitude zero point to apply for coadds")
+    commonZp = Field(dtype=float, default=33.0, doc="Magnitude zero point to apply for common ZP plots")
     doPlotOldMagsHist = Field(dtype=bool, default=False, doc="Make older, separated, mag and hist plots?")
     doPlotRaDec = Field(dtype=bool, default=False, doc="Make delta vs. Ra and Dec plots?")
     doPlotFP = Field(dtype=bool, default=False, doc="Make FocalPlane plots?")
@@ -263,9 +264,9 @@ class Analysis(object):
             plt.text(xLoc, yLoc, "Ntotal = " + str(len(data.mag)), ha="left", va="center",
                      fontsize=9, transform=axScatter.transAxes, color=data.color)
 
-        labelVisit(filename, plt, axScatter, 1.18, -0.11, color="green")
+        labelVisit(filename, plt, axScatter, 1.18, -0.09, color="green")
         if zpLabel is not None:
-            labelZp(zpLabel, plt, axScatter, 0.08, -0.11, color="green")
+            labelZp(zpLabel, plt, axScatter, 0.08, -0.09, color="green")
         plt.savefig(filename)
         plt.close()
 

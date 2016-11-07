@@ -241,8 +241,8 @@ class CoaddAnalysisTask(CmdLineTask):
         return concatenateCatalogs(catList)
 
     def calibrateCatalogs(self, catalog):
-        self.zpLabel = "common (" + str(self.config.analysis.zp) + ")"
-        calibrated = calibrateCoaddSourceCatalog(catalog, self.config.analysis.zp)
+        self.zpLabel = "common (" + str(self.config.analysis.coaddZp) + ")"
+        calibrated = calibrateCoaddSourceCatalog(catalog, self.config.analysis.coaddZp)
         return calibrated
 
     def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
