@@ -503,8 +503,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
                 if "CircularAperture" in col:
                     zpLabel = None
-                Analysis(catalog, MagDiffCompare(col + "_flux"),
-                         "Run Comparison: Mag difference (%s)" % col, "diff_" + col, self.config.analysis,
+                Analysis(catalog, MagDiffCompare(col + "_flux"), "Run Comparison: Mag difference (%s)" %
+                         fluxToPlotString(col), "diff_" + col, self.config.analysis,
                          prefix="first_", qMin=-0.05, qMax=0.05, flags=[col + "_flag"],
                          errFunc=MagDiffErr(col + "_flux"), labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler, camera=camera,
@@ -541,8 +541,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         for col in fluxToPlotList:
             if "first_" + col + "_apCorr" in catalog.schema and "second_" + col + "_apCorr" in catalog.schema:
                 Analysis(catalog, ApCorrDiffCompare(col + "_apCorr"),
-                         "Run Comparison: apCorr difference (%s)" % col, "diff_" + col + "_apCorr",
-                         self.config.analysis,
+                         "Run Comparison: apCorr difference (%s)" % fluxToPlotString(col),
+                         "diff_" + col + "_apCorr", self.config.analysis,
                          prefix="first_", qMin=-0.025, qMax=0.025, flags=[col + "_flag_apCorr"],
                          errFunc=ApCorrDiffErr(col + "_apCorr"), labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler, camera=camera,

@@ -251,9 +251,10 @@ class CoaddAnalysisTask(CmdLineTask):
         enforcer = Enforcer(requireLess={"star": {"stdev": 0.02}})
         for col in fluxToPlotList:
             if col + "_flux" in catalog.schema:
-                self.AnalysisClass(catalog, MagDiff(col + "_flux", "base_PsfFlux_flux"), "Mag(%s) - PSFMag"
-                                   % col, "mag_" + col, self.config.analysis, flags=[col + "_flag"],
-                                   labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                self.AnalysisClass(catalog, MagDiff(col + "_flux", "base_PsfFlux_flux"), "Mag(%s) - PSFMag" %
+                                   fluxToPlotString(col), "mag_" + col, self.config.analysis,
+                                   flags=[col + "_flag"], labeller=StarGalaxyLabeller(),
+                                   flagsCat=flagsCat,
                                    ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun,
@@ -318,17 +319,14 @@ class CoaddAnalysisTask(CmdLineTask):
         if fluxToPlotList is None:
             fluxToPlotList = self.config.fluxToPlotList
         enforcer = None
-        catalog = joinMatches(afwTable.matchRaDec(forced, unforced,
-                                                  self.config.matchRadius*afwGeom.arcseconds),
+        catalog = joinMatches(afwTable.matchRaDec(forced, unforced, matchRadius*afwGeom.arcseconds),
                               "forced_", "unforced_")
-        catalog.writeFits(dataId["filter"] + ".fits")
         for col in fluxToPlotList:
-            # ["base_PsfFlux", "base_GaussianFlux", "slot_CalibFlux", "ext_photometryKron_KronFlux",
-            # "modelfit_Cmodel", "modelfit_Cmodel_exp_flux", "modelfit_Cmodel_dev_flux"]:
-            if "forced_" + col in catalog.schema:
-                self.AnalysisClass(catalog, MagDiff("forced_" + col, "unforced_" + col),
-                                   "Forced - Unforced mag difference (%s)" % col, "forced_" + col,
-                                   self.config.analysis, prefix="unforced_", flags=[col + "_flags"],
+            if "forced_" + col + "_flux" in catalog.schema:
+                self.AnalysisClass(catalog, MagDiff("forced_" + col + "_flux", "unforced_" + col + "_flux"),
+                                   "Forced - Unforced mag (%s)" % fluxToPlotString(col),
+                                   "compareUnforced_" + col, self.config.analysis, prefix="forced_",
+                                   flags=[col + "_flag"],
                                    labeller=OverlapsStarGalaxyLabeller("forced_", "unforced_"),
                                    ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
@@ -360,10 +358,9 @@ class CoaddAnalysisTask(CmdLineTask):
             fluxToPlotList = self.config.fluxToPlotList
         magEnforcer = Enforcer(requireLess={"star": {"stdev": 0.003}})
         for col in fluxToPlotList:
-            # ["base_PsfFlux", "base_GaussianFlux", "ext_photometryKron_KronFlux", "modelfit_Cmodel"]:
             if "first_" + col + "_flux" in overlaps.schema:
                 self.AnalysisClass(overlaps, MagDiff("first_" + col + "_flux", "second_" + col + "_flux"),
-                                   "Overlap mag difference (%s)" % col, "overlap_" + col,
+                                   "Overlap mag difference (%s)" % fluxToPlotString(col), "overlap_" + col,
                                    self.config.analysis, prefix="first_", flags=[col + "_flag"],
                                    labeller=OverlapsStarGalaxyLabeller(),
                                    ).plotAll(dataId, filenamer, self.log, magEnforcer, butler=butler,
@@ -385,10 +382,9 @@ class CoaddAnalysisTask(CmdLineTask):
         ct = self.config.colorterms.getColorterm(filterName, self.config.photoCatName)
         if "src_calib_psfUsed" in matches.schema:
             self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_flux", ct, zp=0.0),
-                               "MagPsf(unforced) - ref (calib_psfUsed)",
-                               description + "_mag_calib_psfUsed", self.config.analysisMatches, prefix="src_",
-                               goodKeys=["calib_psfUsed"], qMin=-0.05, qMax=0.05,
-                               labeller=MatchesStarGalaxyLabeller(),
+                               "MagPsf(unforced) - ref (calib_psfUsed)", description + "_mag_calib_psfUsed",
+                               self.config.analysisMatches, prefix="src_", goodKeys=["calib_psfUsed"],
+                               qMin=-0.05, qMax=0.05, labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.030}}), butler=butler,
                                          camera=camera, ccdList=ccdList, tractInfo=tractInfo,

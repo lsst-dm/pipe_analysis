@@ -19,7 +19,7 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "concatenateCatalogs", "joinMatches", "checkIdLists", "joinCatalogs", "getFluxKeys",
            "addApertureFluxesHSC", "addFpPoint", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
            "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
-           "andCatalog"]
+           "fluxToPlotString", "andCatalog"]
 
 class Filenamer(object):
     """Callable that provides a filename given a style"""
@@ -447,6 +447,21 @@ def checkHscStack(metadata):
     except:
         hscPipe = None
     return hscPipe
+
+def fluxToPlotString(fluxToPlot):
+    """Return a more succint string for fluxes for label plotting
+    """
+    fluxStrMap = {"base_PsfFlux_flux": "PSF",
+                  "base_GaussianFlux": "Gaussian",
+                  "ext_photometryKron_KronFlux": "Kron",
+                  "modelfit_CModel": "CModel",
+                  "base_CircularApertureFlux_12_0": "CircAper 12pix"}
+    if fluxToPlot in fluxStrMap:
+        return fluxStrMap[fluxToPlot]
+    else:
+        print "WARNING: " + fluxToPlot + " not in fluxStrMap"
+        return fluxToPlot
+
 
 @contextmanager
 def andCatalog(version):
