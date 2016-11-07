@@ -242,15 +242,23 @@ def joinMatches(matches, first="first_", second="second_"):
     mapperList = afwTable.SchemaMapper.join(afwTable.SchemaVector([matches[0].first.schema,
                                                                    matches[0].second.schema]),
                                             [first, second])
+    firstAliases = matches[0].first.schema.getAliasMap()
+    secondAliases = matches[0].second.schema.getAliasMap()
     schema = mapperList[0].getOutputSchema()
     distanceKey = schema.addField("distance", type="Angle", doc="Distance between %s and %s" % (first, second))
     catalog = afwTable.BaseCatalog(schema)
+    aliases = catalog.schema.getAliasMap()
     catalog.reserve(len(matches))
     for mm in matches:
         row = catalog.addNew()
         row.assign(mm.first, mapperList[0])
         row.assign(mm.second, mapperList[1])
         row.set(distanceKey, mm.distance*afwGeom.radians)
+    # make sure aliases get persisted to match catalog
+    for k, v in firstAliases.items():
+        aliases.set(first + k, first + v)
+    for k, v in secondAliases.items():
+        aliases.set(second + k, second + v)
     return catalog
 
 def checkIdLists(catalog1, catalog2, prefix=""):
