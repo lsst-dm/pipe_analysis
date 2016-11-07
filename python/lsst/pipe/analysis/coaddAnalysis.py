@@ -497,15 +497,59 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
     def run(self, patchRefList1, patchRefList2):
         dataId = patchRefList1[0].dataId
-        filenamer = Filenamer(patchRefList1[0].getButler(), "plotCompare", patchRefList1[0].dataId)
-        catalog1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_forced_src")
-        catalog2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_forced_src")
-        catalog = self.matchCatalogs(catalog1, catalog2)
-        catalog = self.calibrateCatalogs(catalog)
+        patchList1 = [dataRef1.dataId["patch"] for dataRef1 in patchRefList1]
+        filenamer = Filenamer(patchRefList1[0].getButler(), "plotCompareCoadd", patchRefList1[0].dataId)
+
+        # Check metadata to see if stack used was HSC
+        butler1 = patchRefList1[0].getButler()
+        forcedMd1 = butler1.get("deepCoadd_forced_src", patchRefList1[0].dataId).getMetadata()
+        hscRun1 = checkHscStack(forcedMd1)
+        skymap1 = butler1.get("deepCoadd_skyMap")
+        tractInfo1 = skymap1[dataRef1.dataId["tract"]]
+        butler2 = patchRefList2[0].getButler()
+        forcedMd2 = butler2.get("deepCoadd_forced_src", patchRefList2[0].dataId).getMetadata()
+        hscRun2 = checkHscStack(forcedMd2)
+        forced1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_forced_src")
+        forced1 = self.calibrateCatalogs(forced1)
+        forced2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_forced_src")
+        forced2 = self.calibrateCatalogs(forced2)
+        unforced1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_meas")
+        unforced1 = self.calibrateCatalogs(unforced1)
+        unforced2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_meas")
+        unforced2 = self.calibrateCatalogs(unforced2)
+
+        # Set an alias map for differing src naming conventions of different stacks (if any)
+        if self.config.srcSchemaMap:
+            for hscRun, catalog in zip([hscRun1, hscRun2, hscRun1, hscRun2],
+                                       [forced1, forced2, unforced1, unforced2]):
+                if hscRun:
+                    aliasMap = catalog.schema.getAliasMap()
+                    for lsstName, otherName in self.config.srcSchemaMap.iteritems():
+                        aliasMap.set(lsstName, otherName)
+                else:
+                    # Need this for LSST cat since base_SdssCentroid doesn't exist in forces schema
+                    # but still don't have Sigmas...
+                    aliasMap = catalog.schema.getAliasMap()
+                    aliasMap.set("base_SdssCentroid", "base_TransformedCentroid")
+                    aliasMap.set("base_SdssCentroid_x", "base_TransformedCentroid_x")
+                    aliasMap.set("base_SdssCentroid_y", "base_TransformedCentroid_y")
+                    aliasMap.set("base_SdssCentroid_flag", "base_TransformedCentroid_flag")
+
+        forced = self.matchCatalogs(forced1, forced2)
+        unforced = self.matchCatalogs(unforced1, unforced2)
+        flagsCat = None # can't use unforced as matches aren't exactly the same...
+
+        self.log.info("\nNumber of sources in catalogs: first = {0:d} and second = {1:d}".format(
+                len(forced1), len(forced2)))
+
         if self.config.doPlotMags:
-            self.plotMags(catalog, filenamer, dataId)
+            self.plotMags(forced, filenamer, dataId, tractInfo=tractInfo1, patchList=patchList1,
+                          hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel,
+                          flagsCat=flagsCat)
         if self.config.doPlotCentroids:
-            self.plotCentroids(catalog, filenamer, dataId)
+            self.plotCentroids(forced, filenamer, dataId, tractInfo=tractInfo1, patchList=patchList1,
+                          hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel,
+                          flagsCat=flagsCat)
 
     def readCatalogs(self, patchRefList, dataset):
         catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS) for
@@ -521,23 +565,45 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         return joinMatches(matches, "first_", "second_")
 
     def calibrateCatalogs(self, catalog):
-        self.zpLabel = "common (" + str(self.config.analysis.zp) + ")"
-        calibrated = calibrateCoaddSourceCatalog(catalog, self.config.analysis.zp)
+        self.zpLabel = "common (" + str(self.config.analysis.coaddZp) + ")"
+        calibrated = calibrateCoaddSourceCatalog(catalog, self.config.analysis.coaddZp)
         return calibrated
 
-    def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, hscRun=None,
-                      matchRadius=None, zpLabel=None):
-        distEnforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.005}})
+    def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
+                 patchList=None, hscRun=None, matchRadius=None, zpLabel=None, fluxToPlotList=None,
+                 postFix="", flagsCat=None):
+        if fluxToPlotList is None:
+            fluxToPlotList = self.config.fluxToPlotList
+        enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02}})
+        for col in fluxToPlotList:
+            if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
+                if "CircularAperture" in col:
+                    zpLabel = None
+                Analysis(catalog, MagDiffCompare(col + "_flux"), "Run Comparison: Mag difference (%s)" %
+                         fluxToPlotString(col), "diff_" + col, self.config.analysis,
+                         prefix="first_", qMin=-0.05, qMax=0.05, flags=[col + "_flag"],
+                         errFunc=MagDiffErr(col + "_flux"), labeller=OverlapsStarGalaxyLabeller(),
+                         flagsCat=flagsCat,
+                         ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler, camera=camera,
+                                   ccdList=ccdList, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
+                                   matchRadius=matchRadius, zpLabel=zpLabel, postFix=postFix)
+
+    def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
+                      tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
+                      flagsCat=None):
+        distEnforcer = None
         Analysis(catalog, CentroidDiff("x"), "Run Comparison: x offset (arcsec)", "diff_x",
-                 self.config.analysis, prefix="first_", qMin=-0.3, qMax=0.3, errFunc=CentroidDiffErr("x"),
+                 self.config.analysis, prefix="first_", qMin=-0.3, qMax=0.3, errFunc=None,
                  labeller=OverlapsStarGalaxyLabeller(),
                  ).plotAll(dataId, filenamer, self.log, distEnforcer, butler=butler, camera=camera,
-                           ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
+                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
+                           matchRadius=matchRadius, zpLabel=zpLabel)
         Analysis(catalog, CentroidDiff("y"), "Run Comparison: y offset (arcsec)", "diff_y",
-                 self.config.analysis, prefix="first_", qMin=-0.1, qMax=0.1, errFunc=CentroidDiffErr("y"),
+                 self.config.analysis, prefix="first_", qMin=-0.1, qMax=0.1, errFunc=None,
                  labeller=OverlapsStarGalaxyLabeller(),
                  ).plotAll(dataId, filenamer, self.log, distEnforcer, butler=butler, camera=camera,
-                           ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
+                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
+                           matchRadius=matchRadius, zpLabel=zpLabel)
 
     def _getConfigName(self):
         return None
