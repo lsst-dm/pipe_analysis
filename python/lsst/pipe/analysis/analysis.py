@@ -429,8 +429,8 @@ class Analysis(object):
                              tractInfo=tractInfo, patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                              zpLabel=zpLabel, dataName="star")
 
-        if "pStar" not in self.shortName and not any(ss in self.shortName
-                                                     for ss in ["gri", "riz", "izy", "z9y", "color_"]):
+        if (not any(ss in self.shortName for ss in
+                    ["pStar", "race_", "psfUsed", "gri", "riz", "izy", "z9y", "color_"])):
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky-gals" + postFix),
                                  stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,
                                  tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
