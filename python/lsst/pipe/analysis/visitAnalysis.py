@@ -30,8 +30,9 @@ class CcdAnalysis(Analysis):
                 ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
                 postFix=""):
         stats = self.stats(forcedMean=forcedMean)
-        self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix), stats=stats,
-                     hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
+        if self.config.doPlotCcdXy:
+            self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix), stats=stats,
+                         hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
         if self.config.doPlotFP:
             self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa" + postFix),
                                 stats=stats, camera=camera, ccdList=ccdList, hscRun=hscRun,

@@ -27,7 +27,9 @@ class AnalysisConfig(Config):
     fluxColumn = Field(dtype=str, default="base_PsfFlux_flux", doc="Column to use for flux/mag plotting")
     zp = Field(dtype=float, default=27.0, doc="Magnitude zero point to apply")
     doPlotOldMagsHist = Field(dtype=bool, default=False, doc="Make older, separated, mag and hist plots?")
+    doPlotRaDec = Field(dtype=bool, default=False, doc="Make delta vs. Ra and Dec plots?")
     doPlotFP = Field(dtype=bool, default=False, doc="Make FocalPlane plots?")
+    doPlotCcdXy = Field(dtype=bool, default=False, doc="Make plots as a function of CCD x and y?")
 
 
 class Analysis(object):
@@ -433,8 +435,9 @@ class Analysis(object):
                                  tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
                                  matchRadius=matchRadius, zpLabel=zpLabel, dataName="galaxy")
 
-        self.plotRaDec(filenamer(dataId, description=self.shortName, style="radec" + postFix), stats=stats,
-                       hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
+        if self.config.doPlotRaDec:
+            self.plotRaDec(filenamer(dataId, description=self.shortName, style="radec" + postFix),
+                           stats=stats, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
         log.info("Statistics from %s of %s: %s" % (dataId, self.quantityName, stats))
         if enforcer:
             enforcer(stats, dataId, log, self.quantityName)
