@@ -45,6 +45,7 @@ class CoaddAnalysisConfig(Config):
     doPlotMags = Field(dtype=bool, default=True, doc="Plot magnitudes?")
     doPlotSizes = Field(dtype=bool, default=True, doc="Plot PSF sizes?")
     doPlotCentroids = Field(dtype=bool, default=True, doc="Plot centroids?")
+    doApCorrs = Field(dtype=bool, default=True, doc="Plot aperture corrections?")
     doBackoutApCorr = Field(dtype=bool, default=False, doc="Backout aperture corrections?")
     doAddAperFluxHsc = Field(dtype=bool, default=False,
                              doc="Add a field containing 12 pix circular aperture flux to HSC table?")
@@ -455,27 +456,12 @@ class CoaddAnalysisTask(CmdLineTask):
         return None
 
 
-class CompareCoaddAnalysisConfig(Config):
-    coaddName = Field(dtype=str, default="deep", doc="Name for coadd")
-    matchRadius = Field(dtype=float, default=0.2, doc="Matching radius (arcseconds)")
-    analysis = ConfigField(dtype=AnalysisConfig, doc="Analysis plotting options")
-    doPlotMags = Field(dtype=bool, default=True, doc="Plot magnitudes?")
-    doPlotSizes = Field(dtype=bool, default=False, doc="Plot PSF sizes?")
-    doPlotCentroids = Field(dtype=bool, default=True, doc="Plot centroids?")
-    doApCorrs = Field(dtype=bool, default=True, doc="Plot aperture corrections?")
-    doBackoutApCorr = Field(dtype=bool, default=False, doc="Backout aperture corrections?")
-    sysErrMags = Field(dtype=float, default=0.015, doc="Systematic error in magnitudes")
-    sysErrCentroids = Field(dtype=float, default=0.15, doc="Systematic error in centroids (pixels)")
-    srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
-                             doc="Mapping between different stack (e.g. HSC vs. LSST) schema names")
-    doAddAperFluxHsc = Field(dtype=bool, default=False,
-                             doc="Add a field containing 12 pix circular aperture flux to HSC table?")
-    fluxToPlotList = ListField(dtype=str, default=["base_PsfFlux", "base_GaussianFlux"],
-                               doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(base_PsfFlux)")
-    # "ext_photometryKron_KronFlux", "modelfit_Cmodel", "slot_CalibFlux"]:
-    doApplyUberCal = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input?" +
-                           " FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
+class CompareCoaddAnalysisConfig(CoaddAnalysisConfig):
 
+    def setDefaults(self):
+        CoaddAnalysisConfig.setDefaults(self)
+        self.matchRadius = 0.2
+        fluxToPlotList = ["base_PsfFlux", "base_GaussianFlux"]
 
 class CompareCoaddAnalysisRunner(TaskRunner):
     @staticmethod
