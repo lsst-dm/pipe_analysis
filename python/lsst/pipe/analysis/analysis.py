@@ -352,7 +352,7 @@ class Analysis(object):
         axes.set_xlabel("RA (deg)")
         axes.set_ylabel("Dec (deg)")
 
-        axes.set_xlim(raMin, raMax)
+        axes.set_xlim(raMax, raMin)
         axes.set_ylim(decMin, decMax)
 
         mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vMin, vmax=vMax))
