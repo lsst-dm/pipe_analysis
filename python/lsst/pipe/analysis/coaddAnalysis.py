@@ -126,13 +126,12 @@ class CoaddAnalysisTask(CmdLineTask):
         flagsCat = unforced
         # Check metadata to see if stack used was HSC
         forcedMd = butler.get("deepCoadd_forced_src", patchRefList[0].dataId).getMetadata()
-        # Set an alias map for differing src naming conventions of different stacks (if any)
         hscRun = checkHscStack(forcedMd)
+        # Set an alias map for differing src naming conventions of different stacks (if any)
         if hscRun is not None and self.config.srcSchemaMap is not None:
             for aliasMap in [forced.schema.getAliasMap(), unforced.schema.getAliasMap()]:
                 for lsstName, otherName in self.config.srcSchemaMap.iteritems():
                     aliasMap.set(lsstName, otherName)
-
         if self.config.doPlotMags:
             self.plotMags(forced, filenamer, dataId, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
                           zpLabel=self.zpLabel, flagsCat=flagsCat)
@@ -146,13 +145,14 @@ class CoaddAnalysisTask(CmdLineTask):
             self.plotCosmos(forced, filenamer, cosmos, dataId)
         if self.config.doPlotCompareUnforced:
             self.plotCompareUnforced(forced, unforced, filenamer, dataId, tractInfo=tractInfo,
-                                     patchList=patchList, hscRun=hscRun, zpLabel=self.zpLabel)
+                                     patchList=patchList, hscRun=hscRun, matchRadius=self.config.matchRadius,
+                                     zpLabel=self.zpLabel)
         if self.config.doPlotOverlaps:
             overlaps = self.overlaps(forced, flagsCat=unforced)
             self.plotOverlaps(overlaps, filenamer, dataId, tractInfo=tractInfo, patchList=patchList,
-                              hscRun=hscRun, zpLabel=self.zpLabel)
+                              hscRun=hscRun, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
         if self.config.doPlotMatches:
-            matches = self.readSrcMatches(patchRefList, "deepCoadd_forced_src")
+            matches = self.readSrcMatches(patchRefList, "deepCoadd_forced_src", hscRun=hscRun)
             self.plotMatches(matches, filterName, filenamer, dataId, tractInfo=tractInfo, patchList=patchList,
                              hscRun=hscRun, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
 
@@ -170,24 +170,22 @@ class CoaddAnalysisTask(CmdLineTask):
             catList = [cat[cat["base_ClassificationExtendedness_value"] < 0.5].copy(True) for cat in catList]
         return concatenateCatalogs(catList)
 
-    def readSrcMatches(self, dataRefList, dataset):
+    def readSrcMatches(self, dataRefList, dataset, hscRun=None):
         catList = []
         for dataRef in dataRefList:
-            print "dataRef, dataset: ", dataRef.dataId, dataset
             if not dataRef.datasetExists(dataset):
                 print "Dataset does not exist: ", dataRef.dataId, dataset
                 continue
             butler = dataRef.getButler()
-            if dataset.startswith("deepCoadd_"):
-                metadata = butler.get("deepCoadd_md", dataRef.dataId)
-            else:
-                metadata = butler.get("calexp_md", dataRef.dataId)
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
             catalog = self.calibrateCatalogs(catalog)
             if dataset.startswith("deepCoadd_"):
-                packedMatches = butler.get("deepCoadd_src" + "Match", dataRef.dataId)
+                if hscRun:
+                    packedMatches = butler.get("deepCoadd_meas" + "Match", dataRef.dataId)
+                else:
+                    packedMatches = butler.get("deepCoadd_src" + "Match", dataRef.dataId)
             else:
                 packedMatches = butler.get(dataset + "Match", dataRef.dataId)
             # The reference object loader grows the bbox by the config parameter pixelMargin.  This
@@ -202,15 +200,15 @@ class CoaddAnalysisTask(CmdLineTask):
             matches = refObjLoader.joinMatchListWithCatalog(packedMatches, catalog)
             # LSST reads in a_net catalogs with flux in "janskys", so must convert back to DN
             matches = matchJanskyToDn(matches)
-            if checkHscStack(metadata) is not None and self.config.doAddAperFluxHsc:
+            if hscRun and self.config.doAddAperFluxHsc:
                 addApertureFluxesHSC(matches, prefix="second_")
 
             if len(matches) == 0:
                 self.log.warn("No matches for %s" % (dataRef.dataId,))
                 continue
 
-            # Set the aliap map for the matches sources (i.e. the .second attribute schema for each match)
-            if self.config.srcSchemaMap is not None and checkHscStack(metadata) is not None:
+            # Set the alias map for the matches sources (i.e. the .second attribute schema for each match)
+            if self.config.srcSchemaMap and hscRun:
                 for mm in matches:
                     aliasMap = mm.second.schema.getAliasMap()
                     for lsstName, otherName in self.config.srcSchemaMap.iteritems():
@@ -229,7 +227,7 @@ class CoaddAnalysisTask(CmdLineTask):
             if self.config.doBackoutApCorr:
                 catalog = backoutApCorr(catalog)
             # Need to set the aliap map for the matched catalog sources
-            if self.config.srcSchemaMap is not None and checkHscStack(metadata) is not None:
+            if self.config.srcSchemaMap and hscRun:
                 aliasMap = catalog.schema.getAliasMap()
                 for lsstName, otherName in self.config.srcSchemaMap.iteritems():
                     aliasMap.set("src_" + lsstName, "src_" + otherName)
@@ -370,7 +368,8 @@ class CoaddAnalysisTask(CmdLineTask):
                                    labeller=OverlapsStarGalaxyLabeller(),
                                    ).plotAll(dataId, filenamer, self.log, magEnforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                                             patchList=patchList, hscRun=hscRun, zpLabel=zpLabel)
+                                             patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
+                                             zpLabel=zpLabel)
 
         distEnforcer = Enforcer(requireLess={"star": {"stdev": 0.005}})
         self.AnalysisClass(overlaps, lambda cat: cat["distance"]*(1.0*afwGeom.radians).asArcseconds(),
