@@ -61,7 +61,7 @@ class CosmosLabeller(StarGalaxyLabeller):
 
 
 def labelZp(zpLabel, plt, axis, xLoc, yLoc, color="k"):
-    plt.text(xLoc, yLoc, "zp: " + zpLabel, ha="center", va="center", fontsize=11,
+    plt.text(xLoc, yLoc, "zp: " + zpLabel, ha="center", va="center", fontsize=10,
              transform=axis.transAxes, color=color)
 
 def annotateAxes(plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff=0.045,
@@ -96,15 +96,18 @@ def annotateAxes(plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff
 
 def labelVisit(filename, plt, axis, xLoc, yLoc, color="k"):
     labelStr = None
-    if filename.find("visit-") >= 0:
-        labelStr = "visit"
     if filename.find("tract-") >= 0:
-        labelStr = "tract"
-    if labelStr is not None:
-        i1 = filename.find(labelStr + "-") + len(labelStr + "-")
+        labelStr = "tract: "
+        i1 = filename.find("tract-") + len("tract-")
         i2 = filename.find("/", i1)
-        visitNumber = filename[i1:i2]
-        plt.text(xLoc, yLoc, labelStr + ": " + str(visitNumber), ha="center", va="center", fontsize=12,
+        labelStr += filename[i1:i2]
+    if filename.find("visit-") >= 0:
+        labelStr += " visit: "
+        i1 = filename.find("visit-") + len("visit-")
+        i2 = filename.find("/", i1)
+        labelStr += filename[i1:i2]
+    if labelStr is not None:
+        plt.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=10,
                  transform=axis.transAxes, color=color)
 
 def plotCameraOutline(plt, axes, camera, ccdList):
