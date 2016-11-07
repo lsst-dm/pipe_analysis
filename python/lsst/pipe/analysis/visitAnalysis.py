@@ -297,17 +297,6 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     for lsstName, otherName in self.config.srcSchemaMap.iteritems():
                         aliasMap.set(lsstName, otherName)
 
-            schema = matches[0].second.schema
-            src = afwTable.SourceCatalog(schema)
-            src.reserve(len(catalog))
-            for mm in matches:
-                src.append(mm.second)
-            matches[0].second.table.defineCentroid("base_SdssCentroid")
-            src.table.defineCentroid("base_SdssCentroid")
-
-            for mm, ss in zip(matches, src):
-                mm.second = ss
-
             matchMeta = butler.get(dataset, dataRef.dataId,
                                    flags=afwTable.SOURCE_IO_NO_FOOTPRINTS).getTable().getMetadata()
             catalog = matchesToCatalog(matches, matchMeta)

@@ -216,20 +216,6 @@ class CoaddAnalysisTask(CmdLineTask):
                     for lsstName, otherName in self.config.srcSchemaMap.iteritems():
                         aliasMap.set(lsstName, otherName)
 
-            schema = matches[0].second.schema
-            src = afwTable.SourceCatalog(schema)
-            src.reserve(len(catalog))
-            for mm in matches:
-                src.append(mm.second)
-            centroidStr = "base_SdssCentroid"
-            if centroidStr not in schema:
-                centroidStr = "base_TransformedCentroid"
-            matches[0].second.table.defineCentroid(centroidStr)
-            src.table.defineCentroid(centroidStr)
-
-            for mm, ss in zip(matches, src):
-                mm.second = ss
-
             matchMeta = butler.get(dataset, dataRef.dataId,
                                    flags=afwTable.SOURCE_IO_NO_FOOTPRINTS).getTable().getMetadata()
             catalog = matchesToCatalog(matches, matchMeta)
