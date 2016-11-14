@@ -58,7 +58,8 @@ class CcdAnalysis(Analysis):
         vMin, vMax = ccd.min(), ccd.max()
         if vMin == vMax:
             vMin, vMax = vMin - 2, vMax + 2
-            print "Only one CCD (%d) to analyze: setting vMin (%d), vMax (%d)" % (ccd.min(), vMin, vMax)
+            self.log.info("Only one CCD ({0:d}) to analyze: setting vMin ({1:d}), vMax ({2:d})".format(
+                    ccd.min(), vMin, vMax))
         good = (self.mag < self.config.magThreshold if self.config.magThreshold > 0 else
                 np.ones(len(self.mag), dtype=bool))
         fig, axes = plt.subplots(2, 1)
@@ -171,7 +172,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         return parser
 
     def run(self, dataRefList, tract=None):
-        self.log.info("dataRefList size: %d" % len(dataRefList))
+        self.log.info("dataRefList size: {:d}".format(len(dataRefList)))
         ccdList = [dataRef.dataId["ccd"] for dataRef in dataRefList]
         # cull multiple entries
         ccdList = list(set(ccdList))
@@ -185,7 +186,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         commonZpDone = False
         for i, dataRefListTract in enumerate(dataRefListPerTract):
             if len(dataRefListTract) == 0:
-                self.log.info("No data found for tract: %d" % tractList[i])
+                self.log.info("No data found for tract: {:d}".format(tractList[i]))
                 continue
             dataset = "src"
             if self.config.doApplyUberCal:
@@ -195,19 +196,16 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             butler = dataRefListTract[0].getButler()
             camera = butler.get("camera")
             dataId = dataRefListTract[0].dataId
-            self.log.info("dataId: %s" % (dataId,))
+            self.log.info("dataId: {:s}".format(dataId))
             filterName = dataId["filter"]
             filenamer = Filenamer(butler, "plotVisit", dataRefListTract[0].dataId)
-            # calexp = None
-            # if self.config.doPlotSizes:
-            #     calexp = butler.get("calexp", dataId)
             # Check metadata to see if stack used was HSC
             metadata = butler.get("calexp_md", dataRefListTract[0].dataId)
             commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src")
             # Set an alias map for differing src naming conventions of different stacks (if any)
             hscRun = checkHscStack(metadata)
-            if hscRun is not None and self.config.doAddAperFluxHsc:
-                print "HSC run: adding aperture flux to schema..."
+            if hscRun and self.config.doAddAperFluxHsc:
+                self.log.info("HSC run: adding aperture flux to schema...")
                 catalog = addApertureFluxesHSC(catalog, prefix="")
             if hscRun is not None and self.config.srcSchemaMap is not None:
                 aliasMap = catalog.schema.getAliasMap()
@@ -325,7 +323,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 addApertureFluxesHSC(matches, prefix="second_")
 
             if len(matches) == 0:
-                self.log.warn("No matches for %s" % (dataRef.dataId,))
+                self.log.warn("No matches for {:s}".format(dataRef.dataId))
                 continue
 
             # Set the aliap map for the matches sources (i.e. the .second attribute schema for each match)
@@ -377,7 +375,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             # Scale fluxes to measured zeropoint
             self.zp = 2.5*np.log10(metadata.get("FLUXMAG0"))
             if self.zpLabel is None:
-                self.log.info("Using 2.5*log10(FLUXMAG0) = %.4f from FITS header for zeropoint" % self.zp)
+                self.log.info("Using 2.5*log10(FLUXMAG0) = {:.4f} from FITS header for zeropoint".format(
+                        self.zp))
             self.zpLabel = "FLUXMAG0"
             calibrated = calibrateSourceCatalog(catalog, self.zp)
 
@@ -524,7 +523,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             # Scale fluxes to measured zeropoint
             self.zp = 2.5*np.log10(metadata.get("FLUXMAG0"))
             if self.zpLabel is None:
-                self.log.info("Using 2.5*log10(FLUXMAG0) = %.4f from FITS header for zeropoint" % self.zp)
+                self.log.info("Using 2.5*log10(FLUXMAG0) = {:.4f} from FITS header for zeropoint".format(
+                    self.zp))
             self.zpLabel = "FLUXMAG0"
             calibrated = calibrateSourceCatalog(catalog, self.zp)
 
@@ -537,33 +537,59 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             fluxToPlotList = self.config.fluxToPlotList
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02}})
         for col in fluxToPlotList:
-            # ["base_CircularApertureFlux_12_0"]:
             if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
                 if "CircularAperture" in col:
                     zpLabel = None
+                shortName = "diff_" + col
+                self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, MagDiffCompare(col + "_flux"), "Run Comparison: Mag difference (%s)" %
-                         fluxToPlotString(col), "diff_" + col, self.config.analysis,
+                         fluxToPlotString(col), shortName, self.config.analysis,
                          prefix="first_", qMin=-0.05, qMax=0.05, flags=[col + "_flag"],
                          errFunc=MagDiffErr(col + "_flux"), labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler, camera=camera,
                                    ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
                                    postFix=postFix)
 
+    def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
+                      tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
+                      flagsCat=None):
+        distEnforcer = None
+        shortName = "diff_x"
+        self.log.info("shortName = {:s}".format(shortName))
+        Analysis(catalog, CentroidDiff("x", centroid1="base_SdssCentroid_Rot"),
+                 "Run Comparison: x offset (arcsec)", shortName, self.config.analysis, prefix="first_",
+                 qMin=-0.3, qMax=0.3, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
+                 ).plotAll(dataId, filenamer, self.log, distEnforcer, butler=butler, camera=camera,
+                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
+                           matchRadius=matchRadius, zpLabel=zpLabel)
+        shortName = "diff_y"
+        self.log.info("shortName = {:s}".format(shortName))
+        Analysis(catalog, CentroidDiff("y", centroid1="base_SdssCentroid_Rot"),
+                 "Run Comparison: y offset (arcsec)", shortName, self.config.analysis, prefix="first_",
+                 qMin=-0.1, qMax=0.1, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
+                 ).plotAll(dataId, filenamer, self.log, distEnforcer, butler=butler, camera=camera,
+                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
+                           matchRadius=matchRadius, zpLabel=zpLabel)
+
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, hscRun=None,
                  matchRadius=None, zpLabel=None):
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02}})
         for col in ["base_PsfFlux"]:
             if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
+                shortName = "trace_"
+                self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, psfSdssTraceSizeDiff(),
-                         "SdssShape Trace Radius Diff (psfUsed - PSF model)/(PSF model)", "trace_",
+                         "SdssShape Trace Radius Diff (psfUsed - PSF model)/(PSF model)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-0.04, qMax=0.04,
                          labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
+                shortName = "hsmTrace_"
+                self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, psfHsmTraceSizeDiff(),
-                         "HSM Trace Radius Diff (psfUsed - PSF model)/(PSF model)", "hsmTrace_",
+                         "HSM Trace Radius Diff (psfUsed - PSF model)/(PSF model)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-0.04, qMax=0.04,
                          labeller=OverlapsStarGalaxyLabeller(),
@@ -578,9 +604,11 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02}})
         for col in fluxToPlotList:
             if "first_" + col + "_apCorr" in catalog.schema and "second_" + col + "_apCorr" in catalog.schema:
+                shortName = "diff_" + col + "_apCorr"
+                self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, ApCorrDiffCompare(col + "_apCorr"),
                          "Run Comparison: apCorr difference (%s)" % fluxToPlotString(col),
-                         "diff_" + col + "_apCorr", self.config.analysis,
+                         shortName, self.config.analysis,
                          prefix="first_", qMin=-0.025, qMax=0.025, flags=[col + "_flag_apCorr"],
                          errFunc=ApCorrDiffErr(col + "_apCorr"), labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler, camera=camera,
