@@ -32,6 +32,7 @@ __all__ = ["CoaddAnalysisConfig", "CoaddAnalysisRunner", "CoaddAnalysisTask", "C
 class CoaddAnalysisConfig(Config):
     coaddName = Field(dtype=str, default="deep", doc="Name for coadd")
     matchRadius = Field(dtype=float, default=0.5, doc="Matching radius (arcseconds)")
+    matchOverlapRadius = Field(dtype=float, default=0.5, doc="Matching radius for overlaps (arcseconds)")
     colorterms = ConfigField(dtype=ColortermLibrary, doc="Library of color terms")
     photoCatName = Field(dtype=str, default="sdss", doc="Name of photometric reference catalog; "
                          "used to select a color term dict in colorterms.""Name for coadd")
@@ -358,15 +359,13 @@ class CoaddAnalysisTask(CmdLineTask):
                 return True
         return False
 
-    def overlaps(self, catalog, flagsCat=None):
-        # Get rid of flagged sources here
-        if flagsCat is None:
-            flagsCat = catalog
-        result = afwTable.SourceCatalog(catalog.table)
-        for source, sourceFlag in zip(catalog, flagsCat):
-            if not self.isBad(sourceFlag):
-                result.append(source)
-        matches = afwTable.matchRaDec(result, self.config.matchRadius*afwGeom.arcseconds, False)
+    def overlaps(self, forcedCat, flagsCat):
+        # Don't include parents of blended objects
+        noParentsForcedCat = forcedCat[flagsCat["deblend_nChild"] == 0].copy(True)
+        matches = afwTable.matchRaDec(noParentsForcedCat, self.config.matchOverlapRadius*afwGeom.arcseconds,
+                                      True)
+        if len(matches) == 0:
+            self.log.info("Did not find any overlapping matches")
         return joinMatches(matches, "first_", "second_")
 
     def plotOverlaps(self, overlaps, filenamer, dataId, butler=None, camera=None, ccdList=None,
