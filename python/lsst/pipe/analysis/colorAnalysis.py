@@ -196,12 +196,12 @@ class ColorAnalysisTask(CmdLineTask):
         unforcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList, "deepCoadd_meas") for
                             ff, patchRefList in patchRefsByFilter.iteritems()}
         for cat in unforcedCatalogsByFilter.itervalues():
-            calibrateCoaddSourceCatalog(cat, self.config.analysis.zp)
+            calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
         unforced = self.transformCatalogs(unforcedCatalogsByFilter, self.config.transforms, hscRun=hscRun)
         forcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList, "deepCoadd_forced_src") for
                             ff, patchRefList in patchRefsByFilter.iteritems()}
         for cat in forcedCatalogsByFilter.itervalues():
-            calibrateCoaddSourceCatalog(cat, self.config.analysis.zp)
+            calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
         # self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
         forced = self.transformCatalogs(forcedCatalogsByFilter, self.config.transforms,
                                         flagsCats=unforcedCatalogsByFilter, hscRun=hscRun)
@@ -312,8 +312,10 @@ class ColorAnalysisTask(CmdLineTask):
                 row.assign(iRow, mapperList[1])
 
             catalog.writeFits("gi.fits")
+            shortName = "galaxy-TEST"
+            self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(catalog, GalaxyColor("modelfit_CModel_flux", "slot_CalibFlux_flux", "g_", "i_"),
-                               "(g-i)_cmodel - (g-i)_CalibFlux", "galaxy-TEST", self.config.analysis,
+                               "(g-i)_cmodel - (g-i)_CalibFlux", shortName, self.config.analysis,
                                flags=["modelfit_CModel_flag", "slot_CalibFlux_flag"], prefix="i_",
                                labeller=OverlapsStarGalaxyLabeller("g_", "i_"),
                                qMin=-0.5, qMax=0.5,).plotAll(dataId, filenamer, self.log)
@@ -323,9 +325,11 @@ class ColorAnalysisTask(CmdLineTask):
         for col, transform in self.config.transforms.iteritems():
             if not transform.plot or col not in catalog.schema:
                 continue
+            shortName = "color_" + col
+            self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(catalog, ColorValueInRange(col, transform.requireGreater,
                                                           transform.requireLess),
-                               col, "color_" + col, self.config.analysis, flags=["bad"], labeller=labeller,
+                               col, shortName, self.config.analysis, flags=["bad"], labeller=labeller,
                                qMin=-0.2, qMax=0.2,).plotAll(dataId, filenamer, self.log, butler=butler,
                                                              tractInfo=tractInfo, patchList=patchList,
                                                              hscRun=hscRun)
@@ -333,7 +337,6 @@ class ColorAnalysisTask(CmdLineTask):
     def plotStarColorColor(self, catalogs, filenamer, dataId, butler=None, tractInfo=None, patchList=None,
                            hscRun=None):
         num = len(catalogs.values()[0])
-        zp = self.config.analysis.zp
         zp = 0.0
         mags = {ff: zp - 2.5*np.log10(catalogs[ff][self.fluxColumn]) for ff in catalogs}
 
@@ -362,8 +365,10 @@ class ColorAnalysisTask(CmdLineTask):
                                   color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"), "g - r", "r - i",
                                   xRange=(-0.5, 2.0), yRange=(-0.5, 2.0), order=3, xFitRange=(0.3, 1.1),
                                   hscRun=hscRun)
-            self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, 0.3, 1.1), "griPerp", "gri",
-                               self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
+            shortName = "gri"
+            self.log.info("shortName = {:s}".format(shortName))
+            self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, 0.3, 1.1), "griPerp",
+                               shortName, self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.05}}),
@@ -372,7 +377,9 @@ class ColorAnalysisTask(CmdLineTask):
             poly = colorColorPlot(filenamer(dataId, description="riz", style="fit"),
                                   color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"), "r - i", "i - z",
                                   xRange=(-0.5, 2.0), yRange=(-0.4, 0.8), order=3, hscRun=hscRun)
-            self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly), "rizPerp", "riz",
+            shortName = "riz"
+            self.log.info("shortName = {:s}".format(shortName))
+            self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly), "rizPerp", shortName,
                                self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
@@ -382,7 +389,9 @@ class ColorAnalysisTask(CmdLineTask):
             poly = colorColorPlot(filenamer(dataId, description="izy", style="fit"),
                                   color("HSC-I", "HSC-Z"), color("HSC-Z", "HSC-Y"), "i - z", "z - y",
                                   xRange=(-0.4, 0.8), yRange=(-0.3, 0.5), order=3, hscRun=hscRun)
-            self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly), "izyPerp", "izy",
+            shortName = "izy"
+            self.log.info("shortName = {:s}".format(shortName))
+            self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly), "izyPerp", shortName,
                                self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
@@ -393,7 +402,9 @@ class ColorAnalysisTask(CmdLineTask):
             poly = colorColorPlot(filenamer(dataId, description="z9y", style="fit"),
                                   color("HSC-Z", "NB0921"), color("NB0921", "HSC-Y"), "z-n921", "n921-y",
                                   xRange=(-0.2, 0.2), yRange=(-0.1, 0.2), order=2, xFitRange=(-0.05, 0.15))
-            self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly), "z9yPerp", "z9y",
+            shortName = "z9y"
+            self.log.info("shortName = {:s}".format(shortName))
+            self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly), "z9yPerp", shortName,
                                self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
