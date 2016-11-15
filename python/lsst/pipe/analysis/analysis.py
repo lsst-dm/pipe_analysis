@@ -37,13 +37,17 @@ class Analysis(object):
     """Centralised base for plotting"""
 
     def __init__(self, catalog, func, quantityName, shortName, config, qMin=-0.2, qMax=0.2,
-                 prefix="", flags=[], goodKeys=[], errFunc=None, labeller=AllLabeller(), flagsCat=None):
+                 prefix="", flags=[], goodKeys=[], errFunc=None, labeller=AllLabeller(), flagsCat=None,
+                 magThreshold=21):
         self.catalog = catalog
         self.func = func
         self.quantityName = quantityName
         self.shortName = shortName
-        print "shortName = ", self.shortName
         self.config = config
+        if magThreshold is None:
+            self.magThreshold = self.config.magThreshold
+        else:
+            self.magThreshold = magThreshold
         self.qMin = qMin
         self.qMax = qMax
         if (labeller.labels.has_key("galaxy") and "calib_psfUsed" not in goodKeys and
@@ -112,7 +116,7 @@ class Analysis(object):
         axes.set_ylim(self.qMin, self.qMax)
         axes.set_xlim(magMin, magMax)
         if stats is not None:
-            annotateAxes(plt, axes, stats, "star", self.config.magThreshold, hscRun=hscRun,
+            annotateAxes(plt, axes, stats, "star", self.magThreshold, hscRun=hscRun,
                          matchRadius=matchRadius)
         axes.legend(handles=dataPoints, loc=1, fontsize=8)
         labelVisit(filename, plt, axes, 0.5, 1.05)
@@ -171,7 +175,7 @@ class Analysis(object):
             aboveStarMagMax = self.data["star"].mag > starMagMax
 
         magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
-        magMax = max(self.config.magThreshold+1.0, min(magMax, starMagMax))
+        magMax = max(self.magThreshold+1.0, min(magMax, starMagMax))
 
         axScatter.set_xlim(magMin, magMax)
         axScatter.set_ylim(0.99*self.qMin, 0.99*self.qMax)
@@ -187,9 +191,9 @@ class Analysis(object):
         axHistx.set_yscale("log", nonposy="clip")
         axHisty.set_xscale("log", nonposy="clip")
 
-        nxSyDecimal = int(-1.0*np.around(np.log10(0.05*abs(self.config.magThreshold - magMin)) - 0.5))
-        xSyBinwidth = min(0.1, np.around(0.05*abs(self.config.magThreshold - magMin), nxSyDecimal))
-        xSyBins = np.arange(magMin + 0.5*xSyBinwidth, self.config.magThreshold + 0.5*xSyBinwidth, xSyBinwidth)
+        nxSyDecimal = int(-1.0*np.around(np.log10(0.05*abs(self.magThreshold - magMin)) - 0.5))
+        xSyBinwidth = min(0.1, np.around(0.05*abs(self.magThreshold - magMin), nxSyDecimal))
+        xSyBins = np.arange(magMin + 0.5*xSyBinwidth, self.magThreshold + 0.5*xSyBinwidth, xSyBinwidth)
 
         royalBlue = "#4169E1"
         cornflowerBlue = "#6495ED"
@@ -210,8 +214,8 @@ class Analysis(object):
                 histColor = "green"
             if name == "star":
                 histColor = royalBlue
-                # shade the portion of the plot fainter that self.config.magThreshold
-                axScatter.axvspan(self.config.magThreshold, axScatter.get_xlim()[1], facecolor="k",
+                # shade the portion of the plot fainter that self.magThreshold
+                axScatter.axvspan(self.magThreshold, axScatter.get_xlim()[1], facecolor="k",
                                   edgecolor="none", alpha=0.15)
                 # compute running stats (just for plotting)
                 belowThresh = data.mag < magMax  # set lower if you want to truncate plotted running stats
@@ -249,7 +253,7 @@ class Analysis(object):
         axScatter.set_ylabel(self.quantityName)
 
         if stats is not None:
-            l1, l2 = annotateAxes(plt, axScatter, stats, "star", self.config.magThreshold,
+            l1, l2 = annotateAxes(plt, axScatter, stats, "star", self.magThreshold,
                                   hscRun=hscRun, matchRadius=matchRadius)
         dataPoints = dataPoints + runStats + [l1, l2]
         axScatter.legend(handles=dataPoints, loc=1, fontsize=8)
@@ -279,8 +283,8 @@ class Analysis(object):
             if len(data.mag) == 0:
                 continue
             good = np.isfinite(data.quantity)
-            if self.config.magThreshold is not None:
-                good &= data.mag < self.config.magThreshold
+            if self.magThreshold is not None:
+                good &= data.mag < self.magThreshold
             nValid = np.abs(data.quantity[good]) <= self.qMax  # need to have datapoints lying within range
             if good.sum() == 0 or nValid.sum() == 0:
                 continue
@@ -296,7 +300,7 @@ class Analysis(object):
         if self.qMin == 0.0:
             x0, y0 = 0.68, 0.81
         if stats is not None:
-            annotateAxes(plt, axes, stats, "star", self.config.magThreshold, x0=x0, y0=y0,
+            annotateAxes(plt, axes, stats, "star", self.magThreshold, x0=x0, y0=y0,
                          isHist=True, hscRun=hscRun, matchRadius=matchRadius)
         axes.legend()
         labelVisit(filename, plt, axes, 0.5, 1.05)
@@ -314,8 +318,18 @@ class Analysis(object):
         dec = np.rad2deg(self.catalog[self.prefix + "coord_dec"])
         raMin, raMax = np.round(ra.min() - pad, 2), np.round(ra.max() + pad, 2)
         decMin, decMax = np.round(dec.min() - pad, 2), np.round(dec.max() + pad, 2)
-        good = (self.mag < self.config.magThreshold if self.config.magThreshold > 0 else
+
+        deltaRa = raMax - raMin
+        deltaDec = decMax - decMin
+        deltaDeg = max((deltaRa, deltaDec))
+        raMin = (raMin + deltaRa/2.0) - deltaDeg/2.0
+        raMax = raMin + deltaDeg
+        decMin = (decMin + deltaDec/2.0) - deltaDeg/2.0
+        decMax = decMin + deltaDeg
+
+        good = (self.mag < self.magThreshold if self.magThreshold > 0 else
                 np.ones(len(self.mag), dtype=bool))
+
         if dataName == "star" and "calib_psfUsed" not in self.goodKeys and "pStar" not in filename:
             vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
         elif "CModel" in filename:
@@ -373,7 +387,7 @@ class Analysis(object):
 
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
         dec = np.rad2deg(self.catalog[self.prefix + "coord_dec"])
-        good = (self.mag < self.config.magThreshold if self.config.magThreshold is not None else
+        good = (self.mag < self.magThreshold if self.magThreshold is not None else
                 np.ones(len(self.mag), dtype=bool))
         fig, axes = plt.subplots(2, 1)
         axes[0].axhline(0, linestyle="--", color="0.6")
@@ -398,9 +412,9 @@ class Analysis(object):
 
         axes[0].legend()
         if stats is not None:
-            annotateAxes(plt, axes[0], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
+            annotateAxes(plt, axes[0], stats, "star", self.magThreshold, x0=0.03, yOff=0.07,
                          hscRun=hscRun, matchRadius=matchRadius)
-            annotateAxes(plt, axes[1], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
+            annotateAxes(plt, axes[1], stats, "star", self.magThreshold, x0=0.03, yOff=0.07,
                          hscRun=hscRun, matchRadius=matchRadius)
         labelVisit(filename, plt, axes[0], 0.5, 1.1)
         if zpLabel is not None:
@@ -450,7 +464,7 @@ class Analysis(object):
         for name, data in self.data.iteritems():
             if len(data.mag) == 0:
                 continue
-            good = data.mag < self.config.magThreshold
+            good = data.mag < self.magThreshold
             stats[name] = self.calculateStats(data.quantity, good, forcedMean=forcedMean)
             if self.quantityError is not None:
                 stats[name].sysErr = self.calculateSysError(data.quantity, data.error,
