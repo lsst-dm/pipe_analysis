@@ -17,9 +17,9 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "ApCorrDiffCompare", "AstrometryDiff", "psfSdssTraceSizeDiff", "psfHsmTraceSizeDiff", "MagDiffErr",
            "ApCorrDiffErr", "CentroidDiff", "CentroidDiffErr", "deconvMom", "deconvMomStarGal",
            "concatenateCatalogs", "joinMatches", "checkIdLists", "joinCatalogs", "getFluxKeys",
-           "addApertureFluxesHSC", "addFpPoint", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
-           "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
-           "fluxToPlotString", "andCatalog"]
+           "addApertureFluxesHSC", "addFpPoint", "addRotPoint", "calibrateSourceCatalogMosaic",
+           "calibrateSourceCatalog", "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn",
+           "checkHscStack", "fluxToPlotString", "andCatalog"]
 
 class Filenamer(object):
     """Callable that provides a filename given a style"""
@@ -376,6 +376,52 @@ def addFpPoint(det, catalog, prefix=""):
         row.set(fpxKey, fpPoint[0])
         row.set(fpyKey, fpPoint[1])
 
+    return newCatalog
+
+def rotatePixelCoord(s, width, height, nQuarter):
+    """Rotate single (x, y) pixel coordinate such that LLC of detector in FP is (0, 0)
+    """
+    xKey = s.schema.find("slot_Centroid_x").key
+    yKey = s.schema.find("slot_Centroid_y").key
+    x0 = s.get(xKey)
+    y0 = s.get(yKey)
+    if nQuarter == 1:
+        s.set(xKey, height - y0 - 1.0)
+        s.set(yKey, x0)
+    if nQuarter == 2:
+        s.set(xKey, width - x0 - 1.0)
+        s.set(yKey, height - y0 - 1.0)
+    if nQuarter == 3:
+        s.set(xKey, y0)
+        s.set(yKey, width - x0 - 1.0)
+    return s
+
+def addRotPoint(catalog, width, height, nQuarter, prefix=""):
+    # Compute rotated CCD pixel coords for comparing LSST vs HSC run centroids
+    mapper = afwTable.SchemaMapper(catalog[0].schema)
+    mapper.addMinimalSchema(catalog[0].schema)
+    schema = mapper.getOutputSchema()
+    rotName = prefix + "base_SdssCentroid_Rot"
+    rotxKey = schema.addField(rotName + "_x", type="D", doc="Centroid x (in rotated pixels)")
+    rotyKey = schema.addField(rotName + "_y", type="D", doc="Centroid y (in rotated pixels)")
+    rotFlag = schema.addField(rotName + "_flag", type="Flag", doc="Set to True for any fatal failure")
+
+    newCatalog = afwTable.SourceCatalog(schema)
+    newCatalog.reserve(len(catalog))
+    for source in catalog:
+        row = newCatalog.addNew()
+        row.assign(source, mapper)
+        try:
+            rotPoint = rotatePixelCoord(source, width, height, nQuarter).getCentroid()
+        except:
+            rotPoint = afwGeom.Point2D(np.nan, np.nan)
+            row.set(rotFlag, True)
+        row.set(rotxKey, rotPoint[0])
+        row.set(rotyKey, rotPoint[1])
+
+    aliases = newCatalog.schema.getAliasMap()
+    for k, v in catalog[0].schema.getAliasMap().items():
+        aliases.set(k, v)
     return newCatalog
 
 def calibrateSourceCatalogMosaic(dataRef, catalog, zp=27.0):
