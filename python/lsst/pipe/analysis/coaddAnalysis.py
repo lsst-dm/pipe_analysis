@@ -125,7 +125,6 @@ class CoaddAnalysisTask(CmdLineTask):
             unforced = self.calibrateCatalogs(unforced)
             # catalog = joinCatalogs(meas, forced, prefix1="meas_", prefix2="forced_")
 
-        flagsCat = unforced
         # Check metadata to see if stack used was HSC
         forcedMd = butler.get("deepCoadd_forced_src", patchRefList[0].dataId).getMetadata()
         hscRun = checkHscStack(forcedMd)
@@ -134,13 +133,19 @@ class CoaddAnalysisTask(CmdLineTask):
             for aliasMap in [forced.schema.getAliasMap(), unforced.schema.getAliasMap()]:
                 for lsstName, otherName in self.config.srcSchemaMap.iteritems():
                     aliasMap.set(lsstName, otherName)
+
+        # purge the catalogs of flagged sources
+        for flag in self.config.analysis.flags:
+            forced = forced[~unforced[flag]].copy(True)
+            unforced = unforced[~unforced[flag]].copy(True)
+        flagsCat = unforced
         if self.config.doPlotMags:
             self.plotMags(forced, filenamer, dataId, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
                           zpLabel=self.zpLabel, flagsCat=flagsCat)
         if self.config.doPlotStarGalaxy:
             if "ext_shapeHSM_HsmSourceMoments_xx" in unforced.schema:
                 self.plotStarGal(unforced, filenamer, dataId, tractInfo=tractInfo, patchList=patchList,
-                                 hscRun=hscRun, zpLabel=self.zpLabel, flagsCat=flagsCat)
+                                 hscRun=hscRun, zpLabel=self.zpLabel)
             else:
                 self.log.warn("Cannot run plotStarGal: ext_shapeHSM_HsmSourceMoments_xx not in forced.schema")
         if cosmos:
@@ -558,29 +563,37 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                     for lsstName, otherName in self.config.srcSchemaMap.iteritems():
                         aliasMap.set(lsstName, otherName)
                 else:
-                    # Need this for LSST cat since base_SdssCentroid doesn't exist in forces schema
-                    # but still don't have Sigmas...
-                    aliasMap = catalog.schema.getAliasMap()
-                    aliasMap.set("base_SdssCentroid", "base_TransformedCentroid")
-                    aliasMap.set("base_SdssCentroid_x", "base_TransformedCentroid_x")
-                    aliasMap.set("base_SdssCentroid_y", "base_TransformedCentroid_y")
-                    aliasMap.set("base_SdssCentroid_flag", "base_TransformedCentroid_flag")
+                    if "base_SdssCentroid_x" not in catalog.schema:
+                        if "base_TransformedCentroid_x" in catalog.schema:
+                            # Need this for LSST cat since base_SdssCentroid doesn't exist in forced schema
+                            # but still don't have Sigmas...
+                            aliasMap = catalog.schema.getAliasMap()
+                            aliasMap.set("base_SdssCentroid", "base_TransformedCentroid")
+                            aliasMap.set("base_SdssCentroid_x", "base_TransformedCentroid_x")
+                            aliasMap.set("base_SdssCentroid_y", "base_TransformedCentroid_y")
+                            aliasMap.set("base_SdssCentroid_flag", "base_TransformedCentroid_flag")
+                    else:
+                        self.log.warn("Could not find base_SdssCentroid (or equivalent) flags")
+
+        # purge the catalogs of flagged sources
+        for flag in self.config.analysis.flags:
+            forced1 = forced1[~unforced1[flag]].copy(True)
+            unforced1 = unforced1[~unforced1[flag]].copy(True)
+            forced2 = forced2[~unforced2[flag]].copy(True)
+            unforced2 = unforced2[~unforced2[flag]].copy(True)
 
         forced = self.matchCatalogs(forced1, forced2)
         unforced = self.matchCatalogs(unforced1, unforced2)
-        flagsCat = None # can't use unforced as matches aren't exactly the same...
 
         self.log.info("\nNumber of sources in catalogs: first = {0:d} and second = {1:d}".format(
                 len(forced1), len(forced2)))
 
         if self.config.doPlotMags:
             self.plotMags(forced, filenamer, dataId, tractInfo=tractInfo1, patchList=patchList1,
-                          hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel,
-                          flagsCat=flagsCat)
+                          hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
         if self.config.doPlotCentroids:
             self.plotCentroids(forced, filenamer, dataId, tractInfo=tractInfo1, patchList=patchList1,
-                          hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel,
-                          flagsCat=flagsCat)
+                          hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
 
     def readCatalogs(self, patchRefList, dataset):
         catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS) for

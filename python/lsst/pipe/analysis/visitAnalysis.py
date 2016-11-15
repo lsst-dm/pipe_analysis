@@ -207,10 +207,17 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if hscRun and self.config.doAddAperFluxHsc:
                 self.log.info("HSC run: adding aperture flux to schema...")
                 catalog = addApertureFluxesHSC(catalog, prefix="")
-            if hscRun is not None and self.config.srcSchemaMap is not None:
-                aliasMap = catalog.schema.getAliasMap()
-                for lsstName, otherName in self.config.srcSchemaMap.iteritems():
-                    aliasMap.set(lsstName, otherName)
+            if hscRun and self.config.srcSchemaMap:
+                for cat in [commonZpCat, catalog]:
+                    aliasMap = cat.schema.getAliasMap()
+                    for lsstName, otherName in self.config.srcSchemaMap.iteritems():
+                        aliasMap.set(lsstName, otherName)
+            # purge the catalogs of flagged sources
+            for flag in self.config.analysis.flags:
+                if flag in commonZpCat.schema:
+                    commonZpCat = commonZpCat[~commonZpCat[flag]].copy(True)
+                if flag in catalog.schema:
+                    catalog = catalog[~catalog[flag]].copy(True)
 
             # Create mag comparison plots using common ZP
             if not commonZpDone:
@@ -255,14 +262,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
     def readCatalogs(self, dataRefList, dataset):
         catList = []
         commonZpCatList = []
-        dataIdSubList = []
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
                 continue
-            # To avoid multiple counting when visit overlaps multiple tracts
-            # if (dataRef.dataId['visit'], dataRef.dataId['ccd']) in dataIdSubList:
-            #    continue
-            dataIdSubList.append((dataRef.dataId["visit"], dataRef.dataId["ccd"]))
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
             butler = dataRef.getButler()
             metadata = butler.get("calexp_md", dataRef.dataId)
@@ -386,6 +388,7 @@ class CompareVisitAnalysisRunner(TaskRunner):
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
         parentDir = parsedCmd.input
+        kwargs["tract"] = parsedCmd.tract
         while os.path.exists(os.path.join(parentDir, "_parent")):
             parentDir = os.path.realpath(os.path.join(parentDir, "_parent"))
         butler2 = Butler(root=os.path.join(parentDir, "rerun", parsedCmd.rerun2), calibRoot=parsedCmd.calib)
@@ -417,96 +420,166 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         parser.add_argument("--rerun2", required=True, help="Second rerun, for comparison")
         parser.add_id_argument("--id", "src", help="data ID with raw CCD keys, "
                                "e.g. --id visit=12345 ccd=6^8..11", ContainerClass=PerTractCcdDataIdContainer)
+        parser.add_argument("--tract", type=str, default=None,
+                            help="Tract(s) to use (do one at a time for overlapping) e.g. 1^5^0")
         return parser
 
-    def run(self, dataRefList1, dataRefList2):
-        dataId = dataRefList1[0].dataId
-        ccdList1 = [dataRef.dataId["ccd"] for dataRef in dataRefList1]
-        butler1 = dataRefList1[0].getButler()
-        metadata1 = butler1.get("calexp_md", dataRefList1[0].dataId)
-        camera1 = butler1.get("camera")
-        filenamer = Filenamer(dataRefList1[0].getButler(), "plotCompareVisit", dataId)
-        butler2 = dataRefList2[0].getButler()
-        metadata2 = butler2.get("calexp_md", dataRefList2[0].dataId)
-        # Check metadata to see if stack used was HSC
-        hscRun = checkHscStack(metadata2)
-        hscRun1 = checkHscStack(metadata1)
-        # If comparing LSST vs HSC run, need to rotate the LSST x, y coordinates for rotated CCDs
-        catalog1 = self.readCatalogs(dataRefList1, "src", hscRun=hscRun, hscRun1=hscRun1)
-        catalog2 = self.readCatalogs(dataRefList2, "src")
+    def run(self, dataRefList1, dataRefList2, tract=None):
+        # This is for the commonZP plots (i.e. all ccds regardless of tract)
+        fullCcdList = list(set(
+                [dataRef1.dataId["ccd"] for dataRef1 in dataRefList1 if dataRef1.datasetExists("src")]))
 
-        if hscRun is not None and self.config.doAddAperFluxHsc:
-            print "HSC run: adding aperture flux to schema..."
-            catalog2 = addApertureFluxesHSC(catalog2, prefix="")
+        if tract is None:
+            tractList = [0, ]
+        else:
+            tractList = [int(tractStr) for tractStr in tract.split('^')]
+        print 'tractList = ', tractList
+        dataRefListPerTract1 = [None]*len(tractList)
+        dataRefListPerTract2 = [None]*len(tractList)
+        for i, tract in enumerate(tractList):
+            dataRefListPerTract1[i] = [dataRef1 for dataRef1 in dataRefList1 if
+                                       dataRef1.dataId["tract"] == tract]
+            dataRefListPerTract2[i] = [dataRef2 for dataRef2 in dataRefList2 if
+                                       dataRef2.dataId["tract"] == tract]
+        if len(dataRefListPerTract1) != len(dataRefListPerTract2):
+            raise TaskError("Lengths of comparison dataRefLists do not match!")
+        commonZpDone = False
+        dataset = "src"
+        if self.config.doApplyUberCal:
+            dataset = "wcs_md"
 
-        if hscRun1 is not None and self.config.doAddAperFluxHsc:
-            print "HSC run: adding aperture flux to schema..."
-            catalog1 = addApertureFluxesHSC(catalog1, prefix="")
-
-        self.log.info("\nNumber of sources in catalogs: first = {0:d} and second = {1:d}".format(
-                len(catalog1), len(catalog2)))
-        catalog = self.matchCatalogs(catalog1, catalog2)
-
-        # Set an alias map for differing src naming conventions of different stacks (if any)
-        if self.config.srcSchemaMap and hscRun:
-            aliasMap = catalog.schema.getAliasMap()
-            for lsstName, otherName in self.config.srcSchemaMap.iteritems():
-                aliasMap.set("second_" + lsstName, "second_" + otherName)
-        if self.config.srcSchemaMap and hscRun1:
-            aliasMap = catalog.schema.getAliasMap()
-            for lsstName, otherName in self.config.srcSchemaMap.iteritems():
-                aliasMap.set("first_" + lsstName, "first_" + otherName)
-
-        if self.config.doBackoutApCorr:
-            catalog = backoutApCorr(catalog)
-        # Scale fluxes to common zeropoint to make basic comparison plots without calibrated ZP influence
-        self.zpLabel = "common (" + str(self.config.analysis.commonZp) + ")"
-        commonZpCat = catalog.copy(True)
-        commonZpCat = calibrateSourceCatalog(commonZpCat, self.config.analysis.commonZp)
-        # Create mag comparison plots using common ZP
-        self.plotMags(commonZpCat, filenamer, dataId, butler=butler1, camera=camera1, ccdList=ccdList1,
-                      hscRun=hscRun, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel,
-                      fluxToPlotList=["base_GaussianFlux", ], postFix="_commonZp")
-        # Now calibrate source catalog to either FLUXMAG0 or meas_mosaic result for remainder of plots
-        catalog = self.calibrateCatalogs(dataRef, catalog, metadata1)
-
-        self.log.info("Number of matches (maxDist = {0:.2f} arcsec) = {1:d}".format(
-                self.config.matchRadius, len(catalog)))
-
-        if self.config.doPlotMags:
-            self.plotMags(catalog, filenamer, dataId, butler=butler1, camera=camera1, ccdList=ccdList1,
-                          hscRun=hscRun, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
-        if self.config.doPlotSizes:
-            if "base_SdssShape_psf_xx" in catalog.schema:
-                self.plotSizes(catalog, filenamer, dataId, butler=butler1, camera=camera1, ccdList=ccdList1,
-                               hscRun=hscRun, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
-            else:
-                self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
-        if self.config.doApCorrs:
-            self.plotApCorrs(catalog, filenamer, dataId, butler=butler1, camera=camera1, ccdList=ccdList1,
-                             hscRun=hscRun, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
-        if self.config.doPlotCentroids:
-            self.plotCentroids(catalog, filenamer, dataId, butler=butler1, camera=camera1, ccdList=ccdList1,
-                               hscRun=hscRun, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
-
-    def readCatalogs(self, dataRefList, dataset, hscRun=None, hscRun1=None):
-        catList = []
-        for dataRef in dataRefList:
-            if not dataRef.datasetExists(dataset):
+        i = -1
+        for dataRefListTract1, dataRefListTract2 in zip(dataRefListPerTract1, dataRefListPerTract2):
+            i += 1
+            if len(dataRefListTract1) == 0:
+                self.log.info("No data found in --rerun for tract: {:d}".format(tractList[i]))
                 continue
-            srcCat = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-            butler = dataRef.getButler()
-            metadata = butler.get("calexp_md", dataRef.dataId)
-            calexp = butler.get("calexp", dataRef.dataId)
-            nQuarter = calexp.getDetector().getOrientation().getNQuarter()
-            if hscRun is not None and hscRun1 is None:
-                if nQuarter%4 != 0:
-                    srcCat = rotatePixelCoords(srcCat, calexp.getWidth(), calexp.getHeight(), nQuarter)
-            catList.append(srcCat)
+            if len(dataRefListTract2) == 0:
+                self.log.info("No data found in --rerun2 for tract: {:d}".format(tractList[i]))
+                continue
+            ccdListPerTract1 = [dataRef1.dataId["ccd"] for dataRef1 in dataRefListTract1 if
+                                dataRef1.datasetExists(dataset)]
+            self.log.info("tract: {:d} ".format(dataRef1.dataId["tract"]))
+            self.log.info("ccdListPerTract1: {:s} ".format(ccdListPerTract1))
+            dataId1 = dataRefListTract1[0].dataId
+            butler1 = dataRefListTract1[0].getButler()
+            metadata1 = butler1.get("calexp_md", dataId1)
+            camera1 = butler1.get("camera")
+            filenamer = Filenamer(dataRefListTract1[0].getButler(), "plotCompareVisit", dataId1)
+            butler2 = dataRefListTract2[0].getButler()
+            metadata2 = butler2.get("calexp_md", dataRefListTract2[0].dataId)
+            # Check metadata to see if stack used was HSC
+            hscRun1 = checkHscStack(metadata1)
+            hscRun2 = checkHscStack(metadata2)
+            commonZpCat1, catalog1, commonZpCat2, catalog2 = self.readCatalogs(dataRefListTract1,
+                                                                               dataRefListTract2, "src",
+                                                                               hscRun1=hscRun1,
+                                                                               hscRun2=hscRun2)
+            print 'len(commonZpCat1) = ', len(commonZpCat1), ' len(catalog1) = ',  len(catalog1)
+            print 'len(commonZpCat2) = ', len(commonZpCat2), ' len(catalog2) = ',  len(catalog2)
 
-        if len(catList) == 0:
-            raise TaskError("No catalogs read: %s" % ([dataRefList[0].dataId for dataRef in dataRefList]))
-        return concatenateCatalogs(catList)
+            if hscRun2 and self.config.doAddAperFluxHsc:
+                print "HSC run: adding aperture flux to schema..."
+                catalog2 = addApertureFluxesHSC(catalog2, prefix="")
+
+            if hscRun1 and self.config.doAddAperFluxHsc:
+                print "HSC run: adding aperture flux to schema..."
+                catalog1 = addApertureFluxesHSC(catalog1, prefix="")
+
+            self.log.info("\nNumber of sources in catalogs: first = {0:d} and second = {1:d}".format(
+                    len(catalog1), len(catalog2)))
+            commonZpCat = self.matchCatalogs(commonZpCat1, commonZpCat2)
+            catalog = self.matchCatalogs(catalog1, catalog2)
+
+            # Set an alias map for differing src naming conventions of different stacks (if any)
+            if self.config.srcSchemaMap and hscRun2:
+                for cat in [commonZpCat, catalog]:
+                    aliasMap = cat.schema.getAliasMap()
+                    for lsstName, otherName in self.config.srcSchemaMap.iteritems():
+                        aliasMap.set("second_" + lsstName, "second_" + otherName)
+            if self.config.srcSchemaMap and hscRun1:
+                for cat in [commonZpCat, catalog]:
+                    aliasMap = cat.schema.getAliasMap()
+                    for lsstName, otherName in self.config.srcSchemaMap.iteritems():
+                        aliasMap.set("first_" + lsstName, "first_" + otherName)
+
+            if self.config.doBackoutApCorr:
+                commonZpCat = backoutApCorr(commonZpCat)
+                catalog = backoutApCorr(catalog)
+
+            self.log.info("Number of matches (maxDist = {0:.2f} arcsec) = {1:d}".format(
+                    self.config.matchRadius, len(catalog)))
+
+            # Create mag comparison plots using common ZP
+            if not commonZpDone:
+                self.plotMags(commonZpCat, filenamer, dataId1, butler=butler1, camera=camera1,
+                              ccdList=fullCcdList,
+                              hscRun=hscRun2, matchRadius=self.config.matchRadius,
+                              zpLabel="common (" + str(self.config.analysis.commonZp) + ")",
+                              fluxToPlotList=["base_GaussianFlux", ], postFix="_commonZp")
+                commonZpDone = True
+
+            if self.config.doPlotMags:
+                self.plotMags(catalog, filenamer, dataId1, butler=butler1, camera=camera1,
+                              ccdList=ccdListPerTract1,
+                              hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+            if self.config.doPlotSizes:
+                if "base_SdssShape_psf_xx" in catalog.schema:
+                    self.plotSizes(catalog, filenamer, dataId1, butler=butler1, camera=camera1,
+                                   ccdList=ccdListPerTract1,
+                                   hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                else:
+                    self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
+            if self.config.doApCorrs:
+                self.plotApCorrs(catalog, filenamer, dataId1, butler=butler1, camera=camera1,
+                                 ccdList=ccdListPerTract1,
+                                 hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+            if self.config.doPlotCentroids:
+                self.plotCentroids(catalog, filenamer, dataId1, butler=butler1, camera=camera1,
+                                   ccdList=ccdListPerTract1,
+                                   hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+
+    def readCatalogs(self, dataRefList1, dataRefList2, dataset, hscRun1=None, hscRun2=None):
+        catList1 = []
+        commonZpCatList1 = []
+        catList2 = []
+        commonZpCatList2 = []
+        for dataRef1, dataRef2 in zip(dataRefList1, dataRefList2):
+            if not dataRef1.datasetExists(dataset) or not dataRef2.datasetExists(dataset):
+                continue
+            srcCat1 = dataRef1.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+            srcCat2 = dataRef2.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+            butler1 = dataRef1.getButler()
+            butler2 = dataRef2.getButler()
+            metadata1 = butler1.get("calexp_md", dataRef1.dataId)
+            metadata2 = butler2.get("calexp_md", dataRef2.dataId)
+            calexp1 = butler1.get("calexp", dataRef1.dataId)
+            nQuarter = calexp1.getDetector().getOrientation().getNQuarter()
+            # Add rotated point in LSST cat if comparing with HSC cat to compare centroid pixel positions
+            if hscRun2 is not None and hscRun1 is None:
+                srcCat1 = addRotPoint(srcCat1, calexp1.getWidth(), calexp1.getHeight(), nQuarter)
+
+            # Scale fluxes to common zeropoint to make basic comparison plots without calibrated ZP influence
+            commonZpCat1 = srcCat1.copy(True)
+            commonZpCat1 = calibrateSourceCatalog(commonZpCat1, self.config.analysis.commonZp)
+            commonZpCatList1.append(commonZpCat1)
+            commonZpCat2 = srcCat2.copy(True)
+            commonZpCat2 = calibrateSourceCatalog(commonZpCat2, self.config.analysis.commonZp)
+            commonZpCatList2.append(commonZpCat2)
+            if self.config.doApplyUberCal:
+                if not dataRef1.datasetExists("wcs_md") or not dataRef1.datasetExists("fcr_md"):
+                    continue
+                if not dataRef2.datasetExists("wcs_md") or not dataRef2.datasetExists("fcr_md"):
+                    continue
+            srcCat1 = self.calibrateCatalogs(dataRef1, srcCat1, metadata1)
+            catList1.append(srcCat1)
+            srcCat2 = self.calibrateCatalogs(dataRef2, srcCat2, metadata2)
+            catList2.append(srcCat2)
+
+        if len(catList1) == 0:
+            raise TaskError("No catalogs read: %s" % ([dataRefList1[0].dataId for dataRef1 in dataRefList1]))
+        return (concatenateCatalogs(commonZpCatList1), concatenateCatalogs(catList1),
+                concatenateCatalogs(commonZpCatList2), concatenateCatalogs(catList2))
 
     def calibrateCatalogs(self, dataRef, catalog, metadata):
         self.zp = 0.0

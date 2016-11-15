@@ -6,6 +6,8 @@ import lsst.afw.geom as afwGeom
 import lsst.afw.table as afwTable
 from lsst.meas.mosaic.updateExposure import applyMosaicResultsExposure
 
+from .utils import checkHscStack
+
 __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller",
            "MatchesStarGalaxyLabeller", "CosmosLabeller", "labelZp", "annotateAxes", "labelVisit",
            "plotCameraOutline", "plotTractOutline", "plotPatchOutline", "plotCcdOutline",
@@ -171,12 +173,20 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None):
         dataIdCopy["ccd"] = ccd
         calexp = butler.get("calexp", dataIdCopy)
         dataRef = butler.dataRef("raw", dataId=dataIdCopy)
+        # Check metadata to see if stack used was HSC
+        metadata = butler.get("calexp_md", dataIdCopy)
+        hscRun = checkHscStack(metadata)
         if zpLabel == "MEAS_MOSAIC":
             result = applyMosaicResultsExposure(dataRef, calexp=calexp)
 
         wcs = calexp.getWcs()
         w = calexp.getWidth()
         h = calexp.getHeight()
+        if hscRun and zpLabel == "MEAS_MOSAIC":
+            nQuarter = calexp.getDetector().getOrientation().getNQuarter()
+            if nQuarter%2 != 0:
+                w = calexp.getHeight()
+                h = calexp.getWidth()
 
         ras = list()
         decs = list()
