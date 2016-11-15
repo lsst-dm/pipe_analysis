@@ -178,15 +178,17 @@ class ApCorrDiffErr(object):
 
 class CentroidDiff(object):
     """Functor to calculate difference in astrometry"""
-    def __init__(self, component, first="first_", second="second_", centroid="base_SdssCentroid"):
+    def __init__(self, component, first="first_", second="second_", centroid1="base_SdssCentroid",
+                 centroid2="base_SdssCentroid"):
         self.component = component
         self.first = first
         self.second = second
-        self.centroid = centroid
+        self.centroid1 = centroid1
+        self.centroid2 = centroid2
 
     def __call__(self, catalog):
-        first = self.first + self.centroid + "_" + self.component
-        second = self.second + self.centroid + "_" + self.component
+        first = self.first + self.centroid1 + "_" + self.component
+        second = self.second + self.centroid2 + "_" + self.component
         return catalog[first] - catalog[second]
 
 class CentroidDiffErr(CentroidDiff):
