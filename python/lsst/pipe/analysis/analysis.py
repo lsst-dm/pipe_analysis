@@ -339,6 +339,20 @@ class Analysis(object):
 
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(axisbg="0.7"))
         ptSize = None
+
+        if dataId is not None and butler is not None and ccdList is not None:
+            plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=zpLabel)
+
+        if tractInfo is not None and patchList is not None:
+            for ip, patch in enumerate(tractInfo):
+                if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
+                    raPatch, decPatch = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
+                    raMin = min(np.round(min(raPatch) - pad, 2), raMin)
+                    raMax = max(np.round(max(raPatch) + pad, 2), raMax)
+                    decMin = min(np.round(min(decPatch) - pad, 2), decMin)
+                    decMax = max(np.round(max(decPatch) + pad, 2), decMax)
+            plotPatchOutline(axes, tractInfo, patchList)
+
         for name, data in self.data.iteritems():
             if name is not dataName:
                 continue
@@ -349,19 +363,6 @@ class Analysis(object):
             selection = data.selection & good
             axes.scatter(ra[selection], dec[selection], s=ptSize, marker="o", lw=0, label=name,
                          c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax)
-
-        if dataId is not None and butler is not None and ccdList is not None:
-            plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=zpLabel)
-
-        if tractInfo is not None and patchList is not None:
-            for ip, patch in enumerate(tractInfo):
-                if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
-                    ra, dec = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
-                    raMin = min(np.round(min(ra) - pad, 2), raMin)
-                    raMax = max(np.round(max(ra) + pad, 2), raMax)
-                    decMin = min(np.round(min(dec) - pad, 2), decMin)
-                    decMax = max(np.round(max(dec) + pad, 2), decMax)
-            plotPatchOutline(axes, tractInfo, patchList)
 
         axes.set_xlabel("RA (deg)")
         axes.set_ylabel("Dec (deg)")
