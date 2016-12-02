@@ -14,12 +14,13 @@ import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 
 __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCompare",
-           "ApCorrDiffCompare", "AstrometryDiff", "psfSdssTraceSizeDiff", "psfHsmTraceSizeDiff", "MagDiffErr",
-           "ApCorrDiffErr", "CentroidDiff", "CentroidDiffErr", "deconvMom", "deconvMomStarGal",
-           "concatenateCatalogs", "joinMatches", "checkIdLists", "joinCatalogs", "getFluxKeys",
-           "addApertureFluxesHSC", "addFpPoint", "addRotPoint", "calibrateSourceCatalogMosaic",
-           "calibrateSourceCatalog", "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn",
-           "checkHscStack", "fluxToPlotString", "andCatalog"]
+           "ApCorrDiffCompare", "AstrometryDiff", "psfSdssTraceSizeDiff", "psfHsmTraceSizeDiff",
+           "sdssTraceSizeCompare", "hsmTraceSizeCompare", "MagDiffErr", "ApCorrDiffErr", "CentroidDiff",
+           "CentroidDiffErr", "deconvMom", "deconvMomStarGal", "concatenateCatalogs", "joinMatches",
+           "checkIdLists", "joinCatalogs", "getFluxKeys", "addApertureFluxesHSC", "addFpPoint",
+           "addRotPoint", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
+           "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
+           "fluxToPlotString", "andCatalog"]
 
 class Filenamer(object):
     """Callable that provides a filename given a style"""
@@ -150,6 +151,24 @@ class psfHsmTraceSizeDiff(object):
         psfSize = np.sqrt(0.5*(catalog["ext_shapeHSM_HsmPsfMoments_xx"] +
                                catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
         sizeDiff = (srcSize - psfSize)/psfSize
+        return np.array(sizeDiff)
+
+class sdssTraceSizeCompare(object):
+    """Functor to calculate trace radius size difference between object and psf model"""
+    def __call__(self, catalog):
+        srcSize1 = np.sqrt(0.5*(catalog["first_base_SdssShape_xx"] + catalog["first_base_SdssShape_yy"]))
+        srcSize2 = np.sqrt(0.5*(catalog["second_base_SdssShape_xx"] + catalog["second_base_SdssShape_yy"]))
+        sizeDiff = 100.0*(srcSize1 - srcSize2)/(0.5*(srcSize1 + srcSize2))
+        return np.array(sizeDiff)
+
+class hsmTraceSizeCompare(object):
+    """Functor to calculate trace radius size difference between object and psf model"""
+    def __call__(self, catalog):
+        srcSize1 = np.sqrt(0.5*(catalog["first_ext_shapeHSM_HsmSourceMoments_xx"] +
+                               catalog["first_ext_shapeHSM_HsmSourceMoments_yy"]))
+        srcSize2 = np.sqrt(0.5*(catalog["second_ext_shapeHSM_HsmSourceMoments_xx"] +
+                                catalog["second_ext_shapeHSM_HsmSourceMoments_yy"]))
+        sizeDiff = 100.0*(srcSize1 - srcSize2)/(0.5*(srcSize1 + srcSize2))
         return np.array(sizeDiff)
 
 class MagDiffErr(object):
