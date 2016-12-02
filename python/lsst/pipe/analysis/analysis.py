@@ -249,8 +249,10 @@ class Analysis(object):
         axScatter.yaxis.set_minor_locator(minorLocator)
         axScatter.xaxis.set_minor_locator(minorLocator)
         axScatter.tick_params(which="major", length=5)
-        axScatter.set_xlabel("Mag from %s" % self.fluxColumn)
-        axScatter.set_ylabel(self.quantityName)
+
+        axScatter.set_xlabel("%s mag (%s)" % (fluxToPlotString(self.fluxColumn),
+                                              filterStrFromFilename(filename)))
+        axScatter.set_ylabel("%s (%s)" % (self.quantityName, filterStrFromFilename(filename)))
 
         if stats is not None:
             l1, l2 = annotateAxes(plt, axScatter, stats, "star", self.magThreshold,
@@ -370,10 +372,12 @@ class Analysis(object):
         axes.set_xlim(raMax, raMin)
         axes.set_ylim(decMin, decMax)
 
+        filterStr = filterStrFromFilename(filename)
+
         mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vMin, vmax=vMax))
         mappable._A = []        # fake up the array of the scalar mappable. Urgh...
         cb = plt.colorbar(mappable)
-        cb.set_label(self.quantityName, rotation=270, labelpad=15)
+        cb.set_label(self.quantityName + " (" + filterStr + ")", rotation=270, labelpad=15)
         if hscRun is not None:
             axes.set_title("HSC stack run: " + hscRun, color="#800080")
         labelVisit(filename, plt, axes, 0.5, 1.07)

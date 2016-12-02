@@ -10,8 +10,8 @@ from .utils import checkHscStack
 
 __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller",
            "MatchesStarGalaxyLabeller", "CosmosLabeller", "labelZp", "annotateAxes", "labelVisit",
-           "plotCameraOutline", "plotTractOutline", "plotPatchOutline", "plotCcdOutline",
-           "rotatePixelCoords", "bboxToRaDec", "percent", "setPtSize"]
+           "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
+           "plotCcdOutline", "rotatePixelCoords", "bboxToRaDec", "percent", "setPtSize"]
 
 class AllLabeller(object):
     labels = {"all": 0}
@@ -111,6 +111,16 @@ def labelVisit(filename, plt, axis, xLoc, yLoc, color="k"):
     if labelStr is not None:
         plt.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=10,
                  transform=axis.transAxes, color=color)
+
+def filterStrFromFilename(filename):
+    """!Determine filter string from filename
+    """
+    filterStr = None
+    f1 = filename.find("plots/") + len("plots/")
+    f2 = filename.find("/", f1)
+    filterStr = filename[f1:f2]
+
+    return filterStr
 
 def plotCameraOutline(plt, axes, camera, ccdList):
     axes.tick_params(labelsize=6)
