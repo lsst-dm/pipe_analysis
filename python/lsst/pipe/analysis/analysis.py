@@ -165,6 +165,17 @@ class Analysis(object):
             axTopRight.set_aspect("equal")
             plotTractOutline(axTopRight, tractInfo, patchList)
 
+        inLimits = self.data["star"].quantity < self.qMax
+        inLimits &= self.data["star"].quantity > self.qMin
+        if len(self.data["star"].quantity) > 0:
+            if len(self.data["star"].quantity[inLimits]) < max(1.0, 0.35*len(self.data["star"].quantity)):
+                log.info("No data within limits...decreasing/increasing qMin/qMax")
+            while (len(self.data["star"].quantity[inLimits]) < max(1.0, 0.35*len(self.data["star"].quantity))):
+                self.qMin -= 0.1*np.abs(self.qMin)
+                self.qMax += 0.1*self.qMax
+                inLimits = self.data["star"].quantity < self.qMax
+                inLimits &= self.data["star"].quantity > self.qMin
+
         starMagMax = self.data["star"].mag.max() - 0.1
         aboveStarMagMax = self.data["star"].mag > starMagMax
         while len(self.data["star"].mag[aboveStarMagMax]) < max(1.0, 0.008*len(self.data["star"].mag)):
