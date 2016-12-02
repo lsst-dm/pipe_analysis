@@ -109,24 +109,34 @@ class CoaddAnalysisTask(CmdLineTask):
         return parser
 
     def run(self, patchRefList, cosmos=None):
-        dataId = patchRefList[0].dataId
+        # find index and dataId for first dataset in list that exists
+        dataId = None
+        for indexExists, patchRef in enumerate(patchRefList):
+            if patchRef.datasetExists("deepCoadd_forced_src"):
+                dataId = patchRef.dataId
+                break
+        if dataId is None:
+            raise TaskError("No data exists in patRefList: %s" %
+                            ([patchRef.dataId for patchRef in patchRefList]))
+        dataId = patchRefList[indexExists].dataId
         patchList = [dataRef.dataId["patch"] for dataRef in patchRefList]
-        butler = patchRefList[0].getButler()
+        butler = patchRefList[indexExists].getButler()
         skymap = butler.get("deepCoadd_skyMap")
         tractInfo = skymap[dataRef.dataId["tract"]]
         filterName = dataId["filter"]
-        filenamer = Filenamer(patchRefList[0].getButler(), self.outputDataset, patchRefList[0].dataId)
+        filenamer = Filenamer(patchRefList[indexExists].getButler(), self.outputDataset,
+                              patchRefList[indexExists].dataId)
         if (self.config.doPlotMags or self.config.doPlotStarGalaxy or self.config.doPlotOverlaps or
             self.config.doPlotCompareUnforced or cosmos or self.config.externalCatalogs):
             ### catalog = catalog[catalog["deblend_nChild"] == 0].copy(True) # Don't care about blended objects
-            forced = self.readCatalogs(patchRefList, "deepCoadd_forced_src")
+            forced = self.readCatalogs(patchRefList, "deepCoadd_forced_src", indexExists)
             forced = self.calibrateCatalogs(forced)
-            unforced = self.readCatalogs(patchRefList, "deepCoadd_meas")
+            unforced = self.readCatalogs(patchRefList, "deepCoadd_meas", indexExists)
             unforced = self.calibrateCatalogs(unforced)
             # catalog = joinCatalogs(meas, forced, prefix1="meas_", prefix2="forced_")
 
         # Check metadata to see if stack used was HSC
-        forcedMd = butler.get("deepCoadd_forced_src", patchRefList[0].dataId).getMetadata()
+        forcedMd = butler.get("deepCoadd_forced_src", patchRefList[indexExists].dataId).getMetadata()
         hscRun = checkHscStack(forcedMd)
         # Set an alias map for differing src naming conventions of different stacks (if any)
         if hscRun is not None and self.config.srcSchemaMap is not None:
@@ -171,12 +181,12 @@ class CoaddAnalysisTask(CmdLineTask):
                 matches = self.matchCatalog(forced, filterName, self.config.externalCatalogs[cat])
                 self.plotMatches(matches, filterName, filenamer, dataId, cat)
 
-    def readCatalogs(self, patchRefList, dataset):
+    def readCatalogs(self, patchRefList, dataset, index=0):
         catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS) for
                    patchRef in patchRefList if patchRef.datasetExists(dataset)]
         if len(catList) == 0:
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
-        if self.config.onlyReadStars and "base_ClassificationExtendedness_value" in catList[0].schema:
+        if self.config.onlyReadStars and "base_ClassificationExtendedness_value" in catList[index].schema:
             catList = [cat[cat["base_ClassificationExtendedness_value"] < 0.5].copy(True) for cat in catList]
         return concatenateCatalogs(catList)
 
@@ -532,18 +542,23 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         return parser
 
     def run(self, patchRefList1, patchRefList2):
-        dataId = patchRefList1[0].dataId
+        # find index and dataId for first dataset in list that exists
+        for indexExists1, patchRef1 in enumerate(patchRefList1):
+            if patchRef1.datasetExists("deepCoadd_forced_src"):
+                dataId = patchRef1.dataId
+                break
         patchList1 = [dataRef1.dataId["patch"] for dataRef1 in patchRefList1]
-        filenamer = Filenamer(patchRefList1[0].getButler(), "plotCompareCoadd", patchRefList1[0].dataId)
+        filenamer = Filenamer(patchRefList1[indexExists1].getButler(), "plotCompareCoadd",
+                              patchRefList1[indexExists1].dataId)
 
         # Check metadata to see if stack used was HSC
-        butler1 = patchRefList1[0].getButler()
-        forcedMd1 = butler1.get("deepCoadd_forced_src", patchRefList1[0].dataId).getMetadata()
+        butler1 = patchRefList1[indexExists1].getButler()
+        forcedMd1 = butler1.get("deepCoadd_forced_src", patchRefList1[indexExists1].dataId).getMetadata()
         hscRun1 = checkHscStack(forcedMd1)
         skymap1 = butler1.get("deepCoadd_skyMap")
         tractInfo1 = skymap1[dataRef1.dataId["tract"]]
-        butler2 = patchRefList2[0].getButler()
-        forcedMd2 = butler2.get("deepCoadd_forced_src", patchRefList2[0].dataId).getMetadata()
+        butler2 = patchRefList2[indexExists1].getButler()
+        forcedMd2 = butler2.get("deepCoadd_forced_src", patchRefList2[indexExists1].dataId).getMetadata()
         hscRun2 = checkHscStack(forcedMd2)
         forced1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_forced_src")
         forced1 = self.calibrateCatalogs(forced1)
@@ -595,11 +610,11 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             self.plotCentroids(forced, filenamer, dataId, tractInfo=tractInfo1, patchList=patchList1,
                           hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
 
-    def readCatalogs(self, patchRefList, dataset):
+    def readCatalogs(self, patchRefList, dataset, index=0):
         catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS) for
                    patchRef in patchRefList if patchRef.datasetExists(dataset)]
         if len(catList) == 0:
-            raise TaskError("No catalogs read: %s" % ([patchRefList[0].dataId for dataRef in patchRefList]))
+            raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
         return concatenateCatalogs(catList)
 
     def matchCatalogs(self, catalog1, catalog2):
