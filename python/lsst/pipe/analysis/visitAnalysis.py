@@ -319,9 +319,18 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             refObjLoader = LoadAstrometryNetObjectsTask(self.config.refObjLoaderConfig)
             matches = refObjLoader.joinMatchListWithCatalog(packedMatches, catalog)
             # LSST reads in a_net catalogs with flux in "janskys", so must convert back to DN
-            matches = matchJanskyToDn(matches)
-            if checkHscStack(metadata) is not None and self.config.doAddAperFluxHsc:
-                addApertureFluxesHSC(matches, prefix="second_")
+            noMatches = False
+            if len(matches) < 8:
+                for m in matches:
+                    if not hasattr(m.first, "get"):
+                        matches = []
+                        noMatches = True
+                        break
+
+            if not noMatches:
+                matches = matchJanskyToDn(matches)
+                if checkHscStack(metadata) is not None and self.config.doAddAperFluxHsc:
+                    addApertureFluxesHSC(matches, prefix="second_")
 
             if len(matches) == 0:
                 self.log.warn("No matches for {:s}".format(dataRef.dataId))
@@ -521,7 +530,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                               ccdList=ccdListPerTract1,
                               hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
             if self.config.doPlotSizes:
-                if "base_SdssShape_psf_xx" in catalog.schema:
+                if ("first_base_SdssShape_psf_xx" in catalog.schema and
+                    "second_base_SdssShape_psf_xx" in catalog.schema):
                     self.plotSizes(catalog, filenamer, dataId1, butler=butler1, camera=camera1,
                                    ccdList=ccdListPerTract1,
                                    hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
