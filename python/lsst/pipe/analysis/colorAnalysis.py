@@ -146,7 +146,7 @@ class ColorAnalysisRunner(TaskRunner):
             patchesForFilters = [set(patchRef.dataId["patch"] for patchRef in patchRefList) for
                                  patchRefList in filterRefs.itervalues()]
             if len(patchesForFilters) == 0:
-                parsedCmd.log.warn("No input data found for tract %d" % tract)
+                parsedCmd.log.warn("No input data found for tract {:d}".format(tract))
                 bad.append(tract)
                 continue
             keep = set.intersection(*patchesForFilters)  # Patches with full colour coverage
@@ -361,7 +361,7 @@ class ColorAnalysisTask(CmdLineTask):
         color = lambda c1, c2: (mags[c1] - mags[c2])[good]
         if filters.issuperset(set(("HSC-G", "HSC-R", "HSC-I"))):
             # Lower branch only; upper branch is noisy due to astrophysics
-            poly = colorColorPlot(filenamer(dataId, description="gri", style="fit"),
+            poly = colorColorPlot(dataId, filenamer(dataId, description="gri", style="fit"), self.log,
                                   color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"), "g - r", "r - i",
                                   xRange=(-0.5, 2.0), yRange=(-0.5, 2.0), order=3, xFitRange=(0.3, 1.1),
                                   hscRun=hscRun)
@@ -374,7 +374,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          Enforcer(requireLess={"star": {"stdev": 0.05}}),
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
         if filters.issuperset(set(("HSC-R", "HSC-I", "HSC-Z"))):
-            poly = colorColorPlot(filenamer(dataId, description="riz", style="fit"),
+            poly = colorColorPlot(dataId, filenamer(dataId, description="riz", style="fit"), self.log,
                                   color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"), "r - i", "i - z",
                                   xRange=(-0.5, 2.0), yRange=(-0.4, 0.8), order=3, hscRun=hscRun)
             shortName = "riz"
@@ -386,7 +386,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          Enforcer(requireLess={"star": {"stdev": 0.02}}),
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
         if filters.issuperset(set(("HSC-I", "HSC-Z", "HSC-Y"))):
-            poly = colorColorPlot(filenamer(dataId, description="izy", style="fit"),
+            poly = colorColorPlot(dataId, filenamer(dataId, description="izy", style="fit"), self.log,
                                   color("HSC-I", "HSC-Z"), color("HSC-Z", "HSC-Y"), "i - z", "z - y",
                                   xRange=(-0.4, 0.8), yRange=(-0.3, 0.5), order=3, hscRun=hscRun)
             shortName = "izy"
@@ -399,9 +399,10 @@ class ColorAnalysisTask(CmdLineTask):
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
 
         if filters.issuperset(set(("HSC-Z", "NB0921", "HSC-Y"))):
-            poly = colorColorPlot(filenamer(dataId, description="z9y", style="fit"),
+            poly = colorColorPlot(dataId, filenamer(dataId, description="z9y", style="fit"), self.log,
                                   color("HSC-Z", "NB0921"), color("NB0921", "HSC-Y"), "z-n921", "n921-y",
-                                  xRange=(-0.2, 0.2), yRange=(-0.1, 0.2), order=2, xFitRange=(-0.05, 0.15))
+                                  xRange=(-0.2, 0.2), yRange=(-0.1, 0.2), order=2, xFitRange=(-0.05, 0.15),
+                                  hscRun=hscRun)
             shortName = "z9y"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly), "z9yPerp", shortName,
@@ -420,8 +421,8 @@ class ColorAnalysisTask(CmdLineTask):
         return None
 
 
-def colorColorPlot(filename, xx, yy, xLabel, yLabel, xRange=None, yRange=None, order=1, iterations=1,
-                   rej=3.0, xFitRange=None, numBins=51, hscRun=None):
+def colorColorPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=None, yRange=None, order=1,
+                   iterations=1, rej=3.0, xFitRange=None, numBins=51, hscRun=None, logger=None):
     fig, axes = plt.subplots(1, 2)
     axes[0].tick_params(labelsize=9)
     axes[1].tick_params(labelsize=9)
@@ -477,18 +478,24 @@ def colorColorPlot(filename, xx, yy, xLabel, yLabel, xRange=None, yRange=None, o
 
     q1, median, q3 = np.percentile(distance, [25, 50, 75])
     good = np.logical_not(np.abs(distance - median) > 3.0*0.74*(q3 - q1))
-    print ("distance[good].mean() = %.5f (mmag)  distance[good].std() = %.5f (mmag)" % (
-            1000*distance[good].mean(), 1000*distance[good].std()))
-    meanStr = "mean = {:.4f} (mmag)".format(1000.0*distance[good].mean())
-    stdStr = "  std = {:.4f} (mmag)".format(1000.0*distance[good].std())
+    log.info(("Statistics from {0:s} of Distance to polynomial (mmag): {7:s}\'star\': " +
+              "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; " +
+              "median={5:.4f}; clip={6:.4f}; forcedMean=None){8:s}").format(
+            dataId, 1000*distance[good].mean(), 1000*distance[good].std(), len(xx[keep]), len(xx),
+            1000*np.median(distance[good]),  1000*3.0*0.74*(q3 - q1), "{", "}"))
+    meanStr = "mean = {:7.4f} (mmag)".format(1000.0*distance[good].mean())
+    stdStr = "  std = {:7.4f} (mmag)".format(1000.0*distance[good].std())
+    tractStr = "tract: {:d}".format(dataId["tract"])
     axes[1].hist(distance[good], numBins, range=(-0.05, 0.05), normed=False)
     axes[1].set_xlabel("Distance to polynomial fit (mag)")
     axes[1].set_ylabel("Number", labelpad=-2)
     axes[1].set_yscale("log", nonposy="clip")
-    xLoc, yLoc = -0.053, axes[1].get_ylim()[1] - 0.1*(axes[1].get_ylim()[1] - axes[1].get_ylim()[0])
-    axes[1].text(xLoc, yLoc, meanStr, ha="left", va="center", fontsize=9, color="blue")
-    yLoc -= 0.09*(axes[1].get_ylim()[1] - axes[1].get_ylim()[0])
-    axes[1].text(xLoc, yLoc, stdStr, ha="left", va="center", fontsize=9, color="blue")
+    axes[1].annotate(meanStr, xy=(0.58, 0.96), xycoords="axes fraction", ha="right", va="center",
+                     fontsize=9, color="black")
+    axes[1].annotate(stdStr, xy=(0.58, 0.92), xycoords="axes fraction", ha="right", va="center",
+                     fontsize=9, color="black")
+    axes[1].annotate(tractStr, xy=(0.5, 1.04), xycoords="axes fraction", ha="center", va="center",
+                     fontsize=10, color="green")
 
     if hscRun is not None:
         axes[0].set_title("HSC stack run: " + hscRun, color="#800080")
