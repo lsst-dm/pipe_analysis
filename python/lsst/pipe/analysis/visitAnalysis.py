@@ -433,7 +433,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             tractList = [0, ]
         else:
             tractList = [int(tractStr) for tractStr in tract.split('^')]
-        print 'tractList = ', tractList
+        self.log.info("tractList = {:s}".format(tractList))
         dataRefListPerTract1 = [None]*len(tractList)
         dataRefListPerTract2 = [None]*len(tractList)
         for i, tract in enumerate(tractList):
@@ -475,15 +475,13 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                                                                dataRefListTract2, "src",
                                                                                hscRun1=hscRun1,
                                                                                hscRun2=hscRun2)
-            print 'len(commonZpCat1) = ', len(commonZpCat1), ' len(catalog1) = ',  len(catalog1)
-            print 'len(commonZpCat2) = ', len(commonZpCat2), ' len(catalog2) = ',  len(catalog2)
 
             if hscRun2 and self.config.doAddAperFluxHsc:
-                print "HSC run: adding aperture flux to schema..."
+                self.log.info("HSC run: adding aperture flux to schema...")
                 catalog2 = addApertureFluxesHSC(catalog2, prefix="")
 
             if hscRun1 and self.config.doAddAperFluxHsc:
-                print "HSC run: adding aperture flux to schema..."
+                self.log.info("HSC run: adding aperture flux to schema...")
                 catalog1 = addApertureFluxesHSC(catalog1, prefix="")
 
             self.log.info("\nNumber of sources in catalogs: first = {0:d} and second = {1:d}".format(
@@ -680,7 +678,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 shortName = "diff_" + col + "_apCorr"
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, ApCorrDiffCompare(col + "_apCorr"),
-                         "Run Comparison: apCorr difference (%s)" % fluxToPlotString(col),
+                         "Run Comparison: %s apCorr diff" % fluxToPlotString(col),
                          shortName, self.config.analysis,
                          prefix="first_", qMin=-0.025, qMax=0.025, flags=[col + "_flag_apCorr"],
                          errFunc=ApCorrDiffErr(col + "_apCorr"), labeller=OverlapsStarGalaxyLabeller(),

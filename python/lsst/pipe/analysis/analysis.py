@@ -85,9 +85,6 @@ class Analysis(object):
             for ff in list(config.flags) + flags:
                 if prefix + ff in flagsCat.schema:
                     self.good &= ~flagsCat[prefix + ff]
-                else:
-                    print ("NOTE: Flag (in config.flags list to ignore) " + prefix + ff +
-                           " not in flagsCat.schema")
         for kk in goodKeys:
             self.good &= catalog[prefix + kk]
 
@@ -125,7 +122,7 @@ class Analysis(object):
         fig.savefig(filename)
         plt.close(fig)
 
-    def plotAgainstMagAndHist(self, filename, stats=None, camera=None, ccdList=None, tractInfo=None,
+    def plotAgainstMagAndHist(self, log, filename, stats=None, camera=None, ccdList=None, tractInfo=None,
                               patchList=None, hscRun=None, matchRadius=None, zpLabel=None):
         """Plot quantity against magnitude with side histogram"""
         nullfmt = NullFormatter()  # no labels for histograms
@@ -203,7 +200,7 @@ class Analysis(object):
         ptSize = None
         for name, data in self.data.iteritems():
             if len(data.mag) == 0:
-                print "No data for dataset: ", name
+                log.info("No data for dataset: {:s}".format(name))
                 continue
             if ptSize is None:
                 ptSize = setPtSize(len(data.mag))
@@ -432,7 +429,8 @@ class Analysis(object):
                 postFix=""):
         """Make all plots"""
         stats = self.stats(forcedMean=forcedMean)
-        self.plotAgainstMagAndHist(filenamer(dataId, description=self.shortName, style="psfMagHist" + postFix),
+        self.plotAgainstMagAndHist(log, filenamer(dataId, description=self.shortName,
+                                                  style="psfMagHist" + postFix),
                                    stats=stats, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                    patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                    zpLabel=zpLabel)
@@ -476,7 +474,6 @@ class Analysis(object):
                                                             good, forcedMean=forcedMean)
             if len(stats) == 0:
                 stats = None
-                print "WARNING stats: no usable data.  Returning stats = None"
         return stats
 
     def calculateStats(self, quantity, selection, forcedMean=None):
@@ -506,12 +503,13 @@ class Analysis(object):
         if True:
             result = scipy.optimize.root(function, 0.0, tol=tol)
             if not result.success:
-                print "Warning: sysErr calculation failed: %s" % result.message
+                print "Warning: sysErr calculation failed: {:s}".format(result.message)
                 answer = np.nan
             else:
                 answer = np.sqrt(result.x[0])
         else:
             answer = np.sqrt(scipy.optimize.newton(function, 0.0, tol=tol))
-        print "calculateSysError: ", (function(answer**2), function((answer+0.001)**2),
-                                      function((answer-0.001)**2))
+        print "calculateSysError: {0:.4f}, {1:.4f}, {2:.4f}".format(function(answer**2),
+                                                                        function((answer+0.001)**2),
+                                                                        function((answer-0.001)**2))
         return answer
