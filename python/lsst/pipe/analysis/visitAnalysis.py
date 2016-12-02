@@ -248,8 +248,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if self.config.doPlotMatches:
                 matches = self.readSrcMatches(dataRefListTract, "src")
                 self.plotMatches(matches, filterName, filenamer, dataId, butler=butler, camera=camera,
-                                 ccdList=ccdListPerTract, hscRun=hscRun, matchRadius=self.config.matchRadius,
-                                 zpLabel=self.zpLabel)
+                                 ccdList=ccdListPerTract, hscRun=hscRun, zpLabel=self.zpLabel)
 
             for cat in self.config.externalCatalogs:
                 if self.config.photoCatName not in cat:
@@ -611,15 +610,14 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
                 if "CircularAperture" in col:
                     zpLabel = None
-                shortName = "diff_" + col
+                shortName = "diff_" + col + postFix
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, MagDiffCompare(col + "_flux"), "Run Comparison: Mag difference (%s)" %
+                Analysis(catalog, MagDiffCompare(col + "_flux"), "Run Comparison: %s mag diff" %
                          fluxToPlotString(col), shortName, self.config.analysis,
                          prefix="first_", qMin=-0.05, qMax=0.05, flags=[col + "_flag"],
                          errFunc=MagDiffErr(col + "_flux"), labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler, camera=camera,
-                                   ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
-                                   postFix=postFix)
+                                   ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
 
     def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                       tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
@@ -649,20 +647,18 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
                 shortName = "trace_"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, psfSdssTraceSizeDiff(),
-                         "SdssShape Trace Radius Diff (psfUsed - PSF model)/(PSF model)", shortName,
+                Analysis(catalog, sdssTraceSizeCompare(), "SdssShape Trace Radius Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
-                         goodKeys=["calib_psfUsed"], qMin=-0.04, qMax=0.04,
+                         goodKeys=["calib_psfUsed"], qMin=-1.2, qMax=1.2,
                          labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
                 shortName = "hsmTrace_"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, psfHsmTraceSizeDiff(),
-                         "HSM Trace Radius Diff (psfUsed - PSF model)/(PSF model)", shortName,
+                Analysis(catalog, hsmTraceSizeCompare(), "HSM Trace Radius Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
-                         goodKeys=["calib_psfUsed"], qMin=-0.04, qMax=0.04,
+                         goodKeys=["calib_psfUsed"], qMin=-1.2, qMax=1.2,
                          labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,

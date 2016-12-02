@@ -273,7 +273,7 @@ class CoaddAnalysisTask(CmdLineTask):
             if col + "_flux" in catalog.schema:
                 if "CircularAperture" in col:
                     zpLabel = None
-                shortName = "mag_" + col
+                shortName = "mag_" + col + postFix
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog, MagDiff(col + "_flux", "base_PsfFlux_flux"), "Mag(%s) - PSFMag" %
                                    fluxToPlotString(col), shortName, self.config.analysis,
@@ -282,7 +282,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                    ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun,
-                                             matchRadius=matchRadius, zpLabel=zpLabel, postFix=postFix)
+                                             matchRadius=matchRadius, zpLabel=zpLabel)
 
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                   patchList=None, hscRun=None, matchRadius=None, zpLabel=None, flagsCat=None):
@@ -353,9 +353,9 @@ class CoaddAnalysisTask(CmdLineTask):
         enforcer = None
         catalog = joinMatches(afwTable.matchRaDec(forced, unforced, matchRadius*afwGeom.arcseconds),
                               "forced_", "unforced_")
-        shortName = "compareUnforced_" + col
-        self.log.info("shortName = {:s}".format(shortName))
         for col in fluxToPlotList:
+            shortName = "compareUnforced_" + col
+            self.log.info("shortName = {:s}".format(shortName))
             if "forced_" + col + "_flux" in catalog.schema:
                 self.AnalysisClass(catalog, MagDiff("forced_" + col + "_flux", "unforced_" + col + "_flux"),
                                    "Forced - Unforced mag (%s)" % fluxToPlotString(col),
@@ -423,7 +423,7 @@ class CoaddAnalysisTask(CmdLineTask):
             self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_flux", ct, zp=0.0),
                                "MagPsf(unforced) - ref (calib_psfUsed)", shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_psfUsed"],
-                               qMin=-0.05, qMax=0.05, labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
+                               qMin=-0.15, qMax=0.15, labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.030}}), butler=butler,
                                          camera=camera, ccdList=ccdList, tractInfo=tractInfo,
@@ -434,7 +434,7 @@ class CoaddAnalysisTask(CmdLineTask):
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_flux", ct, zp=0.0), "MagPsf(unforced) - ref",
                            shortName, self.config.analysisMatches, prefix="src_",
-                           qMin=-0.05, qMax=0.05, labeller=MatchesStarGalaxyLabeller(),
+                           qMin=-0.15, qMax=0.15, labeller=MatchesStarGalaxyLabeller(),
                            ).plotAll(dataId, filenamer, self.log,
                                      Enforcer(requireLess={"star": {"stdev": 0.030}}), butler=butler,
                                      camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
@@ -587,8 +587,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                             aliasMap.set("base_SdssCentroid_x", "base_TransformedCentroid_x")
                             aliasMap.set("base_SdssCentroid_y", "base_TransformedCentroid_y")
                             aliasMap.set("base_SdssCentroid_flag", "base_TransformedCentroid_flag")
-                    else:
-                        self.log.warn("Could not find base_SdssCentroid (or equivalent) flags")
+                        else:
+                            self.log.warn("Could not find base_SdssCentroid (or equivalent) flags")
 
         # purge the catalogs of flagged sources
         for flag in self.config.analysis.flags:

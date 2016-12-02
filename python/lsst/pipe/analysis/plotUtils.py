@@ -62,8 +62,8 @@ class CosmosLabeller(StarGalaxyLabeller):
         return np.array([0 if ii in good else 1 for ii in catalog["id"]])
 
 
-def labelZp(zpLabel, plt, axis, xLoc, yLoc, color="k"):
-    plt.text(xLoc, yLoc, "zp: " + zpLabel, ha="center", va="center", fontsize=10,
+def labelZp(zpLabel, plt, axis, xLoc, yLoc, rotation=0, color="k"):
+    plt.text(xLoc, yLoc, "zp: " + zpLabel, ha="center", va="center", fontsize=10, rotation=rotation,
              transform=axis.transAxes, color=color)
 
 def annotateAxes(plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff=0.045,
@@ -71,7 +71,7 @@ def annotateAxes(plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff
     xOffFact = 0.64*len(" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]))
     axes.annotate(dataSet+r" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]),
                   xy=(x0, y0), xycoords="axes fraction", ha=ha, va=va, fontsize=10, color="blue")
-    axes.annotate(r"[mag<{0:.1f}]".format(magThreshold), xy=(x0*xOffFact, y0), xycoords="axes fraction",
+    axes.annotate(r" [mag<{0:.1f}]".format(magThreshold), xy=(x0*xOffFact, y0), xycoords="axes fraction",
                   ha=ha, va=va, fontsize=10, color="k", alpha=0.55)
     axes.annotate("mean = {0.mean:.4f}".format(stats[dataSet]), xy=(x0, y0-yOff),
                   xycoords="axes fraction", ha=ha, va=va, fontsize=10)

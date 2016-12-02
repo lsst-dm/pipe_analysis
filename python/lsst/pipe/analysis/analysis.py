@@ -23,7 +23,7 @@ class AnalysisConfig(Config):
     clip = Field(dtype=float, default=4.0, doc="Rejection threshold (stdev)")
     magThreshold = Field(dtype=float, default=21.0, doc="Magnitude threshold to apply")
     magPlotMin = Field(dtype=float, default=14.0, doc="Minimum magnitude to plot")
-    magPlotMax = Field(dtype=float, default=28.0, doc="Maximum magnitude to plot")
+    magPlotMax = Field(dtype=float, default=26.0, doc="Maximum magnitude to plot")
     fluxColumn = Field(dtype=str, default="base_PsfFlux_flux", doc="Column to use for flux/mag plotting")
     coaddZp = Field(dtype=float, default=27.0, doc="Magnitude zero point to apply for coadds")
     commonZp = Field(dtype=float, default=33.0, doc="Magnitude zero point to apply for common ZP plots")
@@ -172,7 +172,7 @@ class Analysis(object):
             aboveStarMagMax = self.data["star"].mag > starMagMax
 
         magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
-        magMax = max(self.magThreshold+1.0, min(magMax, starMagMax))
+        # magMax = max(self.magThreshold + 1.0, min(magMax, starMagMax))
 
         axScatter.set_xlim(magMin, magMax)
         axScatter.set_ylim(0.99*self.qMin, 0.99*self.qMax)
@@ -269,7 +269,7 @@ class Analysis(object):
 
         labelVisit(filename, plt, axScatter, 1.18, -0.09, color="green")
         if zpLabel is not None:
-            labelZp(zpLabel, plt, axScatter, 0.08, -0.09, color="green")
+            labelZp(zpLabel, plt, axScatter, 0.07, -0.09, color="green")
         plt.savefig(filename)
         plt.close()
 
@@ -331,7 +331,7 @@ class Analysis(object):
 
         if dataName == "star" and "calib_psfUsed" not in self.goodKeys and "pStar" not in filename:
             vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
-        elif "CModel" in filename:
+        elif "CModel" in filename and "overlap" not in filename:
             vMin, vMax = 1.5*self.qMin, 0.5*self.qMax
         else:
             vMin, vMax = 1.5*self.qMin, 1.5*self.qMax
@@ -381,6 +381,11 @@ class Analysis(object):
         if zpLabel is not None:
             labelZp(zpLabel, plt, axes, 0.13, -0.09, color="green")
         axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
+        if stats is not None:
+            axes.annotate("mean = {0.mean:.4f}".format(stats[dataName]), xy=(0.77, 1.08),
+                          xycoords="axes fraction", ha="left", va="top", fontsize=10)
+            axes.annotate("stdev = {0.stdev:.4f}".format(stats[dataName]), xy=(0.77, 1.04),
+                          xycoords="axes fraction", ha="left", va="top", fontsize=10)
         fig.savefig(filename)
         plt.close(fig)
 
