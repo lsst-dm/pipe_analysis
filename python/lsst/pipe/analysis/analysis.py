@@ -344,6 +344,8 @@ class Analysis(object):
             vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
         elif "CModel" in filename and "overlap" not in filename:
             vMin, vMax = 1.5*self.qMin, 0.5*self.qMax
+        elif "race" in filename:
+            vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
         else:
             vMin, vMax = 1.5*self.qMin, 1.5*self.qMax
 
