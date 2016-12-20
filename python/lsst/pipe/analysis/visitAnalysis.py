@@ -149,6 +149,8 @@ class CcdAnalysis(Analysis):
 class VisitAnalysisRunner(TaskRunner):
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
+        if len(parsedCmd.id.refList) < 1:
+            raise RuntimeWarning("refList from parsedCmd is empty...")
         kwargs["tract"] = parsedCmd.tract
         visits = defaultdict(list)
         for ref in parsedCmd.id.refList:
@@ -193,6 +195,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 dataset = "wcs_md"
             ccdListPerTract = [dataRef.dataId["ccd"] for dataRef in dataRefListTract if
                                dataRef.datasetExists(dataset)]
+            if len(ccdListPerTract) == 0:
+                if self.config.doApplyUberCal:
+                    self.log.fatal("No dataset found...are you sure you ran meas_mosaic? "
+                                   "If not, run with --config doApplyUberCal=False")
+                raise RuntimeError("No datasets found for datasetType = {:s}".format(dataset))
             butler = dataRefListTract[0].getButler()
             camera = butler.get("camera")
             dataId = dataRefListTract[0].dataId
@@ -318,6 +325,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             matchmeta.setDouble("RADIUS", rad*1.05, "field radius in degrees, approximate, padded")
             refObjLoader = LoadAstrometryNetObjectsTask(self.config.refObjLoaderConfig)
             matches = refObjLoader.joinMatchListWithCatalog(packedMatches, catalog)
+            if not hasattr(matches[0].first, "schema"):
+                raise RuntimeError("Unable to unpack matches.  "
+                                   "Do you have the correct astrometry_net_data setup?")
             # LSST reads in a_net catalogs with flux in "janskys", so must convert back to DN
             noMatches = False
             if len(matches) < 8:
@@ -467,6 +477,10 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 continue
             ccdListPerTract1 = [dataRef1.dataId["ccd"] for dataRef1 in dataRefListTract1 if
                                 dataRef1.datasetExists(dataset)]
+            if len(ccdListPerTract1) == 0:
+                if self.config.doApplyUberCal:
+                    self.log.fatal("No dataset found...are you sure you ran meas_mosaic?")
+                raise RuntimeError("No datasets found for datasetType = {:s}".format(dataset))
             self.log.info("tract: {:d} ".format(dataRef1.dataId["tract"]))
             self.log.info("ccdListPerTract1: {:s} ".format(ccdListPerTract1))
             dataId1 = dataRefListTract1[0].dataId
