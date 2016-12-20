@@ -445,7 +445,7 @@ def addRotPoint(catalog, width, height, nQuarter, prefix=""):
         aliases.set(k, v)
     return newCatalog
 
-def calibrateSourceCatalogMosaic(dataRef, catalog, zp=27.0):
+def calibrateSourceCatalogMosaic(dataRef, catalog, fluxKeys=None, errKeys=None, zp=27.0):
     """Calibrate catalog with meas_mosaic results
 
     Requires a SourceCatalog input.
@@ -456,7 +456,8 @@ def calibrateSourceCatalogMosaic(dataRef, catalog, zp=27.0):
     # Convert to constant zero point, as for the coadds
     factor = ffp.calib.getFluxMag0()[0]/10.0**(0.4*zp)
 
-    fluxKeys, errKeys = getFluxKeys(catalog.schema)
+    if fluxKeys is None:
+        fluxKeys, errKeys = getFluxKeys(catalog.schema)
     for key in fluxKeys.values() + errKeys.values():
         if len(catalog[key].shape) > 1:
             continue
