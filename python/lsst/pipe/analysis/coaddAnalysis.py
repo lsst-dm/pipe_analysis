@@ -547,7 +547,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             if patchRef1.datasetExists("deepCoadd_forced_src"):
                 dataId = patchRef1.dataId
                 break
-        patchList1 = [dataRef1.dataId["patch"] for dataRef1 in patchRefList1]
+        patchList1 = [dataRef1.dataId["patch"] for dataRef1 in patchRefList1 if
+                      dataRef1.datasetExists("deepCoadd_forced_src")]
         filenamer = Filenamer(patchRefList1[indexExists1].getButler(), "plotCompareCoadd",
                               patchRefList1[indexExists1].dataId)
 
