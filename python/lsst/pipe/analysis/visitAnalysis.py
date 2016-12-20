@@ -560,7 +560,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                    ccdList=ccdListPerTract1,
                                    hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
 
-    def readCatalogs(self, dataRefList1, dataRefList2, dataset, hscRun1=None, hscRun2=None):
+    def readCatalogs(self, dataRefList1, dataRefList2, dataset, hscRun1=None, hscRun2=None,
+                     doReadFootprints=False):
         catList1 = []
         commonZpCatList1 = []
         catList2 = []
@@ -568,8 +569,12 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         for dataRef1, dataRef2 in zip(dataRefList1, dataRefList2):
             if not dataRef1.datasetExists(dataset) or not dataRef2.datasetExists(dataset):
                 continue
-            srcCat1 = dataRef1.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-            srcCat2 = dataRef2.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+            if doReadFootprints:
+                srcCat1 = dataRef1.get(dataset, immediate=True)
+                srcCat2 = dataRef2.get(dataset, immediate=True)
+            else:
+                srcCat1 = dataRef1.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+                srcCat2 = dataRef2.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
             butler1 = dataRef1.getButler()
             butler2 = dataRef2.getButler()
             metadata1 = butler1.get("calexp_md", dataRef1.dataId)
