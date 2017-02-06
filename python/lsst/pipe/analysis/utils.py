@@ -148,11 +148,11 @@ class sdssTraceSize(object):
 
 
 class psfSdssTraceSizeDiff(object):
-    """Functor to calculate SDSS trace radius size difference between object and psf model"""
+    """Functor to calculate SDSS trace radius size difference (%) between object and psf model"""
     def __call__(self, catalog):
         srcSize = np.sqrt(0.5*(catalog["base_SdssShape_xx"] + catalog["base_SdssShape_yy"]))
         psfSize = np.sqrt(0.5*(catalog["base_SdssShape_psf_xx"] + catalog["base_SdssShape_psf_yy"]))
-        sizeDiff = (srcSize - psfSize)/psfSize
+        sizeDiff = 100*(srcSize - psfSize)/(0.5*(srcSize + psfSize))
         return np.array(sizeDiff)
 
 
@@ -165,13 +165,13 @@ class hsmTraceSize(object):
 
 
 class psfHsmTraceSizeDiff(object):
-    """Functor to calculate HSM trace radius size difference between object and psf model"""
+    """Functor to calculate HSM trace radius size difference (%) between object and psf model"""
     def __call__(self, catalog):
         srcSize = np.sqrt(0.5*(catalog["ext_shapeHSM_HsmSourceMoments_xx"] +
                                catalog["ext_shapeHSM_HsmSourceMoments_yy"]))
         psfSize = np.sqrt(0.5*(catalog["ext_shapeHSM_HsmPsfMoments_xx"] +
                                catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
-        sizeDiff = (srcSize - psfSize)/psfSize
+        sizeDiff = 100*(srcSize - psfSize)/(0.5*(srcSize + psfSize))
         return np.array(sizeDiff)
 
 
