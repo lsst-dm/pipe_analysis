@@ -16,10 +16,10 @@ import lsst.afw.table as afwTable
 __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCompare",
            "ApCorrDiffCompare", "AstrometryDiff", "psfSdssTraceSizeDiff", "psfHsmTraceSizeDiff",
            "sdssTraceSizeCompare", "hsmTraceSizeCompare", "MagDiffErr", "ApCorrDiffErr", "CentroidDiff",
-           "e1ResidsSdss", "e2ResidsSdss", "e1ResidsHsm", "e2ResidsHsm",
+           "e1ResidsSdss", "e2ResidsSdss", "e1ResidsHsm", "e2ResidsHsm", "FootNpixDiffCompare",
            "CentroidDiffErr", "deconvMom", "deconvMomStarGal", "concatenateCatalogs", "joinMatches",
            "checkIdLists", "joinCatalogs", "getFluxKeys", "addApertureFluxesHSC", "addFpPoint",
-           "addRotPoint", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
+           "addFootprintNPix", "addRotPoint", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
            "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
            "fluxToPlotString", "andCatalog"]
 
@@ -215,6 +215,17 @@ class e2ResidsHsm(object):
                  (catalog["ext_shapeHSM_HsmPsfMoments_xx"] + catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
         e2Resids = srcE2 - psfE2
         return np.array(e2Resids)
+
+
+class FootNpixDiffCompare(object):
+    """Functor to calculate footprint nPix difference between two entries in comparison catalogs
+    """
+    def __init__(self, column):
+        self.column = column
+    def __call__(self, catalog):
+        nPix1 = catalog["first_" + self.column]
+        nPix2 = catalog["second_" + self.column]
+        return nPix1 - nPix2
 
 
 class MagDiffErr(object):
@@ -442,6 +453,41 @@ def addFpPoint(det, catalog, prefix=""):
             row.set(fpFlag, True)
         row.set(fpxKey, fpPoint[0])
         row.set(fpyKey, fpPoint[1])
+
+    aliases = newCatalog.schema.getAliasMap()
+    for k, v in catalog[0].schema.getAliasMap().items():
+        aliases.set(k, v)
+
+    return newCatalog
+
+def addFootprintNPix(catalog, fromCat=None, prefix=""):
+    # Retrieve the number of pixels in an sources footprint and add to schema
+    mapper = afwTable.SchemaMapper(catalog[0].schema)
+    mapper.addMinimalSchema(catalog[0].schema)
+    schema = mapper.getOutputSchema()
+    fpName = prefix + "base_Footprint_nPix"
+    fpKey = schema.addField(fpName, type="I", doc="Number of pixels in Footprint")
+    fpFlag = schema.addField(fpName + "_flag", type="Flag", doc="Set to True for any fatal failure")
+    newCatalog = afwTable.SourceCatalog(schema)
+    newCatalog.reserve(len(catalog))
+    if fromCat:
+        if len(fromCat) != len(catalog):
+            raise TaskError("Lengths of fromCat and catalog for getting footprint Npixs do not agree")
+    if fromCat is None:
+        fromCat = catalog
+    for srcFrom, srcTo in zip(fromCat, catalog):
+        row = newCatalog.addNew()
+        row.assign(srcTo, mapper)
+        try:
+            footNpix = srcFrom.getFootprint().getNpix()
+        except:
+            footNpix = np.nan
+            row.set(fpFlag, True)
+        row.set(fpKey, footNpix)
+
+    aliases = newCatalog.schema.getAliasMap()
+    for k, v in catalog[0].schema.getAliasMap().items():
+        aliases.set(k, v)
 
     return newCatalog
 
