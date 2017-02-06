@@ -11,7 +11,7 @@ from .utils import checkHscStack
 __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller",
            "MatchesStarGalaxyLabeller", "CosmosLabeller", "labelZp", "annotateAxes", "labelVisit",
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
-           "plotCcdOutline", "rotatePixelCoords", "bboxToRaDec", "percent", "setPtSize"]
+           "plotCcdOutline", "rotatePixelCoords", "bboxToRaDec", "percent", "setPtSize", "getQuiver"]
 
 class AllLabeller(object):
     labels = {"all": 0}
@@ -270,3 +270,17 @@ def setPtSize(num, ptSize=12):
     if num > 10:
         ptSize = min(12, max(4, int(25/np.log10(num))))
     return ptSize
+
+def getQuiver(x, y, e1, e2, ax, color=None, scale=3, width=0.005, label=''):
+    """Return the quiver object for the given input parameters"""
+    theta = [np.math.atan2(a, b)/2.0 for a, b in zip(e1, e2)]
+    e = np.sqrt(e1**2 +e2**2)
+    c1 = e*np.cos(theta)
+    c2 = e*np.sin(theta)
+    if color is None:
+        color = e
+    q = ax.quiver(x, y, c1, c2, color=color, angles='uv', scale=scale,
+                  units='width', pivot='middle', width=width, headwidth=0.0,
+                  headlength=0.0, headaxislength=0.0, label=label)
+
+    return q
