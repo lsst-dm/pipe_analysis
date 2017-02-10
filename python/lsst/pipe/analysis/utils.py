@@ -47,8 +47,8 @@ class Filenamer(object):
 
 class Data(Struct):
     def __init__(self, catalog, quantity, mag, selection, color, error=None, plot=True):
-        Struct.__init__(self, catalog=catalog[selection], quantity=quantity[selection], mag=mag[selection],
-                        selection=selection, color=color, plot=plot,
+        Struct.__init__(self, catalog=catalog[selection].copy(deep=True), quantity=quantity[selection],
+                        mag=mag[selection], selection=selection, color=color, plot=plot,
                         error=error[selection] if error is not None else None)
 
 class Stats(Struct):
