@@ -226,6 +226,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 if flag in catalog.schema:
                     catalog = catalog[~catalog[flag]].copy(True)
 
+            if self.config.doPlotQuiver:
+                self.plotQuiver(catalog, filenamer(dataId, description="ellipResids", style="quiver"),
+                                dataId=dataId, butler=butler, camera=camera, ccdList=ccdListPerTract,
+                                hscRun=hscRun, zpLabel=self.zpLabel)
+
             # Create mag comparison plots using common ZP
             if not commonZpDone:
                 self.plotMags(commonZpCat, filenamer, dataId, butler=butler, camera=camera, ccdList=ccdList,
