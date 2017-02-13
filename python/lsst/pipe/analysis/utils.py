@@ -15,16 +15,15 @@ import lsst.afw.table as afwTable
 
 __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCompare",
            "ApCorrDiffCompare", "AstrometryDiff", "sdssTraceSize", "hsmTraceSize",
-           "psfSdssTraceSizeDiff", "psfHsmTraceSizeDiff",
-           "sdssTraceSizeCompare", "sdssXxCompare", "sdssYyCompare", "hsmTraceSizeCompare",
-           "hsmMomentsXxCompare",  "hsmMomentsYyCompare", "sdssPsfTraceSizeCompare",
-           "hsmPsfTraceSizeCompare", "e1ResidsSdss", "e2ResidsSdss", "e1ResidsHsm", "e2ResidsHsm",
-           "FootNpixDiffCompare", "MagDiffErr", "ApCorrDiffErr", "CentroidDiff",
+           "psfSdssTraceSizeDiff", "psfHsmTraceSizeDiff", "sdssTraceSizeCompare", "sdssXxCompare",
+           "sdssYyCompare", "hsmTraceSizeCompare", "hsmMomentsXxCompare", "hsmMomentsYyCompare",
+           "sdssPsfTraceSizeCompare", "hsmPsfTraceSizeCompare", "e1ResidsSdss", "e2ResidsSdss",
+           "e1ResidsHsm", "e2ResidsHsm", "FootNpixDiffCompare", "MagDiffErr", "ApCorrDiffErr", "CentroidDiff",
            "CentroidDiffErr", "deconvMom", "deconvMomStarGal", "concatenateCatalogs", "joinMatches",
-           "checkIdLists", "joinCatalogs", "getFluxKeys", "addApertureFluxesHSC", "addFpPoint",
-           "addFootprintNPix", "addRotPoint", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
-           "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
-           "fluxToPlotString", "andCatalog"]
+           "checkIdLists", "joinCatalogs", "getFluxKeys", "addColumnToSchema", "addApertureFluxesHSC",
+           "addFpPoint", "addFootprintNPix", "addRotPoint", "calibrateSourceCatalogMosaic",
+           "calibrateSourceCatalog", "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn",
+           "checkHscStack", "fluxToPlotString", "andCatalog"]
 
 class Filenamer(object):
     """Callable that provides a filename given a style"""
@@ -473,6 +472,30 @@ def getFluxKeys(schema):
     if len(fluxKeys) == 0:
         raise RuntimeError("No flux keys found")
     return fluxKeys, errKeys
+
+def addColumnToSchema(fromCat, toCat, colName, prefix=""):
+    # Retrieve the number of pixels in an sources footprint and add to schema
+    mapper = afwTable.SchemaMapper(toCat[0].schema)
+    mapper.addMinimalSchema(toCat[0].schema)
+    schema = mapper.getOutputSchema()
+    colName = prefix + colName
+    colFromKey = fromCat.schema.find(colName).getKey()
+    fromField = fromCat.schema.find(colName).getField()
+    colToKey = schema.addField(fromField)
+    newCatalog = afwTable.SourceCatalog(schema)
+    newCatalog.reserve(len(toCat))
+
+    for srcFrom, srcTo in zip(fromCat, toCat):
+        row = newCatalog.addNew()
+        row.assign(srcTo, mapper)
+        colValue = srcFrom.get(colFromKey)
+        row.set(colToKey, colValue)
+
+    aliases = newCatalog.schema.getAliasMap()
+    for k, v in toCat[0].schema.getAliasMap().items():
+        aliases.set(k, v)
+
+    return newCatalog
 
 def addApertureFluxesHSC(catalog, prefix=""):
     mapper = afwTable.SchemaMapper(catalog[0].schema)
