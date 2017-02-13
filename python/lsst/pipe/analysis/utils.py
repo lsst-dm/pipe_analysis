@@ -537,7 +537,7 @@ def addFpPoint(det, catalog, prefix=""):
 
     return newCatalog
 
-def addFootprintNPix(det, catalog, prefix=""):
+def addFootprintNPix(catalog, fromCat=None, prefix=""):
     # Retrieve the number of pixels in an sources footprint and add to schema
     mapper = afwTable.SchemaMapper(catalog[0].schema)
     mapper.addMinimalSchema(catalog[0].schema)
@@ -547,11 +547,16 @@ def addFootprintNPix(det, catalog, prefix=""):
     fpFlag = schema.addField(fpName + "_flag", type="Flag", doc="Set to True for any fatal failure")
     newCatalog = afwTable.SourceCatalog(schema)
     newCatalog.reserve(len(catalog))
-    for source in catalog:
+    if fromCat:
+        if len(fromCat) != len(catalog):
+            raise TaskError("Lengths of fromCat and catalog for getting footprint Npixs do not agree")
+    if fromCat is None:
+        fromCat = catalog
+    for srcFrom, srcTo in zip(fromCat, catalog):
         row = newCatalog.addNew()
-        row.assign(source, mapper)
+        row.assign(srcTo, mapper)
         try:
-            footNpix = source.getFootprint().getNpix()
+            footNpix = srcFrom.getFootprint().getNpix()
         except:
             footNpix = np.nan
             row.set(fpFlag, True)
