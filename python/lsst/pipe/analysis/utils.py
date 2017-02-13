@@ -666,8 +666,6 @@ def calibrateSourceCatalog(catalog, zp):
     fluxKeys, errKeys = getFluxKeys(catalog.schema)
     for name, key in fluxKeys.items() + errKeys.items():
         factor = 10.0**(0.4*zp)
-        if re.search(r"perture", name):
-            factor = 10.0**(0.4*33.0)
         for src in catalog:
             src[key] /= factor
     return catalog
