@@ -128,7 +128,8 @@ class Analysis(object):
         plt.close(fig)
 
     def plotAgainstMagAndHist(self, log, filename, stats=None, camera=None, ccdList=None, tractInfo=None,
-                              patchList=None, hscRun=None, matchRadius=None, zpLabel=None):
+                              patchList=None, hscRun=None, matchRadius=None, zpLabel=None, plotRunStats=True,
+                              highlightList=None):
         """Plot quantity against magnitude with side histogram"""
         nullfmt = NullFormatter()  # no labels for histograms
         # definitions for the axes
@@ -543,14 +544,14 @@ class Analysis(object):
 
     def plotAll(self, dataId, filenamer, log, enforcer=None, forcedMean=None, butler=None, camera=None,
                 ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                postFix=""):
+                postFix="", plotRunStats=True, highlightList=None):
         """Make all plots"""
         stats = self.stats(forcedMean=forcedMean)
         self.plotAgainstMagAndHist(log, filenamer(dataId, description=self.shortName,
                                                   style="psfMagHist" + postFix),
                                    stats=stats, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                    patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                   zpLabel=zpLabel)
+                                   zpLabel=zpLabel, plotRunStats=plotRunStats, highlightList=highlightList)
 
         if self.config.doPlotOldMagsHist:
             self.plotAgainstMag(filenamer(dataId, description=self.shortName, style="psfMag" + postFix),

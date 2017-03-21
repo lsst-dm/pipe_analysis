@@ -28,7 +28,7 @@ import lsst.afw.table as afwTable
 class CcdAnalysis(Analysis):
     def plotAll(self, dataId, filenamer, log, enforcer=None, forcedMean=None, butler=None, camera=None,
                 ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                postFix=""):
+                postFix="", plotRunStats=True, highlightList=None):
         stats = self.stats(forcedMean=forcedMean)
         if self.config.doPlotCcdXy:
             self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix), stats=stats,
@@ -40,7 +40,8 @@ class CcdAnalysis(Analysis):
 
         return Analysis.plotAll(self, dataId, filenamer, log, enforcer=enforcer, forcedMean=forcedMean,
                                 butler=butler, camera=camera, ccdList=ccdList, hscRun=hscRun,
-                                matchRadius=matchRadius, zpLabel=zpLabel, postFix=postFix)
+                                matchRadius=matchRadius, zpLabel=zpLabel, postFix=postFix,
+                                plotRunStats=plotRunStats, highlightList=highlightList)
 
     def plotFP(self, dataId, filenamer, log, enforcer=None, forcedMean=None, camera=None, ccdList=None,
                hscRun=None, matchRadius=None, zpLabel=None):
@@ -682,14 +683,12 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
 
 
     def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, hscRun=None,
-                 matchRadius=None, zpLabel=None, fluxToPlotList=None, postFix=""):
+                 matchRadius=None, zpLabel=None, fluxToPlotList=None, postFix="", highlightList=None):
         if fluxToPlotList is None:
             fluxToPlotList = self.config.fluxToPlotList
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02}})
         for col in fluxToPlotList:
             if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
-                if "CircularAperture" in col:
-                    zpLabel = None
                 shortName = "diff_" + col + postFix
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, MagDiffCompare(col + "_flux"), "Run Comparison: %s mag diff" %
