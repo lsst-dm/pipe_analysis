@@ -699,25 +699,31 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                    ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
 
     def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
-                      tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                      flagsCat=None):
+                      tractInfo=None, patchList=None, hscRun1=None, hscRun2=None, matchRadius=None,
+                      zpLabel=None, flagsCat=None, highlightList=None):
         distEnforcer = None
         shortName = "diff_x"
         self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, CentroidDiff("x", centroid1="base_SdssCentroid_Rot"),
+        centroidStr1, centroidStr2 = "base_SdssCentroid", "base_SdssCentroid"
+        if (hscRun1 is not None) != (hscRun2 is not None):
+            if hscRun1 is None:
+                centroidStr1 = "base_SdssCentroid_Rot"
+            if hscRun2 is None:
+                centroidStr2 = "base_SdssCentroid_Rot"
+        Analysis(catalog, CentroidDiff("x", centroid1=centroidStr1, centroid2=centroidStr2),
                  "Run Comparison: x offset (arcsec)", shortName, self.config.analysis, prefix="first_",
                  qMin=-0.08, qMax=0.08, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
                  ).plotAll(dataId, filenamer, self.log, distEnforcer, butler=butler, camera=camera,
-                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
-                           matchRadius=matchRadius, zpLabel=zpLabel)
+                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
+                           hscRun=(hscRun1 or hscRun2), matchRadius=matchRadius, zpLabel=zpLabel)
         shortName = "diff_y"
         self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, CentroidDiff("y", centroid1="base_SdssCentroid_Rot"),
+        Analysis(catalog, CentroidDiff("y", centroid1=centroidStr1, centroid2=centroidStr2),
                  "Run Comparison: y offset (arcsec)", shortName, self.config.analysis, prefix="first_",
                  qMin=-0.08, qMax=0.08, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
                  ).plotAll(dataId, filenamer, self.log, distEnforcer, butler=butler, camera=camera,
-                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
-                           matchRadius=matchRadius, zpLabel=zpLabel)
+                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
+                           hscRun=(hscRun1 or hscRun2), matchRadius=matchRadius, zpLabel=zpLabel)
 
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, hscRun=None,
                  matchRadius=None, zpLabel=None):
@@ -728,16 +734,53 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, sdssTraceSizeCompare(), "SdssShape Trace Radius Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
-                         goodKeys=["calib_psfUsed"], qMin=-0.8, qMax=0.8,
+                         goodKeys=["calib_psfUsed"], qMin=-0.5, qMax=1.5,
                          labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
+                shortName = "psfTrace_"
+                self.log.info("shortName = {:s}".format(shortName))
+                Analysis(catalog, sdssPsfTraceSizeCompare(), "SdssShape PSF Trace Radius Diff (%)", shortName,
+                         self.config.analysis, flags=[col + "_flag"], prefix="first_",
+                         goodKeys=["calib_psfUsed"], qMin=-1.1, qMax=1.1,
+                         labeller=OverlapsStarGalaxyLabeller(),
+                         ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
+                                   camera=camera, ccdList=ccdList, hscRun=hscRun,
+                                   matchRadius=matchRadius, zpLabel=zpLabel)
+                shortName = "sdssXx_"
+                self.log.info("shortName = {:s}".format(shortName))
+                Analysis(catalog, sdssXxCompare(), "SdssShape xx Moment Diff (%)", shortName,
+                         self.config.analysis, flags=[col + "_flag"], prefix="first_",
+                         goodKeys=["calib_psfUsed"], qMin=-0.5, qMax=1.5,
+                         labeller=OverlapsStarGalaxyLabeller(),
+                         ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
+                                   camera=camera, ccdList=ccdList, hscRun=hscRun,
+                                   matchRadius=matchRadius, zpLabel=zpLabel)
+                shortName = "sdssYy_"
+                self.log.info("shortName = {:s}".format(shortName))
+                Analysis(catalog, sdssYyCompare(), "SdssShape yy Moment Diff (%)", shortName,
+                         self.config.analysis, flags=[col + "_flag"], prefix="first_",
+                         goodKeys=["calib_psfUsed"], qMin=-0.5, qMax=1.5,
+                         labeller=OverlapsStarGalaxyLabeller(),
+                         ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
+                                   camera=camera, ccdList=ccdList, hscRun=hscRun,
+                                   matchRadius=matchRadius, zpLabel=zpLabel)
+
                 shortName = "hsmTrace_"
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, hsmTraceSizeCompare(), "HSM Trace Radius Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
-                         goodKeys=["calib_psfUsed"], qMin=-0.8, qMax=0.8,
+                         goodKeys=["calib_psfUsed"], qMin=-0.5, qMax=1.5,
+                         labeller=OverlapsStarGalaxyLabeller(),
+                         ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
+                                   camera=camera, ccdList=ccdList, hscRun=hscRun,
+                                   matchRadius=matchRadius, zpLabel=zpLabel)
+                shortName = "hsmPsfTrace_"
+                self.log.info("shortName = {:s}".format(shortName))
+                Analysis(catalog, hsmPsfTraceSizeCompare(), "HSM PSF Trace Radius Diff (%)", shortName,
+                         self.config.analysis, flags=[col + "_flag"], prefix="first_",
+                         goodKeys=["calib_psfUsed"], qMin=-1.1, qMax=1.1,
                          labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
