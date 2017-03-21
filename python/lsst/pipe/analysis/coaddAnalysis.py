@@ -123,6 +123,14 @@ class CoaddAnalysisTask(CmdLineTask):
         dataId = patchRefList[indexExists].dataId
         patchList = [dataRef.dataId["patch"] for dataRef in patchRefList]
         butler = patchRefList[indexExists].getButler()
+        # Check metadata to see if stack used was HSC
+        forcedMd = butler.get("deepCoadd_forced_src", patchRefList[indexExists].dataId).getMetadata()
+        hscRun = checkHscStack(forcedMd)
+        if hscRun:
+            coadd = butler.get("deepCoadd_calexp_hsc", dataId)
+        else:
+            coadd = butler.get("deepCoadd_calexp", dataId)
+        wcs = coadd.getWcs()
         skymap = butler.get("deepCoadd_skyMap")
         tractInfo = skymap[dataRef.dataId["tract"]]
         filterName = dataId["filter"]
@@ -130,16 +138,12 @@ class CoaddAnalysisTask(CmdLineTask):
                               patchRefList[indexExists].dataId)
         if (self.config.doPlotMags or self.config.doPlotStarGalaxy or self.config.doPlotOverlaps or
             self.config.doPlotCompareUnforced or cosmos or self.config.externalCatalogs):
-            ### catalog = catalog[catalog["deblend_nChild"] == 0].copy(True) # Don't care about blended objects
             forced = self.readCatalogs(patchRefList, "deepCoadd_forced_src", indexExists)
-            forced = self.calibrateCatalogs(forced)
+            forced = self.calibrateCatalogs(forced, wcs=wcs)
             unforced = self.readCatalogs(patchRefList, "deepCoadd_meas", indexExists)
-            unforced = self.calibrateCatalogs(unforced)
+            unforced = self.calibrateCatalogs(unforced, wcs=wcs)
             # catalog = joinCatalogs(meas, forced, prefix1="meas_", prefix2="forced_")
 
-        # Check metadata to see if stack used was HSC
-        forcedMd = butler.get("deepCoadd_forced_src", patchRefList[indexExists].dataId).getMetadata()
-        hscRun = checkHscStack(forcedMd)
         # Set an alias map for differing src naming conventions of different stacks (if any)
         if hscRun is not None and self.config.srcSchemaMap is not None:
             for aliasMap in [forced.schema.getAliasMap(), unforced.schema.getAliasMap()]:
@@ -165,8 +169,15 @@ class CoaddAnalysisTask(CmdLineTask):
 
         # purge the catalogs of flagged sources
         for flag in self.config.analysis.flags:
-            forced = forced[~unforced[flag]].copy(True)
-            unforced = unforced[~unforced[flag]].copy(True)
+            forced = forced[~unforced[flag]].copy(deep=True)
+            unforced = unforced[~unforced[flag]].copy(deep=True)
+
+        forced = forced[unforced["deblend_nChild"] == 0].copy(deep=True) # Exclude non-deblended
+        unforced = unforced[unforced["deblend_nChild"] == 0].copy(deep=True) # Exclude non-deblended
+        self.catLabel = "nChild = 0"
+        self.zpLabel = self.zpLabel + " " + self.catLabel
+        print "len(forced) = ", len(forced), "  len(unforced) = ",len(unforced)
+
         flagsCat = unforced
 
         if self.config.doPlotFootprintNpix:
@@ -204,7 +215,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                   hscRun=hscRun, matchRadius=self.config.matchOverlapRadius,
                                   zpLabel=self.zpLabel)
         if self.config.doPlotMatches:
-            matches = self.readSrcMatches(patchRefList, "deepCoadd_forced_src", hscRun=hscRun)
+            matches = self.readSrcMatches(patchRefList, "deepCoadd_forced_src", hscRun=hscRun, wcs=wcs)
             self.plotMatches(matches, filterName, filenamer, dataId, tractInfo=tractInfo, patchList=patchList,
                              hscRun=hscRun, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
 
@@ -222,7 +233,7 @@ class CoaddAnalysisTask(CmdLineTask):
             catList = [cat[cat["base_ClassificationExtendedness_value"] < 0.5].copy(True) for cat in catList]
         return concatenateCatalogs(catList)
 
-    def readSrcMatches(self, dataRefList, dataset, hscRun=None):
+    def readSrcMatches(self, dataRefList, dataset, hscRun=None, wcs=None):
         catList = []
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
@@ -232,7 +243,7 @@ class CoaddAnalysisTask(CmdLineTask):
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-            catalog = self.calibrateCatalogs(catalog)
+            catalog = self.calibrateCatalogs(catalog, wcs=wcs)
             if dataset.startswith("deepCoadd_"):
                 if hscRun:
                     packedMatches = butler.get("deepCoadd_meas" + "Match", dataRef.dataId)
@@ -290,8 +301,15 @@ class CoaddAnalysisTask(CmdLineTask):
 
         return concatenateCatalogs(catList)
 
-    def calibrateCatalogs(self, catalog):
+    def calibrateCatalogs(self, catalog, wcs=None):
         self.zpLabel = "common (" + str(self.config.analysis.coaddZp) + ")"
+        # My persisted catalogs in lauren/LSST/DM-6816new all have nan for ra dec (see DM-9556)
+        if np.all(np.isnan(catalog["coord_ra"])):
+            if wcs is None:
+                self.log.warn("Bad ra, dec entries but can't update because wcs is None")
+            else:
+                for src in catalog:
+                    src.updateCoord(wcs)
         calibrated = calibrateCoaddSourceCatalog(catalog, self.config.analysis.coaddZp)
         return calibrated
 
@@ -692,18 +710,28 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         forcedMd1 = butler1.get("deepCoadd_forced_src", patchRefList1[indexExists1].dataId).getMetadata()
         hscRun1 = checkHscStack(forcedMd1)
         skymap1 = butler1.get("deepCoadd_skyMap")
+        if hscRun1:
+            coadd1 = butler1.get("deepCoadd_calexp_hsc", dataId)
+        else:
+            coadd1 = butler1.get("deepCoadd_calexp", dataId)
+        wcs1 = coadd1.getWcs()
         tractInfo1 = skymap1[dataRef1.dataId["tract"]]
         butler2 = patchRefList2[indexExists1].getButler()
         forcedMd2 = butler2.get("deepCoadd_forced_src", patchRefList2[indexExists1].dataId).getMetadata()
         hscRun2 = checkHscStack(forcedMd2)
+        if hscRun2:
+            coadd2 = butler2.get("deepCoadd_calexp_hsc", dataId)
+        else:
+            coadd2 = butler2.get("deepCoadd_calexp", dataId)
+        wcs2 = coadd2.getWcs()
         forced1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_forced_src")
-        forced1 = self.calibrateCatalogs(forced1)
+        forced1 = self.calibrateCatalogs(forced1, wcs=wcs1)
         forced2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_forced_src")
-        forced2 = self.calibrateCatalogs(forced2)
+        forced2 = self.calibrateCatalogs(forced2, wcs=wcs2)
         unforced1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_meas")
-        unforced1 = self.calibrateCatalogs(unforced1)
+        unforced1 = self.calibrateCatalogs(unforced1, wcs=wcs1)
         unforced2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_meas")
-        unforced2 = self.calibrateCatalogs(unforced2)
+        unforced2 = self.calibrateCatalogs(unforced2, wcs=wcs2)
 
         # Set an alias map for differing src naming conventions of different stacks (if any)
         if self.config.srcSchemaMap:
@@ -759,8 +787,15 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             raise TaskError("No matches found")
         return joinMatches(matches, "first_", "second_")
 
-    def calibrateCatalogs(self, catalog):
+    def calibrateCatalogs(self, catalog, wcs=None):
         self.zpLabel = "common (" + str(self.config.analysis.coaddZp) + ")"
+        # For some reason my persisted catalogs in lauren/LSST/DM-6816new all have nan for ra dec
+        if np.all(np.isnan(catalog["coord_ra"])):
+            if wcs is None:
+                self.log.warn("Bad ra, dec entries but can't update because wcs is None")
+            else:
+                for src in catalog:
+                    src.updateCoord(wcs)
         calibrated = calibrateCoaddSourceCatalog(catalog, self.config.analysis.coaddZp)
         return calibrated
 
