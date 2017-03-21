@@ -201,6 +201,12 @@ class CoaddAnalysisTask(CmdLineTask):
                                  hscRun=hscRun, zpLabel=self.zpLabel)
             else:
                 self.log.warn("Cannot run plotStarGal: ext_shapeHSM_HsmSourceMoments_xx not in forced.schema")
+        if self.config.doPlotSizes:
+            if "base_SdssShape_psf_xx" in forced.schema:
+                self.plotSizes(forced, filenamer, dataId, butler=butler, tractInfo=tractInfo,
+                               patchList=patchList, hscRun=hscRun, zpLabel=self.zpLabel)
+            else:
+                self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
         if cosmos:
             self.plotCosmos(forced, filenamer, cosmos, dataId)
         if self.config.doPlotCompareUnforced:
@@ -210,7 +216,7 @@ class CoaddAnalysisTask(CmdLineTask):
         if self.config.doPlotOverlaps:
             overlaps = self.overlaps(forced, unforced)
             self.log.info("Number of overlap objects matched = {:d}".format(len(overlaps)))
-            if len(overlaps) > 0:
+            if len(overlaps) > 5:
                 self.plotOverlaps(overlaps, filenamer, dataId, tractInfo=tractInfo, patchList=patchList,
                                   hscRun=hscRun, matchRadius=self.config.matchOverlapRadius,
                                   zpLabel=self.zpLabel)
