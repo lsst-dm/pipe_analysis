@@ -18,8 +18,9 @@ colorList = ["blue", "red", "green", "black", "yellow", "cyan", "magenta", ]
 
 class AnalysisConfig(Config):
     flags = ListField(dtype=str, doc="Flags of objects to ignore",
-                      default=["base_SdssCentroid_flag", "base_PixelFlags_flag_saturatedCenter",
-                               "base_PixelFlags_flag_interpolatedCenter", "base_PsfFlux_flag"])
+                      default=["base_SdssCentroid_flag", "slot_Centroid_flag", "base_PsfFlux_flag",
+                               "base_PixelFlags_flag_saturatedCenter",
+                               "base_PixelFlags_flag_interpolatedCenter"])
     clip = Field(dtype=float, default=4.0, doc="Rejection threshold (stdev)")
     magThreshold = Field(dtype=float, default=21.0, doc="Magnitude threshold to apply")
     magPlotMin = Field(dtype=float, default=14.0, doc="Minimum magnitude to plot")
@@ -50,29 +51,31 @@ class Analysis(object):
             self.magThreshold = magThreshold
         self.qMin = qMin
         self.qMax = qMax
-        if (labeller.labels.has_key("galaxy") and "calib_psfUsed" not in goodKeys and
-            self.quantityName != "pStar"):
-            self.qMin, self.qMax = 2.0*qMin, 2.0*qMax
-        if "galaxy" in labeller.plot and "calib_psfUsed" not in goodKeys and self.quantityName != "pStar":
-            self.qMin, self.qMax = 2.0*qMin, 2.0*qMax
+        if labeller is not None:
+            if (labeller.labels.has_key("galaxy") and "calib_psfUsed" not in goodKeys and
+                self.quantityName != "pStar"):
+                self.qMin, self.qMax = 2.0*qMin, 2.0*qMax
+            if "galaxy" in labeller.plot and "calib_psfUsed" not in goodKeys and self.quantityName != "pStar":
+                self.qMin, self.qMax = 2.0*qMin, 2.0*qMax
         self.prefix = prefix
-        self.flags = flags  # omit if flag = True
         self.goodKeys = goodKeys  # include if goodKey = True
         self.errFunc = errFunc
-        if type(func) == np.ndarray:
-            self.quantity = func
+        if func is not None:
+            if type(func) == np.ndarray:
+                self.quantity = func
+            else:
+                self.quantity = func(catalog)
         else:
-            self.quantity = func(catalog)
+            self.quantity = None
 
         self.quantityError = errFunc(catalog) if errFunc is not None else None
-        # self.mag = self.config/zp - 2.5*np.log10(catalog[prefix + self.config.fluxColumn])
         if prefix + self.config.fluxColumn in catalog.schema:
             self.fluxColumn = self.config.fluxColumn
         else:
             self.fluxColumn = "flux_psf_flux"
         self.mag = -2.5*np.log10(catalog[prefix + self.fluxColumn])
 
-        self.good = np.isfinite(self.quantity) & np.isfinite(self.mag)
+        self.good = np.isfinite(self.quantity) & np.isfinite(self.mag) if self.quantity is not None else None
         if errFunc is not None:
             self.good &= np.isfinite(self.quantityError)
         if flagsCat is None:
@@ -81,17 +84,19 @@ class Analysis(object):
             raise RuntimeError(
                 "Catalog being used for flags does not have the same object list as the data catalog")
         # Don't have flags in match and overlap catalogs (already removed in the latter)
-        if "matches" not in self.shortName and "overlap" not in self.shortName:
-            for ff in list(config.flags) + flags:
+        if ("matches" not in self.shortName and "overlap" not in self.shortName and
+            "quiver" not in self.shortName):
+            for ff in set(list(self.config.flags) + flags):
                 if prefix + ff in flagsCat.schema:
                     self.good &= ~flagsCat[prefix + ff]
         for kk in goodKeys:
-            self.good &= catalog[prefix + kk]
+            self.good &= flagsCat[prefix + kk]
 
-        labels = labeller(catalog)
-        self.data = {name: Data(catalog, self.quantity, self.mag, self.good & (labels == value),
-                                colorList[value], self.quantityError, name in labeller.plot) for
-                     name, value in labeller.labels.iteritems()}
+        if labeller is not None:
+            labels = labeller(catalog)
+            self.data = {name: Data(catalog, self.quantity, self.mag, self.good & (labels == value),
+                                    colorList[value], self.quantityError, name in labeller.plot) for
+                         name, value in labeller.labels.iteritems()}
 
     def plotAgainstMag(self, filename, stats=None, camera=None, ccdList=None, tractInfo=None, patchList=None,
                        hscRun=None, matchRadius=None, zpLabel=None):
@@ -126,7 +131,6 @@ class Analysis(object):
                               patchList=None, hscRun=None, matchRadius=None, zpLabel=None):
         """Plot quantity against magnitude with side histogram"""
         nullfmt = NullFormatter()  # no labels for histograms
-        minorLocator = AutoMinorLocator(2)  # minor tick marks
         # definitions for the axes
         left, width = 0.10, 0.62
         bottom, height = 0.08, 0.62
@@ -148,10 +152,6 @@ class Analysis(object):
         # no labels
         axHistx.xaxis.set_major_formatter(nullfmt)
         axHisty.yaxis.set_major_formatter(nullfmt)
-
-        # no labels
-        # axTopRight.xaxis.set_major_formatter(nullfmt)
-        # axTopRight.yaxis.set_major_formatter(nullfmt)
 
         axScatter.tick_params(labelsize=10)
 
@@ -192,13 +192,18 @@ class Analysis(object):
         xBinwidth = min(0.1, np.around(0.05*abs(magMax - magMin), nxDecimal))
         xBins = np.arange(magMin + 0.5*xBinwidth, magMax + 0.5*xBinwidth, xBinwidth)
         nyDecimal = int(-1.0*np.around(np.log10(0.05*abs(self.qMax - self.qMin)) - 0.5))
-        yBinwidth = max(0.005, np.around(0.02*abs(self.qMax - self.qMin), nyDecimal))
+        yBinwidth = max(0.5/10**nyDecimal, np.around(0.02*abs(self.qMax - self.qMin), nyDecimal))
         yBins = np.arange(self.qMin - 0.5*yBinwidth, self.qMax + 0.55*yBinwidth, yBinwidth)
         axHistx.set_xlim(axScatter.get_xlim())
         axHisty.set_ylim(axScatter.get_ylim())
         axHistx.set_yscale("log", nonposy="clip")
         axHisty.set_xscale("log", nonposy="clip")
-
+        nTotal = 0
+        for name, data in self.data.iteritems():
+            nTotal += len(data.mag)
+        axScatterYlim = np.around(nTotal, -1*int(np.floor(np.log10(nTotal))))
+        axHistx.set_ylim(1, axScatterYlim)
+        axHisty.set_xlim(1, axScatterYlim)
         nxSyDecimal = int(-1.0*np.around(np.log10(0.05*abs(self.magThreshold - magMin)) - 0.5))
         xSyBinwidth = min(0.1, np.around(0.05*abs(self.magThreshold - magMin), nxSyDecimal))
         xSyBins = np.arange(magMin + 0.5*xSyBinwidth, self.magThreshold + 0.5*xSyBinwidth, xSyBinwidth)
@@ -226,21 +231,32 @@ class Analysis(object):
                 axScatter.axvspan(self.magThreshold, axScatter.get_xlim()[1], facecolor="k",
                                   edgecolor="none", alpha=0.15)
                 # compute running stats (just for plotting)
-                belowThresh = data.mag < magMax  # set lower if you want to truncate plotted running stats
-                numHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins))
-                syHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
-                                                weights=data.quantity[belowThresh])
-                syHist2, datahist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
-                                                 weights=data.quantity[belowThresh]**2)
-                meanHist = syHist/numHist
-                stdHist = np.sqrt(syHist2/numHist - meanHist*meanHist)
-                runStats.append(axScatter.errorbar((dataHist[1:] + dataHist[:-1])/2, meanHist, yerr=stdHist,
-                                                   fmt="o", mfc=cornflowerBlue, mec="k", ms=4,
-                                                   ecolor="k", label="Running stats\n(all stars)"))
+                if "calib_psfUsed" not in self.goodKeys and plotRunStats:
+                    belowThresh = data.mag < magMax  # set lower if you want to truncate plotted running stats
+                    numHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins))
+                    syHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
+                                                    weights=data.quantity[belowThresh])
+                    syHist2, datahist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
+                                                     weights=data.quantity[belowThresh]**2)
+                    meanHist = syHist/numHist
+                    stdHist = np.sqrt(syHist2/numHist - meanHist*meanHist)
+                    runStats.append(axScatter.errorbar((dataHist[1:] + dataHist[:-1])/2, meanHist,
+                                                       yerr=stdHist, fmt="o", mfc=cornflowerBlue, mec="k",
+                                                       ms=2, ecolor="k", label="Running stats\n(all stars)"))
 
             # plot data.  Appending in dataPoints for the sake of the legend
-            dataPoints.append(axScatter.scatter(data.mag, data.quantity, s=ptSize, marker="o", lw=0,
-                                                c=data.color, label=name, alpha=alpha))
+            dataPoints.append(axScatter.scatter(data.mag, data.quantity, s=ptSize, marker="o",
+                                                facecolors=data.color, edgecolors="none", label=name,
+                                                alpha=alpha))
+
+            if highlightList is not None:
+                for flag, color in highlightList:
+                    highlightSelection = data.catalog[flag] > 0
+                    dataPoints.append(axScatter.scatter(
+                            data.mag[highlightSelection], data.quantity[highlightSelection], s=ptSize,
+                            marker="o", lw=0.75, facecolors="none", edgecolors=color, label=flag,
+                            alpha=alpha))
+
             axHistx.hist(data.mag, bins=xBins, color=histColor, alpha=0.6, label=name)
             axHisty.hist(data.quantity, bins=yBins, color=histColor, alpha=0.6, orientation="horizontal",
                          label=name)
@@ -250,17 +266,18 @@ class Analysis(object):
                 dataUsed = data.quantity[stats[name].dataUsed]
                 axHisty.hist(dataUsed, bins=yBins, color=data.color, orientation="horizontal", alpha=1.0,
                              label="used in Stats")
-        axHistx.xaxis.set_minor_locator(minorLocator)
         axHistx.tick_params(axis="x", which="major", length=5)
-        axHisty.yaxis.set_minor_locator(minorLocator)
+        axHistx.xaxis.set_minor_locator(AutoMinorLocator(2))
         axHisty.tick_params(axis="y", which="major", length=5)
-        axScatter.yaxis.set_minor_locator(minorLocator)
-        axScatter.xaxis.set_minor_locator(minorLocator)
+        axHisty.yaxis.set_minor_locator(AutoMinorLocator(2))
+
         axScatter.tick_params(which="major", length=5)
+        axScatter.xaxis.set_minor_locator(AutoMinorLocator(2))
+        axScatter.yaxis.set_minor_locator(AutoMinorLocator(2))
 
         axScatter.set_xlabel("%s mag (%s)" % (fluxToPlotString(self.fluxColumn),
                                               filterStrFromFilename(filename)))
-        axScatter.set_ylabel("%s (%s)" % (self.quantityName, filterStrFromFilename(filename)))
+        axScatter.set_ylabel(r"%s (%s)" % (self.quantityName, filterStrFromFilename(filename)))
 
         if stats is not None:
             l1, l2 = annotateAxes(plt, axScatter, stats, "star", self.magThreshold,
@@ -303,7 +320,7 @@ class Analysis(object):
             numMax = max(numMax, num.max()*1.1)
         axes.set_xlim(self.qMin, self.qMax)
         axes.set_ylim(0.9, numMax)
-        axes.set_xlabel(self.quantityName)
+        axes.set_xlabel("{0:s} ({1:s})".format(self.quantityName, filterStrFromFilename(filename)))
         axes.set_ylabel("Number")
         axes.set_yscale("log", nonposy="clip")
         x0, y0 = 0.03, 0.96
@@ -344,12 +361,18 @@ class Analysis(object):
             vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
         elif "CModel" in filename and "overlap" not in filename:
             vMin, vMax = 1.5*self.qMin, 0.5*self.qMax
-        elif "race" in filename:
+        elif "raceDiff" in filename or "Resids" in filename:
             vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
+        elif "race_" in filename:
+            vMin, vMax = 1.03*self.qMin, 0.97*self.qMax
+        elif "pStar" in filename:
+            vMin, vMax = 0.0, 1.0
         else:
             vMin, vMax = 1.5*self.qMin, 1.5*self.qMax
+        if dataName == "star" and "deconvMom" in filename:
+            vMin, vMax = -0.1, 0.1
 
-        fig, axes = plt.subplots(1, 1, subplot_kw=dict(axisbg="0.7"))
+        fig, axes = plt.subplots(1, 1, subplot_kw=dict(axisbg="0.35"))
         ptSize = None
 
         if dataId is not None and butler is not None and ccdList is not None:
@@ -541,11 +564,17 @@ class Analysis(object):
                              zpLabel=zpLabel, dataName="star")
 
         if (not any(ss in self.shortName for ss in
-                    ["pStar", "race_", "psfUsed", "gri", "riz", "izy", "z9y", "color_"])):
+                    ["pStar", "race", "Xx_", "Yy_", "Resids", "psfUsed", "gri", "riz", "izy", "z9y",
+                     "color_"])):
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky-gals" + postFix),
                                  stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,
                                  tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
                                  matchRadius=matchRadius, zpLabel=zpLabel, dataName="galaxy")
+        if "diff_" in self.shortName:
+            self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky-split" + postFix),
+                                 stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,
+                                 tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
+                                 matchRadius=matchRadius, zpLabel=zpLabel, dataName="split")
 
         if self.config.doPlotRaDec:
             self.plotRaDec(filenamer(dataId, description=self.shortName, style="radec" + postFix),

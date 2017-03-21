@@ -60,7 +60,7 @@ class CoaddAnalysisConfig(Config):
     srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
                              doc="Mapping between different stack (e.g. HSC vs. LSST) schema names")
     fluxToPlotList = ListField(dtype=str, default=["base_GaussianFlux", "ext_photometryKron_KronFlux",
-                                                   "modelfit_CModel", "base_CircularApertureFlux_12_0"],
+                                                   "modelfit_CModel"],
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(base_PsfFlux)")
     doApplyUberCal = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input?" +
                            " FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
@@ -328,8 +328,6 @@ class CoaddAnalysisTask(CmdLineTask):
         enforcer = Enforcer(requireLess={"star": {"stdev": 0.02}})
         for col in fluxToPlotList:
             if col + "_flux" in catalog.schema:
-                if "CircularAperture" in col:
-                    zpLabel = None
                 shortName = "mag_" + col + postFix
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog, MagDiff(col + "_flux", "base_PsfFlux_flux"), "Mag(%s) - PSFMag" %
@@ -564,6 +562,8 @@ class CoaddAnalysisTask(CmdLineTask):
     def plotMatches(self, matches, filterName, filenamer, dataId, description="matches", butler=None,
                     camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None,
                     zpLabel=None, flagsCat=None):
+        enforcer = None # Enforcer(requireLess={"star": {"stdev": 0.030}}),
+
         ct = self.config.colorterms.getColorterm(filterName, self.config.photoCatName)
         if "src_calib_psfUsed" in matches.schema:
             shortName = description + "_mag_calib_psfUsed"
@@ -572,8 +572,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                "MagPsf(unforced) - ref (calib_psfUsed)", shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_psfUsed"],
                                qMin=-0.15, qMax=0.15, labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
-                               ).plotAll(dataId, filenamer, self.log,
-                                         Enforcer(requireLess={"star": {"stdev": 0.030}}), butler=butler,
+                               ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                          camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                          patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                          zpLabel=zpLabel)
@@ -582,9 +581,8 @@ class CoaddAnalysisTask(CmdLineTask):
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_flux", ct, zp=0.0), "MagPsf(unforced) - ref",
                            shortName, self.config.analysisMatches, prefix="src_",
-                           qMin=-0.15, qMax=0.15, labeller=MatchesStarGalaxyLabeller(),
-                           ).plotAll(dataId, filenamer, self.log,
-                                     Enforcer(requireLess={"star": {"stdev": 0.030}}), butler=butler,
+                           qMin=-0.15, qMax=5.15, labeller=MatchesStarGalaxyLabeller(),
+                           ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                      camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
                                      hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
         shortName = description + "_distance"
@@ -814,8 +812,6 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02}})
         for col in fluxToPlotList:
             if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
-                if "CircularAperture" in col:
-                    zpLabel = None
                 shortName = "diff_" + col
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, MagDiffCompare(col + "_flux"), "Run Comparison: Mag difference (%s)" %
