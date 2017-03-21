@@ -806,7 +806,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
     def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                  patchList=None, hscRun=None, matchRadius=None, zpLabel=None, fluxToPlotList=None,
-                 postFix="", flagsCat=None):
+                 postFix="", flagsCat=None, highlightList=None):
         if fluxToPlotList is None:
             fluxToPlotList = self.config.fluxToPlotList
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02}})
@@ -825,7 +825,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
     def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                       tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                      flagsCat=None):
+                      flagsCat=None, highlightList=None):
         distEnforcer = None
         shortName = "diff_x"
         self.log.info("shortName = {:s}".format(shortName))
