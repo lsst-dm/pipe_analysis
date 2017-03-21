@@ -7,7 +7,7 @@ np.seterr(all="ignore")
 from eups import Eups
 eups = Eups()
 
-from lsst.pex.config import Config, Field, ListField
+from lsst.pex.config import Config, Field, ListField, DictField
 from .utils import *
 from .plotUtils import *
 
@@ -25,6 +25,18 @@ class AnalysisConfig(Config):
     magThreshold = Field(dtype=float, default=21.0, doc="Magnitude threshold to apply")
     magPlotMin = Field(dtype=float, default=14.0, doc="Minimum magnitude to plot")
     magPlotMax = Field(dtype=float, default=26.0, doc="Maximum magnitude to plot")
+    magPlotStarMin = DictField(
+        keytype=str,
+        itemtype=float,
+        default={"HSC-G": 16.5,"HSC-R": 16.5,"HSC-I": 16.5,"HSC-Z": 13.5,"HSC-Y": 13.5,"NB0921": 14.5},
+        doc="Minimum magnitude to plot",
+    )
+    magPlotStarMax = DictField(
+        keytype=str,
+        itemtype=float,
+        default={"HSC-G": 24.5,"HSC-R": 24.5,"HSC-I": 24.0,"HSC-Z": 20.5,"HSC-Y": 21.5,"NB0921": 22.5},
+        doc="Maximum magnitude to plot",
+    )
     fluxColumn = Field(dtype=str, default="base_PsfFlux_flux", doc="Column to use for flux/mag plotting")
     coaddZp = Field(dtype=float, default=27.0, doc="Magnitude zero point to apply for coadds")
     commonZp = Field(dtype=float, default=33.0, doc="Magnitude zero point to apply for common ZP plots")
@@ -177,14 +189,10 @@ class Analysis(object):
                 inLimits = self.data["star"].quantity < self.qMax
                 inLimits &= self.data["star"].quantity > self.qMin
 
-        starMagMax = self.data["star"].mag.max() - 0.1
-        aboveStarMagMax = self.data["star"].mag > starMagMax
-        while len(self.data["star"].mag[aboveStarMagMax]) < max(1.0, 0.008*len(self.data["star"].mag)):
-            starMagMax -= 0.2
-            aboveStarMagMax = self.data["star"].mag > starMagMax
-
         magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
-        # magMax = max(self.magThreshold + 1.0, min(magMax, starMagMax))
+        if "calib_psfUsed" in self.goodKeys:
+            magMin = self.config.magPlotStarMin[filterStrFromFilename(filename)]
+            magMax = self.config.magPlotStarMax[filterStrFromFilename(filename)]
 
         axScatter.set_xlim(magMin, magMax)
         axScatter.set_ylim(0.99*self.qMin, 0.99*self.qMax)
