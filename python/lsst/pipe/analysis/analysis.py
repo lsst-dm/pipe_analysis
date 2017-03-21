@@ -442,6 +442,82 @@ class Analysis(object):
         fig.savefig(filename)
         plt.close(fig)
 
+    def plotQuiver(self, catalog, filename, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
+                   camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
+                   matchRadius=None, zpLabel=None, dataName="star", scale=1):
+        """Plot ellipticity residuals quiver plot"""
+        # Cull the catalog of flagged sources
+        flags = ["base_SdssShape_flag", ]
+        for flag in flags:
+            catalog = catalog[~catalog[flag]].copy(deep=True)
+        # Cull the catalog down to calibration candidates
+        psfUsed = catalog[catalog["calib_psfUsed"]].copy(deep=True)
+        nChild = np.sum(psfUsed["deblend_nChild"])
+
+        catalog, catStr = psfUsed, "psfUsed"
+        pad = 0.02 # Number of degrees to pad the axis ranges
+        ra = np.rad2deg(catalog["coord_ra"])
+        dec = np.rad2deg(catalog["coord_dec"])
+        raMin, raMax = np.round(ra.min() - pad, 2), np.round(ra.max() + pad, 2)
+        decMin, decMax = np.round(dec.min() - pad, 2), np.round(dec.max() + pad, 2)
+
+        deltaRa = raMax - raMin
+        deltaDec = decMax - decMin
+        deltaDeg = max((deltaRa, deltaDec))
+        raMin = (raMin + deltaRa/2.0) - deltaDeg/2.0
+        raMax = raMin + deltaDeg
+        decMin = (decMin + deltaDec/2.0) - deltaDeg/2.0
+        decMax = decMin + deltaDeg
+
+        fig, axes = plt.subplots(1, 1, subplot_kw=dict(axisbg="0.7"))
+
+        if dataId is not None and butler is not None and ccdList is not None:
+            plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=zpLabel)
+
+        if tractInfo is not None and patchList is not None:
+            for ip, patch in enumerate(tractInfo):
+                if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
+                    raPatch, decPatch = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
+                    raMin = min(np.round(min(raPatch) - pad, 2), raMin)
+                    raMax = max(np.round(max(raPatch) + pad, 2), raMax)
+                    decMin = min(np.round(min(decPatch) - pad, 2), decMin)
+                    decMax = max(np.round(max(decPatch) + pad, 2), decMax)
+            plotPatchOutline(axes, tractInfo, patchList)
+
+        if catStr != "psfUsed":
+            axes.scatter(np.rad2deg(psfUsed["coord_ra"]), np.rad2deg(psfUsed["coord_dec"]), s=10, marker="o",
+                         c='w', edgecolors='w', label='psfUsed')
+        e1 = e1ResidsSdss()
+        e1 = e1(catalog)
+        e2 = e2ResidsSdss()
+        e2 = e2(catalog)
+        e = np.sqrt(e1**2 +e2**2)
+
+        nz = matplotlib.colors.Normalize()
+        nz.autoscale(e)
+        cax, _ = matplotlib.colorbar.make_axes(plt.gca())
+        cb = matplotlib.colorbar.ColorbarBase(cax, cmap=plt.cm.jet, norm=nz)
+        cb.set_label(
+            r"ellipticity residual: $\delta_e$ = $\sqrt{(e1_{src}-e1_{psf})^2 + (e2_{src}-e2_{psf})^2}$")
+
+        getQuiver(ra, dec, e1, e2, axes, color=plt.cm.jet(nz(e)), scale=scale, width=0.002, label=catStr)
+
+        axes.set_xlabel("RA (deg)")
+        axes.set_ylabel("Dec (deg)")
+
+        axes.set_xlim(raMax, raMin)
+        axes.set_ylim(decMin, decMax)
+
+        if hscRun is not None:
+            axes.set_title("HSC stack run: " + hscRun, color="#800080")
+        labelVisit(filename, plt, axes, 0.5, 1.07)
+        if zpLabel is not None:
+            labelZp(zpLabel, plt, axes, 0.13, -0.09, color="green")
+        axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
+
+        fig.savefig(filename)
+        plt.close(fig)
+
     def plotAll(self, dataId, filenamer, log, enforcer=None, forcedMean=None, butler=None, camera=None,
                 ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
                 postFix=""):
