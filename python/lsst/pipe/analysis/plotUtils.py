@@ -67,7 +67,8 @@ def labelZp(zpLabel, plt, axis, xLoc, yLoc, rotation=0, color="k"):
              transform=axis.transAxes, color=color)
 
 def annotateAxes(plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff=0.045,
-                 ha="left", va="top", color="blue", isHist=False, hscRun=None, matchRadius=None):
+                 ha="left", va="top", color="blue", isHist=False, hscRun=None, matchRadius=None,
+                 writeMinMax=None):
     xOffFact = 0.64*len(" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]))
     axes.annotate(dataSet+r" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]),
                   xy=(x0, y0), xycoords="axes fraction", ha=ha, va=va, fontsize=10, color="blue")
@@ -78,6 +79,10 @@ def annotateAxes(plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff
     axes.annotate("stdev = {0.stdev:.4f}".format(stats[dataSet]), xy=(x0, y0-2*yOff),
                   xycoords="axes fraction", ha=ha, va=va, fontsize=10)
     yOffMult = 3
+    if writeMinMax is not None:
+        axes.annotate("Min, Max (all stars) = ({0:.2f}, {1:.2f})\"".format(), xy=(x0, y0-yOffMult*yOff),
+                      xycoords="axes fraction", ha=ha, va=va, fontsize=10)
+        yOffMult += 1
     if matchRadius is not None:
         axes.annotate("Match radius = {0:.2f}\"".format(matchRadius), xy=(x0, y0-yOffMult*yOff),
                       xycoords="axes fraction", ha=ha, va=va, fontsize=10)
