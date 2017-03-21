@@ -231,12 +231,13 @@ class CoaddAnalysisTask(CmdLineTask):
                 self.plotMatches(matches, filterName, filenamer, dataId, cat)
 
     def readCatalogs(self, patchRefList, dataset, index=0):
-        catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS) for
+        catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS) for
                    patchRef in patchRefList if patchRef.datasetExists(dataset)]
         if len(catList) == 0:
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
         if self.config.onlyReadStars and "base_ClassificationExtendedness_value" in catList[index].schema:
-            catList = [cat[cat["base_ClassificationExtendedness_value"] < 0.5].copy(True) for cat in catList]
+            catList = [cat[cat["base_ClassificationExtendedness_value"] < 0.5].copy(deep=True)
+                       for cat in catList]
         return concatenateCatalogs(catList)
 
     def readSrcMatches(self, dataRefList, dataset, hscRun=None, wcs=None):
@@ -523,7 +524,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def overlaps(self, forcedCat, flagsCat):
         # Don't include parents of blended objects
-        noParentsForcedCat = forcedCat[flagsCat["deblend_nChild"] == 0].copy(True)
+        noParentsForcedCat = forcedCat[flagsCat["deblend_nChild"] == 0].copy(deep=True)
         matches = afwTable.matchRaDec(noParentsForcedCat, self.config.matchOverlapRadius*afwGeom.arcseconds,
                                       True)
         if len(matches) == 0:
@@ -762,10 +763,10 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
         # purge the catalogs of flagged sources
         for flag in self.config.analysis.flags:
-            forced1 = forced1[~unforced1[flag]].copy(True)
-            unforced1 = unforced1[~unforced1[flag]].copy(True)
-            forced2 = forced2[~unforced2[flag]].copy(True)
-            unforced2 = unforced2[~unforced2[flag]].copy(True)
+            forced1 = forced1[~unforced1[flag]].copy(deep=True)
+            unforced1 = unforced1[~unforced1[flag]].copy(deep=True)
+            forced2 = forced2[~unforced2[flag]].copy(deep=True)
+            unforced2 = unforced2[~unforced2[flag]].copy(deep=True)
 
         forced = self.matchCatalogs(forced1, forced2)
         unforced = self.matchCatalogs(unforced1, unforced2)
