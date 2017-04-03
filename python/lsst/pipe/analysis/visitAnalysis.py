@@ -227,7 +227,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                        hscRun=hscRun, zpLabel=self.zpLabel)
                 self.plotFootprint(catalog, filenamer, dataId, butler=butler, camera=camera,
                                    ccdList=ccdListPerTract, hscRun=hscRun, zpLabel=self.zpLabel,
-                                   plotRunStats=False, highlightList=[("parent", "yellow"), ])
+                                   plotRunStats=False, highlightList=[("parent", 0, "yellow"), ])
 
             if self.config.doPlotQuiver:
                 self.plotQuiver(catalog, filenamer(dataId, description="ellipResids", style="quiver"),
