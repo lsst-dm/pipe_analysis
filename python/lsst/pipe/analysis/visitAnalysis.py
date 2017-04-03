@@ -191,9 +191,19 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if len(dataRefListTract) == 0:
                 self.log.info("No data found for tract: {:d}".format(tractList[i]))
                 continue
+            butler = dataRefListTract[0].getButler()
+            camera = butler.get("camera")
+            dataId = dataRefListTract[0].dataId
+            self.log.info("dataId: {:s}".format(dataId))
+            # Check metadata to see if stack used was HSC
+            metadata = butler.get("calexp_md", dataRefListTract[0].dataId)
+            hscRun = checkHscStack(metadata)
             dataset = "src"
             if self.config.doApplyUberCal:
-                dataset = "wcs_md"
+                if hscRun is not None:
+                    dataset = "wcs_hsc_md"
+                else:
+                    dataset = "wcs_md"
             ccdListPerTract = [dataRef.dataId["ccd"] for dataRef in dataRefListTract if
                                dataRef.datasetExists(dataset)]
             if len(ccdListPerTract) == 0:
@@ -201,15 +211,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     self.log.fatal("No dataset found...are you sure you ran meas_mosaic? "
                                    "If not, run with --config doApplyUberCal=False")
                 raise RuntimeError("No datasets found for datasetType = {:s}".format(dataset))
-            butler = dataRefListTract[0].getButler()
-            camera = butler.get("camera")
-            dataId = dataRefListTract[0].dataId
-            self.log.info("dataId: {:s}".format(dataId))
             filterName = dataId["filter"]
             filenamer = Filenamer(butler, "plotVisit", dataRefListTract[0].dataId)
-            # Check metadata to see if stack used was HSC
-            metadata = butler.get("calexp_md", dataRefListTract[0].dataId)
-            hscRun = checkHscStack(metadata)
             commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", hscRun=hscRun)
             if hscRun and self.config.doAddAperFluxHsc:
                 self.log.info("HSC run: adding aperture flux to schema...")
@@ -315,8 +318,12 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             commonZpCat = calibrateSourceCatalog(commonZpCat, self.config.analysis.commonZp)
             commonZpCatList.append(commonZpCat)
             if self.config.doApplyUberCal:
-                if not dataRef.datasetExists("wcs_md") or not dataRef.datasetExists("fcr_md"):
-                    continue
+                if hscRun is not None:
+                    if not dataRef.datasetExists("wcs_hsc_md") or not dataRef.datasetExists("fcr_hsc_md"):
+                        continue
+                else:
+                    if not dataRef.datasetExists("wcs_md") or not dataRef.datasetExists("fcr_md"):
+                        continue
             catalog = self.calibrateCatalogs(dataRef, catalog, metadata)
             catList.append(catalog)
 
@@ -331,16 +338,21 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
                 continue
-            if self.config.doApplyUberCal:
-                if not dataRef.datasetExists("wcs_md") or not dataRef.datasetExists("fcr_md"):
-                    continue
             butler = dataRef.getButler()
             metadata = butler.get("calexp_md", dataRef.dataId)
+            hscRun = checkHscStack(metadata)
+            if self.config.doApplyUberCal:
+                if hscRun is not None:
+                    if not dataRef.datasetExists("wcs_hsc_md") or not dataRef.datasetExists("fcr_hsc_md"):
+                        continue
+                else:
+                    if not dataRef.datasetExists("wcs_md") or not dataRef.datasetExists("fcr_md"):
+                        continue
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
             # Set an alias map for differing src naming conventions of different stacks (if any)
-            if checkHscStack(metadata) and self.config.srcSchemaMap:
+            if hscRun is not None and self.config.srcSchemaMap:
                 # for cat in [commonZpCat, catalog]:
                 aliasMap = catalog.schema.getAliasMap()
                 for lsstName, otherName in self.config.srcSchemaMap.iteritems():
@@ -490,7 +502,10 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         commonZpDone = False
         dataset = "src"
         if self.config.doApplyUberCal:
-            dataset = "wcs_md"
+            if hscRun is not None:
+                dataset = "wcs_hsc_md"
+            else:
+                dataset = "wcs_md"
 
         i = -1
         for dataRefListTract1, dataRefListTract2 in zip(dataRefListPerTract1, dataRefListPerTract2):
@@ -645,10 +660,16 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             commonZpCat2 = calibrateSourceCatalog(commonZpCat2, self.config.analysis.commonZp)
             commonZpCatList2.append(commonZpCat2)
             if self.config.doApplyUberCal:
-                if not dataRef1.datasetExists("wcs_md") or not dataRef1.datasetExists("fcr_md"):
-                    continue
-                if not dataRef2.datasetExists("wcs_md") or not dataRef2.datasetExists("fcr_md"):
-                    continue
+                if hscRun is not None:
+                    if not dataRef1.datasetExists("wcs_hsc_md") or not dataRef1.datasetExists("fcr_hsc_md"):
+                        continue
+                    if not dataRef2.datasetExists("wcs_hsc_md") or not dataRef2.datasetExists("fcr_hsc_md"):
+                        continue
+                else:
+                    if not dataRef1.datasetExists("wcs_md") or not dataRef1.datasetExists("fcr_md"):
+                        continue
+                    if not dataRef2.datasetExists("wcs_md") or not dataRef2.datasetExists("fcr_md"):
+                        continue
             srcCat1 = self.calibrateCatalogs(dataRef1, srcCat1, metadata1)
             catList1.append(srcCat1)
             srcCat2 = self.calibrateCatalogs(dataRef2, srcCat2, metadata2)
