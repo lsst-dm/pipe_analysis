@@ -259,12 +259,17 @@ class Analysis(object):
                                                 alpha=alpha))
 
             if highlightList is not None:
-                for flag, color in highlightList:
-                    highlightSelection = data.catalog[flag] > 0
-                    dataPoints.append(axScatter.scatter(
+                for flag, threshValue, color in highlightList:
+                    highlightSelection = data.catalog[flag] > threshValue
+                    if name == "star":
+                        dataPoints.append(axScatter.scatter(
+                                data.mag[highlightSelection], data.quantity[highlightSelection], s=ptSize,
+                                marker="o", lw=0.75, facecolors="none", edgecolors=color, label=flag,
+                                alpha=alpha))
+                    else:
+                        axScatter.scatter(
                             data.mag[highlightSelection], data.quantity[highlightSelection], s=ptSize,
-                            marker="o", lw=0.75, facecolors="none", edgecolors=color, label=flag,
-                            alpha=alpha))
+                            marker="o", lw=0.75, facecolors="none", edgecolors=color, label=flag, alpha=alpha)
 
             axHistx.hist(data.mag, bins=xBins, color=histColor, alpha=0.6, label=name)
             axHisty.hist(data.quantity, bins=yBins, color=histColor, alpha=0.6, orientation="horizontal",
