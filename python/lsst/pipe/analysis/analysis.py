@@ -370,8 +370,9 @@ class Analysis(object):
         if camera is not None and len(ccdList) > 0:
             self.plotCameraOutline(axTopRight, camera, ccdList)
 
-        if skymap is not None and len(patchList) > 0:
-            self.plotPatchOutline(axTopRight, skymap, patchList)
+# VERY slow for our 'rings' skymap
+#        if skymap is not None and len(patchList) > 0:
+#            self.plotPatchOutline(axTopRight, skymap, patchList)
 
         starMagMax = self.data["star"].mag.max() - 0.1
         aboveStarMagMax = self.data["star"].mag > starMagMax
