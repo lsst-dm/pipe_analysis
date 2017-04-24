@@ -523,8 +523,7 @@ class CoaddAnalysisTask(CmdLineTask):
     def overlaps(self, forcedCat, flagsCat):
         # Don't include parents of blended objects
         noParentsForcedCat = forcedCat[flagsCat["deblend_nChild"] == 0].copy(deep=True)
-        matches = afwTable.matchRaDec(noParentsForcedCat, self.config.matchOverlapRadius*afwGeom.arcseconds,
-                                      True)
+        matches = afwTable.matchRaDec(noParentsForcedCat, self.config.matchOverlapRadius*afwGeom.arcseconds)
         if len(matches) == 0:
             self.log.info("Did not find any overlapping matches")
         return joinMatches(matches, "first_", "second_")
