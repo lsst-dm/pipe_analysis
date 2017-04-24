@@ -18,12 +18,14 @@ from collections import defaultdict
 
 from lsst.daf.persistence.butler import Butler
 from lsst.daf.persistence.safeFileIo import safeMakeDir
-from lsst.pex.config import Config, Field, ConfigField, ListField, DictField, ConfigDictField
+from lsst.pex.config import (Config, Field, ConfigField, ListField, DictField, ConfigDictField,
+                             ConfigurableField)
 from lsst.pipe.base import Struct, CmdLineTask, ArgumentParser, TaskRunner, TaskError
 from lsst.coadd.utils import TractDataIdContainer
 from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog, matchesFromCatalog
 from lsst.meas.astrom import AstrometryConfig, LoadAstrometryNetObjectsTask, LoadAstrometryNetObjectsConfig
+from lsst.meas.algorithms import LoadIndexedReferenceObjectsTask
 from lsst.pipe.tasks.colorterms import ColortermLibrary
 from lsst.meas.mosaic.updateExposure import applyMosaicResultsCatalog, applyMosaicResultsExposure
 
@@ -1163,8 +1165,7 @@ class CoaddAnalysisConfig(Config):
     matchesMaxDistance = Field(dtype=float, default=0.15, doc="Maximum plotting distance for matches")
     externalCatalogs = ConfigDictField(keytype=str, itemtype=AstrometryConfig, default={},
                                        doc="Additional external catalogs for matching")
-    refObjLoaderConfig = ConfigField(dtype=LoadAstrometryNetObjectsConfig,
-                                     doc="Configuration for reference object loader")
+    refObjLoader = ConfigurableField(target=LoadIndexedReferenceObjectsTask, doc="Reference object loader")
     doPlotMags = Field(dtype=bool, default=True, doc="Plot magnitudes?")
     doPlotSizes = Field(dtype=bool, default=True, doc="Plot PSF sizes?")
     doPlotCentroids = Field(dtype=bool, default=True, doc="Plot centroids?")
@@ -1194,7 +1195,8 @@ class CoaddAnalysisConfig(Config):
         Config.setDefaults(self)
         # self.externalCatalogs = {"sdss-dr9-fink-v5b": astrom}
         self.analysisMatches.magThreshold = 21.0 # External catalogs like PS1 and SDSS used smaller telescopes
-
+        self.refObjLoader.ref_dataset_name = "ps1_pv3_3pi_20170110"
+        self.colorterms.load(os.path.join(os.environ["OBS_SUBARU_DIR"], "config", "hsc", "colorterms.py"))
 
 class CoaddAnalysisRunner(TaskRunner):
     @staticmethod
@@ -1321,7 +1323,7 @@ class CoaddAnalysisTask(CmdLineTask):
             matchmeta = packedMatches.table.getMetadata()
             rad = matchmeta.getDouble("RADIUS")
             matchmeta.setDouble("RADIUS", rad*1.05, "field radius in degrees, approximate, padded")
-            refObjLoader = LoadAstrometryNetObjectsTask(self.config.refObjLoaderConfig)
+            refObjLoader = self.config.refObjLoader.apply(butler=butler)
             matches = refObjLoader.joinMatchListWithCatalog(packedMatches, catalog)
             # LSST reads in a_net catalogs with flux in "janskys", so must convert back to DN
             matches = matchJanskyToDn(matches)
