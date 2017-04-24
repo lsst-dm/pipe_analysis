@@ -1230,7 +1230,7 @@ class CoaddAnalysisConfig(Config):
     matchRadius = Field(dtype=float, default=0.5, doc="Matching radius (arcseconds)")
     colorterms = ConfigField(dtype=ColortermLibrary, doc="Library of color terms")
     photoCatName = Field(dtype=str, default="sdss", doc="Name of photometric reference catalog; "
-                         "used to select a color term dict in colorterms.""Name for coadd")
+                         "used to select a color term dict in colorterms.")
     analysis = ConfigField(dtype=AnalysisConfig, doc="Analysis plotting options")
     analysisMatches = ConfigField(dtype=AnalysisConfig, doc="Analysis plotting options for matches")
     matchesMaxDistance = Field(dtype=float, default=0.15, doc="Maximum plotting distance for matches")
@@ -1526,7 +1526,7 @@ class CoaddAnalysisTask(CmdLineTask):
         catalog = joinMatches(afwTable.matchRaDec(forced, unforced,
                                                   self.config.matchRadius*afwGeom.arcseconds),
                               "forced_", "unforced_")
-        catalog.writeFits(dataId["filter"] + ".fits")
+#        catalog.writeFits(dataId["filter"] + ".fits")
         for col in self.config.fluxToPlotList:
             # ["base_PsfFlux", "base_GaussianFlux", "slot_CalibFlux", "ext_photometryKron_KronFlux",
             # "modelfit_Cmodel", "modelfit_Cmodel_exp_flux", "modelfit_Cmodel_dev_flux"]:
