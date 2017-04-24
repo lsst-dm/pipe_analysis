@@ -1327,7 +1327,7 @@ class CoaddAnalysisTask(CmdLineTask):
             # catalog = joinCatalogs(meas, forced, prefix1="meas_", prefix2="forced_")
 
         # Check metadata to see if stack used was HSC
-        metadata = butler.get("deepCoadd_md", patchRefList[0].dataId)
+        metadata = butler.get("deepCoadd_calexp_md", patchRefList[0].dataId)
         # Set an alias map for differing src naming conventions of different stacks (if any)
         hscRun = checkHscStack(metadata)
         if hscRun is not None and self.config.srcSchemaMap is not None:
@@ -1381,7 +1381,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 continue
             butler = dataRef.getButler()
             if dataset.startswith("deepCoadd_"):
-                metadata = butler.get("deepCoadd_md", dataRef.dataId)
+                metadata = butler.get("deepCoadd_calexp_md", dataRef.dataId)
             else:
                 metadata = butler.get("calexp_md", dataRef.dataId)
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
