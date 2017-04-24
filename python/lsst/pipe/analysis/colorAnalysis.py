@@ -302,7 +302,7 @@ class ColorAnalysisTask(CmdLineTask):
             gg = catalogs["HSC-G"]
             ii = catalogs["HSC-I"]
             assert len(gg) == len(ii)
-            mapperList = afwTable.SchemaMapper.join(afwTable.SchemaVector([gg.schema, ii.schema]),
+            mapperList = afwTable.SchemaMapper.join([gg.schema, ii.schema],
                                                     ["g_", "i_"])
             catalog = afwTable.BaseCatalog(mapperList[0].getOutputSchema())
             catalog.reserve(len(gg))

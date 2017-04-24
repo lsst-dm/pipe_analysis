@@ -393,8 +393,7 @@ def concatenateCatalogs(catalogList):
     return catalog
 
 def joinMatches(matches, first="first_", second="second_"):
-    mapperList = afwTable.SchemaMapper.join(afwTable.SchemaVector([matches[0].first.schema,
-                                                                   matches[0].second.schema]),
+    mapperList = afwTable.SchemaMapper.join([matches[0].first.schema, matches[0].second.schema],
                                             [first, second])
     firstAliases = matches[0].first.schema.getAliasMap()
     secondAliases = matches[0].second.schema.getAliasMap()
@@ -439,7 +438,7 @@ def joinCatalogs(catalog1, catalog2, prefix1="cat1_", prefix2="cat2_"):
     if not checkIdLists(catalog1, catalog2):
         raise RuntimeError("Catalogs with different sets of objects cannot be joined")
 
-    mapperList = afwTable.SchemaMapper.join(afwTable.SchemaVector([catalog1[0].schema, catalog2[0].schema]),
+    mapperList = afwTable.SchemaMapper.join([catalog1[0].schema, catalog2[0].schema],
                                             [prefix1, prefix2])
     schema = mapperList[0].getOutputSchema()
     catalog = afwTable.BaseCatalog(schema)
