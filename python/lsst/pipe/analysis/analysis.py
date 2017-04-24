@@ -1245,6 +1245,12 @@ class CoaddAnalysisTask(CmdLineTask):
 ###            catalog = catalog[catalog["deblend_nChild"] == 0].copy(True) # Don't care about blended objects
             forced = self.readCatalogs(patchRefList, "deepCoadd_forced_src")
             forced = self.calibrateCatalogs(forced)
+
+            # XXX
+            wcs = skymap[dataRef.dataId["tract"]].getWcs()
+            for src in forced:
+                src.updateCoord(wcs)
+
             unforced = self.readCatalogs(patchRefList, "deepCoadd_meas")
             unforced = self.calibrateCatalogs(unforced)
             # catalog = joinCatalogs(meas, forced, prefix1="meas_", prefix2="forced_")
@@ -1311,6 +1317,16 @@ class CoaddAnalysisTask(CmdLineTask):
             # (which requires a refObjLoader to be initialized).
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
             catalog = self.calibrateCatalogs(catalog)
+
+
+            # XXX RA,Dec not set in forced measurement
+            if dataset == "deepCoadd_forced_src":
+                skymap = dataRefList[0].get("deepCoadd_skyMap")
+                wcs = skymap[dataRefList[0].dataId["tract"]].getWcs()
+                for src in catalog:
+                    src.updateCoord(wcs)
+
+
             if dataset.startswith("deepCoadd_"):
                 packedMatches = butler.get("deepCoadd_src" + "Match", dataRef.dataId)
             else:
