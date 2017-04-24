@@ -1063,8 +1063,7 @@ def calibrateSourceCatalog(catalog, zp):
         factor = 10.0**(0.4*zp)
         if re.search(r"perture", name):
             factor = 10.0**(0.4*33.0)
-        for src in catalog:
-            src[key] /= factor
+        catalog[key] /= factor
     return catalog
 
 def calibrateCoaddSourceCatalog(catalog, zp):
@@ -1076,8 +1075,7 @@ def calibrateCoaddSourceCatalog(catalog, zp):
     fluxKeys, errKeys = getFluxKeys(catalog.schema)
     for name, key in fluxKeys.items() + errKeys.items():
         factor = 10.0**(0.4*zp)
-        for src in catalog:
-            src[key] /= factor
+        catalog[key] /= factor
     return catalog
 
 def backoutApCorr(catalog):
@@ -1096,10 +1094,11 @@ def backoutApCorr(catalog):
 def matchJanskyToDn(matches):
     # LSST reads in a_net catalogs with flux in "janskys", so must convert back to DN
     JANSKYS_PER_AB_FLUX = 3631.0
+    schema = matches[0].first.schema
+    keys = [schema[kk].asKey() for kk in schema.getNames() if "_flux" in kk]
     for m in matches:
-        for k in m.first.schema.getNames():
-            if "_flux" in k:
-                m.first[k] /= JANSKYS_PER_AB_FLUX
+        for k in keys:
+            m.first[k] /= JANSKYS_PER_AB_FLUX
     return matches
 
 def checkHscStack(metadata):
