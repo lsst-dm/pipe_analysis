@@ -252,10 +252,7 @@ class CoaddAnalysisTask(CmdLineTask):
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
             catalog = self.calibrateCatalogs(catalog, wcs=wcs)
             if dataset.startswith("deepCoadd_"):
-                if hscRun:
-                    packedMatches = butler.get("deepCoadd_meas" + "Match", dataRef.dataId)
-                else:
-                    packedMatches = butler.get("deepCoadd_src" + "Match", dataRef.dataId)
+                packedMatches = butler.get("deepCoadd_meas" + "Match", dataRef.dataId)
             else:
                 packedMatches = butler.get(dataset + "Match", dataRef.dataId)
             # The reference object loader grows the bbox by the config parameter pixelMargin.  This
