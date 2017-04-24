@@ -266,25 +266,17 @@ class Analysis(object):
         axScatter.tick_params(labelsize=10)
 
         if camera is not None and len(ccdList) > 0:
-            axTopRight = plt.axes(topRight)
-            axTopRight.set_aspect("equal")
-            plotCameraOutline(plt, axTopRight, camera, ccdList)
+            self.plotCameraOutline(axTopRight, camera, ccdList)
 
-        if tractInfo is not None and len(patchList) > 0:
-            axTopRight = plt.axes(topRight)
-            axTopRight.set_aspect("equal")
-            plotTractOutline(axTopRight, tractInfo, patchList)
+# VERY slow for our 'rings' skymap
+#        if skymap is not None and len(patchList) > 0:
+#            self.plotPatchOutline(axTopRight, skymap, patchList)
 
-        inLimits = self.data["star"].quantity < self.qMax
-        inLimits &= self.data["star"].quantity > self.qMin
-        if len(self.data["star"].quantity) > 0:
-            if len(self.data["star"].quantity[inLimits]) < max(1.0, 0.35*len(self.data["star"].quantity)):
-                log.info("No data within limits...decreasing/increasing qMin/qMax")
-            while (len(self.data["star"].quantity[inLimits]) < max(1.0, 0.35*len(self.data["star"].quantity))):
-                self.qMin -= 0.1*np.abs(self.qMin)
-                self.qMax += 0.1*self.qMax
-                inLimits = self.data["star"].quantity < self.qMax
-                inLimits &= self.data["star"].quantity > self.qMin
+        starMagMax = self.data["star"].mag.max() - 0.1
+        aboveStarMagMax = self.data["star"].mag > starMagMax
+        while len(self.data["star"].mag[aboveStarMagMax]) < max(1.0, 0.008*len(self.data["star"].mag)):
+            starMagMax -= 0.2
+            aboveStarMagMax = self.data["star"].mag > starMagMax
 
         magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
         if "calib_psfUsed" in self.goodKeys:
