@@ -1328,7 +1328,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
 
             if dataset.startswith("deepCoadd_"):
-                packedMatches = butler.get("deepCoadd_src" + "Match", dataRef.dataId)
+                packedMatches = butler.get("deepCoadd_measMatch", dataRef.dataId)
             else:
                 packedMatches = butler.get(dataset + "Match", dataRef.dataId)
             # The reference object loader grows the bbox by the config parameter pixelMargin.  This
