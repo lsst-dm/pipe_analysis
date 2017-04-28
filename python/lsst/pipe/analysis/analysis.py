@@ -145,6 +145,8 @@ class Analysis(object):
                               patchList=None, hscRun=None, matchRadius=None, zpLabel=None, plotRunStats=True,
                               highlightList=None):
         """Plot quantity against magnitude with side histogram"""
+        filterStr = filename.dataId.['filter']
+
         nullfmt = NullFormatter()  # no labels for histograms
         # definitions for the axes
         left, width = 0.10, 0.62
@@ -194,8 +196,8 @@ class Analysis(object):
 
         magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
         if "calib_psfUsed" in self.goodKeys:
-            magMin = self.config.magPlotStarMin[filterStrFromFilename(filename)]
-            magMax = self.config.magPlotStarMax[filterStrFromFilename(filename)]
+            magMin = self.config.magPlotStarMin[filterStr]
+            magMax = self.config.magPlotStarMax[filterStr]
 
         axScatter.set_xlim(magMin, magMax)
         axScatter.set_ylim(0.99*self.qMin, 0.99*self.qMax)
@@ -292,9 +294,8 @@ class Analysis(object):
         axScatter.xaxis.set_minor_locator(AutoMinorLocator(2))
         axScatter.yaxis.set_minor_locator(AutoMinorLocator(2))
 
-        axScatter.set_xlabel("%s mag (%s)" % (fluxToPlotString(self.fluxColumn),
-                                              filterStrFromFilename(filename)))
-        axScatter.set_ylabel(r"%s (%s)" % (self.quantityName, filterStrFromFilename(filename)))
+        axScatter.set_xlabel("%s mag (%s)" % (fluxToPlotString(self.fluxColumn), filterStr))
+        axScatter.set_ylabel(r"%s (%s)" % (self.quantityName, filterStr))
 
         if stats is not None:
             l1, l2 = annotateAxes(plt, axScatter, stats, "star", self.magThreshold,
@@ -337,7 +338,8 @@ class Analysis(object):
             numMax = max(numMax, num.max()*1.1)
         axes.set_xlim(self.qMin, self.qMax)
         axes.set_ylim(0.9, numMax)
-        axes.set_xlabel("{0:s} ({1:s})".format(self.quantityName, filterStrFromFilename(filename)))
+        filterStr = filename.dataId['filter']
+        axes.set_xlabel("{0:s} ({1:s})".format(self.quantityName, filterStr))
         axes.set_ylabel("Number")
         axes.set_yscale("log", nonposy="clip")
         x0, y0 = 0.03, 0.96
@@ -422,7 +424,7 @@ class Analysis(object):
         axes.set_xlim(raMax, raMin)
         axes.set_ylim(decMin, decMax)
 
-        filterStr = filterStrFromFilename(filename)
+        filterStr = filename.dataId['filter']
 
         mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vMin, vmax=vMax))
         mappable._A = []        # fake up the array of the scalar mappable. Urgh...
