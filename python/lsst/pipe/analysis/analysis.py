@@ -7,7 +7,9 @@ np.seterr(all="ignore")
 from eups import Eups
 eups = Eups()
 
-from lsst.pex.config import Config, Field, ListField, DictField
+from lsst.pex.config import (Config, Field, ConfigField, ListField, DictField, ConfigDictField,
+                             ConfigurableField)
+
 from .utils import *
 from .plotUtils import *
 
@@ -173,10 +175,11 @@ class Analysis(object):
             axTopRight.set_aspect("equal")
             plotCameraOutline(plt, axTopRight, camera, ccdList)
 
-        if tractInfo is not None and len(patchList) > 0:
-            axTopRight = plt.axes(topRight)
-            axTopRight.set_aspect("equal")
-            plotTractOutline(axTopRight, tractInfo, patchList)
+        # VERY slow for our 'rings' skymap
+        #if tractInfo is not None and len(patchList) > 0:
+        #    axTopRight = plt.axes(topRight)
+        #    axTopRight.set_aspect("equal")
+        #    plotTractOutline(axTopRight, tractInfo, patchList)
 
         inLimits = self.data["star"].quantity < self.qMax
         inLimits &= self.data["star"].quantity > self.qMin
