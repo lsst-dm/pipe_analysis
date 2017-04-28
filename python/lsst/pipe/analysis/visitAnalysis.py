@@ -367,7 +367,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             matchmeta = packedMatches.table.getMetadata()
             rad = matchmeta.getDouble("RADIUS")
             matchmeta.setDouble("RADIUS", rad*1.05, "field radius in degrees, approximate, padded")
-            refObjLoader = LoadAstrometryNetObjectsTask(self.config.refObjLoaderConfig)
+            refObjLoader = self.config.refObjLoader.apply(butler=butler)
             matches = refObjLoader.joinMatchListWithCatalog(packedMatches, catalog)
             if not hasattr(matches[0].first, "schema"):
                 raise RuntimeError("Unable to unpack matches.  "
