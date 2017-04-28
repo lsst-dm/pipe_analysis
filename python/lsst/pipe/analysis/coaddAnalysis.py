@@ -258,6 +258,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 self.log.info("Dataset does not exist: {0:r}, {1:s}".format(dataRef.dataId, dataset))
                 continue
             butler = dataRef.getButler()
+
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
@@ -273,10 +274,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
 
             if dataset.startswith("deepCoadd_"):
-                if hscRun:
-                    packedMatches = butler.get("deepCoadd_meas" + "Match", dataRef.dataId)
-                else:
-                    packedMatches = butler.get("deepCoadd_src" + "Match", dataRef.dataId)
+                packedMatches = butler.get("deepCoadd_measMatch", dataRef.dataId)
             else:
                 packedMatches = butler.get(dataset + "Match", dataRef.dataId)
             # The reference object loader grows the bbox by the config parameter pixelMargin.  This
