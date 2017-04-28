@@ -39,7 +39,7 @@ class CoaddAnalysisConfig(Config):
     matchOverlapRadius = Field(dtype=float, default=0.5, doc="Matching radius for overlaps (arcseconds)")
     colorterms = ConfigField(dtype=ColortermLibrary, doc="Library of color terms")
     photoCatName = Field(dtype=str, default="ps1", doc="Name of photometric reference catalog; "
-                         "used to select a color term dict in colorterms.""Name for coadd")
+                         "used to select a color term dict in colorterms.")
     analysis = ConfigField(dtype=AnalysisConfig, doc="Analysis plotting options")
     analysisMatches = ConfigField(dtype=AnalysisConfig, doc="Analysis plotting options for matches")
     matchesMaxDistance = Field(dtype=float, default=0.15, doc="Maximum plotting distance for matches")
