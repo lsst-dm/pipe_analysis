@@ -393,6 +393,9 @@ def concatenateCatalogs(catalogList):
     return catalog
 
 def joinMatches(matches, first="first_", second="second_"):
+    if len(matches)==0:
+        return [] # empty
+        
     mapperList = afwTable.SchemaMapper.join([matches[0].first.schema,
                                                 matches[0].second.schema],
                                             [first, second])
