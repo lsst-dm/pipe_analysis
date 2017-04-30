@@ -143,9 +143,10 @@ class Analysis(object):
 
     def plotAgainstMagAndHist(self, log, filename, stats=None, camera=None, ccdList=None, tractInfo=None,
                               patchList=None, hscRun=None, matchRadius=None, zpLabel=None, plotRunStats=True,
-                              highlightList=None):
+                              highlightList=None, filterStr=None):
         """Plot quantity against magnitude with side histogram"""
-        filterStr = filename.dataId.['filter']
+        if filterStr is None:
+            filterStr = '' 
 
         nullfmt = NullFormatter()  # no labels for histograms
         # definitions for the axes
@@ -319,7 +320,8 @@ class Analysis(object):
         plt.savefig(filename)
         plt.close()
 
-    def plotHistogram(self, filename, numBins=51, stats=None, hscRun=None, matchRadius=None, zpLabel=None):
+    def plotHistogram(self, filename, numBins=51, stats=None, hscRun=None, matchRadius=None, zpLabel=None,
+                        filterStr=None):
         """Plot histogram of quantity"""
         fig, axes = plt.subplots(1, 1)
         axes.axvline(0, linestyle="--", color="0.6")
@@ -338,7 +340,8 @@ class Analysis(object):
             numMax = max(numMax, num.max()*1.1)
         axes.set_xlim(self.qMin, self.qMax)
         axes.set_ylim(0.9, numMax)
-        filterStr = filename.dataId['filter']
+        if filterStr is None:
+            filterStr = ''
         axes.set_xlabel("{0:s} ({1:s})".format(self.quantityName, filterStr))
         axes.set_ylabel("Number")
         axes.set_yscale("log", nonposy="clip")
@@ -424,7 +427,7 @@ class Analysis(object):
         axes.set_xlim(raMax, raMin)
         axes.set_ylim(decMin, decMax)
 
-        filterStr = filename.dataId['filter']
+        filterStr = dataId['filter'] if dataId is not None else ''
 
         mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vMin, vmax=vMax))
         mappable._A = []        # fake up the array of the scalar mappable. Urgh...
@@ -569,7 +572,8 @@ class Analysis(object):
                                                   style="psfMagHist" + postFix),
                                    stats=stats, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                    patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                   zpLabel=zpLabel, plotRunStats=plotRunStats, highlightList=highlightList)
+                                   zpLabel=zpLabel, plotRunStats=plotRunStats, highlightList=highlightList,
+                                   filterStr=dataId['filter'])
 
         if self.config.doPlotOldMagsHist:
             self.plotAgainstMag(filenamer(dataId, description=self.shortName, style="psfMag" + postFix),

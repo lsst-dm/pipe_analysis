@@ -488,7 +488,7 @@ class CoaddAnalysisTask(CmdLineTask):
                            self.config.analysis, flags=["base_Footprint_nPix_flag"],
                            qMin=0, qMax=3000, labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
                            ).plotHistogram(filenamer, stats=stats, hscRun=hscRun, matchRadius=matchRadius,
-                                           zpLabel=zpLabel)
+                                           zpLabel=zpLabel, filterStr=dataId['filter'])
 
     def plotStarGal(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                     patchList=None, hscRun=None, matchRadius=None, zpLabel=None, flagsCat=None):
