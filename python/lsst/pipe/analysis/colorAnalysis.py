@@ -251,9 +251,9 @@ class ColorAnalysisTask(CmdLineTask):
                     # if all(ff in catalogs for ff in transforms[col].coeffs):
             if doAdd:
                 schema.addField(col, float, transforms[col].description)
-        schema.addField("numStarFlags", type=int, doc="Number of times source was flagged as star")
+        schema.addField("numStarFlags", type=np.int32, doc="Number of times source was flagged as star")
         badKey = schema.addField("bad", type="Flag", doc="Is this a bad source?")
-        schema.addField(self.fluxColumn, type=float, doc="Flux from filter " + self.config.fluxFilter)
+        schema.addField(self.fluxColumn, type=np.float64, doc="Flux from filter " + self.config.fluxFilter)
 
         # Copy basics (id, RA, Dec)
         new = afwTable.SourceCatalog(schema)
