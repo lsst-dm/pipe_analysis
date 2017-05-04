@@ -156,11 +156,10 @@ class CoaddAnalysisTask(CmdLineTask):
                        "ext_shapeHSM_HsmPsfMoments_yy", "ext_shapeHSM_HsmPsfMoments_xy", "deblend_nChild",
                        "calib_psfUsed","calib_psfCandidate"]
                        #, "calib_psfReserved"]
-        for flag in set(list(self.config.analysis.flags) + flagsToCopy):
-            if flag not in forced.schema:
-                if hscRun and flag == "slot_Centroid_flag":
-                    continue
-                forced = addColumnToSchema(unforced, forced, flag)
+        forced = addColumnsToSchema(unforced, forced,
+                                    [flag for flag in flagsToCopy + list(self.config.analysis.flags) if
+                                     flag not in forced.schema and
+                                     not (hscRun and flag == "slot_Centroid_flag")])
 
         if self.config.doPlotFootprintNpix:
             forced = addFootprintNPix(forced, fromCat=unforced)
