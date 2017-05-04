@@ -1,11 +1,10 @@
+import os
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.ticker import NullFormatter, AutoMinorLocator
 import numpy as np
 np.seterr(all="ignore")
-from eups import Eups
-eups = Eups()
 
 from lsst.pex.config import Config, Field, ListField, DictField
 from .utils import *
@@ -1216,14 +1215,6 @@ def percent(values, p=0.5):
     interval = max(values) - m
     return m + p*interval
 
-@contextmanager
-def andCatalog(version):
-    current = eups.findSetupVersion("astrometry_net_data")[0]
-    eups.setup("astrometry_net_data", version, noRecursion=True)
-    try:
-        yield
-    finally:
-        eups.setup("astrometry_net_data", current, noRecursion=True)
 
 class CoaddAnalysisConfig(Config):
     coaddName = Field(dtype=str, default="deep", doc="Name for coadd")

@@ -3,8 +3,6 @@
 import os
 import numpy as np
 np.seterr(all="ignore")
-from eups import Eups
-eups = Eups()
 import functools
 
 from collections import defaultdict
