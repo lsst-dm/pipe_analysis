@@ -668,8 +668,7 @@ def calibrateSourceCatalog(catalog, zp):
     fluxKeys, errKeys = getFluxKeys(catalog.schema)
     for name, key in fluxKeys.items() + errKeys.items():
         factor = 10.0**(0.4*zp)
-        for src in catalog:
-            src[key] /= factor
+        catalog[key] /= factor
     return catalog
 
 def calibrateCoaddSourceCatalog(catalog, zp):
@@ -681,8 +680,7 @@ def calibrateCoaddSourceCatalog(catalog, zp):
     fluxKeys, errKeys = getFluxKeys(catalog.schema)
     for name, key in fluxKeys.items() + errKeys.items():
         factor = 10.0**(0.4*zp)
-        for src in catalog:
-            src[key] /= factor
+        catalog[key] /= factor
     return catalog
 
 def backoutApCorr(catalog):
