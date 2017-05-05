@@ -776,11 +776,16 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                             self.log.warn("Could not find base_SdssCentroid (or equivalent) flags")
 
         # purge the catalogs of flagged sources
+        bad1 = np.zeros(len(unforced1), dtype=bool)
+        bad2 = np.zeros(len(unforced2), dtype=bool)
         for flag in self.config.analysis.flags:
-            forced1 = forced1[~unforced1[flag]].copy(deep=True)
-            unforced1 = unforced1[~unforced1[flag]].copy(deep=True)
-            forced2 = forced2[~unforced2[flag]].copy(deep=True)
-            unforced2 = unforced2[~unforced2[flag]].copy(deep=True)
+            bad1 |= unforced1[flag]
+            bad2 |= unforced2[flag]
+
+        forced1 = forced1[~bad1].copy(deep=True)
+        unforced1 = unforced1[~bad1].copy(deep=True)
+        forced2 = forced2[~bad2].copy(deep=True)
+        unforced2 = unforced2[~bad2].copy(deep=True)
 
         forced = self.matchCatalogs(forced1, forced2)
         unforced = self.matchCatalogs(unforced1, unforced2)
