@@ -20,7 +20,7 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "sdssPsfTraceSizeCompare", "hsmPsfTraceSizeCompare", "e1ResidsSdss", "e2ResidsSdss",
            "e1ResidsHsm", "e2ResidsHsm", "FootNpixDiffCompare", "MagDiffErr", "ApCorrDiffErr", "CentroidDiff",
            "CentroidDiffErr", "deconvMom", "deconvMomStarGal", "concatenateCatalogs", "joinMatches",
-           "checkIdLists", "joinCatalogs", "getFluxKeys", "addColumnToSchema", "addApertureFluxesHSC",
+           "checkIdLists", "joinCatalogs", "getFluxKeys", "addColumnsToSchema", "addApertureFluxesHSC",
            "addFpPoint", "addFootprintNPix", "addRotPoint", "calibrateSourceCatalogMosaic",
            "calibrateSourceCatalog", "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn",
            "checkHscStack", "fluxToPlotString", "andCatalog"]
@@ -476,26 +476,30 @@ def getFluxKeys(schema):
         raise RuntimeError("No flux keys found")
     return fluxKeys, errKeys
 
-def addColumnToSchema(fromCat, toCat, colName, prefix=""):
-    # Retrieve the number of pixels in an sources footprint and add to schema
-    mapper = afwTable.SchemaMapper(toCat[0].schema)
-    mapper.addMinimalSchema(toCat[0].schema)
-    schema = mapper.getOutputSchema()
-    colName = prefix + colName
-    colFromKey = fromCat.schema.find(colName).getKey()
-    fromField = fromCat.schema.find(colName).getField()
-    colToKey = schema.addField(fromField)
+def addColumnsToSchema(fromCat, toCat, colName, prefix=""):
+    """Copy columns from fromCat to new version of toCat"""
+    fromMapper = afwTable.SchemaMapper(fromCat.schema)
+    fromMapper.addMinimalSchema(toCat.schema, False)
+    toMapper = afwTable.SchemaMapper(toCat.schema)
+    toMapper.addMinimalSchema(toCat.schema)
+    schema = fromMapper.editOutputSchema()
+    for col in colNameList:
+        colName = prefix + col
+        fromKey = fromCat.schema.find(colName).getKey()
+        fromField = fromCat.schema.find(colName).getField()
+        schema.addField(fromField)
+        toField = schema.find(colName).getField()
+        fromMapper.addMapping(fromKey, toField, doReplace=True)
+
     newCatalog = afwTable.SourceCatalog(schema)
     newCatalog.reserve(len(toCat))
 
-    for srcFrom, srcTo in zip(fromCat, toCat):
-        row = newCatalog.addNew()
-        row.assign(srcTo, mapper)
-        colValue = srcFrom.get(colFromKey)
-        row.set(colToKey, colValue)
+    newCatalog.extend(toCat, toMapper)
+    for srcFrom, srcTo in zip(fromCat, newCatalog):
+        srcTo.assign(srcFrom, fromMapper)
 
     aliases = newCatalog.schema.getAliasMap()
-    for k, v in toCat[0].schema.getAliasMap().items():
+    for k, v in toCat.schema.getAliasMap().items():
         aliases.set(k, v)
 
     return newCatalog
