@@ -4,8 +4,6 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import NullFormatter, AutoMinorLocator
 import numpy as np
 np.seterr(all="ignore")
-from eups import Eups
-eups = Eups()
 
 from lsst.pex.config import (Config, Field, ConfigField, ListField, DictField, ConfigDictField,
                              ConfigurableField)

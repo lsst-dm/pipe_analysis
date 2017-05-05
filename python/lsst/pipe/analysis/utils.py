@@ -732,8 +732,22 @@ def fluxToPlotString(fluxToPlot):
         return fluxToPlot
 
 
+_eups = None
+def getEups():
+    """Return a EUPS handle
+
+    We instantiate this once only, because instantiation is expensive.
+    """
+    global _eups
+    from eups import Eups  #noqa Nothing else depends on eups, so prevent it from importing unless needed
+    if not _eups:
+        _eups = Eups()
+    return _eups
+
+
 @contextmanager
 def andCatalog(version):
+    eups = getEups()
     current = eups.findSetupVersion("astrometry_net_data")[0]
     eups.setup("astrometry_net_data", version, noRecursion=True)
     try:
