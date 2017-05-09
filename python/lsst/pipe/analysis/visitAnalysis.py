@@ -15,7 +15,7 @@ from lsst.daf.persistence.butler import Butler
 from lsst.pipe.base import ArgumentParser, TaskRunner, TaskError
 from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
-from lsst.meas.astrom import LoadAstrometryNetObjectsTask
+from lsst.meas.extensions.astrometryNet import LoadAstrometryNetObjectsTask
 from .analysis import Analysis
 from .coaddAnalysis import (CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisConfig,
                             CompareCoaddAnalysisTask)

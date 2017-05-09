@@ -13,7 +13,8 @@ from lsst.pex.config import (Config, Field, ConfigField, ListField, DictField, C
 from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError
 from lsst.coadd.utils import TractDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
-from lsst.meas.astrom import AstrometryConfig, LoadAstrometryNetObjectsTask, LoadAstrometryNetObjectsConfig
+from lsst.meas.astrom import AstrometryConfig
+from lsst.meas.extensions.astrometryNet import LoadAstrometryNetObjectsTask, LoadAstrometryNetObjectsConfig
 from lsst.pipe.tasks.colorterms import ColortermLibrary
 
 from lsst.meas.algorithms import LoadIndexedReferenceObjectsTask
