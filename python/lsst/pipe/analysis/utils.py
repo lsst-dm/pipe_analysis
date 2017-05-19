@@ -586,8 +586,9 @@ def addFootprintNPix(catalog, fromCat=None, prefix=""):
         row = newCatalog.addNew()
         row.assign(srcTo, mapper)
         try:
-            footNpix = srcFrom.getFootprint().getNpix()
+            footNpix = srcFrom.getFootprint().getArea()
         except:
+            raise
             footNpix = 0 # used to be np.nan, but didn't work.
             row.set(fpFlag, True)
         row.set(fpKey, footNpix)
