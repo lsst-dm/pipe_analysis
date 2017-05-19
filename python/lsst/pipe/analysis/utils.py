@@ -587,13 +587,10 @@ def addFootprintNPix(catalog, fromCat=None, prefix=""):
         row.assign(srcTo, mapper)
         try:
             footNpix = srcFrom.getFootprint().getNpix()
-            row.set(fpKey, footNpix)
         except:
-            footNpix = np.nan
+            footNpix = -1 # used to be np.nan, but didn't work.
             row.set(fpFlag, True)
-
-        ## The following used to be set regardless of getNpix() working, but now breaks when footNpix is nan 
-        # row.set(fpKey, footNpix)
+        row.set(fpKey, footNpix)
 
     aliases = newCatalog.schema.getAliasMap()
     for k, v in catalog[0].schema.getAliasMap().items():
