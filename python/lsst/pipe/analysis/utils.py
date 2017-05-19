@@ -476,7 +476,7 @@ def getFluxKeys(schema):
         raise RuntimeError("No flux keys found")
     return fluxKeys, errKeys
 
-def addColumnsToSchema(fromCat, toCat, colName, prefix=""):
+def addColumnsToSchema(fromCat, toCat, colNameList, prefix=""):
     """Copy columns from fromCat to new version of toCat"""
     fromMapper = afwTable.SchemaMapper(fromCat.schema)
     fromMapper.addMinimalSchema(toCat.schema, False)
