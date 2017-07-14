@@ -1,3 +1,3 @@
 #!/usr/bin/env python
-from lsst.pipe.analysis.analysis import CoaddAnalysisTask
+from lsst.pipe.analysis.coaddAnalysis import CoaddAnalysisTask
 CoaddAnalysisTask.parseAndRun()
