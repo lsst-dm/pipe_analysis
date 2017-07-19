@@ -272,8 +272,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if self.config.doPlotMatches:
                 matches = self.readSrcMatches(dataRefListTract, "src")
                 self.plotMatches(matches, filterName, filenamer, dataId, butler=butler, camera=camera,
-                                 ccdList=ccdListPerTract, hscRun=hscRun, matchRadius=self.config.matchRadius,
-                                 zpLabel=self.zpLabel)
+                                 ccdList=ccdListPerTract, hscRun=hscRun, zpLabel=self.zpLabel)
 
             for cat in self.config.externalCatalogs:
                 if self.config.photoCatName not in cat:

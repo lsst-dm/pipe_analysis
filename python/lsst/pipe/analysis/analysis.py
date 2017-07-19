@@ -63,14 +63,17 @@ class Analysis(object):
             self.magThreshold = magThreshold
         self.qMin = qMin
         self.qMax = qMax
+        self.goodKeys = goodKeys  # include if goodKey = True
+        self.calibUsedOnly = len([key for key in self.goodKeys if "Used" in key])
+        if self.calibUsedOnly > 0:
+            self.magThreshold = 99 # Want to plot all calibUsed
+
         if labeller is not None:
-            if (labeller.labels.has_key("galaxy") and "calib_psfUsed" not in goodKeys and
-                self.quantityName != "pStar"):
+            if labeller.labels.has_key("galaxy") and self.calibUsedOnly == 0 and self.quantityName != "pStar":
                 self.qMin, self.qMax = 2.0*qMin, 2.0*qMax
-            if "galaxy" in labeller.plot and "calib_psfUsed" not in goodKeys and self.quantityName != "pStar":
+            if "galaxy" in labeller.plot and self.calibUsedOnly == 0 and self.quantityName != "pStar":
                 self.qMin, self.qMax = 2.0*qMin, 2.0*qMax
         self.prefix = prefix
-        self.goodKeys = goodKeys  # include if goodKey = True
         self.errFunc = errFunc
         if func is not None:
             if type(func) == np.ndarray:
@@ -194,7 +197,10 @@ class Analysis(object):
                 inLimits &= self.data["star"].quantity > self.qMin
 
         magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
-        if "calib_psfUsed" in self.goodKeys:
+        if "matches" in filename:  # narrow magnitude plotting limits for matches
+            magMin += 1
+            magMax -= 1
+        if self.calibUsedOnly > 0:
             magMin = self.config.magPlotStarMin[filterStr]
             magMax = self.config.magPlotStarMax[filterStr]
 
@@ -244,7 +250,7 @@ class Analysis(object):
                 axScatter.axvspan(self.magThreshold, axScatter.get_xlim()[1], facecolor="k",
                                   edgecolor="none", alpha=0.15)
                 # compute running stats (just for plotting)
-                if "calib_psfUsed" not in self.goodKeys and plotRunStats:
+                if self.calibUsedOnly == 0 and plotRunStats:
                     belowThresh = data.mag < magMax  # set lower if you want to truncate plotted running stats
                     numHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins))
                     syHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
@@ -377,7 +383,7 @@ class Analysis(object):
         good = (self.mag < self.magThreshold if self.magThreshold > 0 else
                 np.ones(len(self.mag), dtype=bool))
 
-        if dataName == "star" and "calib_psfUsed" not in self.goodKeys and "pStar" not in filename:
+        if dataName == "star" and self.calibUsedOnly == 0 and "pStar" not in filename:
             vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
         elif "CModel" in filename and "overlap" not in filename:
             vMin, vMax = 1.5*self.qMin, 0.5*self.qMax
@@ -591,8 +597,8 @@ class Analysis(object):
                              zpLabel=zpLabel, dataName="star")
 
         if (not any(ss in self.shortName for ss in
-                    ["pStar", "race", "Xx_", "Yy_", "Resids", "psfUsed", "gri", "riz", "izy", "z9y",
-                     "color_"])):
+                    ["pStar", "race", "Xx_", "Yy_", "Resids", "psfUsed", "photometryUsed",
+                     "gri", "riz", "izy", "z9y", "color_"])):
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky-gals" + postFix),
                                  stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,
                                  tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
