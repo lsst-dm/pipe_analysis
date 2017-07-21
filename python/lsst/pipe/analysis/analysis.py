@@ -28,13 +28,13 @@ class AnalysisConfig(Config):
     magPlotStarMin = DictField(
         keytype=str,
         itemtype=float,
-        default={"HSC-G": 16.5,"HSC-R": 16.5,"HSC-I": 16.5,"HSC-Z": 13.5,"HSC-Y": 13.5,"NB0921": 14.5},
+        default={"HSC-G": 16.5, "HSC-R": 17.0, "HSC-I": 16.5, "HSC-Z": 15.5, "HSC-Y": 15.5, "NB0921": 15.5},
         doc="Minimum magnitude to plot",
     )
     magPlotStarMax = DictField(
         keytype=str,
         itemtype=float,
-        default={"HSC-G": 24.5,"HSC-R": 24.5,"HSC-I": 24.0,"HSC-Z": 20.5,"HSC-Y": 21.5,"NB0921": 22.5},
+        default={"HSC-G": 23.5, "HSC-R": 24.0, "HSC-I": 23.5, "HSC-Z": 22.5, "HSC-Y": 22.5, "NB0921": 22.5},
         doc="Maximum magnitude to plot",
     )
     fluxColumn = Field(dtype=str, default="base_PsfFlux_flux", doc="Column to use for flux/mag plotting")
