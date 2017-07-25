@@ -191,6 +191,13 @@ class CoaddAnalysisTask(CmdLineTask):
 
         flagsCat = unforced
 
+        # Create and write parquet tables
+        tableFilenamer = Filenamer(patchRefList[indexExists].getButler(), 'qaTableCoadd',
+                                   patchRefList[indexExists].dataId)
+
+        writeParquet(forced, tableFilenamer(dataId, description='forced'))
+        writeParquet(unforced, tableFilenamer(dataId, description='unforced'))
+
         if self.config.doPlotFootprintNpix:
             self.plotFootprintHist(forced, filenamer(dataId, description="footNpix", style="hist"),
                                    dataId, butler=butler, camera=camera, tractInfo=tractInfo,
