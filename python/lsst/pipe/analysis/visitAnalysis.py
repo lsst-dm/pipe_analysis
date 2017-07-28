@@ -122,7 +122,7 @@ class CcdAnalysis(Analysis):
             cmap = plt.cm.pink
             vMin = min(0, np.round(self.data["star"].quantity.min() - 10))
             vMax = np.round(self.data["star"].quantity.max() + 50, -2)
-        fig, axes = plt.subplots(1, 1, subplot_kw=dict(axisbg="0.7"))
+        fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.7"))
         for name, data in self.data.iteritems():
             if not data.plot:
                 continue
