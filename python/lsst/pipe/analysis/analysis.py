@@ -400,7 +400,7 @@ class Analysis(object):
         if dataName == "star" and "deconvMom" in filename:
             vMin, vMax = -0.1, 0.1
 
-        fig, axes = plt.subplots(1, 1, subplot_kw=dict(axisbg="0.35"))
+        fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.35"))
         ptSize = None
 
         if dataId is not None and butler is not None and ccdList is not None:
@@ -522,7 +522,7 @@ class Analysis(object):
         decMin = (decMin + deltaDec/2.0) - deltaDeg/2.0
         decMax = decMin + deltaDeg
 
-        fig, axes = plt.subplots(1, 1, subplot_kw=dict(axisbg="0.7"))
+        fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.7"))
 
         if dataId is not None and butler is not None and ccdList is not None:
             plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=zpLabel)
