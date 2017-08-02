@@ -8,8 +8,8 @@ from lsst.meas.mosaic.updateExposure import applyMosaicResultsExposure
 
 from .utils import checkHscStack
 
-__all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller",
-           "MatchesStarGalaxyLabeller", "CosmosLabeller", "labelZp", "annotateAxes", "labelVisit",
+__all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "MatchesStarGalaxyLabeller",
+           "CosmosLabeller", "labelZp", "annotateAxes", "labelVisit", "labelCamera",
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
            "plotCcdOutline", "rotatePixelCoords", "bboxToRaDec", "percent", "setPtSize", "getQuiver"]
 
@@ -116,6 +116,11 @@ def labelVisit(filename, plt, axis, xLoc, yLoc, color="k"):
     if labelStr is not None:
         plt.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=10,
                  transform=axis.transAxes, color=color)
+
+def labelCamera(camera, plt, axis, xLoc, yLoc, color="k", fontSize=10):
+    labelStr = "camera: " + str(camera.getName())
+    plt.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=fontSize,
+             transform=axis.transAxes, color=color)
 
 def filterStrFromFilename(filename):
     """!Determine filter string from filename

@@ -325,7 +325,7 @@ class Analysis(object):
         plt.close()
 
     def plotHistogram(self, filename, numBins=51, stats=None, hscRun=None, matchRadius=None, zpLabel=None,
-                        filterStr=None):
+                      camera=None, filterStr=None):
         """Plot histogram of quantity"""
         fig, axes = plt.subplots(1, 1)
         axes.axvline(0, linestyle="--", color="0.6")
@@ -356,7 +356,9 @@ class Analysis(object):
             annotateAxes(plt, axes, stats, "star", self.magThreshold, x0=x0, y0=y0,
                          isHist=True, hscRun=hscRun, matchRadius=matchRadius)
         axes.legend()
-        labelVisit(filename, plt, axes, 0.5, 1.05)
+        if camera is not None:
+            labelCamera(camera, plt, axes, 0.5, 1.09)
+        labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
             labelZp(zpLabel, plt, axes, 0.13, -0.09, color="green")
         fig.savefig(filename)
@@ -439,7 +441,9 @@ class Analysis(object):
         cb.set_label(self.quantityName + " (" + filterStr + ")", rotation=270, labelpad=15)
         if hscRun is not None:
             axes.set_title("HSC stack run: " + hscRun, color="#800080")
-        labelVisit(filename, plt, axes, 0.5, 1.07)
+        if camera is not None:
+            labelCamera(camera, plt, axes, 0.5, 1.09)
+        labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
             labelZp(zpLabel, plt, axes, 0.13, -0.09, color="green")
         axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
@@ -565,7 +569,9 @@ class Analysis(object):
 
         if hscRun is not None:
             axes.set_title("HSC stack run: " + hscRun, color="#800080")
-        labelVisit(filename, plt, axes, 0.5, 1.07)
+        if camera is not None:
+            labelCamera(camera, plt, axes, 0.5, 1.09)
+        labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
             labelZp(zpLabel, plt, axes, 0.13, -0.09, color="green")
         axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
