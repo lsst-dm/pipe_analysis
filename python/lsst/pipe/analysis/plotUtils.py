@@ -62,34 +62,41 @@ class CosmosLabeller(StarGalaxyLabeller):
         return np.array([0 if ii in good else 1 for ii in catalog["id"]])
 
 
-def labelZp(zpLabel, plt, axis, xLoc, yLoc, rotation=0, color="k"):
-    plt.text(xLoc, yLoc, "zp: " + zpLabel, ha="center", va="center", fontsize=10, rotation=rotation,
+def labelZp(zpLabel, plt, axis, xLoc, yLoc, rotation=0, fontSize=9, color="k"):
+    plt.text(xLoc, yLoc, "zp: " + zpLabel, ha="center", va="center", fontsize=fontSize, rotation=rotation,
              transform=axis.transAxes, color=color)
 
-def annotateAxes(plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff=0.045,
+def annotateAxes(plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff=0.05, fontSize=8,
                  ha="left", va="top", color="blue", isHist=False, hscRun=None, matchRadius=None,
                  writeMinMax=None):
-    xOffFact = 0.64*len(" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]))
+    xOffFact = 0.67*len(" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]))
     axes.annotate(dataSet+r" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]),
-                  xy=(x0, y0), xycoords="axes fraction", ha=ha, va=va, fontsize=10, color="blue")
+                  xy=(x0, y0), xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize, color=color)
     axes.annotate(r" [mag<{0:.1f}]".format(magThreshold), xy=(x0*xOffFact, y0), xycoords="axes fraction",
-                  ha=ha, va=va, fontsize=10, color="k", alpha=0.55)
-    axes.annotate("mean = {0.mean:.4f}".format(stats[dataSet]), xy=(x0, y0-yOff),
-                  xycoords="axes fraction", ha=ha, va=va, fontsize=10)
-    axes.annotate("stdev = {0.stdev:.4f}".format(stats[dataSet]), xy=(x0, y0-2*yOff),
-                  xycoords="axes fraction", ha=ha, va=va, fontsize=10)
+                  ha=ha, va=va, fontsize=fontSize, color="k", alpha=0.55)
+    meanStr = "{0.mean:.4f}".format(stats[dataSet])
+    stdevStr = "{0.stdev:.4f}".format(stats[dataSet])
+    lenStr = 0.215 + 0.018*(max(max(len(meanStr), len(stdevStr)) - 6, 0))
+    axes.annotate("mean = ", xy=(x0 + 0.12, y0 -yOff),
+                  xycoords="axes fraction", ha="right", va=va, fontsize=fontSize, color="k")
+    axes.annotate(meanStr, xy=(x0 + lenStr, y0 - yOff),
+                  xycoords="axes fraction", ha="right", va=va, fontsize=fontSize, color="k")
+    axes.annotate("stdev = ", xy=(x0 + 0.12, y0- 2*yOff),
+                  xycoords="axes fraction", ha="right", va=va, fontsize=fontSize, color="k")
+    axes.annotate(stdevStr, xy=(x0 + lenStr, y0 - 2*yOff),
+                  xycoords="axes fraction", ha="right", va=va, fontsize=fontSize, color="k")
     yOffMult = 3
     if writeMinMax is not None:
-        axes.annotate("Min, Max (all stars) = ({0:.2f}, {1:.2f})\"".format(), xy=(x0, y0-yOffMult*yOff),
-                      xycoords="axes fraction", ha=ha, va=va, fontsize=10)
+        axes.annotate("Min, Max (all stars) = ({0:.2f}, {1:.2f})\"".format(), xy=(x0, y0 - yOffMult*yOff),
+                      xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize)
         yOffMult += 1
     if matchRadius is not None:
-        axes.annotate("Match radius = {0:.2f}\"".format(matchRadius), xy=(x0, y0-yOffMult*yOff),
-                      xycoords="axes fraction", ha=ha, va=va, fontsize=10)
+        axes.annotate("Match radius = {0:.2f}\"".format(matchRadius), xy=(x0, y0 - yOffMult*yOff),
+                      xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize)
         yOffMult += 1
     if hscRun is not None:
-        axes.annotate("HSC stack run: {0:s}".format(hscRun), xy=(x0, y0-yOffMult*yOff),
-                      xycoords="axes fraction", ha=ha, va=va, fontsize=10, color="#800080")
+        axes.annotate("HSC stack run: {0:s}".format(hscRun), xy=(x0, y0 - yOffMult*yOff),
+                      xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize, color="#800080")
     if isHist:
         l1 = axes.axvline(stats[dataSet].median, linestyle="dotted", color="0.7")
         l2 = axes.axvline(stats[dataSet].median+stats[dataSet].clip, linestyle="dashdot", color="0.7")
@@ -101,7 +108,7 @@ def annotateAxes(plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff
         l3 = axes.axhline(stats[dataSet].median-stats[dataSet].clip, linestyle="dashdot", color="0.7")
     return l1, l2
 
-def labelVisit(filename, plt, axis, xLoc, yLoc, color="k"):
+def labelVisit(filename, plt, axis, xLoc, yLoc, color="k", fontSize=9):
     labelStr = None
     if filename.find("tract-") >= 0:
         labelStr = "tract: "
@@ -114,7 +121,7 @@ def labelVisit(filename, plt, axis, xLoc, yLoc, color="k"):
         i2 = filename.find("/", i1)
         labelStr += filename[i1:i2]
     if labelStr is not None:
-        plt.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=10,
+        plt.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=fontSize,
                  transform=axis.transAxes, color=color)
 
 def labelCamera(camera, plt, axis, xLoc, yLoc, color="k", fontSize=10):
@@ -132,8 +139,8 @@ def filterStrFromFilename(filename):
 
     return filterStr
 
-def plotCameraOutline(plt, axes, camera, ccdList):
-    axes.tick_params(labelsize=6)
+def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
+    axes.tick_params(which="both", direction="in", labelleft="off", labelbottom="off")
     axes.locator_params(nbins=6)
     axes.ticklabel_format(useOffset=False)
     camRadius = max(camera.getFpBBox().getWidth(), camera.getFpBBox().getHeight())/2
@@ -145,16 +152,15 @@ def plotCameraOutline(plt, axes, camera, ccdList):
             ccdCenter = ccd.getCenter(cameraGeom.FOCAL_PLANE).getPoint()
             plt.gca().add_patch(patches.Rectangle(ccdCorners[0], *list(ccdCorners[2] - ccdCorners[0]),
                                                   fill=True, facecolor="y", edgecolor="k", ls="solid"))
-            # axes.text(ccdCenter.getX(), ccdCenter.getY(), ccd.getId(),
-            #                ha="center", fontsize=2)
-    axes.set_title("%s CCDs" % camera.getName(), fontsize=6)
     axes.set_xlim(-camLimits, camLimits)
     axes.set_ylim(-camLimits, camLimits)
-    axes.add_patch(patches.Circle((0, 0), radius=camRadius, color="black", alpha=0.2))
+    axes.add_patch(patches.Circle((0, 0), radius=camRadius, color="k", alpha=0.2))
     for x, y, t in ([-1, 0, "N"], [0, 1, "W"], [1, 0, "S"], [0, -1, "E"]):
-        axes.text(1.08*camRadius*x, 1.08*camRadius*y, t, ha="center", va="center", fontsize=6)
+        axes.text(1.085*camRadius*x, 1.085*camRadius*y, t, ha="center", va="center", fontsize=fontSize - 1)
+    axes.text(-0.82*camRadius, 0.95*camRadius, "%s" % camera.getName(), ha="center", fontsize=fontSize,
+               color=color)
 
-def plotTractOutline(axes, tractInfo, patchList):
+def plotTractOutline(axes, tractInfo, patchList, fontSize=6):
     buff = 0.02
     axes.tick_params(labelsize=6)
     axes.locator_params(nbins=6)
@@ -176,16 +182,16 @@ def plotTractOutline(axes, tractInfo, patchList):
         ra, dec = bboxToRaDec(patch.getInnerBBox(), tractInfo.getWcs())
         axes.fill(ra, dec, fill=False, color=color, lw=1, linestyle="dashed", alpha=0.5*alpha)
         axes.text(percent(ra), percent(dec, 0.5), str(patch.getIndex()),
-                  fontsize=5, horizontalalignment="center", verticalalignment="center")
+                  fontsize=fontSize - 1, horizontalalignment="center", verticalalignment="center")
     axes.text(percent(tractRa, 0.5), 2.0*percent(tractDec, 0.0) - percent(tractDec, 0.18), "RA (deg)",
-              fontsize=6, horizontalalignment="center", verticalalignment="center")
+              fontsize=fontSize, horizontalalignment="center", verticalalignment="center")
     axes.text(2*percent(tractRa, 1.0) - percent(tractRa, 0.78), percent(tractDec, 0.5), "Dec (deg)",
-              fontsize=6, horizontalalignment="center", verticalalignment="center",
+              fontsize=fontSize, horizontalalignment="center", verticalalignment="center",
               rotation="vertical")
     axes.set_xlim(xlim)
     axes.set_ylim(ylim)
 
-def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None):
+def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
     """!Plot outlines of CCDs in ccdList
     """
     dataIdCopy = dataId.copy()
@@ -216,11 +222,11 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None):
             dec = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
             ras.append(ra)
             decs.append(dec)
-        axes.plot(ras, decs, "k-")
+        axes.plot(ras, decs, "k-", linewidth=1)
         xy = afwGeom.Point2D(w/2, h/2)
         centerX = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
         centerY = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
-        axes.text(centerX, centerY, "%i" % ccd, ha="center", va= "center", fontsize=9)
+        axes.text(centerX, centerY, "%i" % ccd, ha="center", va= "center", fontsize=fontSize)
 
 def plotPatchOutline(axes, tractInfo, patchList):
     """!Plot outlines of patches in patchList
@@ -278,7 +284,7 @@ def percent(values, p=0.5):
 def setPtSize(num, ptSize=12):
     """Set the point size according to the size of the catalog"""
     if num > 10:
-        ptSize = min(12, max(4, int(25/np.log10(num))))
+        ptSize = min(12, max(4, int(20/np.log10(num))))
     return ptSize
 
 def getQuiver(x, y, e1, e2, ax, color=None, scale=3, width=0.005, label=''):
