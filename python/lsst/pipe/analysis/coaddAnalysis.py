@@ -609,7 +609,7 @@ class CoaddAnalysisTask(CmdLineTask):
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_flux", ct, zp=0.0), "MagPsf(unforced) - ref",
                            shortName, self.config.analysisMatches, prefix="src_",
-                           qMin=-0.15, qMax=5.15, labeller=MatchesStarGalaxyLabeller(),
+                           qMin=-0.15, qMax=0.5, labeller=MatchesStarGalaxyLabeller(),
                            ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                      camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
                                      hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)

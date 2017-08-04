@@ -49,7 +49,7 @@ class AnalysisConfig(Config):
 class Analysis(object):
     """Centralised base for plotting"""
 
-    def __init__(self, catalog, func, quantityName, shortName, config, qMin=-0.2, qMax=0.2,
+    def __init__(self, catalog, func, quantityName, shortName, config, qMin=-0.15, qMax=0.15,
                  prefix="", flags=[], goodKeys=[], errFunc=None, labeller=AllLabeller(), flagsCat=None,
                  magThreshold=21):
         self.catalog = catalog
@@ -63,16 +63,14 @@ class Analysis(object):
             self.magThreshold = magThreshold
         self.qMin = qMin
         self.qMax = qMax
+        if "modelfit" in self.shortName:  # Cmodel has smaller mean/scatter from psf mag for most objects
+            self.qMin /= 2.0
+            self.qMax /= 2.0
         self.goodKeys = goodKeys  # include if goodKey = True
         self.calibUsedOnly = len([key for key in self.goodKeys if "Used" in key])
         if self.calibUsedOnly > 0:
             self.magThreshold = 99 # Want to plot all calibUsed
 
-        if labeller is not None:
-            if labeller.labels.has_key("galaxy") and self.calibUsedOnly == 0 and self.quantityName != "pStar":
-                self.qMin, self.qMax = 2.0*qMin, 2.0*qMax
-            if "galaxy" in labeller.plot and self.calibUsedOnly == 0 and self.quantityName != "pStar":
-                self.qMin, self.qMax = 2.0*qMin, 2.0*qMax
         self.prefix = prefix
         self.errFunc = errFunc
         if func is not None:
@@ -386,23 +384,36 @@ class Analysis(object):
         decMin = (decMin + deltaDec/2.0) - deltaDeg/2.0
         decMax = decMin + deltaDeg
 
-        good = (self.mag < self.magThreshold if self.magThreshold > 0 else
-                np.ones(len(self.mag), dtype=bool))
+        magThreshold = self.magThreshold
+        if dataName == "galaxy" and magThreshold < 99.0:
+            magThreshold += 1.0  # plot to fainter mags for galaxies
+        good = (self.mag < magThreshold if magThreshold > 0 else np.ones(len(self.mag), dtype=bool))
 
-        if dataName == "star" and self.calibUsedOnly == 0 and "pStar" not in filename:
-            vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
+        if ((dataName == "star" or "matches" in filename) and "pStar" not in filename and
+            "race_" not in filename):
+            vMin, vMax = 0.4*self.qMin, 0.4*self.qMax
+            if "-mag_" in filename:
+                vMin, vMax = 0.6*vMin, 0.6*vMax
+            if "-matches_mag" in filename:
+                vMax = -vMin
         elif "CModel" in filename and "overlap" not in filename:
             vMin, vMax = 1.5*self.qMin, 0.5*self.qMax
         elif "raceDiff" in filename or "Resids" in filename:
             vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
         elif "race_" in filename:
-            vMin, vMax = 1.03*self.qMin, 0.97*self.qMax
+            vMin, vMax = 1.05*self.qMin, 0.95*self.qMax
         elif "pStar" in filename:
             vMin, vMax = 0.0, 1.0
         else:
-            vMin, vMax = 1.5*self.qMin, 1.5*self.qMax
+            vMin, vMax = self.qMin, self.qMax
         if dataName == "star" and "deconvMom" in filename:
             vMin, vMax = -0.1, 0.1
+        if dataName == "galaxy" and "-mag_" in filename:
+            vMin = 2.0*self.qMin
+            if dataName == "galaxy" and "GaussianFlux" in filename:
+                vMin = 3.0*self.qMin
+        if dataName == "galaxy" and ("CircularApertureFlux" in filename or "KronFlux" in filename):
+            vMin, vMax = 4.0*self.qMin, 1.0*self.qMax
 
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.35"))
         axes.tick_params(which="both", direction="in", top="on", right="on", labelsize=8)
@@ -428,6 +439,7 @@ class Analysis(object):
                 continue
             if ptSize is None:
                 ptSize = 0.7*setPtSize(len(data.mag))
+            stats0 = self.calculateStats(data.quantity, good[data.selection])
             selection = data.selection & good
             axes.scatter(ra[selection], dec[selection], s=ptSize, marker="o", lw=0, label=name,
                          c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax)
@@ -452,11 +464,23 @@ class Analysis(object):
         if zpLabel is not None:
             labelZp(zpLabel, plt, axes, 0.13, -0.09, color="green")
         axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
-        if stats is not None:
-            axes.annotate("mean = {0.mean:.4f}".format(stats[dataName]), xy=(0.77, 1.08),
-                          xycoords="axes fraction", ha="left", va="top", fontsize=8)
-            axes.annotate("stdev = {0.stdev:.4f}".format(stats[dataName]), xy=(0.77, 1.035),
-                          xycoords="axes fraction", ha="left", va="top", fontsize=8)
+
+        meanStr = "{0.mean:.4f}".format(stats0)
+        stdevStr = "{0.stdev:.4f}".format(stats0)
+        x0 = 0.86
+        lenStr = 0.1 + 0.022*(max(max(len(meanStr), len(stdevStr)) - 6, 0))
+        axes.annotate("mean = ", xy=(x0, 1.08),
+                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
+        axes.annotate(meanStr, xy=(x0 + lenStr, 1.08),
+                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
+        axes.annotate("stdev = ", xy=(x0, 1.035),
+                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
+        axes.annotate(stdevStr,  xy=(x0 + lenStr, 1.035),
+                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
+        axes.annotate(r"N = {0} [mag<{1:.1f}]".format(stats0.num, magThreshold),
+                      xy=(x0 + lenStr + 0.02, 1.08),
+                      xycoords="axes fraction", ha="left", va="center", fontsize=8)
+
         fig.savefig(filename)
         plt.close(fig)
 
