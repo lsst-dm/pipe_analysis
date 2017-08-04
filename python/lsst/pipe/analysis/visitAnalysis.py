@@ -107,7 +107,7 @@ class CcdAnalysis(Analysis):
         plt.close(fig)
 
     def plotFocalPlane(self, filename, cmap=plt.cm.Spectral, stats=None, camera=None, ccdList=None,
-                       hscRun=None, matchRadius=None, zpLabel=None):
+                       hscRun=None, matchRadius=None, zpLabel=None, fontSize=8):
         """Plot quantity colormaped on the focal plane"""
         xFp = self.catalog[self.prefix + "base_FPPosition_x"]
         yFp = self.catalog[self.prefix + "base_FPPosition_y"]
@@ -123,6 +123,7 @@ class CcdAnalysis(Analysis):
             vMin = min(0, np.round(self.data["star"].quantity.min() - 10))
             vMax = np.round(self.data["star"].quantity.max() + 50, -2)
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.7"))
+        axes.tick_params(which="both", direction="in", top="on", right="on", labelsize=fontSize)
         for name, data in self.data.iteritems():
             if not data.plot:
                 continue
@@ -144,7 +145,7 @@ class CcdAnalysis(Analysis):
         if camera is not None:
             labelCamera(camera, plt, axes, 0.5, 1.09)
         if zpLabel is not None:
-            labelZp(zpLabel, plt, axes, 0.08, -0.11, color="green")
+            labelZp(zpLabel, plt, axes, 0.08, -0.1, color="green")
         fig.savefig(filename)
         plt.close(fig)
 
