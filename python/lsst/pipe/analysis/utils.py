@@ -20,10 +20,10 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "sdssPsfTraceSizeCompare", "hsmPsfTraceSizeCompare", "e1ResidsSdss", "e2ResidsSdss",
            "e1ResidsHsm", "e2ResidsHsm", "FootNpixDiffCompare", "MagDiffErr", "ApCorrDiffErr", "CentroidDiff",
            "CentroidDiffErr", "deconvMom", "deconvMomStarGal", "concatenateCatalogs", "joinMatches",
-           "checkIdLists", "joinCatalogs", "getFluxKeys", "addColumnsToSchema", "addApertureFluxesHSC",
-           "addFpPoint", "addFootprintNPix", "addRotPoint", "calibrateSourceCatalogMosaic",
-           "calibrateSourceCatalog", "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn",
-           "checkHscStack", "fluxToPlotString", "andCatalog"]
+           "checkIdLists", "checkPatchOverlap", "joinCatalogs", "getFluxKeys", "addColumnsToSchema",
+           "addApertureFluxesHSC", "addFpPoint", "addFootprintNPix", "addRotPoint",
+           "calibrateSourceCatalogMosaic", "calibrateSourceCatalog", "calibrateCoaddSourceCatalog",
+           "backoutApCorr", "matchJanskyToDn", "checkHscStack", "fluxToPlotString", "andCatalog"]
 
 class Filenamer(object):
     """Callable that provides a filename given a style"""
@@ -435,6 +435,26 @@ def checkIdLists(catalog1, catalog2, prefix=""):
                                prefix + "objectId)")
 
     return np.all(catalog1[idStrList[0]] == catalog2[idStrList[1]])
+
+def checkPatchOverlap(patchList, tractInfo):
+    # Given a list of patch dataIds along with the associated tractInfo, check if any of the patches overlap
+    for i, patch0 in enumerate(patchList):
+        overlappingPatches = False
+        patchIndex = [int(val) for val in patch0.split(",")]
+        patchInfo = tractInfo.getPatchInfo(patchIndex)
+        patchBBox0 = patchInfo.getOuterBBox()
+        for j, patch1 in enumerate(patchList):
+            if patch1 != patch0 and j > i:
+                patchIndex = [int(val) for val in patch1.split(",")]
+                patchInfo = tractInfo.getPatchInfo(patchIndex)
+                patchBBox1 = patchInfo.getOuterBBox()
+                if patchBBox0.overlaps(patchBBox1):
+                    print patchBBox0.overlaps(patchBBox1)
+                    overlappingPatches = True
+                    break
+        if overlappingPatches:
+            break
+    return overlappingPatches
 
 def joinCatalogs(catalog1, catalog2, prefix1="cat1_", prefix2="cat2_"):
     # Make sure catalogs entries are all associated with the same object
