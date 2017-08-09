@@ -126,6 +126,7 @@ class CoaddAnalysisTask(CmdLineTask):
                             ([patchRef.dataId for patchRef in patchRefList]))
         dataId = patchRefList[indexExists].dataId
         patchList = [dataRef.dataId["patch"] for dataRef in patchRefList]
+        self.log.info("patchList size: {:d}".format(len(patchList)))
         butler = patchRefList[indexExists].getButler()
         # Check metadata to see if stack used was HSC
         forcedMd = butler.get("deepCoadd_forced_src", patchRefList[indexExists].dataId).getMetadata()
@@ -224,12 +225,18 @@ class CoaddAnalysisTask(CmdLineTask):
                                      patchList=patchList, hscRun=hscRun, matchRadius=self.config.matchRadius,
                                      zpLabel=self.zpLabel)
         if self.config.doPlotOverlaps:
-            overlaps = self.overlaps(forced, unforced)
-            self.log.info("Number of overlap objects matched = {:d}".format(len(overlaps)))
-            if len(overlaps) > 5:
-                self.plotOverlaps(overlaps, filenamer, dataId, tractInfo=tractInfo, patchList=patchList,
-                                  hscRun=hscRun, matchRadius=self.config.matchOverlapRadius,
-                                  zpLabel=self.zpLabel)
+            # Determine if any patches in the patchList actually overlap
+            overlappingPatches = checkPatchOverlap(patchList, tractInfo)
+            if not overlappingPatches:
+                self.log.info("No overlapping patches...skipping overlap plots")
+            else:
+                overlaps = self.overlaps(forced, unforced)
+                self.log.info("Number of overlap objects matched = {:d}".format(len(overlaps)))
+                if len(overlaps) > 0:
+                    self.plotOverlaps(overlaps, filenamer, dataId, tractInfo=tractInfo, patchList=patchList,
+                                      hscRun=hscRun, matchRadius=self.config.matchOverlapRadius,
+                                      zpLabel=self.zpLabel)
+
         if self.config.doPlotMatches:
             matches = self.readSrcMatches(patchRefList, "deepCoadd_forced_src", hscRun=hscRun, wcs=wcs)
             self.plotMatches(matches, filterName, filenamer, dataId, tractInfo=tractInfo, patchList=patchList,
