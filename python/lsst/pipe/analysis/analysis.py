@@ -567,6 +567,7 @@ class Analysis(object):
             catStr = "psfUsed"
         elif "base_ClassificationExtendedness_value" in catalog.schema:
             bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
+            bad |= -2.5*np.log10(catalog[self.fluxColumn]) > self.magThreshold
             catStr = "ClassExtendedness"
         else:
             raise RuntimeError(
@@ -623,6 +624,25 @@ class Analysis(object):
 
         axes.set_xlim(raMax, raMin)
         axes.set_ylim(decMin, decMax)
+
+        good = np.ones(len(e), dtype=bool)
+        stats0 = self.calculateStats(e, good)
+        meanStr = "{0.mean:.4f}".format(stats0)
+        stdevStr = "{0.stdev:.4f}".format(stats0)
+
+        x0 = 0.86
+        lenStr = 0.1 + 0.022*(max(max(len(meanStr), len(stdevStr)) - 6, 0))
+        axes.annotate("mean = ", xy=(x0, 1.08),
+                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
+        axes.annotate(meanStr, xy=(x0 + lenStr, 1.08),
+                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
+        axes.annotate("stdev = ", xy=(x0, 1.035),
+                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
+        axes.annotate(stdevStr,  xy=(x0 + lenStr, 1.035),
+                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
+        axes.annotate(r"N = {0}".format(stats0.num),
+                      xy=(x0 + lenStr + 0.02, 1.035),
+                      xycoords="axes fraction", ha="left", va="center", fontsize=8)
 
         if hscRun is not None:
             axes.set_title("HSC stack run: " + hscRun, color="#800080")
