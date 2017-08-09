@@ -463,8 +463,30 @@ class CoaddAnalysisTask(CmdLineTask):
                                    unitScale=self.unitScale,
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                                             patchList=patchList, hscRun=hscRun,
-                                             matchRadius=matchRadius, zpLabel=zpLabel)
+                                             patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
+                                             zpLabel=zpLabel)
+                shortName = "e2Resids_"
+                self.log.info("shortName = {:s}".format(shortName))
+                self.AnalysisClass(catalog, e2ResidsSdss(unitScale=self.unitScale),
+                                   "       SdssShape e2 resids (psfUsed - PSFmodel)%s" % unitStr, shortName,
+                                   self.config.analysis, flags=[col + "_flag"], goodKeys=["calib_psfUsed"],
+                                   qMin=-0.05, qMax=0.05, labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                                   unitScale=self.unitScale,
+                                   ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
+                                             camera=camera, ccdList=ccdList, tractInfo=tractInfo,
+                                             patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
+                                             zpLabel=zpLabel)
+                shortName = "e2ResidsHsm_"
+                self.log.info("shortName = {:s}".format(shortName))
+                self.AnalysisClass(catalog, e2ResidsHsm(unitScale=self.unitScale),
+                                   "   HSM e2 resids (psfUsed - PSFmodel)%s" % unitStr, shortName,
+                                   self.config.analysis, flags=[col + "_flag"], goodKeys=["calib_psfUsed"],
+                                   qMin=-0.05, qMax=0.05, labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                                   unitScale=self.unitScale,
+                                   ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
+                                             camera=camera, ccdList=ccdList, tractInfo=tractInfo,
+                                             patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
+                                             zpLabel=zpLabel)
 
     def plotCentroidXY(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                        tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
