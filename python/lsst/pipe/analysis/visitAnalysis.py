@@ -300,9 +300,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             catalog = catalog[catalog["deblend_nChild"] == 0].copy(True) # Exclude non-deblended objects
             self.catLabel = "nChild = 0"
             # purge the catalogs of flagged sources
+            bad = np.zeros(len(catalog), dtype=bool)
             for flag in self.config.analysis.flags:
                 if flag in catalog.schema:
-                    catalog = catalog[~catalog[flag]].copy(True)
+                    bad |= catalog[flag]
+            catalog = catalog[~bad].copy(deep=True)
 
             butler = dataRef.getButler()
             metadata = butler.get("calexp_md", dataRef.dataId)
