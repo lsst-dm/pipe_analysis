@@ -24,9 +24,9 @@ import lsst.afw.table as afwTable
 
 
 class CcdAnalysis(Analysis):
-    def plotAll(self, dataId, filenamer, log, enforcer=None, forcedMean=None, butler=None, camera=None,
-                ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                postFix="", plotRunStats=True, highlightList=None):
+    def plotAll(self, dataId, filenamer, log, enforcer=None, forcedMean=None, butler=None,
+                camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None,
+                zpLabel=None, postFix="", plotRunStats=True, highlightList=None):
         stats = self.stats(forcedMean=forcedMean)
         if self.config.doPlotCcdXy:
             self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix), stats=stats,
@@ -283,7 +283,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 if self.config.photoCatName not in cat:
                     with andCatalog(cat):
                         matches = self.matchCatalog(catalog, filterName, self.config.externalCatalogs[cat])
-                        self.plotMatches(matches, filterName, filenamer, dataId, cat, butler=butler,
+                        self.plotMatches(matches, filterName, filenamer, dataId, butler=butler,
                                          camera=camera, ccdList=ccdListPerTract, hscRun=hscRun,
                                          matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
 
@@ -724,8 +724,9 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                          fluxToPlotString(col), shortName, self.config.analysis,
                          prefix="first_", qMin=-0.05, qMax=0.05, flags=[col + "_flag"],
                          errFunc=MagDiffErr(col + "_flux"), labeller=OverlapsStarGalaxyLabeller(),
-                         ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler, camera=camera,
-                                   ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
+                         ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
+                                   camera=camera, ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
+                                   zpLabel=zpLabel)
 
     def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                       tractInfo=None, patchList=None, hscRun1=None, hscRun2=None, matchRadius=None,
@@ -742,7 +743,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         Analysis(catalog, CentroidDiff("x", centroid1=centroidStr1, centroid2=centroidStr2),
                  "Run Comparison: x offset (arcsec)", shortName, self.config.analysis, prefix="first_",
                  qMin=-0.08, qMax=0.08, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
-                 ).plotAll(dataId, filenamer, self.log, distEnforcer, butler=butler, camera=camera,
+                 ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, butler=butler, camera=camera,
                            ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
                            hscRun=(hscRun1 or hscRun2), matchRadius=matchRadius, zpLabel=zpLabel)
         shortName = "diff_y"
@@ -750,7 +751,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         Analysis(catalog, CentroidDiff("y", centroid1=centroidStr1, centroid2=centroidStr2),
                  "Run Comparison: y offset (arcsec)", shortName, self.config.analysis, prefix="first_",
                  qMin=-0.08, qMax=0.08, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
-                 ).plotAll(dataId, filenamer, self.log, distEnforcer, butler=butler, camera=camera,
+                 ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, butler=butler, camera=camera,
                            ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
                            hscRun=(hscRun1 or hscRun2), matchRadius=matchRadius, zpLabel=zpLabel)
 
@@ -765,7 +766,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-0.5, qMax=1.5,
                          labeller=OverlapsStarGalaxyLabeller(),
-                         ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
+                         ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
                 shortName = "psfTrace_"
@@ -774,7 +775,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-1.1, qMax=1.1,
                          labeller=OverlapsStarGalaxyLabeller(),
-                         ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
+                         ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
                 shortName = "sdssXx_"
@@ -783,7 +784,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-0.5, qMax=1.5,
                          labeller=OverlapsStarGalaxyLabeller(),
-                         ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
+                         ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
                 shortName = "sdssYy_"
@@ -792,7 +793,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-0.5, qMax=1.5,
                          labeller=OverlapsStarGalaxyLabeller(),
-                         ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
+                         ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
 
@@ -802,7 +803,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-0.5, qMax=1.5,
                          labeller=OverlapsStarGalaxyLabeller(),
-                         ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
+                         ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
                 shortName = "hsmPsfTrace_"
@@ -811,7 +812,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-1.1, qMax=1.1,
                          labeller=OverlapsStarGalaxyLabeller(),
-                         ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler,
+                         ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
 
@@ -829,5 +830,6 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                          shortName, self.config.analysis,
                          prefix="first_", qMin=-0.025, qMax=0.025, flags=[col + "_flag_apCorr"],
                          errFunc=ApCorrDiffErr(col + "_apCorr"), labeller=OverlapsStarGalaxyLabeller(),
-                         ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler, camera=camera,
-                                   ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=None)
+                         ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
+                                   camera=camera, ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
+                                   zpLabel=None)
