@@ -83,9 +83,9 @@ class CcdAnalysis(Analysis):
         axes[1].set_xlabel("y_ccd")
         fig.text(0.02, 0.5, self.quantityName, ha="center", va="center", rotation="vertical")
         if stats is not None:
-            annotateAxes(plt, axes[0], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
+            annotateAxes(filename, plt, axes[0], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
                          hscRun=hscRun, matchRadius=matchRadius)
-            annotateAxes(plt, axes[1], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
+            annotateAxes(filename, plt, axes[1], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
                          hscRun=hscRun, matchRadius=matchRadius)
         axes[0].set_xlim(-100, 2150)
         axes[1].set_xlim(-100, 4300)
@@ -223,6 +223,10 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 self.zpLabel = self.zpLabel + " " + self.catLabel
             except:
                 pass
+
+            self.unitScale = 1.0
+            if self.config.toMilli:
+                self.unitScale = 1000.0
 
             if self.config.doPlotFootprintNpix:
                 catalog = addFootprintNPix(catalog)
@@ -715,7 +719,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
                 shortName = "diff_" + col + postFix
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, MagDiffCompare(col + "_flux"), "Run Comparison: %s mag diff" %
+                Analysis(catalog, MagDiffCompare(col + "_flux", unitScale=self.unitScale),
+                         "Run Comparison: %s mag diff" %
                          fluxToPlotString(col), shortName, self.config.analysis,
                          prefix="first_", qMin=-0.05, qMax=0.05, flags=[col + "_flag"],
                          errFunc=MagDiffErr(col + "_flux"), labeller=OverlapsStarGalaxyLabeller(),
