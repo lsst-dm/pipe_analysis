@@ -316,10 +316,10 @@ class Analysis(object):
         axHistx.legend(fontsize=7, loc=2)
         axHisty.legend(fontsize=7)
         # Label total number of objects of each data type
-        xLoc, yLoc = 0.18, 1.405
+        xLoc, yLoc = 0.17, 1.405
         for name, data in self.data.iteritems():
             if name == "galaxy" and len(data.mag) > 0:
-                xLoc += 0.04
+                xLoc += 0.035
 
         for name, data in self.data.iteritems():
             if len(data.mag) == 0:
@@ -397,10 +397,10 @@ class Analysis(object):
             magThreshold += 1.0  # plot to fainter mags for galaxies
         good = (self.mag < magThreshold if magThreshold > 0 else np.ones(len(self.mag), dtype=bool))
 
-        if ((dataName == "star" or "matches" in filename) and "pStar" not in filename and
-            "race_" not in filename):
+        if ((dataName == "star" or "matches" in filename or "compareUnforced" in filename) and
+            "pStar" not in filename and "race_" not in filename):
             vMin, vMax = 0.4*self.qMin, 0.4*self.qMax
-            if "-mag_" in filename:
+            if "-mag_"  in filename or  any(ss in filename for ss in ["compareUnforced", "overlap"]):
                 vMin, vMax = 0.6*vMin, 0.6*vMax
             if "-matches_mag" in filename:
                 vMax = -vMin
@@ -409,18 +409,22 @@ class Analysis(object):
         elif "raceDiff" in filename or "Resids" in filename:
             vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
         elif "race_" in filename:
-            vMin, vMax = 1.05*self.qMin, 0.95*self.qMax
+            yDelta = 0.05*(self.qMax - self.qMin)
+            vMin, vMax = self.qMin + yDelta, self.qMax - yDelta
         elif "pStar" in filename:
             vMin, vMax = 0.0, 1.0
         else:
             vMin, vMax = self.qMin, self.qMax
         if dataName == "star" and "deconvMom" in filename:
             vMin, vMax = -0.1, 0.1
+        if dataName == "galaxy" and "deconvMom" in filename:
+            vMin, vMax = -0.1, 3.0*self.qMax
         if dataName == "galaxy" and "-mag_" in filename:
             vMin = 2.0*self.qMin
             if dataName == "galaxy" and "GaussianFlux" in filename:
-                vMin = 3.0*self.qMin
-        if dataName == "galaxy" and ("CircularApertureFlux" in filename or "KronFlux" in filename):
+                vMin, vMax = 3.0*self.qMin, 0.0
+        if (dataName == "galaxy" and ("CircularApertureFlux" in filename or "KronFlux" in filename) and
+            "compare" not in filename and "overlap" not in filename):
             vMin, vMax = 4.0*self.qMin, 1.0*self.qMax
 
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.35"))
