@@ -6,8 +6,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 np.seterr(all="ignore")
-from eups import Eups
-eups = Eups()
 
 from collections import defaultdict
 
