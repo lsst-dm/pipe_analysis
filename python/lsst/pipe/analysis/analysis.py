@@ -30,13 +30,15 @@ class AnalysisConfig(Config):
     magPlotStarMin = DictField(
         keytype=str,
         itemtype=float,
-        default={"HSC-G": 16.5, "HSC-R": 17.0, "HSC-I": 16.5, "HSC-Z": 15.5, "HSC-Y": 15.5, "NB0921": 15.5},
+        default={"HSC-G": 16.5, "HSC-R": 17.0, "HSC-I": 16.5, "HSC-Z": 15.5, "HSC-Y": 15.5, "NB0921": 15.5,
+                 "g": 16.5, "r": 15.0, "i": 16.5, "z": 15.5, "y": 15.5},
         doc="Minimum magnitude to plot",
     )
     magPlotStarMax = DictField(
         keytype=str,
         itemtype=float,
-        default={"HSC-G": 23.5, "HSC-R": 24.0, "HSC-I": 23.5, "HSC-Z": 22.5, "HSC-Y": 22.5, "NB0921": 22.5},
+        default={"HSC-G": 23.5, "HSC-R": 24.0, "HSC-I": 23.5, "HSC-Z": 22.5, "HSC-Y": 22.5, "NB0921": 22.5,
+                 "g": 23.5, "r": 22.0, "i": 23.5, "z": 22.5, "y": 22.5},
         doc="Maximum magnitude to plot",
     )
     fluxColumn = Field(dtype=str, default="base_PsfFlux_flux", doc="Column to use for flux/mag plotting")
@@ -216,8 +218,10 @@ class Analysis(object):
             magMin += 1
             magMax -= 1
         if self.calibUsedOnly > 0:
-            magMin = self.config.magPlotStarMin[filterStr]
-            magMax = self.config.magPlotStarMax[filterStr]
+            if filterStr in self.config.magPlotStarMin.keys():
+                magMin = self.config.magPlotStarMin[filterStr]
+            if filterStr in self.config.magPlotStarMax.keys():
+                magMax = self.config.magPlotStarMax[filterStr]
 
         axScatter.set_xlim(magMin, magMax)
         yDelta = 0.01*(self.qMax - self.qMin)
