@@ -36,7 +36,7 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "addApertureFluxesHSC", "addFpPoint", "addFootprintNPix", "addRotPoint",
            "calibrateSourceCatalogMosaic", "calibrateSourceCatalog", "calibrateCoaddSourceCatalog",
            "backoutApCorr", "matchJanskyToDn", "checkHscStack", "fluxToPlotString", "andCatalog",
-           "writeParquet", "getRepoInfo"]
+           "writeParquet", "getRepoInfo", "findCcdKey"]
 
 def writeParquet(table, path):
     """
@@ -889,3 +889,31 @@ def getRepoInfo(dataRef, coaddName=None, doApplyUberCal=False):
         wcs = wcs,
         tractInfo = tractInfo,
     )
+
+def findCcdKey(dataId):
+    """Determine the convention for identifying a "ccd" for the current camera
+
+    Parameters
+    ----------
+    dataId : `instance` of `lsst.daf.persistence.DataId`
+
+    Raises
+    ------
+    `RuntimeError`
+       If "ccd" key could not be identified from the current hardwired list
+
+    Returns
+    -------
+    ccdKey : `str`
+       The string associated with the "ccd" key.
+    """
+    ccdKey = None
+    ccdKeyList = ["ccd", "sensor", "camcol"]
+    for ss in ccdKeyList:
+        if dataId.has_key(ss):
+            ccdKey = ss
+            break
+    if ccdKey is None:
+        raise RuntimeError("Could not identify ccd key for dataId: %s: \nNot in list of known keys: %s" %
+                           (dataId, ccdKeyList))
+    return ccdKey
