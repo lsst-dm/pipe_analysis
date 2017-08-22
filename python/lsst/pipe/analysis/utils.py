@@ -36,7 +36,7 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "addApertureFluxesHSC", "addFpPoint", "addFootprintNPix", "addRotPoint",
            "calibrateSourceCatalogMosaic", "calibrateSourceCatalog", "calibrateCoaddSourceCatalog",
            "backoutApCorr", "matchJanskyToDn", "checkHscStack", "fluxToPlotString", "andCatalog",
-           "writeParquet", "getRepoInfo", "findCcdKey"]
+           "writeParquet", "getRepoInfo", "findCcdKey", "getCcdNameRefList", "getDataExistsRefList"]
 
 def writeParquet(table, path):
     """
@@ -862,6 +862,7 @@ def getRepoInfo(dataRef, coaddName=None, doApplyUberCal=False):
     dataId = dataRef.dataId
     filterName = dataId["filter"]
     isCoadd = True if dataId.has_key("patch") else False
+    ccdKey = None if isCoadd else findCcdKey(dataId)
     # Check metadata to see if stack used was HSC
     metaStr = coaddName + "Coadd_forced_src" if coaddName is not None else "calexp_md"
     metadata = butler.get(metaStr, dataId)
@@ -882,6 +883,7 @@ def getRepoInfo(dataRef, coaddName=None, doApplyUberCal=False):
         camera = camera,
         dataId = dataId,
         filterName = filterName,
+        ccdKey = ccdKey,
         metadata = metadata,
         hscRun = hscRun,
         dataset = dataset,
@@ -917,3 +919,34 @@ def findCcdKey(dataId):
         raise RuntimeError("Could not identify ccd key for dataId: %s: \nNot in list of known keys: %s" %
                            (dataId, ccdKeyList))
     return ccdKey
+
+def getCcdNameRefList(dataRefList):
+    ccdNameRefList = None
+    ccdKey = findCcdKey(dataRefList[0].dataId)
+    if dataRefList[0].dataId.has_key("raft"):
+        ccdNameRefList = [re.sub("[,]", "", str(dataRef.dataId["raft"]) + str(dataRef.dataId[ccdKey])) for
+                          dataRef in dataRefList]
+    else:
+        ccdNameRefList = [dataRef.dataId[ccdKey] for dataRef in dataRefList]
+    # cull multiple entries
+    ccdNameRefList = list(set(ccdNameRefList))
+
+    if ccdNameRefList is None:
+        raise RuntimeError("Failed to create ccdNameRefList")
+    return ccdNameRefList
+
+def getDataExistsRefList(dataRefList, dataset):
+    dataExistsRefList = None
+    ccdKey = findCcdKey(dataRefList[0].dataId)
+    if dataRefList[0].dataId.has_key("raft"):
+        dataExistsRefList = [re.sub("[,]", "", str(dataRef.dataId["raft"]) + str(dataRef.dataId[ccdKey])) for
+                             dataRef in dataRefList if dataRef.datasetExists(dataset)]
+    else:
+        dataExistsRefList = [dataRef.dataId[ccdKey] for dataRef in dataRefList if
+                             dataRef.datasetExists(dataset)]
+    # cull multiple entries
+    dataExistsRefList = list(set(dataExistsRefList))
+
+    if dataExistsRefList is None:
+        raise RuntimeError("dataExistsRef list is empty")
+    return dataExistsRefList

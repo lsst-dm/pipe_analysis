@@ -190,9 +190,6 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
     def run(self, dataRefList, tract=None):
         self.log.info("dataRefList size: {:d}".format(len(dataRefList)))
-        ccdList = [dataRef.dataId["ccd"] for dataRef in dataRefList]
-        # cull multiple entries
-        ccdList = list(set(ccdList))
         if tract is None:
             tractList = [0, ]
         else:
@@ -208,8 +205,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 continue
             repoInfo = getRepoInfo(dataRefListTract[0], doApplyUberCal=self.config.doApplyUberCal)
             self.log.info("dataId: {!s:s}".format(repoInfo.dataId))
-            ccdListPerTract = [dataRef.dataId["ccd"] for dataRef in dataRefListTract if
-                               dataRef.datasetExists(repoInfo.dataset)]
+            ccdListPerTract = getDataExistsRefList(dataRefListTract, repoInfo.dataset)
+            self.log.info("Exising data for tract {:d}: ccdListPerTract = {}".
+                          format(tractList[i], ccdListPerTract))
             if len(ccdListPerTract) == 0:
                 if self.config.doApplyUberCal:
                     self.log.fatal("No data found for {:s} datset...are you sure you ran meas_mosaic? "
@@ -258,7 +256,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 except:
                     pass
                 self.plotMags(commonZpCat, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                              camera=repoInfo.camera, ccdList=ccdList, hscRun=repoInfo.hscRun, zpLabel=zpLabel,
+                              camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
+                              zpLabel=zpLabel,
                               fluxToPlotList=["base_GaussianFlux", "base_CircularApertureFlux_12_0"],
                               postFix="_commonZp")
                 commonZpDone = True
@@ -431,9 +430,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 for lsstName, otherName in self.config.srcSchemaMap.items():
                     aliasMap.set("src_" + lsstName, "src_" + otherName)
             # To avoid multiple counting when visit overlaps multiple tracts
-            if (dataRef.dataId['visit'], dataRef.dataId['ccd']) not in dataIdSubList:
+            noTractId = dataRef.dataId.copy()
+            noTractId.pop("tract")
+            if noTractId not in dataIdSubList:
                 catList.append(catalog)
-            dataIdSubList.append((dataRef.dataId["visit"], dataRef.dataId["ccd"]))
+            dataIdSubList.append(noTractId)
 
         if len(catList) == 0:
             raise TaskError("No matches read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
@@ -521,9 +522,6 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
 
     def run(self, dataRefList1, dataRefList2, tract=None):
         # This is for the commonZP plots (i.e. all ccds regardless of tract)
-        fullCcdList = list(set(
-                [dataRef1.dataId["ccd"] for dataRef1 in dataRefList1 if dataRef1.datasetExists("src")]))
-
         if tract is None:
             tractList = [0, ]
         else:
@@ -549,6 +547,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             repoInfo2 = getRepoInfo(dataRefListTract2[0], doApplyUberCal=self.config.doApplyUberCal2)
             break
 
+        fullCcdList = getDataExistsRefList(dataRefList1, repoInfo1.dataset)
+
         i = -1
         for dataRefListTract1, dataRefListTract2 in zip(dataRefListPerTract1, dataRefListPerTract2):
             i += 1
@@ -558,10 +558,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             if len(dataRefListTract2) == 0:
                 self.log.info("No data found in --rerun2 for tract: {:d}".format(tractList[i]))
                 continue
-            ccdListPerTract1 = [dataRef1.dataId["ccd"] for dataRef1 in dataRefListTract1 if
-                                dataRef1.datasetExists(repoInfo1.dataset)]
-            ccdListPerTract2 = [dataRef2.dataId["ccd"] for dataRef2 in dataRefListTract2 if
-                                dataRef2.datasetExists(repoInfo2.dataset)]
+            ccdListPerTract1 = getDataExistsRefList(dataRefListTract1, repoInfo1.dataset)
+            ccdListPerTract2 = getDataExistsRefList(dataRefListTract2, repoInfo2.dataset)
             if len(ccdListPerTract1) == 0:
                 if self.config.doApplyUberCal1 and "wcs" in repoInfo1.dataset:
                     self.log.fatal("No data found for {:s} dataset...are you sure you ran meas_mosaic? If "
