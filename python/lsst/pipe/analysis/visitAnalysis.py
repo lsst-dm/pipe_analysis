@@ -212,10 +212,13 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 raise RuntimeError("No datasets found for datasetType = {:s}".format(dataset))
             filterName = dataId["filter"]
             filenamer = Filenamer(butler, "plotVisit", dataRefListTract[0].dataId)
-            commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", hscRun=hscRun)
-            if hscRun and self.config.doAddAperFluxHsc:
-                self.log.info("HSC run: adding aperture flux to schema...")
-                catalog = addApertureFluxesHSC(catalog, prefix="")
+            if any(doPlot for doPlot in [self.config.doPlotFootprintNpix, self.config.doPlotQuiver,
+                              self.config.doPlotMags, self.config.doPlotSizes, self.config.doPlotCentroids,
+                              self.config.doPlotStarGalaxy]):
+                commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", hscRun=hscRun)
+                if hscRun and self.config.doAddAperFluxHsc:
+                    self.log.info("HSC run: adding aperture flux to schema...")
+                    catalog = addApertureFluxesHSC(catalog, prefix="")
 
             try:
                 self.zpLabel = self.zpLabel + " " + self.catLabel
@@ -241,7 +244,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                 hscRun=hscRun, zpLabel=self.zpLabel, scale=2)
 
             # Create mag comparison plots using common ZP
-            if not commonZpDone:
+            if self.config.doPlotMags and not commonZpDone:
                 zpLabel = "common (" + str(self.config.analysis.commonZp) + ")"
                 try:
                     zpLabel = zpLabel + " " + self.catLabel
