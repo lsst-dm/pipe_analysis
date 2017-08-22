@@ -6,7 +6,7 @@ import lsst.afw.geom as afwGeom
 import lsst.afw.table as afwTable
 from lsst.pipe.base import Struct
 
-from .utils import checkHscStack
+from .utils import checkHscStack, findCcdKey
 
 try:
     from lsst.meas.mosaic.updateExposure import applyMosaicResultsExposure
@@ -166,8 +166,9 @@ def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
     camRadius = max(camera.getFpBBox().getWidth(), camera.getFpBBox().getHeight())/2
     camRadius = np.round(camRadius, -2)
     camLimits = np.round(1.25*camRadius, -2)
+    intCcdList = [int(ccd) for ccd in ccdList]
     for ccd in camera:
-        if ccd.getId() in ccdList:
+        if ccd.getId() in intCcdList:
             ccdCorners = ccd.getCorners(cameraGeom.FOCAL_PLANE)
             ccdCenter = ccd.getCenter(cameraGeom.FOCAL_PLANE).getPoint()
             plt.gca().add_patch(patches.Rectangle(ccdCorners[0], *list(ccdCorners[2] - ccdCorners[0]),
@@ -175,8 +176,9 @@ def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
     axes.set_xlim(-camLimits, camLimits)
     axes.set_ylim(-camLimits, camLimits)
     axes.add_patch(patches.Circle((0, 0), radius=camRadius, color="k", alpha=0.2))
-    for x, y, t in ([-1, 0, "N"], [0, 1, "W"], [1, 0, "S"], [0, -1, "E"]):
-        axes.text(1.085*camRadius*x, 1.085*camRadius*y, t, ha="center", va="center", fontsize=fontSize - 1)
+    if camera.getName() == "HSC":
+        for x, y, t in ([-1, 0, "N"], [0, 1, "W"], [1, 0, "S"], [0, -1, "E"]):
+            axes.text(1.085*camRadius*x, 1.085*camRadius*y, t, ha="center", va="center", fontsize=fontSize - 1)
     axes.text(-0.82*camRadius, 0.95*camRadius, "%s" % camera.getName(), ha="center", fontsize=fontSize,
                color=color)
 
@@ -250,7 +252,20 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
     """
     dataIdCopy = dataId.copy()
     for ccd in ccdList:
-        dataIdCopy["ccd"] = ccd
+        ccdKey = findCcdKey(dataId)
+        ccdLabelStr = str(ccd)
+        if dataId.has_key("raft"):
+            if len(ccd) != 4 :
+                if len(ccd) > 4 :
+                    errorStr = "Only raft/sensor combos with x,y coords 0 through 9 have been accommodated"
+                else:
+                    errorStr = "Only 2 by 2 = 4 integer raft/sensor combo names have been accommodated"
+                RuntimeError(errorStr)
+            raft = ccd[0] + "," + ccd[1]
+            dataIdCopy["raft"] = raft
+            ccd = ccd[-2] + "," + ccd[-1]
+            ccdLabelStr = "R" + str(raft) + "S" + str(ccd)
+        dataIdCopy[ccdKey] = ccd
         calexp = butler.get("calexp", dataIdCopy)
         dataRef = butler.dataRef("raw", dataId=dataIdCopy)
         # Check metadata to see if stack used was HSC
@@ -282,7 +297,7 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
         xy = afwGeom.Point2D(w/2, h/2)
         centerX = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
         centerY = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
-        axes.text(centerX, centerY, "%i" % ccd, ha="center", va= "center", fontsize=fontSize)
+        axes.text(centerX, centerY, "%s" % str(ccdLabelStr), ha="center", va= "center", fontsize=fontSize)
 
 def plotPatchOutline(axes, tractInfo, patchList):
     """!Plot outlines of patches in patchList
