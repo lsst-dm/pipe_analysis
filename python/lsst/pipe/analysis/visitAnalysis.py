@@ -30,9 +30,9 @@ class CcdAnalysis(Analysis):
                 plotRunStats=True, highlightList=None, haveFpCoords=None):
         stats = self.stats
         if self.config.doPlotCcdXy:
-            self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix), stats=stats,
-                         hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
-        if self.config.doPlotFP:
+            self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix),
+                         stats=self.stats, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
+        if self.config.doPlotFP and haveFpCoords:
             self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa" + postFix),
                                 stats=stats, camera=camera, ccdList=ccdList, hscRun=hscRun,
                                 matchRadius=matchRadius, zpLabel=zpLabel)
@@ -273,7 +273,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 self.plotMags(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
                               camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
                               zpLabel=self.zpLabel)
-            if self.config.doPlotCentroids:
+            if self.config.doPlotCentroids and self.haveFpCoords:
                 self.plotCentroidXY(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
                                     camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
                                     zpLabel=self.zpLabel)
@@ -304,6 +304,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
     def readCatalogs(self, dataRefList, dataset, hscRun=None):
         catList = []
         commonZpCatList = []
+        self.haveFpCoords = True
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
                 continue
@@ -326,10 +327,14 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             metadata = butler.get("calexp_md", dataRef.dataId)
 
             # Compute Focal Plane coordinates for each source if not already there
-            if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
-                exp = butler.get("calexp", dataRef.dataId)
-                det = exp.getDetector()
-                catalog = addFpPoint(det, catalog)
+            if self.config.doPlotCentroids or self.config.doPlotFP and self.haveFpCoords:
+                if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
+                    exp = butler.get("calexp", dataRef.dataId)
+                    det = exp.getDetector()
+                    catalog = addFpPoint(det, catalog)
+                xFp = catalog["base_FPPosition_x"]
+                if len(xFp[np.where(np.isfinite(xFp))]) <= 0:
+                    self.haveFpCoords = False
             # Optionally backout aperture corrections
             if self.config.doBackoutApCorr:
                 catalog = backoutApCorr(catalog)
