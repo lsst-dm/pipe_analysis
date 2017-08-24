@@ -26,10 +26,10 @@ import lsst.afw.table as afwTable
 
 
 class CcdAnalysis(Analysis):
-    def plotAll(self, dataId, filenamer, log, enforcer=None, forcedMean=None, butler=None, camera=None,
-                ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                postFix="", plotRunStats=True, highlightList=None):
-        stats = self.stats(forcedMean=forcedMean)
+    def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
+                tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None, postFix="",
+                plotRunStats=True, highlightList=None):
+        stats = self.stats
         if self.config.doPlotCcdXy:
             self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix), stats=stats,
                          hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
@@ -38,15 +38,13 @@ class CcdAnalysis(Analysis):
                                 stats=stats, camera=camera, ccdList=ccdList, hscRun=hscRun,
                                 matchRadius=matchRadius, zpLabel=zpLabel)
 
-        return Analysis.plotAll(self, dataId, filenamer, log, enforcer=enforcer, forcedMean=forcedMean,
-                                butler=butler, camera=camera, ccdList=ccdList, hscRun=hscRun,
-                                matchRadius=matchRadius, zpLabel=zpLabel, postFix=postFix,
-                                plotRunStats=plotRunStats, highlightList=highlightList)
+        return Analysis.plotAll(self, dataId, filenamer, log, enforcer=enforcer, butler=butler, camera=camera,
+                                ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
+                                postFix=postFix, plotRunStats=plotRunStats, highlightList=highlightList)
 
-    def plotFP(self, dataId, filenamer, log, enforcer=None, forcedMean=None, camera=None, ccdList=None,
-               hscRun=None, matchRadius=None, zpLabel=None):
-        stats = self.stats(forcedMean=forcedMean)
-        self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa"), stats=stats,
+    def plotFP(self, dataId, filenamer, log, enforcer=None, camera=None, ccdList=None, hscRun=None,
+               matchRadius=None, zpLabel=None):
+        self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa"), stats=self.stats,
                             camera=camera, ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
                             zpLabel=zpLabel)
 
