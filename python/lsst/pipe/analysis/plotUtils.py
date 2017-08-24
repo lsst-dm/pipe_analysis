@@ -66,9 +66,9 @@ def labelZp(zpLabel, plt, axis, xLoc, yLoc, rotation=0, fontSize=9, color="k"):
     plt.text(xLoc, yLoc, "zp: " + zpLabel, ha="center", va="center", fontsize=fontSize, rotation=rotation,
              transform=axis.transAxes, color=color)
 
-def annotateAxes(plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff=0.05, fontSize=8,
-                 ha="left", va="top", color="blue", isHist=False, hscRun=None, matchRadius=None,
-                 writeMinMax=None):
+def annotateAxes(filename, plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff=0.05,
+                 fontSize=8, ha="left", va="top", color="blue", isHist=False, hscRun=None, matchRadius=None,
+                 writeMinMax=None, unitScale=1.0):
     xOffFact = 0.67*len(" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]))
     axes.annotate(dataSet+r" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]),
                   xy=(x0, y0), xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize, color=color)
@@ -76,11 +76,24 @@ def annotateAxes(plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff
                   ha=ha, va=va, fontsize=fontSize, color="k", alpha=0.55)
     meanStr = "{0.mean:.4f}".format(stats[dataSet])
     stdevStr = "{0.stdev:.4f}".format(stats[dataSet])
-    lenStr = 0.215 + 0.018*(max(max(len(meanStr), len(stdevStr)) - 6, 0))
+    statsUnitStr = None
+    if unitScale == 1000.0:
+        meanStr = "{0.mean:.2f}".format(stats[dataSet])
+        stdevStr = "{0.stdev:.2f}".format(stats[dataSet])
+        statsUnitStr = " (milli)"
+        if any (ss in filename for ss in ["_ra", "_dec", "distance"]):
+            statsUnitStr = " (mas)"
+        if any (ss in filename for ss in ["mag_", "_photometry", "matches_mag"]):
+            statsUnitStr = " (mmag)"
+    lenStr = 0.12 + 0.017*(max(len(meanStr), len(stdevStr)))
+
     axes.annotate("mean = ", xy=(x0 + 0.12, y0 -yOff),
                   xycoords="axes fraction", ha="right", va=va, fontsize=fontSize, color="k")
     axes.annotate(meanStr, xy=(x0 + lenStr, y0 - yOff),
                   xycoords="axes fraction", ha="right", va=va, fontsize=fontSize, color="k")
+    if statsUnitStr is not None:
+        axes.annotate(statsUnitStr, xy=(x0 + lenStr + 0.006, y0 - yOff),
+                      xycoords="axes fraction", ha="left", va=va, fontsize=fontSize, color="k")
     axes.annotate("stdev = ", xy=(x0 + 0.12, y0- 2*yOff),
                   xycoords="axes fraction", ha="right", va=va, fontsize=fontSize, color="k")
     axes.annotate(stdevStr, xy=(x0 + lenStr, y0 - 2*yOff),

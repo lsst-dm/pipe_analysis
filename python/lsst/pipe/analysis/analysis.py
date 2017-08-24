@@ -51,7 +51,7 @@ class Analysis(object):
 
     def __init__(self, catalog, func, quantityName, shortName, config, qMin=-0.2, qMax=0.2,
                  prefix="", flags=[], goodKeys=[], errFunc=None, labeller=AllLabeller(), flagsCat=None,
-                 magThreshold=21, forcedMean=None):
+                 magThreshold=21, forcedMean=None, unitScale=1.0):
         self.catalog = catalog
         self.func = func
         self.quantityName = quantityName
@@ -62,8 +62,9 @@ class Analysis(object):
             self.magThreshold = self.config.magThreshold
         else:
             self.magThreshold = magThreshold
-        self.qMin = qMin
-        self.qMax = qMax
+        self.unitScale = unitScale
+        self.qMin = qMin*self.unitScale
+        self.qMax = qMax*self.unitScale
         if "modelfit" in self.shortName:  # Cmodel has smaller mean/scatter from psf mag for most objects
             self.qMin /= 2.0
             self.qMax /= 2.0
@@ -138,8 +139,8 @@ class Analysis(object):
         axes.set_ylim(self.qMin, self.qMax)
         axes.set_xlim(magMin, magMax)
         if stats is not None:
-            annotateAxes(plt, axes, stats, "star", self.magThreshold, hscRun=hscRun,
-                         matchRadius=matchRadius)
+            annotateAxes(filename, plt, axes, stats, "star", self.magThreshold, hscRun=hscRun,
+                         matchRadius=matchRadius, unitScale=self.unitScale)
         axes.legend(handles=dataPoints, loc=1, fontsize=8)
         labelVisit(filename, plt, axes, 0.5, 1.05)
         if zpLabel is not None:
@@ -305,12 +306,12 @@ class Analysis(object):
         axScatter.xaxis.set_minor_locator(AutoMinorLocator(2))
         axScatter.yaxis.set_minor_locator(AutoMinorLocator(2))
 
-        axScatter.set_xlabel("%s mag (%s)" % (fluxToPlotString(self.fluxColumn), filterStr))
-        axScatter.set_ylabel(r"%s (%s)" % (self.quantityName, filterStr))
+        axScatter.set_xlabel("%s mag [%s]" % (fluxToPlotString(self.fluxColumn), filterStr))
+        axScatter.set_ylabel(r"%s [%s]" % (self.quantityName, filterStr))
 
         if stats is not None:
-            l1, l2 = annotateAxes(plt, axScatter, stats, "star", self.magThreshold,
-                                  hscRun=hscRun, matchRadius=matchRadius)
+            l1, l2 = annotateAxes(filename, plt, axScatter, stats, "star", self.magThreshold,
+                                  hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
         dataPoints = dataPoints + runStats + [l1, l2]
         axScatter.legend(handles=dataPoints, loc=1, fontsize=8)
         axHistx.legend(fontsize=7, loc=2)
@@ -356,15 +357,15 @@ class Analysis(object):
         axes.set_ylim(0.9, numMax)
         if filterStr is None:
             filterStr = ''
-        axes.set_xlabel("{0:s} ({1:s})".format(self.quantityName, filterStr))
+        axes.set_xlabel("{0:s} [{1:s}]".format(self.quantityName, filterStr))
         axes.set_ylabel("Number")
         axes.set_yscale("log", nonposy="clip")
         x0, y0 = 0.03, 0.97
         if self.qMin == 0.0:
             x0, y0 = 0.68, 0.81
         if stats is not None:
-            annotateAxes(plt, axes, stats, "star", self.magThreshold, x0=x0, y0=y0,
-                         isHist=True, hscRun=hscRun, matchRadius=matchRadius)
+            annotateAxes(filename, plt, axes, stats, "star", self.magThreshold, x0=x0, y0=y0,
+                         isHist=True, hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
         axes.legend()
         if camera is not None:
             labelCamera(camera, plt, axes, 0.5, 1.09)
@@ -467,7 +468,7 @@ class Analysis(object):
         mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vMin, vmax=vMax))
         mappable._A = []        # fake up the array of the scalar mappable. Urgh...
         cb = plt.colorbar(mappable)
-        cb.set_label(self.quantityName + " (" + filterStr + ")", rotation=270, labelpad=15)
+        cb.set_label(self.quantityName + " [" + filterStr + "]", rotation=270, labelpad=15)
         if hscRun is not None:
             axes.set_title("HSC stack run: " + hscRun, color="#800080")
         if camera is not None:
@@ -479,18 +480,32 @@ class Analysis(object):
 
         meanStr = "{0.mean:.4f}".format(stats0)
         stdevStr = "{0.stdev:.4f}".format(stats0)
+        statsUnitStr = None
+        if "(milli)" in self.quantityName:
+            statsUnitStr = " (milli)"
+        if "(mmag)" in self.quantityName:
+            statsUnitStr = " (mmag)"
+        if "(mas)" in self.quantityName:
+            statsUnitStr = " (mas)"
+        if statsUnitStr is not None:
+            meanStr = "{0.mean:.2f}".format(stats0)
+            stdevStr = "{0.stdev:.2f}".format(stats0)
+
         x0 = 0.86
-        lenStr = 0.1 + 0.022*(max(max(len(meanStr), len(stdevStr)) - 6, 0))
+        lenStr = 0.017*(max(len(meanStr), len(stdevStr)))
         axes.annotate("mean = ", xy=(x0, 1.08),
                       xycoords="axes fraction", ha="right", va="center", fontsize=8)
         axes.annotate(meanStr, xy=(x0 + lenStr, 1.08),
                       xycoords="axes fraction", ha="right", va="center", fontsize=8)
+        if statsUnitStr is not None:
+            axes.annotate(statsUnitStr, xy=(x0 + lenStr + 0.006, 1.08),
+                          xycoords="axes fraction", ha="left", va="center", fontsize=8)
         axes.annotate("stdev = ", xy=(x0, 1.035),
                       xycoords="axes fraction", ha="right", va="center", fontsize=8)
         axes.annotate(stdevStr,  xy=(x0 + lenStr, 1.035),
                       xycoords="axes fraction", ha="right", va="center", fontsize=8)
         axes.annotate(r"N = {0} [mag<{1:.1f}]".format(stats0.num, magThreshold),
-                      xy=(x0 + lenStr + 0.02, 1.08),
+                      xy=(x0 + lenStr + 0.012, 1.035),
                       xycoords="axes fraction", ha="left", va="center", fontsize=8)
 
         fig.savefig(filename)
@@ -526,10 +541,10 @@ class Analysis(object):
 
         axes[0].legend()
         if stats is not None:
-            annotateAxes(plt, axes[0], stats, "star", self.magThreshold, x0=0.03, yOff=0.07,
-                         hscRun=hscRun, matchRadius=matchRadius)
-            annotateAxes(plt, axes[1], stats, "star", self.magThreshold, x0=0.03, yOff=0.07,
-                         hscRun=hscRun, matchRadius=matchRadius)
+            annotateAxes(filename, plt, axes[0], stats, "star", self.magThreshold, x0=0.03, yOff=0.07,
+                         hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
+            annotateAxes(filename, plt, axes[1], stats, "star", self.magThreshold, x0=0.03, yOff=0.07,
+                         hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
         labelVisit(filename, plt, axes[0], 0.5, 1.1)
         if zpLabel is not None:
             labelZp(zpLabel, plt, axes[0], 0.13, -0.09, color="green")

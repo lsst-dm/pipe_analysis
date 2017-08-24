@@ -81,10 +81,10 @@ class CcdAnalysis(Analysis):
         axes[1].set_xlabel("y_ccd")
         fig.text(0.02, 0.5, self.quantityName, ha="center", va="center", rotation="vertical")
         if stats is not None:
-            annotateAxes(plt, axes[0], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
-                         hscRun=hscRun, matchRadius=matchRadius)
-            annotateAxes(plt, axes[1], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
-                         hscRun=hscRun, matchRadius=matchRadius)
+            annotateAxes(filename, plt, axes[0], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
+                         hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
+            annotateAxes(filename, plt, axes[1], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
+                         hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
         axes[0].set_xlim(-100, 2150)
         axes[1].set_xlim(-100, 4300)
         axes[0].set_ylim(self.qMin, self.qMax)
@@ -221,6 +221,10 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 self.zpLabel = self.zpLabel + " " + self.catLabel
             except:
                 pass
+
+            self.unitScale = 1.0
+            if self.config.toMilli:
+                self.unitScale = 1000.0
 
             if self.config.doPlotFootprintNpix:
                 catalog = addFootprintNPix(catalog)
@@ -706,17 +710,21 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
 
     def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, hscRun=None,
                  matchRadius=None, zpLabel=None, fluxToPlotList=None, postFix="", highlightList=None):
+        unitStr = "mag"
+        if self.config.toMilli:
+            unitStr = "mmag"
         if fluxToPlotList is None:
             fluxToPlotList = self.config.fluxToPlotList
-        enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02}})
+        enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in fluxToPlotList:
             if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
                 shortName = "diff_" + col + postFix
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, MagDiffCompare(col + "_flux"), "Run Comparison: %s mag diff" %
-                         fluxToPlotString(col), shortName, self.config.analysis,
-                         prefix="first_", qMin=-0.05, qMax=0.05, flags=[col + "_flag"],
+                Analysis(catalog, MagDiffCompare(col + "_flux", unitScale=self.unitScale),
+                         "Run Comparison: %s mag diff (%s)" % (fluxToPlotString(col), unitStr), shortName,
+                         self.config.analysis, prefix="first_", qMin=-0.05, qMax=0.05, flags=[col + "_flag"],
                          errFunc=MagDiffErr(col + "_flux"), labeller=OverlapsStarGalaxyLabeller(),
+                         unitScale=self.unitScale,
                          ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler, camera=camera,
                                    ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
 
@@ -749,7 +757,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
 
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, hscRun=None,
                  matchRadius=None, zpLabel=None):
-        enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02}})
+        enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in ["base_PsfFlux"]:
             if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
                 shortName = "trace_"
@@ -812,7 +820,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                     matchRadius=None, zpLabel=None, fluxToPlotList=None):
         if fluxToPlotList is None:
             fluxToPlotList = self.config.fluxToPlotList
-        enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02}})
+        enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in fluxToPlotList:
             if "first_" + col + "_apCorr" in catalog.schema and "second_" + col + "_apCorr" in catalog.schema:
                 shortName = "diff_" + col + "_apCorr"
