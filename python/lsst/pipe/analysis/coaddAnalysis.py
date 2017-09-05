@@ -707,11 +707,38 @@ class CoaddAnalysisTask(CmdLineTask):
                                      patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                      zpLabel=zpLabel)
         if "src_calib_astrometryUsed" in matches.schema:
-            shortName = description + "_ra_calib_astrometryUsed"
+            shortName = description + "_raCosDec_calib_astrometryUsed"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra",
                                                        declination="ref_coord_dec", unitScale=self.unitScale),
-                               "dRA*cos(Dec) (%s) (calib_astromUsed)" % unitStr, shortName,
+                               "      $\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s) (calib_astromUsed)" % unitStr,
+                               shortName, self.config.analysisMatches, prefix="src_",
+                               goodKeys=["calib_astrometryUsed"], qMin=-0.2*self.config.matchRadius,
+                               qMax=0.2*self.config.matchRadius, labeller=MatchesStarGalaxyLabeller(),
+                               flagsCat=flagsCat, unitScale=self.unitScale,
+                               ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
+                                         camera=camera, ccdList=ccdList, tractInfo=tractInfo,
+                                         patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
+                                         zpLabel=zpLabel)
+        shortName = description + "_raCosDec"
+        self.log.info("shortName = {:s}".format(shortName))
+        self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra",
+                                                   declination="ref_coord_dec", unitScale=self.unitScale),
+                           "$\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr, shortName,
+                           self.config.analysisMatches, prefix="src_", qMin=-0.2*self.config.matchRadius,
+                           qMax=0.2*self.config.matchRadius, labeller=MatchesStarGalaxyLabeller(),
+                           flagsCat=flagsCat, unitScale=self.unitScale,
+                           ).plotAll(dataId, filenamer, self.log,
+                                     enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
+                                     butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
+                                     patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
+                                     zpLabel=zpLabel)
+        if "src_calib_astrometryUsed" in matches.schema:
+            shortName = description + "_ra_calib_astrometryUsed"
+            self.log.info("shortName = {:s}".format(shortName))
+            self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra", declination=None,
+                                                       unitScale=self.unitScale),
+                               "$\Delta$RA (%s) (calib_astromUsed)" % unitStr, shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometryUsed"],
                                qMin=-0.25*self.config.matchRadius, qMax=0.25*self.config.matchRadius,
                                labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
@@ -722,9 +749,9 @@ class CoaddAnalysisTask(CmdLineTask):
                                          zpLabel=zpLabel)
         shortName = description + "_ra"
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra",
-                                                   declination="ref_coord_dec", unitScale=self.unitScale),
-                           "dRA*cos(Dec) (%s)" % unitStr, shortName, self.config.analysisMatches,
+        self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra", declination=None,
+                                                   unitScale=self.unitScale),
+                           "$\Delta$RA (%s)" % unitStr, shortName, self.config.analysisMatches,
                            prefix="src_", qMin=-0.25*self.config.matchRadius,
                            qMax=0.25*self.config.matchRadius, labeller=MatchesStarGalaxyLabeller(),
                            flagsCat=flagsCat, unitScale=self.unitScale,
@@ -738,7 +765,7 @@ class CoaddAnalysisTask(CmdLineTask):
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(matches, AstrometryDiff("src_coord_dec", "ref_coord_dec",
                                                        unitScale=self.unitScale),
-                               "dDec (%s) (calib_astromUsed)" % unitStr, shortName,
+                               "$\delta_{Dec}$ (%s) (calib_astromUsed)" % unitStr, shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometryUsed"],
                                qMin=-0.25*self.config.matchRadius, qMax=0.25*self.config.matchRadius,
                                labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
@@ -750,8 +777,8 @@ class CoaddAnalysisTask(CmdLineTask):
         shortName = description + "_dec"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches, AstrometryDiff("src_coord_dec", "ref_coord_dec", unitScale=self.unitScale),
-                           "dDec (%s)" % unitStr, shortName, self.config.analysisMatches, prefix="src_",
-                           qMin=-0.25*self.config.matchRadius, qMax=0.25*self.config.matchRadius,
+                           "$\delta_{Dec}$ (%s)" % unitStr, shortName, self.config.analysisMatches,
+                           prefix="src_", qMin=-0.3*self.config.matchRadius, qMax=0.3*self.config.matchRadius,
                            labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat, unitScale=self.unitScale,
                            ).plotAll(dataId, filenamer, self.log,
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
