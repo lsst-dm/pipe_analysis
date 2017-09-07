@@ -151,13 +151,12 @@ class CoaddAnalysisTask(CmdLineTask):
                        "ext_shapeHSM_HsmSourceMoments_xx", "ext_shapeHSM_HsmSourceMoments_yy",
                        "ext_shapeHSM_HsmSourceMoments_xy", "ext_shapeHSM_HsmPsfMoments_xx",
                        "ext_shapeHSM_HsmPsfMoments_yy", "ext_shapeHSM_HsmPsfMoments_xy", "deblend_nChild",
-                       "calib_psfUsed","calib_psfCandidate"]
-                       #, "calib_psfReserved"]
+                       "calib_psfUsed", "calib_psfCandidate", "base_ClassificationExtendedness_value",
+                       "base_ClassificationExtendedness_flag"]
         forced = addColumnsToSchema(unforced, forced,
                                     [flag for flag in flagsToCopy + list(self.config.analysis.flags) if
-                                     flag not in forced.schema and
+                                     flag not in forced.schema and flag in unforced.schema and
                                      not (repoInfo.hscRun and flag == "slot_Centroid_flag")])
-
 
         if self.config.doPlotFootprintNpix:
             forced = addFootprintNPix(forced, fromCat=unforced)
@@ -208,12 +207,13 @@ class CoaddAnalysisTask(CmdLineTask):
             else:
                 self.log.warn("Cannot run plotStarGal: ext_shapeHSM_HsmSourceMoments_xx not in forced.schema")
         if self.config.doPlotSizes:
-            if "base_SdssShape_psf_xx" in forced.schema:
+            if all (ss in forced.schema for ss in ["base_SdssShape_psf_xx", "calib_psfUsed"]):
                 self.plotSizes(forced, filenamer, repoInfo.dataId, butler=repoInfo.butler,
                                camera=repoInfo.camera, tractInfo=repoInfo.tractInfo, patchList=patchList,
                                hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
             else:
-                self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
+                self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx and/or calib_psfUsed "
+                              "not in catalog.schema")
         if cosmos:
             self.plotCosmos(forced, filenamer, cosmos, dataId)
         if self.config.doPlotCompareUnforced:
@@ -270,7 +270,18 @@ class CoaddAnalysisTask(CmdLineTask):
 
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
+            flagsToCopy = ["deblend_nChild", "calib_psfUsed", "calib_psfCandidate",
+                           "base_ClassificationExtendedness_value", "base_ClassificationExtendedness_flag"]
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+            if dataset != "deepCoadd_meas" and any(ss not in catalog.schema for ss in flagsToCopy):
+                unforced = dataRef.get("deepCoadd_meas", immediate=True,
+                                       flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+                # copy over some fields from unforced to forced catalog
+                catalog = addColumnsToSchema(unforced, catalog,
+                                        [flag for flag in flagsToCopy + list(self.config.analysis.flags) if
+                                         flag not in catalog.schema and flag in unforced.schema and
+                                         not (hscRun and flag == "slot_Centroid_flag")])
+
             catalog = self.calibrateCatalogs(catalog, wcs=wcs)
 
             if dataset.startswith("deepCoadd_"):
@@ -487,16 +498,18 @@ class CoaddAnalysisTask(CmdLineTask):
                       tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
                       postFix="", flagsCat=None, plotRunStats=False, highlightList=None):
         enforcer = None
-        shortName = "footNpix_calib_psfUsed"
-        self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
-                           self.config.analysis, flags=["base_Footprint_nPix_flag"],
-                           goodKeys=["calib_psfUsed"], qMin=-100, qMax=2000, labeller=StarGalaxyLabeller(),
-                           flagsCat=flagsCat,
-                           ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
-                                     camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
-                                     hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
-                                     plotRunStats=plotRunStats, highlightList=highlightList)
+        if "calib_psfUsed" in catalog.schema:
+            shortName = "footNpix_calib_psfUsed"
+            self.log.info("shortName = {:s}".format(shortName))
+            self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
+                               self.config.analysis, flags=["base_Footprint_nPix_flag"],
+                               goodKeys=["calib_psfUsed"], qMin=-100, qMax=2000,
+                               labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                               ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
+                                         camera=camera, ccdList=ccdList, tractInfo=tractInfo,
+                                         patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
+                                         zpLabel=zpLabel, plotRunStats=plotRunStats,
+                                         highlightList=highlightList)
         shortName = "footNpix"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
