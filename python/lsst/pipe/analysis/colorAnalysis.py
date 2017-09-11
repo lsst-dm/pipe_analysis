@@ -76,8 +76,7 @@ class NumStarLabeller(object):
     def __init__(self, numBands):
         self.numBands = numBands
     def __call__(self, catalog):
-        return np.array([0 if nn == self.numBands else 2 if nn == 0 else 1 for
-                         nn in catalog["numStarFlags"]])
+        return np.array([0 if nn == self.numBands else 2 if nn == 0 else 1 for nn in catalog["numStarFlags"]])
 
 
 class ColorValueInRange(object):

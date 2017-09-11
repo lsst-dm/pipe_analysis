@@ -178,13 +178,13 @@ class CoaddAnalysisTask(CmdLineTask):
             forced = addFootprintNPix(forced, fromCat=unforced)
 
         # purge the catalogs of flagged sources
-        for flag in self.config.analysis.flags:
-            forced = forced[~unforced[flag]].copy(deep=True)
-            unforced = unforced[~unforced[flag]].copy(deep=True)
-
-        forced = forced[unforced["deblend_nChild"] == 0].copy(deep=True) # Exclude non-deblended
-        unforced = unforced[unforced["deblend_nChild"] == 0].copy(deep=True) # Exclude non-deblended
+        bad = np.zeros(len(unforced), dtype=bool)
+        bad |= unforced["deblend_nChild"] > 0  # Exclude non-deblended
         self.catLabel = "nChild = 0"
+        for flag in self.config.analysis.flags:
+            bad |= unforced[flag]
+        forced = forced[~bad].copy(deep=True)
+        unforced = unforced[~bad].copy(deep=True)
         self.zpLabel = self.zpLabel + " " + self.catLabel
         print "len(forced) = ", len(forced), "  len(unforced) = ",len(unforced)
 
@@ -461,10 +461,11 @@ class CoaddAnalysisTask(CmdLineTask):
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
                            self.config.analysis, flags=["base_Footprint_nPix_flag"],
-                           goodKeys=["calib_psfUsed"],
-                           qMin=-100, qMax=2000, labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
-                           ).plotAll(dataId, filenamer, self.log, enforcer, butler=butler, camera=camera,
-                                     ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
+                           goodKeys=["calib_psfUsed"], qMin=-100, qMax=2000, labeller=StarGalaxyLabeller(),
+                           flagsCat=flagsCat,
+                           ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
+                                     camera=camera, ccdList=ccdList, tractInfo=tractInfo,
+                                     patchList=patchList,
                                      hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
                                      plotRunStats=plotRunStats, highlightList=highlightList)
         shortName = "footNpix"
@@ -484,8 +485,8 @@ class CoaddAnalysisTask(CmdLineTask):
         shortName = "footNpix"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
-                           self.config.analysis, flags=["base_Footprint_nPix_flag"],
-                           qMin=0, qMax=3000, labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                           self.config.analysis, flags=["base_Footprint_nPix_flag"], qMin=0, qMax=3000,
+                           labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
                            ).plotHistogram(filenamer, stats=stats, hscRun=hscRun, matchRadius=matchRadius,
                                            zpLabel=zpLabel, filterStr=dataId['filter'])
 

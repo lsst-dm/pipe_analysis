@@ -100,10 +100,10 @@ class MagDiffMatches(object):
         self.colorterm = colorterm
         self.zp = zp
     def __call__(self, catalog):
-        ref1 = -2.5*np.log10(catalog.get("ref_" + self.colorterm.primary + "_flux"))
-        ref2 = -2.5*np.log10(catalog.get("ref_" + self.colorterm.secondary + "_flux"))
+        ref1 = -2.5*np.log10(catalog["ref_" + self.colorterm.primary + "_flux"])
+        ref2 = -2.5*np.log10(catalog["ref_" + self.colorterm.secondary + "_flux"])
         ref = self.colorterm.transformMags(ref1, ref2)
-        src = self.zp - 2.5*np.log10(catalog.get("src_" + self.column))
+        src = self.zp - 2.5*np.log10(catalog["src_" + self.column])
         return src - ref
 
 class MagDiffCompare(object):
@@ -116,6 +116,7 @@ class MagDiffCompare(object):
         src2 = -2.5*np.log10(catalog["second_" + self.column])
         return src1 - src2
 
+
 class ApCorrDiffCompare(object):
     """Functor to calculate magnitude difference between two entries in comparison catalogs
     """
@@ -125,6 +126,7 @@ class ApCorrDiffCompare(object):
         apCorr1 = catalog["first_" + self.column]
         apCorr2 = catalog["second_" + self.column]
         return -2.5*np.log10(apCorr1/apCorr2)
+
 
 class AstrometryDiff(object):
     """Functor to calculate difference between astrometry"""
@@ -360,17 +362,20 @@ class CentroidDiffErr(CentroidDiff):
 
 def deconvMom(catalog):
     """Calculate deconvolved moments"""
-    if "ext_shapeHSM_HsmSourceMoments" in catalog.schema:
+    if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
         hsm = catalog["ext_shapeHSM_HsmSourceMoments_xx"] + catalog["ext_shapeHSM_HsmSourceMoments_yy"]
     else:
         hsm = np.ones(len(catalog))*np.nan
     sdss = catalog["base_SdssShape_xx"] + catalog["base_SdssShape_yy"]
     if "ext_shapeHSM_HsmPsfMoments_xx" in catalog.schema:
-        psf = catalog["ext_shapeHSM_HsmPsfMoments_xx"] + catalog["ext_shapeHSM_HsmPsfMoments_yy"]
+        psfXxName = "ext_shapeHSM_HsmPsfMoments_xx"
+        psfYyName = "ext_shapeHSM_HsmPsfMoments_yy"
+    elif "base_SdssShape_psf_xx" in catalog.schema:
+        psfXxName = "base_SdssShape_psf_xx"
+        psfYyName = "base_SdssShape_psf_yy"
     else:
-        # LSST does not have shape.sdss.psf.  Could instead add base_PsfShape to catalog using
-        # exposure.getPsf().computeShape(s.getCentroid()).getIxx()
         raise RuntimeError("No psf shape parameter found in catalog")
+    psf = catalog[psfXxName] + catalog[psfYyName]
     return np.where(np.isfinite(hsm), hsm, sdss) - psf
 
 def deconvMomStarGal(catalog):
@@ -460,14 +465,14 @@ def getFluxKeys(schema):
     schemaKeys = dict((s.field.getName(), s.key) for s in schema)
     fluxKeys = dict((name, key) for name, key in schemaKeys.items() if
                     re.search(r"^(\w+_flux)$", name) and key.getTypeString() != "Flag")
-    errKeys = dict((name, schemaKeys[name + "Sigma"]) for name in fluxKeys.keys() if
+    errKeys = dict((name + "Sigma", schemaKeys[name + "Sigma"]) for name in fluxKeys.keys() if
                    name + "Sigma" in schemaKeys)
     # Also check for any in HSC format
     fluxKeysHSC = dict((name, key) for name, key in schemaKeys.items() if
                        (re.search(r"^(flux\_\w+|\w+\_flux)$", name) or
                         re.search(r"^(\w+flux\_\w+|\w+\_flux)$", name))
                        and not re.search(r"^(\w+\_apcorr)$", name) and name + "_err" in schemaKeys)
-    errKeysHSC = dict((name, schemaKeys[name + "_err"]) for name in fluxKeysHSC.keys() if
+    errKeysHSC = dict((name + "_err", schemaKeys[name + "_err"]) for name in fluxKeysHSC.keys() if
                        name + "_err" in schemaKeys)
     if len(fluxKeysHSC) > 0:
         fluxKeys.update(fluxKeysHSC)
@@ -531,7 +536,7 @@ def addApertureFluxesHSC(catalog, prefix=""):
         for ia in (4,):
             row.set(apFluxKey, source[prefix+"flux_aperture"][ia])
             row.set(apFluxSigmaKey, source[prefix+"flux_aperture_err"][ia])
-        row.set(apFlagKey, source.get(prefix+"flux_aperture_flag"))
+        row.set(apFlagKey, source[prefix + "flux_aperture_flag"])
 
     return newCatalog
 
@@ -547,12 +552,13 @@ def addFpPoint(det, catalog, prefix=""):
 
     newCatalog = afwTable.SourceCatalog(schema)
     newCatalog.reserve(len(catalog))
+    xCentroidKey = catalog.schema[prefix + "base_SdssCentroid_x"].asKey()
+    yCentroidKey = catalog.schema[prefix + "base_SdssCentroid_y"].asKey()
     for source in catalog:
         row = newCatalog.addNew()
         row.assign(source, mapper)
         try:
-            center = afwGeom.Point2D(source[prefix + "base_SdssCentroid_x"],
-                                     source[prefix + "base_SdssCentroid_y"])
+            center = afwGeom.Point2D(source[xCentroidKey], source[yCentroidKey])
             posInPix = det.makeCameraPoint(center, cameraGeom.PIXELS)
             fpPoint = det.transform(posInPix, cameraGeom.FOCAL_PLANE).getPoint()
         except:
@@ -604,8 +610,8 @@ def rotatePixelCoord(s, width, height, nQuarter):
     """
     xKey = s.schema.find("slot_Centroid_x").key
     yKey = s.schema.find("slot_Centroid_y").key
-    x0 = s.get(xKey)
-    y0 = s.get(yKey)
+    x0 = s[xKey]
+    y0 = s[yKey]
     if nQuarter == 1:
         s.set(xKey, height - y0 - 1.0)
         s.set(yKey, x0)
@@ -661,8 +667,7 @@ def calibrateSourceCatalogMosaic(dataRef, catalog, fluxKeys=None, errKeys=None, 
     for key in fluxKeys.values() + errKeys.values():
         if len(catalog[key].shape) > 1:
             continue
-        catalog[key][:] /= factor
-
+        catalog[key] /= factor
     return catalog
 
 def calibrateSourceCatalog(catalog, zp):
@@ -672,8 +677,8 @@ def calibrateSourceCatalog(catalog, zp):
     """
     # Convert to constant zero point, as for the coadds
     fluxKeys, errKeys = getFluxKeys(catalog.schema)
+    factor = 10.0**(0.4*zp)
     for name, key in fluxKeys.items() + errKeys.items():
-        factor = 10.0**(0.4*zp)
         catalog[key] /= factor
     return catalog
 
@@ -684,8 +689,8 @@ def calibrateCoaddSourceCatalog(catalog, zp):
     """
     # Convert to constant zero point, as for the coadds
     fluxKeys, errKeys = getFluxKeys(catalog.schema)
+    factor = 10.0**(0.4*zp)
     for name, key in fluxKeys.items() + errKeys.items():
-        factor = 10.0**(0.4*zp)
         catalog[key] /= factor
     return catalog
 
@@ -693,13 +698,12 @@ def backoutApCorr(catalog):
     """Back out the aperture correction to all fluxes
     """
     ii = 0
-    for src in catalog:
-        for k in src.schema.getNames():
-            if "_flux" in k and k[:-5] + "_apCorr" in src.schema.getNames() and "_apCorr" not in k:
-                if ii == 0:
-                    print "Backing out apcorr for:", k
-                    ii += 1
-                src[k] /= src[k[:-5] + "_apCorr"]
+    for k in catalog.schema.getNames():
+        if "_flux" in k and k[:-5] + "_apCorr" in src.schema.getNames() and "_apCorr" not in k:
+            if ii == 0:
+                print "Backing out apcorr for:", k
+                ii += 1
+            catalog[k] /= catalog[k[:-5] + "_apCorr"]
     return catalog
 
 def matchJanskyToDn(matches):
