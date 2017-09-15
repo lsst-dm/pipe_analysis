@@ -241,8 +241,8 @@ def rotatePixelCoords(sources, width, height, nQuarter):
     xKey = sources.schema.find("slot_Centroid_x").key
     yKey = sources.schema.find("slot_Centroid_y").key
     for s in sources:
-        x0 = s.get(xKey)
-        y0 = s.get(yKey)
+        x0 = s[xKey]
+        y0 = s[yKey]
         if nQuarter == 1:
             s.set(xKey, height - y0 - 1.0)
             s.set(yKey, x0)

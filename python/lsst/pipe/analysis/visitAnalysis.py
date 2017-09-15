@@ -295,12 +295,14 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 aliasMap = catalog.schema.getAliasMap()
                 for lsstName, otherName in self.config.srcSchemaMap.iteritems():
                     aliasMap.set(lsstName, otherName)
-            catalog = catalog[catalog["deblend_nChild"] == 0].copy(True) # Exclude non-deblended objects
-            self.catLabel = "nChild = 0"
             # purge the catalogs of flagged sources
+            bad = np.zeros(len(catalog), dtype=bool)
+            bad |= catalog["deblend_nChild"] > 0
+            self.catLabel = "nChild = 0"
             for flag in self.config.analysis.flags:
                 if flag in catalog.schema:
-                    catalog = catalog[~catalog[flag]].copy(True)
+                    bad |= catalog[flag]
+            catalog = catalog[~bad].copy(deep=True)
 
             butler = dataRef.getButler()
             metadata = butler.get("calexp_md", dataRef.dataId)

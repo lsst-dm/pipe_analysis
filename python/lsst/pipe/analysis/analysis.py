@@ -491,13 +491,22 @@ class Analysis(object):
         """Plot ellipticity residuals quiver plot"""
         # Cull the catalog of flagged sources
         flags = ["base_SdssShape_flag", ]
+        bad = np.zeros(len(catalog), dtype=bool)
+        bad |= catalog["deblend_nChild"] > 0
         for flag in flags:
-            catalog = catalog[~catalog[flag]].copy(deep=True)
-        # Cull the catalog down to calibration candidates
-        psfUsed = catalog[catalog["calib_psfUsed"]].copy(deep=True)
-        nChild = np.sum(psfUsed["deblend_nChild"])
+            bad |= catalog[flag]
+        # Cull the catalog down to calibration candidates (or stars if calibration flags not available)
+        if "calib_psfUsed" in catalog.schema:
+            bad |= ~catalog["calib_psfUsed"]
+            catStr = "psfUsed"
+        elif "base_ClassificationExtendedness_value" in catalog.schema:
+            bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
+            catStr = "ClassExtendedness"
+        else:
+            raise RuntimeError(
+                "Neither calib_psfUsed nor base_ClassificationExtendedness_value in schema. Skip quiver plot.")
+        catalog = catalog[~bad].copy(deep=True)
 
-        catalog, catStr = psfUsed, "psfUsed"
         pad = 0.02 # Number of degrees to pad the axis ranges
         ra = np.rad2deg(catalog["coord_ra"])
         dec = np.rad2deg(catalog["coord_dec"])
@@ -527,9 +536,6 @@ class Analysis(object):
                     decMax = max(np.round(max(decPatch) + pad, 2), decMax)
             plotPatchOutline(axes, tractInfo, patchList)
 
-        if catStr != "psfUsed":
-            axes.scatter(np.rad2deg(psfUsed["coord_ra"]), np.rad2deg(psfUsed["coord_dec"]), s=10, marker="o",
-                         c='w', edgecolors='w', label='psfUsed')
         e1 = e1ResidsSdss()
         e1 = e1(catalog)
         e2 = e2ResidsSdss()
