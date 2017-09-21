@@ -70,7 +70,7 @@ class Enforcer(object):
             for ss in self.requireGreater[label]:
                 value = getattr(stats[label], ss)
                 if value <= self.requireGreater[label][ss]:
-                    text = ("%s %s = %f exceeds minimum limit of %f: %s" %
+                    text = ("%s %s = %.2f exceeds minimum limit of %.2f: %s" %
                             (description, ss, value, self.requireGreater[label][ss], dataId))
                     log.warn(text)
                     if self.doRaise:
@@ -79,7 +79,7 @@ class Enforcer(object):
             for ss in self.requireLess[label]:
                 value = getattr(stats[label], ss)
                 if value >= self.requireLess[label][ss]:
-                    text = ("%s %s = %f exceeds maximum limit of %f: %s" %
+                    text = ("%s %s = %.2f exceeds maximum limit of %.2f: %s" %
                             (description, ss, value, self.requireLess[label][ss], dataId))
                     log.warn(text)
                     if self.doRaise:
@@ -87,58 +87,63 @@ class Enforcer(object):
 
 class MagDiff(object):
     """Functor to calculate magnitude difference"""
-    def __init__(self, col1, col2):
+    def __init__(self, col1, col2, unitScale=1.0):
         self.col1 = col1
         self.col2 = col2
+        self.unitScale = unitScale
     def __call__(self, catalog):
-        return -2.5*np.log10(catalog[self.col1]/catalog[self.col2])
+        return -2.5*np.log10(catalog[self.col1]/catalog[self.col2])*self.unitScale
 
 class MagDiffMatches(object):
     """Functor to calculate magnitude difference for match catalog"""
-    def __init__(self, column, colorterm, zp=27.0):
+    def __init__(self, column, colorterm, zp=27.0, unitScale=1.0):
         self.column = column
         self.colorterm = colorterm
         self.zp = zp
+        self.unitScale = unitScale
     def __call__(self, catalog):
         ref1 = -2.5*np.log10(catalog["ref_" + self.colorterm.primary + "_flux"])
         ref2 = -2.5*np.log10(catalog["ref_" + self.colorterm.secondary + "_flux"])
         ref = self.colorterm.transformMags(ref1, ref2)
         src = self.zp - 2.5*np.log10(catalog["src_" + self.column])
-        return src - ref
+        return (src - ref)*self.unitScale
 
 class MagDiffCompare(object):
     """Functor to calculate magnitude difference between two entries in comparison catalogs
     """
-    def __init__(self, column):
+    def __init__(self, column, unitScale=1.0):
         self.column = column
+        self.unitScale = unitScale
     def __call__(self, catalog):
         src1 = -2.5*np.log10(catalog["first_" + self.column])
         src2 = -2.5*np.log10(catalog["second_" + self.column])
-        return src1 - src2
+        return (src1 - src2)*self.unitScale
 
 
 class ApCorrDiffCompare(object):
     """Functor to calculate magnitude difference between two entries in comparison catalogs
     """
-    def __init__(self, column):
+    def __init__(self, column, unitScale=1.0):
         self.column = column
+        self.unitScale = unitScale
     def __call__(self, catalog):
         apCorr1 = catalog["first_" + self.column]
         apCorr2 = catalog["second_" + self.column]
-        return -2.5*np.log10(apCorr1/apCorr2)
+        return -2.5*np.log10(apCorr1/apCorr2)*self.unitScale
 
 
 class AstrometryDiff(object):
     """Functor to calculate difference between astrometry"""
-    def __init__(self, first, second, declination=None):
+    def __init__(self, first, second, declination=None, unitScale=1.0):
         self.first = first
         self.second = second
         self.declination = declination
+        self.unitScale = unitScale
     def __call__(self, catalog):
         first = catalog[self.first]
         second = catalog[self.second]
         cosDec = np.cos(catalog[self.declination]) if self.declination is not None else 1.0
-        return (first - second)*cosDec*(1.0*afwGeom.radians).asArcseconds()
+        return (first - second)*cosDec*(1.0*afwGeom.radians).asArcseconds()*self.unitScale
 
 
 class sdssTraceSize(object):
@@ -256,43 +261,51 @@ class hsmPsfTraceSizeCompare(object):
 
 class e1ResidsSdss(object):
     """Functor to calculate SDSS e1 ellipticity residuals for a given object and psf model"""
+    def __init__(self, unitScale=1.0):
+        self.unitScale = unitScale
     def __call__(self, catalog):
         srcE1 = ((catalog["base_SdssShape_xx"] - catalog["base_SdssShape_yy"])/
                  (catalog["base_SdssShape_xx"] + catalog["base_SdssShape_yy"]))
         psfE1 = ((catalog["base_SdssShape_psf_xx"] - catalog["base_SdssShape_psf_yy"])/
                  (catalog["base_SdssShape_psf_xx"] + catalog["base_SdssShape_psf_yy"]))
         e1Resids = srcE1 - psfE1
-        return np.array(e1Resids)
+        return np.array(e1Resids)*self.unitScale
 
 class e2ResidsSdss(object):
     """Functor to calculate SDSS e2 ellipticity residuals for a given object and psf model"""
+    def __init__(self, unitScale=1.0):
+        self.unitScale = unitScale
     def __call__(self, catalog):
         srcE2 = (2.0*catalog["base_SdssShape_xy"]/
                  (catalog["base_SdssShape_xx"] + catalog["base_SdssShape_yy"]))
         psfE2 = (2.0*catalog["base_SdssShape_psf_xy"]/
                  (catalog["base_SdssShape_psf_xx"] + catalog["base_SdssShape_psf_yy"]))
         e2Resids = srcE2 - psfE2
-        return np.array(e2Resids)
+        return np.array(e2Resids)*self.unitScale
 
 class e1ResidsHsm(object):
     """Functor to calculate HSM e1 ellipticity residuals for a given object and psf model"""
+    def __init__(self, unitScale=1.0):
+        self.unitScale = unitScale
     def __call__(self, catalog):
         srcE1 = ((catalog["ext_shapeHSM_HsmSourceMoments_xx"] - catalog["ext_shapeHSM_HsmSourceMoments_yy"])/
                  (catalog["ext_shapeHSM_HsmSourceMoments_xx"] + catalog["ext_shapeHSM_HsmSourceMoments_yy"]))
         psfE1 = ((catalog["ext_shapeHSM_HsmPsfMoments_xx"] - catalog["ext_shapeHSM_HsmPsfMoments_yy"])/
                  (catalog["ext_shapeHSM_HsmPsfMoments_xx"] + catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
         e1Resids = srcE1 - psfE1
-        return np.array(e1Resids)
+        return np.array(e1Resids)*self.unitScale
 
 class e2ResidsHsm(object):
     """Functor to calculate HSM e1 ellipticity residuals for a given object and psf model"""
+    def __init__(self, unitScale=1.0):
+        self.unitScale = unitScale
     def __call__(self, catalog):
         srcE2 = (2.0*catalog["ext_shapeHSM_HsmSourceMoments_xy"]/
                  (catalog["ext_shapeHSM_HsmSourceMoments_xx"] + catalog["ext_shapeHSM_HsmSourceMoments_yy"]))
         psfE2 = (2.0*catalog["ext_shapeHSM_HsmPsfMoments_xy"]/
                  (catalog["ext_shapeHSM_HsmPsfMoments_xx"] + catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
         e2Resids = srcE2 - psfE2
-        return np.array(e2Resids)
+        return np.array(e2Resids)*self.unitScale
 
 
 class FootNpixDiffCompare(object):
@@ -308,27 +321,29 @@ class FootNpixDiffCompare(object):
 
 class MagDiffErr(object):
     """Functor to calculate magnitude difference error"""
-    def __init__(self, column):
+    def __init__(self, column, unitScale=1.0):
         zp = 27.0 # Exact value is not important, since we're differencing the magnitudes
         self.column = column
         self.calib = afwImage.Calib()
         self.calib.setFluxMag0(10.0**(0.4*zp))
         self.calib.setThrowOnNegativeFlux(False)
+        self.unitScale = unitScale
     def __call__(self, catalog):
         mag1, err1 = self.calib.getMagnitude(catalog["first_" + self.column],
                                              catalog["first_" + self.column + "Sigma"])
         mag2, err2 = self.calib.getMagnitude(catalog["second_" + self.column],
                                              catalog["second_" + self.column + "Sigma"])
-        return np.sqrt(err1**2 + err2**2)
+        return np.sqrt(err1**2 + err2**2)*self.unitScale
 
 class ApCorrDiffErr(object):
     """Functor to calculate magnitude difference error"""
-    def __init__(self, column):
+    def __init__(self, column, unitScale=1.0):
         self.column = column
+        self.unitScale = unitScale
     def __call__(self, catalog):
         err1 = catalog["first_" + self.column + "Sigma"]
         err2 = catalog["second_" + self.column + "Sigma"]
-        return np.sqrt(err1**2 + err2**2)
+        return np.sqrt(err1**2 + err2**2)*self.unitScale
 
 class CentroidDiff(object):
     """Functor to calculate difference in astrometry"""
