@@ -28,13 +28,13 @@ class AnalysisConfig(Config):
     magPlotStarMin = DictField(
         keytype=str,
         itemtype=float,
-        default={"HSC-G": 16.5,"HSC-R": 16.5,"HSC-I": 16.5,"HSC-Z": 13.5,"HSC-Y": 13.5,"NB0921": 14.5},
+        default={"HSC-G": 16.5, "HSC-R": 17.0, "HSC-I": 16.5, "HSC-Z": 15.5, "HSC-Y": 15.5, "NB0921": 15.5},
         doc="Minimum magnitude to plot",
     )
     magPlotStarMax = DictField(
         keytype=str,
         itemtype=float,
-        default={"HSC-G": 24.5,"HSC-R": 24.5,"HSC-I": 24.0,"HSC-Z": 20.5,"HSC-Y": 21.5,"NB0921": 22.5},
+        default={"HSC-G": 23.5, "HSC-R": 24.0, "HSC-I": 23.5, "HSC-Z": 22.5, "HSC-Y": 22.5, "NB0921": 22.5},
         doc="Maximum magnitude to plot",
     )
     fluxColumn = Field(dtype=str, default="base_PsfFlux_flux", doc="Column to use for flux/mag plotting")
@@ -63,14 +63,17 @@ class Analysis(object):
             self.magThreshold = magThreshold
         self.qMin = qMin
         self.qMax = qMax
+        self.goodKeys = goodKeys  # include if goodKey = True
+        self.calibUsedOnly = len([key for key in self.goodKeys if "Used" in key])
+        if self.calibUsedOnly > 0:
+            self.magThreshold = 99 # Want to plot all calibUsed
+
         if labeller is not None:
-            if (labeller.labels.has_key("galaxy") and "calib_psfUsed" not in goodKeys and
-                self.quantityName != "pStar"):
+            if labeller.labels.has_key("galaxy") and self.calibUsedOnly == 0 and self.quantityName != "pStar":
                 self.qMin, self.qMax = 2.0*qMin, 2.0*qMax
-            if "galaxy" in labeller.plot and "calib_psfUsed" not in goodKeys and self.quantityName != "pStar":
+            if "galaxy" in labeller.plot and self.calibUsedOnly == 0 and self.quantityName != "pStar":
                 self.qMin, self.qMax = 2.0*qMin, 2.0*qMax
         self.prefix = prefix
-        self.goodKeys = goodKeys  # include if goodKey = True
         self.errFunc = errFunc
         if func is not None:
             if type(func) == np.ndarray:
@@ -194,7 +197,10 @@ class Analysis(object):
                 inLimits &= self.data["star"].quantity > self.qMin
 
         magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
-        if "calib_psfUsed" in self.goodKeys:
+        if "matches" in filename:  # narrow magnitude plotting limits for matches
+            magMin += 1
+            magMax -= 1
+        if self.calibUsedOnly > 0:
             magMin = self.config.magPlotStarMin[filterStr]
             magMax = self.config.magPlotStarMax[filterStr]
 
@@ -244,7 +250,7 @@ class Analysis(object):
                 axScatter.axvspan(self.magThreshold, axScatter.get_xlim()[1], facecolor="k",
                                   edgecolor="none", alpha=0.15)
                 # compute running stats (just for plotting)
-                if "calib_psfUsed" not in self.goodKeys and plotRunStats:
+                if self.calibUsedOnly == 0 and plotRunStats:
                     belowThresh = data.mag < magMax  # set lower if you want to truncate plotted running stats
                     numHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins))
                     syHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
@@ -319,7 +325,7 @@ class Analysis(object):
         plt.close()
 
     def plotHistogram(self, filename, numBins=51, stats=None, hscRun=None, matchRadius=None, zpLabel=None,
-                        filterStr=None):
+                      camera=None, filterStr=None):
         """Plot histogram of quantity"""
         fig, axes = plt.subplots(1, 1)
         axes.axvline(0, linestyle="--", color="0.6")
@@ -350,7 +356,9 @@ class Analysis(object):
             annotateAxes(plt, axes, stats, "star", self.magThreshold, x0=x0, y0=y0,
                          isHist=True, hscRun=hscRun, matchRadius=matchRadius)
         axes.legend()
-        labelVisit(filename, plt, axes, 0.5, 1.05)
+        if camera is not None:
+            labelCamera(camera, plt, axes, 0.5, 1.09)
+        labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
             labelZp(zpLabel, plt, axes, 0.13, -0.09, color="green")
         fig.savefig(filename)
@@ -377,7 +385,7 @@ class Analysis(object):
         good = (self.mag < self.magThreshold if self.magThreshold > 0 else
                 np.ones(len(self.mag), dtype=bool))
 
-        if dataName == "star" and "calib_psfUsed" not in self.goodKeys and "pStar" not in filename:
+        if dataName == "star" and self.calibUsedOnly == 0 and "pStar" not in filename:
             vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
         elif "CModel" in filename and "overlap" not in filename:
             vMin, vMax = 1.5*self.qMin, 0.5*self.qMax
@@ -433,7 +441,9 @@ class Analysis(object):
         cb.set_label(self.quantityName + " (" + filterStr + ")", rotation=270, labelpad=15)
         if hscRun is not None:
             axes.set_title("HSC stack run: " + hscRun, color="#800080")
-        labelVisit(filename, plt, axes, 0.5, 1.07)
+        if camera is not None:
+            labelCamera(camera, plt, axes, 0.5, 1.09)
+        labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
             labelZp(zpLabel, plt, axes, 0.13, -0.09, color="green")
         axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
@@ -559,7 +569,9 @@ class Analysis(object):
 
         if hscRun is not None:
             axes.set_title("HSC stack run: " + hscRun, color="#800080")
-        labelVisit(filename, plt, axes, 0.5, 1.07)
+        if camera is not None:
+            labelCamera(camera, plt, axes, 0.5, 1.09)
+        labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
             labelZp(zpLabel, plt, axes, 0.13, -0.09, color="green")
         axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
@@ -591,8 +603,8 @@ class Analysis(object):
                              zpLabel=zpLabel, dataName="star")
 
         if (not any(ss in self.shortName for ss in
-                    ["pStar", "race", "Xx_", "Yy_", "Resids", "psfUsed", "gri", "riz", "izy", "z9y",
-                     "color_"])):
+                    ["pStar", "race", "Xx_", "Yy_", "Resids", "psfUsed", "photometryUsed",
+                     "gri", "riz", "izy", "z9y", "color_"])):
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky-gals" + postFix),
                                  stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,
                                  tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,

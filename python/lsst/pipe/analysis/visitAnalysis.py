@@ -140,7 +140,9 @@ class CcdAnalysis(Analysis):
         cb.set_label(self.quantityName, rotation=270, labelpad=15)
         if hscRun is not None:
             axes.set_title("HSC stack run: " + hscRun, color="#800080")
-        labelVisit(filename, plt, axes, 0.5, 1.07)
+        labelVisit(filename, plt, axes, 0.5, 1.04)
+        if camera is not None:
+            labelCamera(camera, plt, axes, 0.5, 1.09)
         if zpLabel is not None:
             labelZp(zpLabel, plt, axes, 0.08, -0.11, color="green")
         fig.savefig(filename)
@@ -272,8 +274,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if self.config.doPlotMatches:
                 matches = self.readSrcMatches(dataRefListTract, "src")
                 self.plotMatches(matches, filterName, filenamer, dataId, butler=butler, camera=camera,
-                                 ccdList=ccdListPerTract, hscRun=hscRun, matchRadius=self.config.matchRadius,
-                                 zpLabel=self.zpLabel)
+                                 ccdList=ccdListPerTract, hscRun=hscRun, zpLabel=self.zpLabel)
 
             for cat in self.config.externalCatalogs:
                 if self.config.photoCatName not in cat:
