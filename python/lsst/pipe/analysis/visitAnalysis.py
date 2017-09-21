@@ -26,8 +26,8 @@ import lsst.afw.table as afwTable
 
 class CcdAnalysis(Analysis):
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
-                tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None, postFix="",
-                plotRunStats=True, highlightList=None, haveFpCoords=None):
+                tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
+                postFix="", plotRunStats=True, highlightList=None, haveFpCoords=None):
         stats = self.stats
         if self.config.doPlotCcdXy:
             self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix),
@@ -42,10 +42,10 @@ class CcdAnalysis(Analysis):
                                 postFix=postFix, plotRunStats=plotRunStats, highlightList=highlightList)
 
     def plotFP(self, dataId, filenamer, log, enforcer=None, camera=None, ccdList=None, hscRun=None,
-               matchRadius=None, zpLabel=None):
+               matchRadius=None, zpLabel=None, forcedStr=None):
         self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa"), stats=self.stats,
                             camera=camera, ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
-                            zpLabel=zpLabel)
+                            zpLabel=zpLabel, forcedStr=forcedStr)
 
     def plotCcd(self, filename, centroid="base_SdssCentroid", cmap=plt.cm.nipy_spectral, idBits=32,
                 visitMultiplier=200, stats=None, hscRun=None, matchRadius=None, zpLabel=None):
@@ -99,12 +99,12 @@ class CcdAnalysis(Analysis):
         cb.set_label("CCD index", rotation=270, labelpad=15)
         labelVisit(filename, plt, axes[0], 0.5, 1.1)
         if zpLabel is not None:
-            labelZp(zpLabel, plt, axes[0], 0.08, -0.11, color="green")
+            plotText(zpLabel, plt, axes[0], 0.08, -0.11, prefix="zp: ", color="green")
         fig.savefig(filename)
         plt.close(fig)
 
     def plotFocalPlane(self, filename, cmap=plt.cm.Spectral, stats=None, camera=None, ccdList=None,
-                       hscRun=None, matchRadius=None, zpLabel=None, fontSize=8):
+                       hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None, fontSize=8):
         """Plot quantity colormaped on the focal plane"""
         xFp = self.catalog[self.prefix + "base_FPPosition_x"]
         yFp = self.catalog[self.prefix + "base_FPPosition_y"]
@@ -142,7 +142,9 @@ class CcdAnalysis(Analysis):
         if camera is not None:
             labelCamera(camera, plt, axes, 0.5, 1.09)
         if zpLabel is not None:
-            labelZp(zpLabel, plt, axes, 0.08, -0.1, color="green")
+            plotText(zpLabel, plt, axes, 0.08, -0.1, prefix="zp: ", color="green")
+        if forcedStr is not None:
+            plotText(forcedStr, plt, axes, 0.86, -0.1, prefix="cat: ", color="green")
         fig.savefig(filename)
         plt.close(fig)
 

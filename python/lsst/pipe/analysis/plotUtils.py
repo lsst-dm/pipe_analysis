@@ -14,7 +14,7 @@ except ImportError:
     applyMosaicResultsExposure = None
 
 __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "MatchesStarGalaxyLabeller",
-           "CosmosLabeller", "labelZp", "annotateAxes", "labelVisit", "labelCamera",
+           "CosmosLabeller", "plotText", "annotateAxes", "labelVisit", "labelCamera",
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
            "plotCcdOutline", "rotatePixelCoords", "bboxToRaDec", "getRaDecMinMaxPatchList", "percent",
            "setPtSize", "getQuiver"]
@@ -67,10 +67,9 @@ class CosmosLabeller(StarGalaxyLabeller):
         good = set(mm.second.getId() for mm in matches)
         return np.array([0 if ii in good else 1 for ii in catalog["id"]])
 
-
-def labelZp(zpLabel, plt, axis, xLoc, yLoc, rotation=0, fontSize=9, color="k"):
+def plotText(zpLabel, plt, axis, xLoc, yLoc, prefix="", rotation=0, fontSize=9, color="k"):
     fontSize = int(fontSize - min(3, len(zpLabel)/10))
-    plt.text(xLoc, yLoc, "zp: " + zpLabel, ha="center", va="center", fontsize=fontSize, rotation=rotation,
+    plt.text(xLoc, yLoc, prefix + zpLabel, ha="center", va="center", fontsize=fontSize, rotation=rotation,
              transform=axis.transAxes, color=color)
 
 def annotateAxes(filename, plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff=0.05,

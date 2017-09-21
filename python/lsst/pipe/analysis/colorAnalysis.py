@@ -187,7 +187,8 @@ class ColorAnalysisTask(CmdLineTask):
                     patchList.append(dataRef.dataId["patch"] )
 
         for patchRefList in patchRefsByFilter.itervalues():
-            repoInfo = getRepoInfo(patchRefList[0], coaddName=self.config.coaddName)
+            repoInfo = getRepoInfo(patchRefList[0], coaddName=self.config.coaddName,
+                                   coaddDataset="Coadd_forced_src")
             break
 
         filenamer = Filenamer(repoInfo.butler, "plotColor", repoInfo.dataId)

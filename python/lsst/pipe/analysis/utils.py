@@ -844,7 +844,7 @@ def andCatalog(version):
     finally:
         eups.setup("astrometry_net_data", current, noRecursion=True)
 
-def getRepoInfo(dataRef, coaddName=None, doApplyUberCal=False):
+def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False):
     """Obtain the relevant repository information for the given dataRef
 
     Parameters
@@ -864,7 +864,7 @@ def getRepoInfo(dataRef, coaddName=None, doApplyUberCal=False):
     isCoadd = True if dataId.has_key("patch") else False
     ccdKey = None if isCoadd else findCcdKey(dataId)
     # Check metadata to see if stack used was HSC
-    metaStr = coaddName + "Coadd_forced_src" if coaddName is not None else "calexp_md"
+    metaStr = coaddName + coaddDataset if coaddName is not None else "calexp_md"
     metadata = butler.get(metaStr, dataId)
     hscRun = checkHscStack(metadata)
     dataset = "src"
