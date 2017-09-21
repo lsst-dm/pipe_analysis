@@ -6,8 +6,6 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 np.seterr(all="ignore")
-from eups import Eups
-eups = Eups()
 
 from collections import defaultdict
 
@@ -26,10 +24,10 @@ import lsst.afw.table as afwTable
 
 
 class CcdAnalysis(Analysis):
-    def plotAll(self, dataId, filenamer, log, enforcer=None, forcedMean=None, butler=None, camera=None,
-                ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                postFix="", plotRunStats=True, highlightList=None):
-        stats = self.stats(forcedMean=forcedMean)
+    def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
+                tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None, postFix="",
+                plotRunStats=True, highlightList=None):
+        stats = self.stats
         if self.config.doPlotCcdXy:
             self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix), stats=stats,
                          hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
@@ -38,15 +36,13 @@ class CcdAnalysis(Analysis):
                                 stats=stats, camera=camera, ccdList=ccdList, hscRun=hscRun,
                                 matchRadius=matchRadius, zpLabel=zpLabel)
 
-        return Analysis.plotAll(self, dataId, filenamer, log, enforcer=enforcer, forcedMean=forcedMean,
-                                butler=butler, camera=camera, ccdList=ccdList, hscRun=hscRun,
-                                matchRadius=matchRadius, zpLabel=zpLabel, postFix=postFix,
-                                plotRunStats=plotRunStats, highlightList=highlightList)
+        return Analysis.plotAll(self, dataId, filenamer, log, enforcer=enforcer, butler=butler, camera=camera,
+                                ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
+                                postFix=postFix, plotRunStats=plotRunStats, highlightList=highlightList)
 
-    def plotFP(self, dataId, filenamer, log, enforcer=None, forcedMean=None, camera=None, ccdList=None,
-               hscRun=None, matchRadius=None, zpLabel=None):
-        stats = self.stats(forcedMean=forcedMean)
-        self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa"), stats=stats,
+    def plotFP(self, dataId, filenamer, log, enforcer=None, camera=None, ccdList=None, hscRun=None,
+               matchRadius=None, zpLabel=None):
+        self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa"), stats=self.stats,
                             camera=camera, ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
                             zpLabel=zpLabel)
 
@@ -107,7 +103,7 @@ class CcdAnalysis(Analysis):
         plt.close(fig)
 
     def plotFocalPlane(self, filename, cmap=plt.cm.Spectral, stats=None, camera=None, ccdList=None,
-                       hscRun=None, matchRadius=None, zpLabel=None):
+                       hscRun=None, matchRadius=None, zpLabel=None, fontSize=8):
         """Plot quantity colormaped on the focal plane"""
         xFp = self.catalog[self.prefix + "base_FPPosition_x"]
         yFp = self.catalog[self.prefix + "base_FPPosition_y"]
@@ -122,7 +118,8 @@ class CcdAnalysis(Analysis):
             cmap = plt.cm.pink
             vMin = min(0, np.round(self.data["star"].quantity.min() - 10))
             vMax = np.round(self.data["star"].quantity.max() + 50, -2)
-        fig, axes = plt.subplots(1, 1, subplot_kw=dict(axisbg="0.7"))
+        fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.7"))
+        axes.tick_params(which="both", direction="in", top="on", right="on", labelsize=fontSize)
         for name, data in self.data.iteritems():
             if not data.plot:
                 continue
@@ -144,7 +141,7 @@ class CcdAnalysis(Analysis):
         if camera is not None:
             labelCamera(camera, plt, axes, 0.5, 1.09)
         if zpLabel is not None:
-            labelZp(zpLabel, plt, axes, 0.08, -0.11, color="green")
+            labelZp(zpLabel, plt, axes, 0.08, -0.1, color="green")
         fig.savefig(filename)
         plt.close(fig)
 

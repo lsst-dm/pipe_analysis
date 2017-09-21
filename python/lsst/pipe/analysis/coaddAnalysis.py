@@ -126,6 +126,7 @@ class CoaddAnalysisTask(CmdLineTask):
                             ([patchRef.dataId for patchRef in patchRefList]))
         dataId = patchRefList[indexExists].dataId
         patchList = [dataRef.dataId["patch"] for dataRef in patchRefList]
+        self.log.info("patchList size: {:d}".format(len(patchList)))
         butler = patchRefList[indexExists].getButler()
         # Check metadata to see if stack used was HSC
         forcedMd = butler.get("deepCoadd_forced_src", patchRefList[indexExists].dataId).getMetadata()
@@ -224,12 +225,18 @@ class CoaddAnalysisTask(CmdLineTask):
                                      patchList=patchList, hscRun=hscRun, matchRadius=self.config.matchRadius,
                                      zpLabel=self.zpLabel)
         if self.config.doPlotOverlaps:
-            overlaps = self.overlaps(forced, unforced)
-            self.log.info("Number of overlap objects matched = {:d}".format(len(overlaps)))
-            if len(overlaps) > 5:
-                self.plotOverlaps(overlaps, filenamer, dataId, tractInfo=tractInfo, patchList=patchList,
-                                  hscRun=hscRun, matchRadius=self.config.matchOverlapRadius,
-                                  zpLabel=self.zpLabel)
+            # Determine if any patches in the patchList actually overlap
+            overlappingPatches = checkPatchOverlap(patchList, tractInfo)
+            if not overlappingPatches:
+                self.log.info("No overlapping patches...skipping overlap plots")
+            else:
+                overlaps = self.overlaps(forced, unforced)
+                self.log.info("Number of overlap objects matched = {:d}".format(len(overlaps)))
+                if len(overlaps) > 0:
+                    self.plotOverlaps(overlaps, filenamer, dataId, tractInfo=tractInfo, patchList=patchList,
+                                      hscRun=hscRun, matchRadius=self.config.matchOverlapRadius,
+                                      zpLabel=self.zpLabel)
+
         if self.config.doPlotMatches:
             matches = self.readSrcMatches(patchRefList, "deepCoadd_forced_src", hscRun=hscRun, wcs=wcs)
             self.plotMatches(matches, filterName, filenamer, dataId, tractInfo=tractInfo, patchList=patchList,
@@ -369,8 +376,8 @@ class CoaddAnalysisTask(CmdLineTask):
                 sdssTrace = sdssTraceSize()
                 sdssTrace = sdssTrace(psfUsed)
                 sdssTrace = sdssTrace[np.where(np.isfinite(sdssTrace))]
-                traceMean = np.around(sdssTrace.mean(), 1)
-                traceStd = np.around(4.5*sdssTrace.std(), 1)
+                traceMean = np.around(sdssTrace.mean(), 2)
+                traceStd = max(0.03, np.around(4.5*sdssTrace.std(), 2))
                 qMin = traceMean - traceStd
                 qMax = traceMean + traceStd
                 self.log.info("shortName = {:s}".format(shortName))
@@ -573,10 +580,10 @@ class CoaddAnalysisTask(CmdLineTask):
         self.AnalysisClass(overlaps, lambda cat: cat["distance"]*(1.0*afwGeom.radians).asArcseconds(),
                            "Distance (arcsec)", shortName, self.config.analysis, prefix="first_",
                            qMin=-0.01, qMax=0.11, labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat,
-                           ).plotAll(dataId, filenamer, self.log, distEnforcer, forcedMean=0.0,
-                                     butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                                     patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                     zpLabel=zpLabel)
+                           forcedMean=0.0,
+                           ).plotAll(dataId, filenamer, self.log, distEnforcer, butler=butler, camera=camera,
+                                     ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
+                                     hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
 
     def plotMatches(self, matches, filterName, filenamer, dataId, description="matches", butler=None,
                     camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None,
@@ -610,7 +617,7 @@ class CoaddAnalysisTask(CmdLineTask):
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_flux", ct, zp=0.0), "MagPsf(unforced) - ref",
                            shortName, self.config.analysisMatches, prefix="src_",
-                           qMin=-0.15, qMax=5.15, labeller=MatchesStarGalaxyLabeller(),
+                           qMin=-0.15, qMax=0.5, labeller=MatchesStarGalaxyLabeller(),
                            ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                      camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
                                      hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
@@ -631,9 +638,9 @@ class CoaddAnalysisTask(CmdLineTask):
         self.AnalysisClass(matches, lambda cat: cat["distance"]*(1.0*afwGeom.radians).asArcseconds(),
                            "Distance (arcsec)", shortName, self.config.analysisMatches, prefix="src_",
                            qMin=-0.05*self.config.matchRadius, qMax=0.3*self.config.matchRadius,
-                           labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
+                           labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat, forcedMean=0.0,
                            ).plotAll(dataId, filenamer, self.log,
-                                     Enforcer(requireLess={"star": {"stdev": 0.050}}), forcedMean=0.0,
+                                     Enforcer(requireLess={"star": {"stdev": 0.050}}),
                                      butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                      patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                      zpLabel=zpLabel)
@@ -643,7 +650,7 @@ class CoaddAnalysisTask(CmdLineTask):
             self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra", "ref_coord_dec"),
                                "dRA*cos(Dec) (arcsec) (calib_astrometryUsed)", shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometryUsed"],
-                               qMin=-0.2*self.config.matchRadius, qMax=0.2*self.config.matchRadius,
+                               qMin=-0.25*self.config.matchRadius, qMax=0.25*self.config.matchRadius,
                                labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                          camera=camera, ccdList=ccdList, tractInfo=tractInfo,
@@ -653,7 +660,7 @@ class CoaddAnalysisTask(CmdLineTask):
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra", "ref_coord_dec"),
                            "dRA*cos(Dec) (arcsec)", shortName, self.config.analysisMatches, prefix="src_",
-                           qMin=-0.2*self.config.matchRadius, qMax=0.2*self.config.matchRadius,
+                           qMin=-0.25*self.config.matchRadius, qMax=0.25*self.config.matchRadius,
                            labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
                            ).plotAll(dataId, filenamer, self.log,
                                      Enforcer(requireLess={"star": {"stdev": 0.050}}),
@@ -676,7 +683,7 @@ class CoaddAnalysisTask(CmdLineTask):
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches, AstrometryDiff("src_coord_dec", "ref_coord_dec"),
                            "dDec (arcsec)", shortName, self.config.analysisMatches, prefix="src_",
-                           qMin=-0.3*self.config.matchRadius, qMax=0.3*self.config.matchRadius,
+                           qMin=-0.25*self.config.matchRadius, qMax=0.25*self.config.matchRadius,
                            labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
                            ).plotAll(dataId, filenamer, self.log,
                                      Enforcer(requireLess={"star": {"stdev": 0.050}}),
