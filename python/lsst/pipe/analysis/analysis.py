@@ -115,6 +115,10 @@ class Analysis(object):
                                     colorList[value], self.quantityError, name in labeller.plot) for
                          name, value in labeller.labels.items()}
             self.stats = self.statistics(forcedMean=forcedMean)
+            # Make sure you have some good data to plot
+            for name in labeller.plot:
+                if (self.stats[name].num) == 0:
+                    raise RuntimeError("No good data points to plot for sample labelled: {:}".format(name))
             # Ensure plot limits always encompass at least mean +/- 2.5*stdev
             if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar"]):
                 self.qMin = min(self.qMin, self.stats["star"].mean - 2.5*self.stats["star"].stdev)
@@ -707,8 +711,6 @@ class Analysis(object):
         """Calculate statistics on quantity"""
         stats = {}
         for name, data in self.data.items():
-            if len(data.mag) == 0:
-                continue
             good = data.mag < self.magThreshold
             stats[name] = self.calculateStats(data.quantity, good, forcedMean=forcedMean)
             if self.quantityError is not None:

@@ -448,6 +448,11 @@ def colorColorPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=None, y
         keep = np.logical_not(np.abs(dy) > clip)
 
     keep &= select
+    nKeep = np.sum(keep)
+    if nKeep < order:
+        raise RuntimeError(
+            "Not enough good data points ({0:d}) for polynomial fit of order {1:d}".format(nKeep, order))
+
     poly = np.polyfit(xx[keep], yy[keep], order)
     xLine = np.linspace(xRange[0], xRange[1], 1000)
     yLine = np.polyval(poly, xLine)
