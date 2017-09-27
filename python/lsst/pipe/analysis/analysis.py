@@ -180,10 +180,11 @@ class Analysis(object):
 
         axScatter.tick_params(which="both", direction="in", labelsize=9)
 
-        if camera is not None and len(ccdList) > 0:
-            axTopRight = plt.axes(topRight)
-            axTopRight.set_aspect("equal")
-            plotCameraOutline(plt, axTopRight, camera, ccdList)
+        if camera is not None and ccdList is not None:
+            if len(ccdList) > 0:
+                axTopRight = plt.axes(topRight)
+                axTopRight.set_aspect("equal")
+                plotCameraOutline(plt, axTopRight, camera, ccdList)
 
         # VERY slow for our 'rings' skymap
         #if tractInfo is not None and len(patchList) > 0:
