@@ -88,9 +88,9 @@ class ColorValueInRange(object):
 
     def __call__(self, catalog):
         good = np.ones(len(catalog), dtype=bool)
-        for col, value in self.requireGreater.iteritems():
+        for col, value in self.requireGreater.items():
             good &= catalog[col] > value
-        for col, value in self.requireLess.iteritems():
+        for col, value in self.requireLess.items():
             good &= catalog[col] < value
         return np.where(good, catalog[self.column], np.nan)
 
@@ -193,12 +193,12 @@ class ColorAnalysisTask(CmdLineTask):
         tractInfo = skymap[dataRef.dataId["tract"]]
         filenamer = Filenamer(butler, "plotColor", dataId)
         unforcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList, "deepCoadd_meas") for
-                            ff, patchRefList in patchRefsByFilter.iteritems()}
+                            ff, patchRefList in patchRefsByFilter.items()}
         for cat in unforcedCatalogsByFilter.itervalues():
             calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
         unforced = self.transformCatalogs(unforcedCatalogsByFilter, self.config.transforms, hscRun=hscRun)
         forcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList, "deepCoadd_forced_src") for
-                            ff, patchRefList in patchRefsByFilter.iteritems()}
+                            ff, patchRefList in patchRefsByFilter.items()}
         for cat in forcedCatalogsByFilter.itervalues():
             calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
         # self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
@@ -264,11 +264,11 @@ class ColorAnalysisTask(CmdLineTask):
         new.extend(template, mapper)
 
         # Set transformed colors
-        for col, transform in transforms.iteritems():
+        for col, transform in transforms.items():
             if col not in schema:
                 continue
             value = np.ones(num)*transform.coeffs[""] if "" in transform.coeffs else np.zeros(num)
-            for ff, coeff in transform.coeffs.iteritems():
+            for ff, coeff in transform.coeffs.items():
                 if ff == "":  # Constant: already done
                     continue
                 cat = catalogs[ff]
@@ -325,7 +325,7 @@ class ColorAnalysisTask(CmdLineTask):
 
     def plotStarColors(self, catalog, filenamer, labeller, dataId, butler=None, tractInfo=None,
                        patchList=None, hscRun=None):
-        for col, transform in self.config.transforms.iteritems():
+        for col, transform in self.config.transforms.items():
             if not transform.plot or col not in catalog.schema:
                 continue
             shortName = "color_" + col
