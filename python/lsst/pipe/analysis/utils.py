@@ -2,7 +2,12 @@ import os
 import re
 
 import numpy as np
-import fastparquet
+try:
+    import fastparquet
+except ImportError:
+    fastparquet = None
+    import logging
+    logging.warning('fastparquet package not available.  Parquet files will not be written.')
 
 from contextlib import contextmanager
 
@@ -27,10 +32,33 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "backoutApCorr", "matchJanskyToDn", "checkHscStack", "fluxToPlotString", "andCatalog", "writeParquet"]
 
 def writeParquet(table, path):
-    """Write a parquet file into repo
-    
-    table is afwTable
     """
+    Write an afwTable into Parquet format
+    
+    Parameters
+    ----------
+    table : afwTable
+        Table to be written to parquet
+    path : str
+        Path to which to write.  Must end in ".parq".
+
+    Returns
+    -------
+    None
+
+    Notes
+    -----
+    This function first converts the afwTable to an astropy table,
+    then to a pandas DataFrame, which is then written to parquet
+    format using the fastparquet library.  If fastparquet is not
+    available, then it will do nothing.
+
+    """
+    if fastparquet is None:
+        return
+
+    if not path.endswith('.parq'):
+        raise ValueError('Please provide a filename ending in .parq.')
     df = table.asAstropy().to_pandas()
     df = df.set_index('id', drop=True)
     fastparquet.write(path, df)
