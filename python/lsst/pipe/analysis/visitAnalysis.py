@@ -220,6 +220,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     self.log.info("HSC run: adding aperture flux to schema...")
                     catalog = addApertureFluxesHSC(catalog, prefix="")
 
+            # Create and write parquet tables
+            tableFilenamer = Filenamer(butler, 'qaTableVisit', dataRefListTract[0].dataId)
+            writeParquet(catalog, tableFilenamer(dataRefListTract[0].dataId, description='catalog'))
+            writeParquet(commonZpCat, tableFilenamer(dataRefListTract[0].dataId, description='commonZp'))
+
             try:
                 self.zpLabel = self.zpLabel + " " + self.catLabel
             except:

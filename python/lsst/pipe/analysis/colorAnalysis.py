@@ -205,6 +205,10 @@ class ColorAnalysisTask(CmdLineTask):
         forced = self.transformCatalogs(forcedCatalogsByFilter, self.config.transforms,
                                         flagsCats=unforcedCatalogsByFilter, hscRun=hscRun)
 
+        # Create and write parquet tables
+        tableFilenamer = Filenamer(butler, 'qaTableColor', dataId)
+        writeParquet(forced, tableFilenamer(dataId, description='forced'))
+
         self.plotStarColors(forced, filenamer, NumStarLabeller(len(forcedCatalogsByFilter)), dataId,
                             tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
         self.plotStarColorColor(forcedCatalogsByFilter, filenamer, dataId, tractInfo=tractInfo,
