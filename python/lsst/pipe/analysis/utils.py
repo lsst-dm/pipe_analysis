@@ -178,17 +178,18 @@ class ApCorrDiffCompare(object):
 
 class AstrometryDiff(object):
     """Functor to calculate difference between astrometry"""
-    def __init__(self, first, second, declination=None, unitScale=1.0):
+    def __init__(self, first, second, declination1=None, declination2=None, unitScale=1.0):
         self.first = first
         self.second = second
-        self.declination = declination
+        self.declination1 = declination1
+        self.declination2 = declination2
         self.unitScale = unitScale
     def __call__(self, catalog):
         first = catalog[self.first]
         second = catalog[self.second]
-        cosDec = np.cos(catalog[self.declination]) if self.declination is not None else 1.0
-        return (first - second)*cosDec*(1.0*afwGeom.radians).asArcseconds()*self.unitScale
-
+        cosDec1 = np.cos(catalog[self.declination1]) if self.declination1 is not None else 1.0
+        cosDec2 = np.cos(catalog[self.declination2]) if self.declination2 is not None else 1.0
+        return (first*cosDec1 - second*cosDec2)*(1.0*afwGeom.radians).asArcseconds()*self.unitScale
 
 class sdssTraceSize(object):
     """Functor to calculate SDSS trace radius size for sources"""

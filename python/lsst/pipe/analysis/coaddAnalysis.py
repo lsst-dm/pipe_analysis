@@ -710,7 +710,9 @@ class CoaddAnalysisTask(CmdLineTask):
             shortName = description + "_raCosDec_calib_astrometryUsed"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra",
-                                                       declination="ref_coord_dec", unitScale=self.unitScale),
+                                                       declination1="src_coord_dec",
+                                                       declination2="ref_coord_dec",
+                                                       unitScale=self.unitScale),
                                "      $\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s) (calib_astromUsed)" % unitStr,
                                shortName, self.config.analysisMatches, prefix="src_",
                                goodKeys=["calib_astrometryUsed"], qMin=-0.2*self.config.matchRadius,
@@ -723,7 +725,8 @@ class CoaddAnalysisTask(CmdLineTask):
         shortName = description + "_raCosDec"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra",
-                                                   declination="ref_coord_dec", unitScale=self.unitScale),
+                                                   declination1="src_coord_dec", declination2="ref_coord_dec",
+                                                   unitScale=self.unitScale),
                            "$\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr, shortName,
                            self.config.analysisMatches, prefix="src_", qMin=-0.2*self.config.matchRadius,
                            qMax=0.2*self.config.matchRadius, labeller=MatchesStarGalaxyLabeller(),
@@ -736,7 +739,7 @@ class CoaddAnalysisTask(CmdLineTask):
         if "src_calib_astrometryUsed" in matches.schema:
             shortName = description + "_ra_calib_astrometryUsed"
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra", declination=None,
+            self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra",
                                                        unitScale=self.unitScale),
                                "$\Delta$RA (%s) (calib_astromUsed)" % unitStr, shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometryUsed"],
@@ -749,8 +752,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                          zpLabel=zpLabel)
         shortName = description + "_ra"
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra", declination=None,
-                                                   unitScale=self.unitScale),
+        self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra", unitScale=self.unitScale),
                            "$\Delta$RA (%s)" % unitStr, shortName, self.config.analysisMatches,
                            prefix="src_", qMin=-0.25*self.config.matchRadius,
                            qMax=0.25*self.config.matchRadius, labeller=MatchesStarGalaxyLabeller(),
