@@ -454,6 +454,7 @@ class Analysis(object):
                     decMax = max(np.round(max(decPatch) + pad, 2), decMax)
             plotPatchOutline(axes, tractInfo, patchList)
 
+        stats0 = None
         for name, data in self.data.items():
             if name is not dataName:
                 continue
@@ -466,6 +467,8 @@ class Analysis(object):
             axes.scatter(ra[selection], dec[selection], s=ptSize, marker="o", lw=0, label=name,
                          c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax)
 
+        if stats0 is None:  # No data to plot
+            return
         axes.set_xlabel("RA (deg)")
         axes.set_ylabel("Dec (deg)")
 
@@ -695,7 +698,7 @@ class Analysis(object):
                                  stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,
                                  tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
                                  matchRadius=matchRadius, zpLabel=zpLabel, dataName="galaxy")
-        if "diff_" in self.shortName:
+        if "diff_" in self.shortName and stats["split"].num > 0:
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky-split" + postFix),
                                  stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,
                                  tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
