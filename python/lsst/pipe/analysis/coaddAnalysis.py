@@ -811,7 +811,10 @@ class CompareCoaddAnalysisRunner(TaskRunner):
         parentDir = parsedCmd.input
         while os.path.exists(os.path.join(parentDir, "_parent")):
             parentDir = os.path.realpath(os.path.join(parentDir, "_parent"))
-        butler2 = Butler(root=os.path.join(parentDir, "rerun", parsedCmd.rerun2), calibRoot=parsedCmd.calib)
+        butlerArgs = dict(root=os.path.join(parentDir, "rerun", parsedCmd.rerun2))
+        if parsedCmd.calib is not None:
+            butlerArgs["calibRoot"] = parsedCmd.calib
+        butler2 = Butler(**butlerArgs)
         idParser = parsedCmd.id.__class__(parsedCmd.id.level)
         idParser.idList = parsedCmd.id.idList
         butler = parsedCmd.butler
