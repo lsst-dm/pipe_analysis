@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -111,7 +113,7 @@ class Analysis(object):
             labels = labeller(catalog)
             self.data = {name: Data(catalog, self.quantity, self.mag, self.good & (labels == value),
                                     colorList[value], self.quantityError, name in labeller.plot) for
-                         name, value in labeller.labels.iteritems()}
+                         name, value in labeller.labels.items()}
             self.stats = self.statistics(forcedMean=forcedMean)
             # Ensure plot limits always encompass at least mean +/- 2.5*stdev
             if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar"]):
@@ -127,7 +129,7 @@ class Analysis(object):
         magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
         dataPoints = []
         ptSize = None
-        for name, data in self.data.iteritems():
+        for name, data in self.data.items():
             if len(data.mag) == 0:
                 continue
             if ptSize is None:
@@ -226,7 +228,7 @@ class Analysis(object):
         axHistx.set_yscale("log", nonposy="clip")
         axHisty.set_xscale("log", nonposy="clip")
         nTotal = 0
-        for name, data in self.data.iteritems():
+        for name, data in self.data.items():
             nTotal += len(data.mag)
         axScatterYlim = np.around(nTotal, -1*int(np.floor(np.log10(nTotal))))
         axHistx.set_ylim(1, axScatterYlim)
@@ -241,7 +243,7 @@ class Analysis(object):
         dataPoints = []
         runStats = []
         ptSize = None
-        for name, data in self.data.iteritems():
+        for name, data in self.data.items():
             if len(data.mag) == 0:
                 log.info("No data for dataset: {:s}".format(name))
                 continue
@@ -293,7 +295,7 @@ class Analysis(object):
             axHisty.hist(data.quantity, bins=yBins, color=histColor, alpha=0.6, orientation="horizontal",
                          label=name)
         # Make sure stars used histogram is plotted last
-        for name, data in self.data.iteritems():
+        for name, data in self.data.items():
             if stats is not None and name == "star":
                 dataUsed = data.quantity[stats[name].dataUsed]
                 axHisty.hist(dataUsed, bins=yBins, color=data.color, orientation="horizontal", alpha=1.0,
@@ -319,11 +321,11 @@ class Analysis(object):
         axHisty.legend(fontsize=7)
         # Label total number of objects of each data type
         xLoc, yLoc = 0.17, 1.405
-        for name, data in self.data.iteritems():
+        for name, data in self.data.items():
             if name == "galaxy" and len(data.mag) > 0:
                 xLoc += 0.035
 
-        for name, data in self.data.iteritems():
+        for name, data in self.data.items():
             if len(data.mag) == 0:
                 continue
             yLoc -= 0.05
@@ -342,7 +344,7 @@ class Analysis(object):
         fig, axes = plt.subplots(1, 1)
         axes.axvline(0, linestyle="--", color="0.6")
         numMax = 0
-        for name, data in self.data.iteritems():
+        for name, data in self.data.items():
             if len(data.mag) == 0:
                 continue
             good = np.isfinite(data.quantity)
@@ -446,7 +448,7 @@ class Analysis(object):
                     decMax = max(np.round(max(decPatch) + pad, 2), decMax)
             plotPatchOutline(axes, tractInfo, patchList)
 
-        for name, data in self.data.iteritems():
+        for name, data in self.data.items():
             if name is not dataName:
                 continue
             if len(data.mag) == 0:
@@ -523,7 +525,7 @@ class Analysis(object):
         axes[0].axhline(0, linestyle="--", color="0.6")
         axes[1].axhline(0, linestyle="--", color="0.6")
         ptSize = None
-        for name, data in self.data.iteritems():
+        for name, data in self.data.items():
             if len(data.mag) == 0:
                 continue
             if ptSize is None:
@@ -704,7 +706,7 @@ class Analysis(object):
     def statistics(self, forcedMean=None):
         """Calculate statistics on quantity"""
         stats = {}
-        for name, data in self.data.iteritems():
+        for name, data in self.data.items():
             if len(data.mag) == 0:
                 continue
             good = data.mag < self.magThreshold
@@ -743,13 +745,13 @@ class Analysis(object):
         if True:
             result = scipy.optimize.root(function, 0.0, tol=tol)
             if not result.success:
-                print "Warning: sysErr calculation failed: {:s}".format(result.message)
+                print("Warning: sysErr calculation failed: {:s}".format(result.message))
                 answer = np.nan
             else:
                 answer = np.sqrt(result.x[0])
         else:
             answer = np.sqrt(scipy.optimize.newton(function, 0.0, tol=tol))
-        print "calculateSysError: {0:.4f}, {1:.4f}, {2:.4f}".format(function(answer**2),
-                                                                        function((answer+0.001)**2),
-                                                                        function((answer-0.001)**2))
+        print("calculateSysError: {0:.4f}, {1:.4f}, {2:.4f}".format(function(answer**2),
+                                                                    function((answer+0.001)**2),
+                                                                    function((answer-0.001)**2)))
         return answer

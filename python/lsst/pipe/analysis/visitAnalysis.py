@@ -63,7 +63,7 @@ class CcdAnalysis(Analysis):
         axes[0].axhline(0, linestyle="--", color="0.6")
         axes[1].axhline(0, linestyle="--", color="0.6")
         ptSize = None
-        for name, data in self.data.iteritems():
+        for name, data in self.data.items():
             if not data.plot:
                 continue
             if len(data.mag) == 0:
@@ -109,7 +109,7 @@ class CcdAnalysis(Analysis):
         yFp = self.catalog[self.prefix + "base_FPPosition_y"]
         good = (self.mag < self.config.magThreshold if self.config.magThreshold > 0 else
                 np.ones(len(self.mag), dtype=bool))
-        if self.data.has_key("galaxy") and "calib_psfUsed" not in self.goodKeys:
+        if "galaxy" in self.data and "calib_psfUsed" not in self.goodKeys:
             vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
         else:
             vMin, vMax = self.qMin, self.qMax
@@ -120,7 +120,7 @@ class CcdAnalysis(Analysis):
             vMax = np.round(self.data["star"].quantity.max() + 50, -2)
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.7"))
         axes.tick_params(which="both", direction="in", top="on", right="on", labelsize=fontSize)
-        for name, data in self.data.iteritems():
+        for name, data in self.data.items():
             if not data.plot:
                 continue
             if len(data.mag) == 0:
@@ -155,7 +155,7 @@ class VisitAnalysisRunner(TaskRunner):
         visits = defaultdict(list)
         for ref in parsedCmd.id.refList:
             visits[ref.dataId["visit"]].append(ref)
-        return [(refs, kwargs) for refs in visits.itervalues()]
+        return [(visits[key], kwargs) for key in visits.keys()]
 
 
 class VisitAnalysisTask(CoaddAnalysisTask):
@@ -193,7 +193,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             butler = dataRefListTract[0].getButler()
             camera = butler.get("camera")
             dataId = dataRefListTract[0].dataId
-            self.log.info("dataId: {:s}".format(dataId))
+            self.log.info("dataId: {!s:s}".format(dataId))
             # Check metadata to see if stack used was HSC
             metadata = butler.get("calexp_md", dataRefListTract[0].dataId)
             hscRun = checkHscStack(metadata)
@@ -303,7 +303,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             # Set an alias map for differing src naming conventions of different stacks (if any)
             if hscRun and self.config.srcSchemaMap:
                 aliasMap = catalog.schema.getAliasMap()
-                for lsstName, otherName in self.config.srcSchemaMap.iteritems():
+                for lsstName, otherName in self.config.srcSchemaMap.items():
                     aliasMap.set(lsstName, otherName)
             # purge the catalogs of flagged sources
             bad = np.zeros(len(catalog), dtype=bool)
@@ -368,7 +368,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if hscRun is not None and self.config.srcSchemaMap:
                 # for cat in [commonZpCat, catalog]:
                 aliasMap = catalog.schema.getAliasMap()
-                for lsstName, otherName in self.config.srcSchemaMap.iteritems():
+                for lsstName, otherName in self.config.srcSchemaMap.items():
                     aliasMap.set(lsstName, otherName)
             catalog = self.calibrateCatalogs(dataRef, catalog, metadata)
             packedMatches = butler.get(dataset + "Match", dataRef.dataId)
@@ -419,7 +419,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             # Need to set the aliap map for the matched catalog sources
             if self.config.srcSchemaMap is not None and checkHscStack(metadata) is not None:
                 aliasMap = catalog.schema.getAliasMap()
-                for lsstName, otherName in self.config.srcSchemaMap.iteritems():
+                for lsstName, otherName in self.config.srcSchemaMap.items():
                     aliasMap.set("src_" + lsstName, "src_" + otherName)
             # To avoid multiple counting when visit overlaps multiple tracts
             if (dataRef.dataId['visit'], dataRef.dataId['ccd']) not in dataIdSubList:
@@ -643,7 +643,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             for cat, hscRun in ([srcCat1, hscRun1], [srcCat2, hscRun2]):
                 if self.config.srcSchemaMap and hscRun:
                     aliasMap = cat.schema.getAliasMap()
-                    for lsstName, otherName in self.config.srcSchemaMap.iteritems():
+                    for lsstName, otherName in self.config.srcSchemaMap.items():
                         aliasMap.set(lsstName, otherName)
             srcCat1 = srcCat1[srcCat1["deblend_nChild"] == 0].copy(True) # Exclude non-deblended objects
             srcCat2 = srcCat2[srcCat2["deblend_nChild"] == 0].copy(True) # Exclude non-deblended objects

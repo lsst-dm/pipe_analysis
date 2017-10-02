@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+from __future__ import print_function
+
 import os
 import numpy as np
 np.seterr(all="ignore")
@@ -139,7 +141,7 @@ class CoaddAnalysisTask(CmdLineTask):
             coadd = butler.get("deepCoadd_calexp", dataId)
         wcs = coadd.getWcs()
         skymap = butler.get("deepCoadd_skyMap")
-        tractInfo = skymap[dataRef.dataId["tract"]]
+        tractInfo = skymap[patchRefList[0].dataId["tract"]]
         filterName = dataId["filter"]
         filenamer = Filenamer(patchRefList[indexExists].getButler(), self.outputDataset,
                               patchRefList[indexExists].dataId)
@@ -154,7 +156,7 @@ class CoaddAnalysisTask(CmdLineTask):
         # Set an alias map for differing src naming conventions of different stacks (if any)
         if hscRun is not None and self.config.srcSchemaMap is not None:
             for aliasMap in [forced.schema.getAliasMap(), unforced.schema.getAliasMap()]:
-                for lsstName, otherName in self.config.srcSchemaMap.iteritems():
+                for lsstName, otherName in self.config.srcSchemaMap.items():
                     aliasMap.set(lsstName, otherName)
 
         # copy over some fields from unforced to forced catalog
@@ -183,7 +185,7 @@ class CoaddAnalysisTask(CmdLineTask):
         forced = forced[~bad].copy(deep=True)
         unforced = unforced[~bad].copy(deep=True)
         self.zpLabel = self.zpLabel + " " + self.catLabel
-        print "len(forced) = ", len(forced), "  len(unforced) = ",len(unforced)
+        print("len(forced) = ", len(forced), "  len(unforced) = ",len(unforced))
 
         self.unitScale = 1.0
         if self.config.toMilli:
@@ -310,7 +312,7 @@ class CoaddAnalysisTask(CmdLineTask):
             if self.config.srcSchemaMap and hscRun:
                 for mm in matches:
                     aliasMap = mm.second.schema.getAliasMap()
-                    for lsstName, otherName in self.config.srcSchemaMap.iteritems():
+                    for lsstName, otherName in self.config.srcSchemaMap.items():
                         aliasMap.set(lsstName, otherName)
 
             matchMeta = butler.get(dataset, dataRef.dataId,
@@ -328,7 +330,7 @@ class CoaddAnalysisTask(CmdLineTask):
             # Need to set the aliap map for the matched catalog sources
             if self.config.srcSchemaMap and hscRun:
                 aliasMap = catalog.schema.getAliasMap()
-                for lsstName, otherName in self.config.srcSchemaMap.iteritems():
+                for lsstName, otherName in self.config.srcSchemaMap.items():
                     aliasMap.set("src_" + lsstName, "src_" + otherName)
             catList.append(catalog)
 
@@ -882,7 +884,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                        [forced1, forced2, unforced1, unforced2]):
                 if hscRun:
                     aliasMap = catalog.schema.getAliasMap()
-                    for lsstName, otherName in self.config.srcSchemaMap.iteritems():
+                    for lsstName, otherName in self.config.srcSchemaMap.items():
                         aliasMap.set(lsstName, otherName)
                 else:
                     if "base_SdssCentroid_x" not in catalog.schema:

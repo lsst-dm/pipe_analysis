@@ -1,3 +1,5 @@
+from __future__ import print_function
+
 import os
 import re
 
@@ -77,7 +79,7 @@ class Filenamer(object):
         # your intention is to write to a different output dir!).  So, here we check for the presence
         # of _parent in the filename and strip it out if present.
         if "_parent/" in filename:
-            print "Note: stripping _parent from filename: ", filename
+            print("Note: stripping _parent from filename: ", filename)
             filename = filename.replace("_parent/", "")
         safeMakeDir(os.path.dirname(filename))
         return filename
@@ -736,7 +738,7 @@ def calibrateSourceCatalogMosaic(dataRef, catalog, fluxKeys=None, errKeys=None, 
 
     if fluxKeys is None:
         fluxKeys, errKeys = getFluxKeys(catalog.schema)
-    for key in fluxKeys.values() + errKeys.values():
+    for key in list(fluxKeys.values()) + list(errKeys.values()):
         if len(catalog[key].shape) > 1:
             continue
         catalog[key] /= factor
@@ -750,7 +752,7 @@ def calibrateSourceCatalog(catalog, zp):
     # Convert to constant zero point, as for the coadds
     fluxKeys, errKeys = getFluxKeys(catalog.schema)
     factor = 10.0**(0.4*zp)
-    for name, key in fluxKeys.items() + errKeys.items():
+    for name, key in list(fluxKeys.items()) + list(errKeys.items()):
         catalog[key] /= factor
     return catalog
 
@@ -762,7 +764,7 @@ def calibrateCoaddSourceCatalog(catalog, zp):
     # Convert to constant zero point, as for the coadds
     fluxKeys, errKeys = getFluxKeys(catalog.schema)
     factor = 10.0**(0.4*zp)
-    for name, key in fluxKeys.items() + errKeys.items():
+    for name, key in list(fluxKeys.items()) + list(errKeys.items()):
         catalog[key] /= factor
     return catalog
 
@@ -773,7 +775,7 @@ def backoutApCorr(catalog):
     for k in catalog.schema.getNames():
         if "_flux" in k and k[:-5] + "_apCorr" in src.schema.getNames() and "_apCorr" not in k:
             if ii == 0:
-                print "Backing out apcorr for:", k
+                print("Backing out apcorr for:", k)
                 ii += 1
             catalog[k] /= catalog[k[:-5] + "_apCorr"]
     return catalog
@@ -809,7 +811,7 @@ def fluxToPlotString(fluxToPlot):
     if fluxToPlot in fluxStrMap:
         return fluxStrMap[fluxToPlot]
     else:
-        print "WARNING: " + fluxToPlot + " not in fluxStrMap"
+        print("WARNING: " + fluxToPlot + " not in fluxStrMap")
         return fluxToPlot
 
 
