@@ -81,10 +81,11 @@ class NumStarLabeller(object):
 
 class ColorValueInRange(object):
     """Functor to produce color value if in the appropriate range"""
-    def __init__(self, column, requireGreater, requireLess):
+    def __init__(self, column, requireGreater, requireLess, unitScale=1.0):
         self.column = column
         self.requireGreater = requireGreater
         self.requireLess = requireLess
+        self.unitScale = unitScale
 
     def __call__(self, catalog):
         good = np.ones(len(catalog), dtype=bool)
@@ -92,7 +93,7 @@ class ColorValueInRange(object):
             good &= catalog[col] > value
         for col, value in self.requireLess.items():
             good &= catalog[col] < value
-        return np.where(good, catalog[self.column], np.nan)
+        return np.where(good, catalog[self.column], np.nan)*self.unitScale
 
 
 class GalaxyColor(object):
@@ -120,6 +121,7 @@ class ColorAnalysisConfig(Config):
     fluxFilter = Field(dtype=str, default="HSC-I", doc="Filter to use for plotting against magnitude")
     srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
                              doc="Mapping between different stack (e.g. HSC vs. LSST) schema names")
+    toMilli = Field(dtype=bool, default=True, doc="Print stats in milli units (i.e. mas, mmag)?")
 
     def setDefaults(self):
         Config.setDefaults(self)
@@ -209,6 +211,10 @@ class ColorAnalysisTask(CmdLineTask):
         # Create and write parquet tables
         tableFilenamer = Filenamer(butler, 'qaTableColor', dataId)
         writeParquet(forced, tableFilenamer(dataId, description='forced'))
+
+        self.unitScale = 1.0
+        if self.config.toMilli:
+            self.unitScale = 1000.0
 
         self.plotStarColors(forced, filenamer, NumStarLabeller(len(forcedCatalogsByFilter)), dataId,
                             camera=camera, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
@@ -326,15 +332,18 @@ class ColorAnalysisTask(CmdLineTask):
 
     def plotStarColors(self, catalog, filenamer, labeller, dataId, butler=None, camera=None, tractInfo=None,
                        patchList=None, hscRun=None):
+        unitStr = "mag"
+        if self.config.toMilli:
+            unitStr = "mmag"
         for col, transform in self.config.transforms.items():
             if not transform.plot or col not in catalog.schema:
                 continue
             shortName = "color_" + col
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(catalog, ColorValueInRange(col, transform.requireGreater,
-                                                          transform.requireLess),
-                               col, shortName, self.config.analysis, flags=["bad"], labeller=labeller,
-                               qMin=-0.2, qMax=0.2,
+                                                          transform.requireLess, unitScale=self.unitScale),
+                               "%s (%s)" % (col, unitStr), shortName, self.config.analysis, flags=["bad"],
+                               labeller=labeller, qMin=-0.2, qMax=0.2,
                                ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
 
