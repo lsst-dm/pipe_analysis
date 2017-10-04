@@ -117,6 +117,10 @@ class CoaddAnalysisTask(CmdLineTask):
                                ContainerClass=TractDataIdContainer)
         return parser
 
+    def __init__(self, *args, **kwargs):
+        CmdLineTask.__init__(self, *args, **kwargs)
+        self.unitScale = 1000.0 if self.config.toMilli else 1.0
+
     def run(self, patchRefList, cosmos=None):
         # find index and dataId for first dataset in list that exists
         dataId = None
@@ -186,10 +190,6 @@ class CoaddAnalysisTask(CmdLineTask):
         unforced = unforced[~bad].copy(deep=True)
         self.zpLabel = self.zpLabel + " " + self.catLabel
         print("len(forced) = ", len(forced), "  len(unforced) = ",len(unforced))
-
-        self.unitScale = 1.0
-        if self.config.toMilli:
-            self.unitScale = 1000.0
 
         flagsCat = unforced
 
@@ -813,7 +813,7 @@ class CompareCoaddAnalysisRunner(TaskRunner):
         parentDir = parsedCmd.input
         while os.path.exists(os.path.join(parentDir, "_parent")):
             parentDir = os.path.realpath(os.path.join(parentDir, "_parent"))
-        butler2 = Butler(root=os.path.join(parentDir, "rerun", parsedCmd.rerun2), calibRoot=parsedCmd.calib)
+        butler2 = Butler(root=os.path.join(parentDir, "rerun", parsedCmd.rerun2))
         idParser = parsedCmd.id.__class__(parsedCmd.id.level)
         idParser.idList = parsedCmd.id.idList
         butler = parsedCmd.butler
@@ -838,6 +838,10 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                help="data ID, e.g. --id tract=12345 patch=1,2 filter=HSC-X",
                                ContainerClass=TractDataIdContainer)
         return parser
+
+    def __init__(self, *args, **kwargs):
+        CmdLineTask.__init__(self, *args, **kwargs)
+        self.unitScale = 1000.0 if self.config.toMilli else 1.0
 
     def run(self, patchRefList1, patchRefList2):
         # find index and dataId for first dataset in list that exists
@@ -963,10 +967,10 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                 shortName = "diff_" + col
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, MagDiffCompare(col + "_flux", unitScale=self.unitScale),
-                         "Run Comparison: Mag difference (%s)" % (fluxToPlotString(col), unitStr),
+                         "Run Comparison: Mag difference %s (%s)" % (fluxToPlotString(col), unitStr),
                          shortName, self.config.analysis, prefix="first_", qMin=-0.05, qMax=0.05,
-                         flags=[col + "_flag"], errFunc=MagDiffErr(col + "_flux", unitScale=unitScale),
-                         labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat, unitScale=unitScale,
+                         flags=[col + "_flag"], errFunc=MagDiffErr(col + "_flux", unitScale=self.unitScale),
+                         labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat, unitScale=self.unitScale,
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
                                    hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel, postFix=postFix)
