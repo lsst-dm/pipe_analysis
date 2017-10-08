@@ -202,12 +202,12 @@ class ColorAnalysisTask(CmdLineTask):
         tractInfo = skymap[dataRef.dataId["tract"]]
         filenamer = Filenamer(butler, "plotColor", dataId)
         unforcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList, "deepCoadd_meas") for
-                            ff, patchRefList in patchRefsByFilter.items()}
+                                    ff, patchRefList in patchRefsByFilter.items()}
         for cat in unforcedCatalogsByFilter.itervalues():
             calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
         unforced = self.transformCatalogs(unforcedCatalogsByFilter, self.config.transforms, hscRun=hscRun)
         forcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList, "deepCoadd_forced_src") for
-                            ff, patchRefList in patchRefsByFilter.items()}
+                                  ff, patchRefList in patchRefsByFilter.items()}
         for cat in forcedCatalogsByFilter.itervalues():
             calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
         # self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
