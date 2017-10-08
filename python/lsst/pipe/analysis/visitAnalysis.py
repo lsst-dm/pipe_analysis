@@ -245,10 +245,6 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             except:
                 pass
 
-            self.unitScale = 1.0
-            if self.config.toMilli:
-                self.unitScale = 1000.0
-
             if self.config.doPlotFootprintNpix:
                 catalog = addFootprintNPix(catalog)
                 self.plotFootprintHist(catalog, filenamer(dataId, description="footNpix", style="hist"),
@@ -622,10 +618,6 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
 
             self.log.info("Number of matches (maxDist = {0:.2f} arcsec) = {1:d}".format(
                     self.config.matchRadius, len(catalog)))
-
-            self.unitScale = 1.0
-            if self.config.toMilli:
-                self.unitScale = 1000.0
 
             filenamer = Filenamer(dataRefListTract1[0].getButler(), "plotCompareVisit", dataId1)
             if self.config.doPlotFootprintNpix:

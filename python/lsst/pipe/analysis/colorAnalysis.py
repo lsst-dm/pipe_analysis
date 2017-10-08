@@ -173,6 +173,10 @@ class ColorAnalysisTask(CmdLineTask):
                                ContainerClass=TractDataIdContainer)
         return parser
 
+    def __init__(self, *args, **kwargs):
+        CmdLineTask.__init__(self, *args, **kwargs)
+        self.unitScale = 1000.0 if self.config.toMilli else 1.0
+
     def run(self, patchRefsByFilter):
         patchList = []
         for patchRefList in patchRefsByFilter.itervalues():
@@ -211,10 +215,6 @@ class ColorAnalysisTask(CmdLineTask):
         # Create and write parquet tables
         tableFilenamer = Filenamer(butler, 'qaTableColor', dataId)
         writeParquet(forced, tableFilenamer(dataId, description='forced'))
-
-        self.unitScale = 1.0
-        if self.config.toMilli:
-            self.unitScale = 1000.0
 
         self.plotStarColors(forced, filenamer, NumStarLabeller(len(forcedCatalogsByFilter)), dataId,
                             camera=camera, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
@@ -332,9 +332,7 @@ class ColorAnalysisTask(CmdLineTask):
 
     def plotStarColors(self, catalog, filenamer, labeller, dataId, butler=None, camera=None, tractInfo=None,
                        patchList=None, hscRun=None):
-        unitStr = "mag"
-        if self.config.toMilli:
-            unitStr = "mmag"
+        unitStr = "mmag" if self.config.toMilli else "mag"
         for col, transform in self.config.transforms.items():
             if not transform.plot or col not in catalog.schema:
                 continue

@@ -118,6 +118,10 @@ class CoaddAnalysisTask(CmdLineTask):
                                ContainerClass=TractDataIdContainer)
         return parser
 
+    def __init__(self, *args, **kwargs):
+        CmdLineTask.__init__(self, *args, **kwargs)
+        self.unitScale = 1000.0 if self.config.toMilli else 1.0
+
     def run(self, patchRefList, cosmos=None):
         # find index and dataId for first dataset in list that exists
         dataId = None
@@ -186,10 +190,6 @@ class CoaddAnalysisTask(CmdLineTask):
         unforced = unforced[~bad].copy(deep=True)
         self.zpLabel = self.zpLabel + " " + self.catLabel
         print("len(forced) = ", len(forced), "  len(unforced) = ",len(unforced))
-
-        self.unitScale = 1.0
-        if self.config.toMilli:
-            self.unitScale = 1000.0
 
         flagsCat = unforced
 
@@ -356,9 +356,7 @@ class CoaddAnalysisTask(CmdLineTask):
                  postFix="", flagsCat=None):
         if fluxToPlotList is None:
             fluxToPlotList = self.config.fluxToPlotList
-        unitStr = "mag"
-        if self.config.toMilli:
-            unitStr = "mmag"
+        unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in fluxToPlotList:
             if col + "_flux" in catalog.schema:
@@ -378,9 +376,7 @@ class CoaddAnalysisTask(CmdLineTask):
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                   patchList=None, hscRun=None, matchRadius=None, zpLabel=None, flagsCat=None):
         enforcer = None
-        unitStr = ""
-        if self.config.toMilli:
-            unitStr = " (milli)"
+        unitStr = " (milli)" if self.config.toMilli else ""
         for col in ["base_PsfFlux", ]:
             if col + "_flux" in catalog.schema:
                 shortName = "trace"
@@ -559,9 +555,7 @@ class CoaddAnalysisTask(CmdLineTask):
                             fluxToPlotList=None):
         if fluxToPlotList is None:
             fluxToPlotList = self.config.fluxToPlotList
-        unitStr = "mag"
-        if self.config.toMilli:
-            unitStr = "mmag"
+        unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = None
         catalog = joinMatches(afwTable.matchRaDec(forced, unforced, matchRadius*afwGeom.arcseconds),
                               "forced_", "unforced_")
@@ -600,9 +594,7 @@ class CoaddAnalysisTask(CmdLineTask):
                      fluxToPlotList=None, flagsCat=None):
         if fluxToPlotList is None:
             fluxToPlotList = self.config.fluxToPlotList
-        unitStr = "mag"
-        if self.config.toMilli:
-            unitStr = "mmag"
+        unitStr = "mmag" if self.config.toMilli else "mag"
         magEnforcer = Enforcer(requireLess={"star": {"stdev": 0.003*self.unitScale}})
         for col in fluxToPlotList:
             shortName = "overlap_" + col
@@ -618,9 +610,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                              zpLabel=zpLabel)
-        unitStr = "arcsec"
-        if self.config.toMilli:
-            unitStr = "mas"
+        unitStr = "mas" if self.config.toMilli else "arcsec"
         distEnforcer = Enforcer(requireLess={"star": {"stdev": 0.005*self.unitScale}})
         shortName = "overlap_distance"
         self.log.info("shortName = {:s}".format(shortName))
@@ -636,9 +626,7 @@ class CoaddAnalysisTask(CmdLineTask):
     def plotMatches(self, matches, filterName, filenamer, dataId, description="matches", butler=None,
                     camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None,
                     zpLabel=None, flagsCat=None):
-        unitStr = "mag"
-        if self.config.toMilli:
-            unitStr = "mmag"
+        unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = None # Enforcer(requireLess={"star": {"stdev": 0.030*self.unitScale}}),
 
         try:
@@ -684,9 +672,8 @@ class CoaddAnalysisTask(CmdLineTask):
                            ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                      camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
                                      hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
-        unitStr = "arcsec"
-        if self.config.toMilli:
-            unitStr = "mas"
+
+        unitStr = "mas" if self.config.toMilli else "arcsec"
         if "src_calib_astrometryUsed" in matches.schema:
             shortName = description + "_distance_calib_astrometryUsed"
             self.log.info("shortName = {:s}".format(shortName))
@@ -877,6 +864,10 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                ContainerClass=TractDataIdContainer)
         return parser
 
+    def __init__(self, *args, **kwargs):
+        CmdLineTask.__init__(self, *args, **kwargs)
+        self.unitScale = 1000.0 if self.config.toMilli else 1.0
+
     def run(self, patchRefList1, patchRefList2):
         # find index and dataId for first dataset in list that exists
         for indexExists1, patchRef1 in enumerate(patchRefList1):
@@ -956,10 +947,6 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         self.log.info("\nNumber of sources in catalogs: first = {0:d} and second = {1:d}".format(
                 len(forced1), len(forced2)))
 
-        self.unitScale = 1.0
-        if self.config.toMilli:
-            self.unitScale = 1000.0
-
         if self.config.doPlotMags:
             self.plotMags(forced, filenamer, dataId, butler=butler1, camera=camera1,
                           tractInfo=tractInfo1, patchList=patchList1, hscRun=hscRun2,
@@ -999,9 +986,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                  postFix="", flagsCat=None, highlightList=None):
         if fluxToPlotList is None:
             fluxToPlotList = self.config.fluxToPlotList
-        unitStr = "mag"
-        if self.config.toMilli:
-            unitStr = "mmag"
+        unitStr = "mmag" if self.config.toMilli else "mag"
         if fluxToPlotList is None:
             fluxToPlotList = self.config.fluxToPlotList
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
@@ -1021,9 +1006,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
     def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                       tractInfo=None, patchList=None, hscRun1=None, hscRun2=None, matchRadius=None,
                       zpLabel=None, flagsCat=None, highlightList=None):
-        unitStr = "arcsec"
-        if self.config.toMilli:
-            unitStr = "mas"
+        unitStr = "mas" if self.config.toMilli else "arcsec"
         distEnforcer = None
         centroidStr1, centroidStr2 = "base_SdssCentroid", "base_SdssCentroid"
         if bool(hscRun1) ^ bool(hscRun2):
