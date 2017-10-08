@@ -373,11 +373,28 @@ class ColorAnalysisTask(CmdLineTask):
         filters = set(catalogs.keys())
         color = lambda c1, c2: (mags[c1] - mags[c2])[good]
         if filters.issuperset(set(("HSC-G", "HSC-R", "HSC-I"))):
+            # Do a linear fit to regions defined in Ivezic transforms
+            transform = self.config.transforms["wPerp"]
+            xFitRange1 = transform.requireGreater["wPara"]
+            xFitRange2 = transform.requireLess["wPara"]
+            wPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description="gri-wFit", style="fit"),
+                                             self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
+                                             "g - r", "r - i", xRange=(-0.5, 2.0), yRange=(-0.5, 2.0), order=1,
+                                             xFitRange=(xFitRange1, xFitRange2), camera=camera, hscRun=hscRun,
+                                             unitScale=self.unitScale)
+            transform = self.config.transforms["xPerp"]
+            xFitRange1 = transform.requireGreater["xPara"]
+            xFitRange2 = transform.requireLess["xPara"]
+            xPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description="gri-xFit", style="fit"),
+                                             self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
+                                             "g - r", "r - i", xRange=(-0.5, 2.0), yRange=(-0.5, 2.0), order=1,
+                                             xFitRange=(xFitRange1, xFitRange2), camera=camera, hscRun=hscRun,
+                                             unitScale=self.unitScale)
             # Lower branch only; upper branch is noisy due to astrophysics
-            poly = colorColorPlot(dataId, filenamer(dataId, description="gri", style="fit"), self.log,
+            poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description="gri", style="fit"), self.log,
                                   color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"), "g - r", "r - i",
                                   xRange=(-0.5, 2.0), yRange=(-0.5, 2.0), order=3, xFitRange=(0.3, 1.1),
-                                  camera=camera, hscRun=hscRun)
+                                  camera=camera, hscRun=hscRun, unitScale=self.unitScale)
             shortName = "gri"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, 0.3, 1.1), "griPerp",
@@ -387,9 +404,19 @@ class ColorAnalysisTask(CmdLineTask):
                                          Enforcer(requireLess={"star": {"stdev": 0.05}}), camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
         if filters.issuperset(set(("HSC-R", "HSC-I", "HSC-Z"))):
-            poly = colorColorPlot(dataId, filenamer(dataId, description="riz", style="fit"), self.log,
-                                  color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"), "r - i", "i - z",
-                                  xRange=(-0.5, 2.0), yRange=(-0.4, 0.8), order=3, hscRun=hscRun)
+            # Do a linear fit to regions defined in Ivezic transforms
+            transform = self.config.transforms["yPerp"]
+            xFitRange1 = transform.requireGreater["yPara"]
+            xFitRange2 = transform.requireLess["yPara"]
+            yPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description="riz-yFit", style="fit"),
+                                             self.log, color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"),
+                                             "r - i", "i - z", xRange=(-0.5, 2.0), yRange=(-0.4, 0.8), order=1,
+                                             xFitRange=(xFitRange1, xFitRange2), camera=camera, hscRun=hscRun,
+                                             unitScale=self.unitScale)
+            poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description="riz", style="fit"), self.log,
+                                         color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"), "r - i", "i - z",
+                                         xRange=(-0.5, 2.0), yRange=(-0.4, 0.8), order=3, camera=camera,
+                                         hscRun=hscRun, unitScale=self.unitScale)
             shortName = "riz"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly), "rizPerp", shortName,
@@ -399,9 +426,10 @@ class ColorAnalysisTask(CmdLineTask):
                                          Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
         if filters.issuperset(set(("HSC-I", "HSC-Z", "HSC-Y"))):
-            poly = colorColorPlot(dataId, filenamer(dataId, description="izy", style="fit"), self.log,
-                                  color("HSC-I", "HSC-Z"), color("HSC-Z", "HSC-Y"), "i - z", "z - y",
-                                  xRange=(-0.4, 0.8), yRange=(-0.3, 0.5), order=3, hscRun=hscRun)
+            poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description="izy", style="fit"), self.log,
+                                         color("HSC-I", "HSC-Z"), color("HSC-Z", "HSC-Y"), "i - z", "z - y",
+                                         xRange=(-0.4, 0.8), yRange=(-0.3, 0.5), order=3, camera=camera,
+                                         hscRun=hscRun, unitScale=self.unitScale)
             shortName = "izy"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly), "izyPerp", shortName,
@@ -412,10 +440,11 @@ class ColorAnalysisTask(CmdLineTask):
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
 
         if filters.issuperset(set(("HSC-Z", "NB0921", "HSC-Y"))):
-            poly = colorColorPlot(dataId, filenamer(dataId, description="z9y", style="fit"), self.log,
-                                  color("HSC-Z", "NB0921"), color("NB0921", "HSC-Y"), "z-n921", "n921-y",
-                                  xRange=(-0.2, 0.2), yRange=(-0.1, 0.2), order=2, xFitRange=(-0.05, 0.15),
-                                  hscRun=hscRun)
+            poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description="z9y", style="fit"), self.log,
+                                         color("HSC-Z", "NB0921"), color("NB0921", "HSC-Y"),
+                                         "z-n921", "n921-y", xRange=(-0.2, 0.2), yRange=(-0.1, 0.2),
+                                         order=2, xFitRange=(-0.05, 0.15), camera=camera, hscRun=hscRun,
+                                         unitScale=self.unitScale)
             shortName = "z9y"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly), "z9yPerp", shortName,
@@ -434,8 +463,9 @@ class ColorAnalysisTask(CmdLineTask):
         return None
 
 
-def colorColorPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=None, yRange=None, order=1,
-                   iterations=1, rej=3.0, xFitRange=None, numBins=51, hscRun=None, logger=None, camera=None):
+def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=None, yRange=None, order=1,
+                          iterations=1, rej=3.0, xFitRange=None, numBins=51, hscRun=None, logger=None,
+                          camera=None, unitScale=1.0):
     fig, axes = plt.subplots(1, 2)
     axes[0].tick_params(which="both", direction="in", labelsize=9)
     axes[1].tick_params(which="both", direction="in", labelsize=9)
@@ -483,6 +513,17 @@ def colorColorPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=None, y
     axes[0].text(xLoc, yLoc, "Nother = " + str(len(xx[~keep])), ha="left", va="center", fontsize=8,
                  color="black")
 
+    # Label polynomial fit parameters to 2 decimal places
+    polyStr = "y = {:.2f}".format(poly[len(poly) - 1])
+    for i in range(1, len(poly)):
+        index = len(poly) - 1 - i
+        plusMinus = " - " if poly[index] < 0.0 else " + "
+        exponent = "$^{" + str(i) + "}$" if i > 1 else ""
+        polyStr += plusMinus + "{:.2f}".format(abs(poly[index])) + "x" + exponent
+    xLoc = xRange[0] + 0.05*(xRange[1] - xRange[0])
+    yLoc -= 0.055*(yRange[1] - yRange[0])
+    axes[0].text(xLoc, yLoc, polyStr, ha="left", va="center", fontsize=8, color="green")
+
     # Determine quality of locus
     distance2 = []
     poly = np.poly1d(poly)
@@ -493,21 +534,23 @@ def colorColorPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=None, y
         distance2.append(min(calculateDistance2(x, y, np.real(rr)) for rr in roots if np.real(rr) == rr))
     distance = np.sqrt(distance2)
     distance *= np.where(yy[select] >= poly(xx[select]), 1.0, -1.0)
-
+    unitStr = "mmag" if unitScale == 1000 else "mag"
+    distance *= unitScale
     q1, median, q3 = np.percentile(distance, [25, 50, 75])
     good = np.logical_not(np.abs(distance - median) > 3.0*0.74*(q3 - q1))
-    log.info(("Statistics from {0:s} of Distance to polynomial (mmag): {7:s}\'star\': " +
+    log.info(("Statistics from {0:s} of Distance to polynomial ({9:s}): {7:s}\'star\': " +
               "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; " +
               "median={5:.4f}; clip={6:.4f}; forcedMean=None){8:s}").format(
-            dataId, 1000*distance[good].mean(), 1000*distance[good].std(), len(xx[keep]), len(xx),
-            1000*np.median(distance[good]),  1000*3.0*0.74*(q3 - q1), "{", "}"))
-    meanStr = "mean = {:5.2f} (mmag)".format(1000.0*distance[good].mean())
-    stdStr = "  std = {:5.2f} (mmag)".format(1000.0*distance[good].std())
+            dataId, distance[good].mean(), distance[good].std(), len(xx[keep]), len(xx),
+            np.median(distance[good]), 3.0*0.74*(q3 - q1), "{", "}", unitStr))
+    log.info("Polynomial fit: {:2}".format(polyStr.translate(None, "${}")))
+    meanStr = "mean = {0:5.2f} ({1:s})".format(distance[good].mean(), unitStr)
+    stdStr = "  std = {0:5.2f} ({1:s})".format(distance[good].std(), unitStr)
     tractStr = "tract: {:d}".format(dataId["tract"])
     axes[1].set_xlabel("Distance to polynomial fit (mag)")
     axes[1].set_ylabel("Number")
     axes[1].set_yscale("log", nonposy="clip")
-    axes[1].hist(distance[good], numBins, range=(-0.05, 0.05), normed=False)
+    axes[1].hist(distance[good], numBins, range=(-0.05*unitScale, 0.05*unitScale), normed=False)
     axes[1].annotate(meanStr, xy=(0.6, 0.96), xycoords="axes fraction", ha="right", va="center",
                      fontsize=8, color="black")
     axes[1].annotate(stdStr, xy=(0.6, 0.92), xycoords="axes fraction", ha="right", va="center",
