@@ -46,6 +46,7 @@ class AnalysisConfig(Config):
     doPlotRaDec = Field(dtype=bool, default=False, doc="Make delta vs. Ra and Dec plots?")
     doPlotFP = Field(dtype=bool, default=False, doc="Make FocalPlane plots?")
     doPlotCcdXy = Field(dtype=bool, default=False, doc="Make plots as a function of CCD x and y?")
+    doPlotTractOutline = Field(dtype=bool, default=True, doc="Plot tract outline (may be a bit slow)?")
 
 
 class Analysis(object):
@@ -170,7 +171,7 @@ class Analysis(object):
         rect_scatter = [left, bottom, width, height]
         rect_histx = [left, bottom_h, width, 0.23]
         rect_histy = [left_h, bottom, 0.20, height]
-        topRight = [left_h - 0.015, bottom_h + 0.0, 0.23, 0.23]
+        topRight = [left_h + 0.003, bottom_h + 0.01, 0.22, 0.22]
         # start with a rectangular Figure
         plt.figure(1)
 
@@ -192,11 +193,10 @@ class Analysis(object):
                 axTopRight.set_aspect("equal")
                 plotCameraOutline(plt, axTopRight, camera, ccdList)
 
-        # VERY slow for our 'rings' skymap
-        #if tractInfo is not None and len(patchList) > 0:
-        #    axTopRight = plt.axes(topRight)
-        #    axTopRight.set_aspect("equal")
-        #    plotTractOutline(axTopRight, tractInfo, patchList)
+        if self.config.doPlotTractOutline and tractInfo is not None and len(patchList) > 0:
+            axTopRight = plt.axes(topRight)
+            axTopRight.set_aspect("equal")
+            plotTractOutline(axTopRight, tractInfo, patchList)
 
         inLimits = self.data["star"].quantity < self.qMax
         inLimits &= self.data["star"].quantity > self.qMin
@@ -445,13 +445,12 @@ class Analysis(object):
             plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=zpLabel)
 
         if tractInfo is not None and patchList is not None:
-            for ip, patch in enumerate(tractInfo):
-                if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
-                    raPatch, decPatch = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
-                    raMin = min(np.round(min(raPatch) - pad, 2), raMin)
-                    raMax = max(np.round(max(raPatch) + pad, 2), raMax)
-                    decMin = min(np.round(min(decPatch) - pad, 2), decMin)
-                    decMax = max(np.round(max(decPatch) + pad, 2), decMax)
+            patchBoundary = getRaDecMinMaxPatchList(patchList, tractInfo, pad=pad, nDecimals=2, raMin=raMin,
+                                                    raMax=raMax, decMin=decMin, decMax=decMax)
+            raMin = patchBoundary.raMin
+            raMax = patchBoundary.raMax
+            decMin = patchBoundary.decMin
+            decMax = patchBoundary.decMax
             plotPatchOutline(axes, tractInfo, patchList)
 
         stats0 = None

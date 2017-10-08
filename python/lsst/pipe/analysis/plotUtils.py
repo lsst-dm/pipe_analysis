@@ -4,6 +4,7 @@ import numpy as np
 import lsst.afw.cameraGeom as cameraGeom
 import lsst.afw.geom as afwGeom
 import lsst.afw.table as afwTable
+from lsst.pipe.base import Struct
 
 from .utils import checkHscStack
 
@@ -15,7 +16,8 @@ except ImportError:
 __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "MatchesStarGalaxyLabeller",
            "CosmosLabeller", "labelZp", "annotateAxes", "labelVisit", "labelCamera",
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
-           "plotCcdOutline", "rotatePixelCoords", "bboxToRaDec", "percent", "setPtSize", "getQuiver"]
+           "plotCcdOutline", "rotatePixelCoords", "bboxToRaDec", "getRaDecMinMaxPatchList", "percent",
+           "setPtSize", "getQuiver"]
 
 class AllLabeller(object):
     labels = {"all": 0}
@@ -178,34 +180,68 @@ def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
     axes.text(-0.82*camRadius, 0.95*camRadius, "%s" % camera.getName(), ha="center", fontsize=fontSize,
                color=color)
 
-def plotTractOutline(axes, tractInfo, patchList, fontSize=6):
+def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1.5):
+    """Plot the the outline of the tract and patches highlighting those with data
+
+    As some skyMap settings can define tracts with a large number of patches, this can
+    become very crowded.  So, if only a subset of patches are included, find the outer
+    boudary of all patches in patchList and only plot to maxDegBeyondPatch degrees
+    beyond those boundaries (in all four directions).
+
+    Parameters
+    ----------
+    tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
+       Tract information object for extracting tract RA and DEC limits.
+    patchList : `list` of `str`
+       List of patch IDs with data to be plotted.  These will be color shaded in the outline plot.
+    fontSize : `int`
+       Font size for plot labels.
+    maxDegBeyondPatch : `float`
+       Maximum number of degrees to plot beyond the border defined by all patches with data to be plotted.
+    """
     buff = 0.02
-    axes.tick_params(labelsize=6)
+    axes.tick_params(which="both", direction="in", labelsize=fontSize)
     axes.locator_params(nbins=6)
     axes.ticklabel_format(useOffset=False)
 
     tractRa, tractDec = bboxToRaDec(tractInfo.getBBox(), tractInfo.getWcs())
-    xlim = max(tractRa) + buff, min(tractRa) - buff
-    ylim = min(tractDec) - buff, max(tractDec) + buff
-    axes.fill(tractRa, tractDec, fill=True, edgecolor='k', lw=1, linestyle='dashed',
+    patchBoundary = getRaDecMinMaxPatchList(patchList, tractInfo, pad=maxDegBeyondPatch)
+
+    xMin = min(max(tractRa), patchBoundary.raMax) + buff
+    xMax = max(min(tractRa), patchBoundary.raMin) - buff
+    yMin = max(min(tractDec), patchBoundary.decMin) - buff
+    yMax = min(max(tractDec), patchBoundary.decMax) + buff
+    xlim = xMin, xMax
+    ylim = yMin, yMax
+    axes.fill(tractRa, tractDec, fill=True, edgecolor='k', lw=1, linestyle='solid',
               color="black", alpha=0.2)
     for ip, patch in enumerate(tractInfo):
+        patchIndexStr = str(patch.getIndex()[0]) + "," + str(patch.getIndex()[1])
         color = "k"
         alpha = 0.05
-        if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
-            color = ("r", "b", "c", "g", "m")[ip%5]
+        if patchIndexStr in patchList:
+            color = ("c", "g", "r", "b", "m")[ip%5]
             alpha = 0.5
         ra, dec = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
-        axes.fill(ra, dec, fill=True, color=color, lw=1, linestyle="solid", alpha=alpha)
-        ra, dec = bboxToRaDec(patch.getInnerBBox(), tractInfo.getWcs())
-        axes.fill(ra, dec, fill=False, color=color, lw=1, linestyle="dashed", alpha=0.5*alpha)
-        axes.text(percent(ra), percent(dec, 0.5), str(patch.getIndex()),
-                  fontsize=fontSize - 1, horizontalalignment="center", verticalalignment="center")
-    axes.text(percent(tractRa, 0.5), 2.0*percent(tractDec, 0.0) - percent(tractDec, 0.18), "RA (deg)",
-              fontsize=fontSize, horizontalalignment="center", verticalalignment="center")
-    axes.text(2*percent(tractRa, 1.0) - percent(tractRa, 0.78), percent(tractDec, 0.5), "Dec (deg)",
+        deltaRa = abs(max(ra) - min(ra))
+        deltaDec = abs(max(dec) - min(dec))
+        pBuff = 0.5*max(deltaRa, deltaDec)
+        centerRa = min(ra) + 0.5*deltaRa
+        centerDec = min(dec) + 0.5*deltaDec
+        if (centerRa < xMin + pBuff and centerRa > xMax - pBuff and
+            centerDec > yMin - pBuff and centerDec < yMax + pBuff):
+            axes.fill(ra, dec, fill=True, color=color, lw=1, linestyle="solid", alpha=alpha)
+            if patchIndexStr in patchList or (centerRa < xMin - 0.2*pBuff and
+                                              centerRa > xMax + 0.2*pBuff and
+                                              centerDec > yMin + 0.2*pBuff and
+                                              centerDec < yMax - 0.2*pBuff):
+                axes.text(percent(ra), percent(dec, 0.5), str(patchIndexStr),
+                          fontsize=fontSize - 1, horizontalalignment="center", verticalalignment="center")
+    axes.text(percent((xMin, xMax), 1.06), percent((yMin, yMax), -0.08), "RA",
+              fontsize=fontSize, horizontalalignment="center", verticalalignment="center", color="green")
+    axes.text(percent((xMin, xMax), 1.15), percent((yMin, yMax), 0.01), "Dec",
               fontsize=fontSize, horizontalalignment="center", verticalalignment="center",
-              rotation="vertical")
+              rotation="vertical", color="green")
     axes.set_xlim(xlim)
     axes.set_ylim(ylim)
 
@@ -294,6 +330,44 @@ def bboxToRaDec(bbox, wcs):
         corners.append([coord.getRa().asDegrees(), coord.getDec().asDegrees()])
     ra, dec = zip(*corners)
     return ra, dec
+
+def getRaDecMinMaxPatchList(patchList, tractInfo, pad=0.0, nDecimals=4, raMin=360.0, raMax=0.0,
+                            decMin=90.0, decMax=-90.0):
+    """Find the max and min RA and DEC (deg) boundaries encompased in the patchList
+
+    Parameters
+    ----------
+    patchList : `list` of `str`
+       List of patch IDs.
+    tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
+       Tract information associated with the patches in patchList
+    pad : `float`
+       Pad the boundary by pad degrees
+    nDecimals : `int`
+       Round coordinates to this number of decimal places
+    raMin, raMax : `float`
+       Initiate minimum[maximum] RA determination at raMin[raMax] (deg)
+    decMin, decMax : `float`
+       Initiate minimum[maximum] DEC determination at decMin[decMax] (deg)
+
+    Returns
+    -------
+    `lsst.pipe.base.Struct`
+       Contains the ra and dec min and max values for the patchList provided
+    """
+    for ip, patch in enumerate(tractInfo):
+        if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
+            raPatch, decPatch = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
+            raMin = min(np.round(min(raPatch) - pad, nDecimals), raMin)
+            raMax = max(np.round(max(raPatch) + pad, nDecimals), raMax)
+            decMin = min(np.round(min(decPatch) - pad, nDecimals), decMin)
+            decMax = max(np.round(max(decPatch) + pad, nDecimals), decMax)
+    return Struct(
+        raMin = raMin,
+        raMax = raMax,
+        decMin = decMin,
+        decMax = decMax,
+    )
 
 def percent(values, p=0.5):
     """Return a value a faction of the way between the min and max values in a list."""
