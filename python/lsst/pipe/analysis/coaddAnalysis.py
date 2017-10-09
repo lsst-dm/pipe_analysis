@@ -17,7 +17,7 @@ from lsst.coadd.utils import TractDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
 from lsst.meas.astrom import AstrometryConfig
 from lsst.meas.extensions.astrometryNet import LoadAstrometryNetObjectsTask, LoadAstrometryNetObjectsConfig
-from lsst.pipe.tasks.colorterms import ColortermLibrary
+from lsst.pipe.tasks.colorterms import Colorterm, ColortermLibrary
 
 from lsst.meas.algorithms import LoadIndexedReferenceObjectsTask
 
@@ -38,9 +38,13 @@ class CoaddAnalysisConfig(Config):
     coaddName = Field(dtype=str, default="deep", doc="Name for coadd")
     matchRadius = Field(dtype=float, default=0.5, doc="Matching radius (arcseconds)")
     matchOverlapRadius = Field(dtype=float, default=0.5, doc="Matching radius for overlaps (arcseconds)")
-    colorterms = ConfigField(dtype=ColortermLibrary, doc="Library of color terms")
-    photoCatName = Field(dtype=str, default="ps1", doc="Name of photometric reference catalog; "
-                         "used to select a color term dict in colorterms.")
+    colorterms = ConfigField(dtype=ColortermLibrary,
+                             doc=("Library of color terms."
+                                  "\nNote that the colorterms, if any, need to be loaded in a config "
+                                  "override file.  See obs_subaru/config/hsc/coaddAnalysis.py for an "
+                                  "example.  If the colorterms for the appropriate reference dataset are "
+                                  "loaded, they will be applied.  Otherwise, no colorterms will be applied "
+                                  "to the reference catalog."))
     analysis = ConfigField(dtype=AnalysisConfig, doc="Analysis plotting options")
     analysisMatches = ConfigField(dtype=AnalysisConfig, doc="Analysis plotting options for matches")
     matchesMaxDistance = Field(dtype=float, default=0.15, doc="Maximum plotting distance for matches")
@@ -78,7 +82,6 @@ class CoaddAnalysisConfig(Config):
         # self.externalCatalogs = {"sdss-dr9-fink-v5b": astrom}
         self.analysisMatches.magThreshold = 21.0  # External catalogs like PS1 & SDSS used smaller telescopes
         self.refObjLoader.ref_dataset_name = "ps1_pv3_3pi_20170110"
-        self.colorterms.load(os.path.join(os.environ["OBS_SUBARU_DIR"], "config", "hsc", "colorterms.py"))
 
 
 class CoaddAnalysisRunner(TaskRunner):
@@ -638,7 +641,13 @@ class CoaddAnalysisTask(CmdLineTask):
             unitStr = "mmag"
         enforcer = None # Enforcer(requireLess={"star": {"stdev": 0.030*self.unitScale}}),
 
-        ct = self.config.colorterms.getColorterm(filterName, self.config.photoCatName)
+        try:
+            ct = self.config.colorterms.getColorterm(filterName, self.config.refObjLoader.ref_dataset_name)
+        except:
+            # Pass in a null colorterm.  Note the filterName must match for the source and reference catalogs
+            ct = Colorterm(primary=filterName, secondary=filterName)
+            self.log.warn("Note: no colorterms loaded for {:s}, thus no colorterms will be applied to "
+                          "the reference catalog".format(self.config.refObjLoader.ref_dataset_name))
         if "src_calib_psfUsed" in matches.schema:
             shortName = description + "_mag_calib_psfUsed"
             self.log.info("shortName = {:s}".format(shortName))
