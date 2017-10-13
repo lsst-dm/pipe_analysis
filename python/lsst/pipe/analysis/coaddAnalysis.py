@@ -74,7 +74,7 @@ class CoaddAnalysisConfig(Config):
 
     def saveToStream(self, outfile, root="root"):
         """Required for loading colorterms from a Config outside the 'lsst' namespace"""
-        print >> outfile, "import lsst.meas.photocal.colorterms"
+        print("import lsst.meas.photocal.colorterms", file=outfile)
         return Config.saveToStream(self, outfile, root)
 
     def setDefaults(self):
