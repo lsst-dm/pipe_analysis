@@ -187,41 +187,35 @@ class ColorAnalysisTask(CmdLineTask):
                     patchList.append(dataRef.dataId["patch"] )
 
         for patchRefList in patchRefsByFilter.itervalues():
-            patchRef = patchRefList[0]
-            butler = patchRef.getButler()
-            dataId = patchRef.dataId
+            repoInfo = getRepoInfo(patchRefList[0], coaddName=self.config.coaddName)
             break
-        camera = butler.get("camera")
 
-        # Check to see if stack used was HSC...need to use deepCoadd_forced_src cat because
-        # deepCoadd_calexp is persisted to a different location in HSC stack...ughhh!
-        forcedMd = butler.get("deepCoadd_forced_src", patchRef.dataId).getMetadata()
-        hscRun = checkHscStack(forcedMd)
-
-        skymap = butler.get("deepCoadd_skyMap")
-        tractInfo = skymap[dataRef.dataId["tract"]]
-        filenamer = Filenamer(butler, "plotColor", dataId)
-        unforcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList, "deepCoadd_meas") for
+        filenamer = Filenamer(repoInfo.butler, "plotColor", repoInfo.dataId)
+        unforcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList,
+                                                          self.config.coaddName + "Coadd_meas") for
                                     ff, patchRefList in patchRefsByFilter.items()}
         for cat in unforcedCatalogsByFilter.itervalues():
             calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
-        unforced = self.transformCatalogs(unforcedCatalogsByFilter, self.config.transforms, hscRun=hscRun)
-        forcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList, "deepCoadd_forced_src") for
+        unforced = self.transformCatalogs(unforcedCatalogsByFilter, self.config.transforms,
+                                          hscRun=repoInfo.hscRun)
+        forcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList,
+                                                        self.config.coaddName + "Coadd_forced_src") for
                                   ff, patchRefList in patchRefsByFilter.items()}
         for cat in forcedCatalogsByFilter.itervalues():
             calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
         # self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
         forced = self.transformCatalogs(forcedCatalogsByFilter, self.config.transforms,
-                                        flagsCats=unforcedCatalogsByFilter, hscRun=hscRun)
+                                        flagsCats=unforcedCatalogsByFilter, hscRun=repoInfo.hscRun)
 
         # Create and write parquet tables
-        tableFilenamer = Filenamer(butler, 'qaTableColor', dataId)
-        writeParquet(forced, tableFilenamer(dataId, description='forced'))
+        tableFilenamer = Filenamer(repoInfo.butler, 'qaTableColor', repoInfo.dataId)
+        writeParquet(forced, tableFilenamer(repoInfo.dataId, description='forced'))
 
-        self.plotStarColors(forced, filenamer, NumStarLabeller(len(forcedCatalogsByFilter)), dataId,
-                            camera=camera, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
-        self.plotStarColorColor(forcedCatalogsByFilter, filenamer, dataId, camera=camera, tractInfo=tractInfo,
-                                patchList=patchList, hscRun=hscRun)
+        self.plotStarColors(forced, filenamer, NumStarLabeller(len(forcedCatalogsByFilter)), repoInfo.dataId,
+                            camera=repoInfo.camera, tractInfo=repoInfo.tractInfo, patchList=patchList,
+                            hscRun=repoInfo.hscRun)
+        self.plotStarColorColor(forcedCatalogsByFilter, filenamer, repoInfo.dataId, camera=repoInfo.camera,
+                                tractInfo=repoInfo.tractInfo, patchList=patchList, hscRun=repoInfo.hscRun)
 
     def readCatalogs(self, patchRefList, dataset):
         catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS) for
