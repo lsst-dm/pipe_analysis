@@ -408,7 +408,7 @@ class Analysis(object):
         good = (self.mag < magThreshold if magThreshold > 0 else np.ones(len(self.mag), dtype=bool))
 
         if ((dataName == "star" or "matches" in filename or "compareUnforced" in filename) and
-            "pStar" not in filename and "race_" not in filename):
+            "pStar" not in filename and "race-" not in filename):
             vMin, vMax = 0.4*self.qMin, 0.4*self.qMax
             if "-mag_"  in filename or  any(ss in filename for ss in ["compareUnforced", "overlap"]):
                 vMin, vMax = 0.6*vMin, 0.6*vMax
@@ -418,7 +418,7 @@ class Analysis(object):
             vMin, vMax = 1.5*self.qMin, 0.5*self.qMax
         elif "raceDiff" in filename or "Resids" in filename:
             vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
-        elif "race_" in filename:
+        elif "race-" in filename:
             yDelta = 0.05*(self.qMax - self.qMin)
             vMin, vMax = self.qMin + yDelta, self.qMax - yDelta
         elif "pStar" in filename:

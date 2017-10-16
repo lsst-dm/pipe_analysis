@@ -27,7 +27,7 @@ import lsst.afw.table as afwTable
 class CcdAnalysis(Analysis):
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
                 tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None, postFix="",
-                plotRunStats=True, highlightList=None):
+                plotRunStats=True, highlightList=None, haveFpCoords=None):
         stats = self.stats
         if self.config.doPlotCcdXy:
             self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix), stats=stats,
@@ -623,6 +623,10 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             self.log.info("Number of matches (maxDist = {0:.2f} arcsec) = {1:d}".format(
                     self.config.matchRadius, len(catalog)))
 
+            self.unitScale = 1.0
+            if self.config.toMilli:
+                self.unitScale = 1000.0
+
             filenamer = Filenamer(dataRefListTract1[0].getButler(), "plotCompareVisit", dataId1)
             if self.config.doPlotFootprintNpix:
                 self.plotFootprint(catalog, filenamer, dataId1, butler=butler1, camera=camera1,
@@ -662,8 +666,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                  hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
             if self.config.doPlotCentroids:
                 self.plotCentroids(catalog, filenamer, dataId1, butler=butler1, camera=camera1,
-                                   ccdList=ccdListPerTract1, hscRun1=hscRun1,
-                                   hscRun2=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                                   ccdList=ccdListPerTract1, hscRun1=hscRun1, hscRun2=hscRun2,
+                                   matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
 
     def readCatalogs(self, dataRefList1, dataRefList2, dataset, hscRun1=None, hscRun2=None,
                      doReadFootprints=None):
@@ -817,25 +821,25 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in ["base_PsfFlux"]:
             if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
-                shortName = "trace_"
+                shortName = "trace"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, sdssTraceSizeCompare(), "SdssShape Trace Radius Diff (%)", shortName,
-                         self.config.analysis, flags=[col + "_flag"], prefix="first_",
+                Analysis(catalog, sdssTraceSizeCompare(), "SdssShape Trace Radius Diff (%)",
+                         shortName, self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-0.5, qMax=1.5,
                          labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
-                shortName = "psfTrace_"
+                shortName = "psfTrace"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, sdssPsfTraceSizeCompare(), "SdssShape PSF Trace Radius Diff (%)", shortName,
-                         self.config.analysis, flags=[col + "_flag"], prefix="first_",
+                Analysis(catalog, sdssPsfTraceSizeCompare(), " SdssShape PSF Trace Radius Diff (%)",
+                         shortName, self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-1.1, qMax=1.1,
                          labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
-                shortName = "sdssXx_"
+                shortName = "sdssXx"
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, sdssXxCompare(), "SdssShape xx Moment Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
@@ -844,7 +848,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
-                shortName = "sdssYy_"
+                shortName = "sdssYy"
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, sdssYyCompare(), "SdssShape yy Moment Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
@@ -854,7 +858,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
 
-                shortName = "hsmTrace_"
+                shortName = "hsmTrace"
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, hsmTraceSizeCompare(), "HSM Trace Radius Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
@@ -863,7 +867,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
-                shortName = "hsmPsfTrace_"
+                shortName = "hsmPsfTrace"
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, hsmPsfTraceSizeCompare(), "HSM PSF Trace Radius Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
@@ -883,7 +887,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 shortName = "diff_" + col + "_apCorr"
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, ApCorrDiffCompare(col + "_apCorr"),
-                         "Run Comparison: %s apCorr diff" % fluxToPlotString(col),
+                         "  Run Comparison: %s apCorr diff" % fluxToPlotString(col),
                          shortName, self.config.analysis,
                          prefix="first_", qMin=-0.025, qMax=0.025, flags=[col + "_flag_apCorr"],
                          errFunc=ApCorrDiffErr(col + "_apCorr"), labeller=OverlapsStarGalaxyLabeller(),

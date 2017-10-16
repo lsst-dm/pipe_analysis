@@ -88,7 +88,7 @@ def annotateAxes(filename, plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=
         statsUnitStr = " (milli)"
         if any (ss in filename for ss in ["_ra", "_dec", "distance"]):
             statsUnitStr = " (mas)"
-        if any (ss in filename for ss in ["mag_", "_photometry", "matches_mag"]):
+        if any (ss in filename for ss in ["Flux", "_photometry", "matches_mag"]):
             statsUnitStr = " (mmag)"
     lenStr = 0.12 + 0.017*(max(len(meanStr), len(stdevStr)))
 

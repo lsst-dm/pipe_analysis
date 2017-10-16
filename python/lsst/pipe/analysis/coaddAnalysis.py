@@ -149,7 +149,6 @@ class CoaddAnalysisTask(CmdLineTask):
             forced = self.calibrateCatalogs(forced, wcs=wcs)
             unforced = self.readCatalogs(patchRefList, "deepCoadd_meas", indexExists)
             unforced = self.calibrateCatalogs(unforced, wcs=wcs)
-            # catalog = joinCatalogs(meas, forced, prefix1="meas_", prefix2="forced_")
 
         # Set an alias map for differing src naming conventions of different stacks (if any)
         if hscRun is not None and self.config.srcSchemaMap is not None:
@@ -381,7 +380,7 @@ class CoaddAnalysisTask(CmdLineTask):
             unitStr = " (milli)"
         for col in ["base_PsfFlux", ]:
             if col + "_flux" in catalog.schema:
-                shortName = "trace_"
+                shortName = "trace"
                 # set limits dynamically...can be very different visit-to-visit due to seeing differences
                 psfUsed = catalog[catalog["calib_psfUsed"]].copy(deep=True)
                 sdssTrace = sdssTraceSize()
@@ -401,7 +400,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                              zpLabel=zpLabel)
-                shortName = "hsmTrace_"
+                shortName = "hsmTrace"
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog, hsmTraceSize(),
                                    "HSM Trace: $\sqrt{0.5*(I_{xx}+I_{yy})}$ (pixels)", shortName,
@@ -413,7 +412,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                              zpLabel=zpLabel)
             if col + "_flux" in catalog.schema:
-                shortName = "psfTraceDiff_"
+                shortName = "psfTraceDiff"
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog, psfSdssTraceSizeDiff(),
                                    "    SdssShape Trace % diff (psfUsed - PSFmodel)", shortName,
@@ -424,7 +423,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                              zpLabel=zpLabel)
-                shortName = "psfHsmTraceDiff_"
+                shortName = "psfHsmTraceDiff"
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog, psfHsmTraceSizeDiff(),
                                    "HSM Trace % diff (psfUsed - PSFmodel)", shortName,
@@ -435,7 +434,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                              zpLabel=zpLabel)
-                shortName = "e1Resids_"
+                shortName = "e1Resids"
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog, e1ResidsSdss(unitScale=self.unitScale),
                                    "         SdssShape e1 resids (psfUsed - PSFmodel)%s" % unitStr, shortName,
@@ -446,7 +445,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                              zpLabel=zpLabel)
-                shortName = "e1ResidsHsm_"
+                shortName = "e1ResidsHsm"
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog, e1ResidsHsm(unitScale=self.unitScale),
                                    "   HSM e1 resids (psfUsed - PSFmodel)%s" % unitStr, shortName,
@@ -457,7 +456,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                              zpLabel=zpLabel)
-                shortName = "e2Resids_"
+                shortName = "e2Resids"
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog, e2ResidsSdss(unitScale=self.unitScale),
                                    "       SdssShape e2 resids (psfUsed - PSFmodel)%s" % unitStr, shortName,
@@ -468,7 +467,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                              zpLabel=zpLabel)
-                shortName = "e2ResidsHsm_"
+                shortName = "e2ResidsHsm"
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog, e2ResidsHsm(unitScale=self.unitScale),
                                    "   HSM e2 resids (psfUsed - PSFmodel)%s" % unitStr, shortName,
@@ -994,19 +993,21 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         unitStr = "mag"
         if self.config.toMilli:
             unitStr = "mmag"
+        if fluxToPlotList is None:
+            fluxToPlotList = self.config.fluxToPlotList
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in fluxToPlotList:
             if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
-                shortName = "diff_" + col
+                shortName = "diff_" + col + postFix
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, MagDiffCompare(col + "_flux", unitScale=self.unitScale),
-                         "Run Comparison: Mag difference (%s)" % (fluxToPlotString(col), unitStr),
+                         "      Run Comparison: %s mag diff (%s)" % (fluxToPlotString(col), unitStr),
                          shortName, self.config.analysis, prefix="first_", qMin=-0.05, qMax=0.05,
-                         flags=[col + "_flag"], errFunc=MagDiffErr(col + "_flux", unitScale=unitScale),
-                         labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat, unitScale=unitScale,
+                         flags=[col + "_flag"], errFunc=MagDiffErr(col + "_flux", unitScale=self.unitScale),
+                         labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat, unitScale=self.unitScale,
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
-                                   hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel, postFix=postFix)
+                                   hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
 
     def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                       tractInfo=None, patchList=None, hscRun1=None, hscRun2=None, matchRadius=None,
