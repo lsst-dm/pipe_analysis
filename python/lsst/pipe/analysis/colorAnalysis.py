@@ -428,8 +428,8 @@ class ColorAnalysisTask(CmdLineTask):
 def colorColorPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=None, yRange=None, order=1,
                    iterations=1, rej=3.0, xFitRange=None, numBins=51, hscRun=None, logger=None, camera=None):
     fig, axes = plt.subplots(1, 2)
-    axes[0].tick_params(labelsize=9)
-    axes[1].tick_params(labelsize=9)
+    axes[0].tick_params(which="both", direction="in", labelsize=9)
+    axes[1].tick_params(which="both", direction="in", labelsize=9)
 
     if xRange:
         axes[0].set_xlim(*xRange)
@@ -463,15 +463,15 @@ def colorColorPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=None, y
     axes[0].scatter(xx[~keep], yy[~keep], c="black", label="other", **kwargs)
     axes[0].set_xlabel(xLabel)
     axes[0].set_ylabel(yLabel, labelpad=-1)
-    axes[0].legend(loc="upper left", fontsize=10)  # usually blank in color-color plots...
+    axes[0].legend(loc="upper left", fontsize=7)
     axes[0].plot(xLine, yLine, "r-")
 
     # Label total number of objects of each data type
-    xLoc, yLoc = xRange[0] + 0.38*(xRange[1] - xRange[0]), yRange[1] - 0.042*(yRange[1] - yRange[0])
-    axes[0].text(xLoc, yLoc, "Nused  = " + str(len(xx[keep])), ha="left", va="center", fontsize=9,
+    xLoc, yLoc = xRange[0] + 0.34*(xRange[1] - xRange[0]), yRange[1] - 0.036*(yRange[1] - yRange[0])
+    axes[0].text(xLoc, yLoc, "Nused  = " + str(len(xx[keep])), ha="left", va="center", fontsize=8,
                  color="blue")
-    yLoc -= 0.042*(yRange[1] - yRange[0])
-    axes[0].text(xLoc, yLoc, "Nother = " + str(len(xx[~keep])), ha="left", va="center", fontsize=9,
+    yLoc -= 0.044*(yRange[1] - yRange[0])
+    axes[0].text(xLoc, yLoc, "Nother = " + str(len(xx[~keep])), ha="left", va="center", fontsize=8,
                  color="black")
 
     # Determine quality of locus
@@ -492,17 +492,17 @@ def colorColorPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=None, y
               "median={5:.4f}; clip={6:.4f}; forcedMean=None){8:s}").format(
             dataId, 1000*distance[good].mean(), 1000*distance[good].std(), len(xx[keep]), len(xx),
             1000*np.median(distance[good]),  1000*3.0*0.74*(q3 - q1), "{", "}"))
-    meanStr = "mean = {:7.4f} (mmag)".format(1000.0*distance[good].mean())
-    stdStr = "  std = {:7.4f} (mmag)".format(1000.0*distance[good].std())
+    meanStr = "mean = {:5.2f} (mmag)".format(1000.0*distance[good].mean())
+    stdStr = "  std = {:5.2f} (mmag)".format(1000.0*distance[good].std())
     tractStr = "tract: {:d}".format(dataId["tract"])
-    axes[1].hist(distance[good], numBins, range=(-0.05, 0.05), normed=False)
     axes[1].set_xlabel("Distance to polynomial fit (mag)")
-    axes[1].set_ylabel("Number", labelpad=-2)
+    axes[1].set_ylabel("Number")
     axes[1].set_yscale("log", nonposy="clip")
-    axes[1].annotate(meanStr, xy=(0.58, 0.96), xycoords="axes fraction", ha="right", va="center",
-                     fontsize=9, color="black")
-    axes[1].annotate(stdStr, xy=(0.58, 0.92), xycoords="axes fraction", ha="right", va="center",
-                     fontsize=9, color="black")
+    axes[1].hist(distance[good], numBins, range=(-0.05, 0.05), normed=False)
+    axes[1].annotate(meanStr, xy=(0.6, 0.96), xycoords="axes fraction", ha="right", va="center",
+                     fontsize=8, color="black")
+    axes[1].annotate(stdStr, xy=(0.6, 0.92), xycoords="axes fraction", ha="right", va="center",
+                     fontsize=8, color="black")
     axes[1].annotate(tractStr, xy=(0.5, 1.04), xycoords="axes fraction", ha="center", va="center",
                      fontsize=10, color="green")
 
@@ -511,6 +511,7 @@ def colorColorPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=None, y
     if hscRun is not None:
         axes[0].set_title("HSC stack run: " + hscRun, color="#800080")
 
+    plt.tight_layout(pad=2.5, w_pad=0.5, h_pad=1.0)
     fig.savefig(filename)
     plt.close(fig)
 
