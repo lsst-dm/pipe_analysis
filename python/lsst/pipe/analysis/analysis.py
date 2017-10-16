@@ -324,10 +324,12 @@ class Analysis(object):
         axHistx.legend(fontsize=7, loc=2)
         axHisty.legend(fontsize=7)
         # Label total number of objects of each data type
-        xLoc, yLoc = 0.17, 1.405
+        xLoc, yLoc = 0.09, 1.405
+        lenNameMax = 0
         for name, data in self.data.items():
-            if name == "galaxy" and len(data.mag) > 0:
-                xLoc += 0.035
+            if len(data.mag) > 0:
+                lenNameMax = len(name) if len(name) > lenNameMax else lenNameMax
+        xLoc += 0.02*lenNameMax
 
         for name, data in self.data.items():
             if len(data.mag) == 0:
