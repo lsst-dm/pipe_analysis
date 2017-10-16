@@ -1038,7 +1038,37 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                  "Run Comparison: y offset (%s)" % unitStr, shortName, self.config.analysis, prefix="first_",
                  qMin=-0.08, qMax=0.08, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
                  ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, butler=butler, camera=camera,
-                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
+                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
+                           hscRun=(hscRun1 or hscRun2), matchRadius=matchRadius, zpLabel=zpLabel)
+        shortName = "diff_raCosDec"
+        self.log.info("shortName = {:s}".format(shortName))
+        Analysis(catalog, AstrometryDiff("first_coord_ra", "second_coord_ra", declination1="first_coord_dec",
+                                         declination2="second_coord_dec", unitScale=self.unitScale),
+                 "   Run Comparison: $\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr, shortName,
+                 self.config.analysisMatches, prefix="first_", qMin=-0.2*self.config.matchRadius,
+                 qMax=0.2*self.config.matchRadius, labeller=OverlapsStarGalaxyLabeller(),
+                 flagsCat=flagsCat, unitScale=self.unitScale,
+                 ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera, ccdList=ccdList,
+                           tractInfo=tractInfo, patchList=patchList, hscRun=(hscRun1 or hscRun2),
+                           matchRadius=matchRadius, zpLabel=zpLabel)
+        shortName = "diff_ra"
+        self.log.info("shortName = {:s}".format(shortName))
+        Analysis(catalog, AstrometryDiff("first_coord_ra", "second_coord_ra", declination1=None,
+                                         declination2=None, unitScale=self.unitScale),
+                 "Run Comparison: $\Delta$RA (%s)" % unitStr, shortName, self.config.analysisMatches,
+                 prefix="first_", qMin=-0.25*self.config.matchRadius, qMax=0.25*self.config.matchRadius,
+                 labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat, unitScale=self.unitScale,
+                 ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera, ccdList=ccdList,
+                           tractInfo=tractInfo, patchList=patchList, hscRun=(hscRun1 or hscRun2),
+                           matchRadius=matchRadius, zpLabel=zpLabel)
+        shortName = "diff_dec"
+        self.log.info("shortName = {:s}".format(shortName))
+        Analysis(catalog, AstrometryDiff("first_coord_dec", "second_coord_dec", unitScale=self.unitScale),
+                 "$\delta_{Dec}$ (%s)" % unitStr, shortName, self.config.analysisMatches, prefix="first_",
+                 qMin=-0.3*self.config.matchRadius, qMax=0.3*self.config.matchRadius,
+                 labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat, unitScale=self.unitScale,
+                 ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera, ccdList=ccdList,
+                           tractInfo=tractInfo, patchList=patchList, hscRun=(hscRun1 or hscRun2),
                            matchRadius=matchRadius, zpLabel=zpLabel)
 
     def plotFootprint(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,

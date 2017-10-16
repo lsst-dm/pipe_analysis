@@ -768,54 +768,6 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
 
         return calibrated
 
-    def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, hscRun=None,
-                 matchRadius=None, zpLabel=None, fluxToPlotList=None, postFix="", highlightList=None):
-        unitStr = "mag"
-        if self.config.toMilli:
-            unitStr = "mmag"
-        if fluxToPlotList is None:
-            fluxToPlotList = self.config.fluxToPlotList
-        enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
-        for col in fluxToPlotList:
-            if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
-                shortName = "diff_" + col + postFix
-                self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, MagDiffCompare(col + "_flux", unitScale=self.unitScale),
-                         "Run Comparison: %s mag diff (%s)" % (fluxToPlotString(col), unitStr), shortName,
-                         self.config.analysis, prefix="first_", qMin=-0.05, qMax=0.05, flags=[col + "_flag"],
-                         errFunc=MagDiffErr(col + "_flux"), labeller=OverlapsStarGalaxyLabeller(),
-                         unitScale=self.unitScale,
-                         ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
-                                   camera=camera, ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
-                                   zpLabel=zpLabel)
-
-    def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
-                      tractInfo=None, patchList=None, hscRun1=None, hscRun2=None, matchRadius=None,
-                      zpLabel=None, flagsCat=None, highlightList=None):
-        distEnforcer = None
-        shortName = "diff_x"
-        self.log.info("shortName = {:s}".format(shortName))
-        centroidStr1, centroidStr2 = "base_SdssCentroid", "base_SdssCentroid"
-        if (hscRun1 is not None) != (hscRun2 is not None):
-            if hscRun1 is None:
-                centroidStr1 = "base_SdssCentroid_Rot"
-            if hscRun2 is None:
-                centroidStr2 = "base_SdssCentroid_Rot"
-        Analysis(catalog, CentroidDiff("x", centroid1=centroidStr1, centroid2=centroidStr2),
-                 "Run Comparison: x offset (arcsec)", shortName, self.config.analysis, prefix="first_",
-                 qMin=-0.08, qMax=0.08, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
-                 ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, butler=butler, camera=camera,
-                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
-                           hscRun=(hscRun1 or hscRun2), matchRadius=matchRadius, zpLabel=zpLabel)
-        shortName = "diff_y"
-        self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, CentroidDiff("y", centroid1=centroidStr1, centroid2=centroidStr2),
-                 "Run Comparison: y offset (arcsec)", shortName, self.config.analysis, prefix="first_",
-                 qMin=-0.08, qMax=0.08, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
-                 ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, butler=butler, camera=camera,
-                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
-                           hscRun=(hscRun1 or hscRun2), matchRadius=matchRadius, zpLabel=zpLabel)
-
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, hscRun=None,
                  matchRadius=None, zpLabel=None):
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
