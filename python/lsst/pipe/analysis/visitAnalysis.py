@@ -650,6 +650,39 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
 
     def readCatalogs(self, dataRefList1, dataRefList2, dataset, hscRun1=None, hscRun2=None,
                      doReadFootprints=None):
+        """Read in and concatenate catalogs of type dataset in lists of data references
+
+        Parameters
+        ----------
+        dataRefList1 : `list` of `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+           A list of butler data references whose catalogs of dataset type are to be read in
+        dataRefList2 : `list` of `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+           A second list of butler data references whose catalogs of dataset type are to be read in and
+           compared against the catalogs associated with dataRefList1
+        dataset : `str`
+           Name of the catalog dataset to be read in
+        hscRun1, hscRun2 : `NoneType` or `str`, optional
+           If the processing was done with an HSC stack (now obsolete, but processing runs still exist),
+           contains the value of the fits card HSCPIPE_VERSION for the given repository (the default is None)
+        doReadFootprints : `NoneType` or `str`, optional
+           A string dictating if and what type of Footprint to read in along with the catalog
+           None (the default): do not read in Footprints
+           light: read in regular Footprints (include SpanSet and list of peaks per Footprint)
+           heavy: read in HeavyFootprints (include regular Footprint plus flux values per Footprint)
+
+        Raises
+        ------
+        `TaskError`
+           If no data is read in for either dataRefList
+
+        Returns
+        -------
+        `list` of 4 concatenated `lsst.afw.table.source.source.SourceCatalog`
+           The concatenated catalogs returned are (common ZP calibrated of dataRefList1,
+           sfm or uber calibrated of dataRefList1, common ZP calibrated of dataRefList2,
+           sfm or uber calibrated of dataRefList2)
+
+        """
         catList1 = []
         commonZpCatList1 = []
         catList2 = []
@@ -718,10 +751,27 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
 
         if len(catList1) == 0:
             raise TaskError("No catalogs read: %s" % ([dataRefList1[0].dataId for dataRef1 in dataRefList1]))
+        if len(catList2) == 0:
+            raise TaskError("No catalogs read: %s" % ([dataRefList2[0].dataId for dataRef2 in dataRefList2]))
         return (concatenateCatalogs(commonZpCatList1), concatenateCatalogs(catList1),
                 concatenateCatalogs(commonZpCatList2), concatenateCatalogs(catList2))
 
     def calibrateCatalogs(self, dataRef, catalog, metadata, doApplyUberCal):
+        """Determine and apply appropriate flux calibration to the catalog
+
+        Parameters
+        ----------
+        dataRef : `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+           A dataRef is needed for call to meas_mosaic's applyMosaicResultsCatalog() in
+           utils' calibrateSourceCatalogMosaic()
+        catalog : `lsst.afw.table.source.source.SourceCatalog`
+           The catalog to which the calibration is applied in place
+        metadata : `lsst.daf.base.propertyContainer.propertyList.PropertyList`
+           The metadata associated with the catalog to obtain the FLUXMAG0 zeropoint
+        doApplyUberCal : `bool`
+           If True: Apply the flux and wcs uber calibrations from meas_mosaic to the caltalog
+           If False: Apply the FLUXMAG0 flux calibration from single frame processing to the catalog
+        """
         self.zp = 0.0
         try:
             self.zpLabel = self.zpLabel
