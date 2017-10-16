@@ -468,6 +468,17 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
         return calibrated
 
+class CompareVisitAnalysisConfig(VisitAnalysisConfig):
+    doApplyUberCal1 = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input1?" +
+                            " FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
+    doApplyUberCal2 = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input2?" +
+                            " FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
+
+    def setDefaults(self):
+        VisitAnalysisConfig.setDefaults(self)
+        # Use a tighter match radius for comparing runs: they are calibrated and we want to avoid mis-matches
+        self.matchRadius = 0.2
+
 class CompareVisitAnalysisRunner(TaskRunner):
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
@@ -494,7 +505,7 @@ class CompareVisitAnalysisRunner(TaskRunner):
 
 
 class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
-    ConfigClass = CompareCoaddAnalysisConfig
+    ConfigClass = CompareVisitAnalysisConfig
     RunnerClass = CompareVisitAnalysisRunner
     _DefaultName = "compareVisitAnalysis"
 
@@ -528,12 +539,29 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         if len(dataRefListPerTract1) != len(dataRefListPerTract2):
             raise TaskError("Lengths of comparison dataRefLists do not match!")
         commonZpDone = False
-        dataset = "src"
-        if self.config.doApplyUberCal:
-            if hscRun is not None:
-                dataset = "wcs_hsc_md"
-            else:
-                dataset = "wcs_md"
+
+        for dataRefListTract1, dataRefListTract2 in zip(dataRefListPerTract1, dataRefListPerTract2):
+            dataId1 = dataRefListTract1[0].dataId
+            dataId2 = dataRefListTract2[0].dataId
+            butler1 = dataRefListTract1[0].getButler()
+            butler2 = dataRefListTract2[0].getButler()
+            break
+        camera1 = butler1.get("camera")
+        metadata1 = butler1.get("calexp_md", dataId1)
+        metadata2 = butler2.get("calexp_md", dataId2)
+        # Check metadata to see if stack used was HSC
+        hscRun1 = checkHscStack(metadata1)
+        hscRun2 = checkHscStack(metadata2)
+        dataset1 = "src"
+        dataset2 = "src"
+        if self.config.doApplyUberCal1:
+            dataset1 = "wcs_md"
+            if hscRun1 is not None:
+                dataset1 = "wcs_hsc_md"
+        if self.config.doApplyUberCal2:
+            dataset2 = "wcs_md"
+            if hscRun2 is not None:
+                dataset2 = "wcs_hsc_md"
 
         i = -1
         for dataRefListTract1, dataRefListTract2 in zip(dataRefListPerTract1, dataRefListPerTract2):
@@ -545,30 +573,25 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 self.log.info("No data found in --rerun2 for tract: {:d}".format(tractList[i]))
                 continue
             ccdListPerTract1 = [dataRef1.dataId["ccd"] for dataRef1 in dataRefListTract1 if
-                                dataRef1.datasetExists(dataset)]
+                                dataRef1.datasetExists(dataset1)]
+            ccdListPerTract2 = [dataRef1.dataId["ccd"] for dataRef2 in dataRefListTract2 if
+                                dataRef1.datasetExists(dataset2)]
             if len(ccdListPerTract1) == 0:
-                if self.config.doApplyUberCal:
+                if self.config.doApplyUberCal1:
                     self.log.fatal("No dataset found...are you sure you ran meas_mosaic?")
-                raise RuntimeError("No datasets found for datasetType = {:s}".format(dataset))
+                raise RuntimeError("No datasets found for datasetType = {:s}".format(dataset1))
+            if len(ccdListPerTract2) == 0:
+                if self.config.doApplyUberCal2:
+                    self.log.fatal("No dataset found...are you sure you ran meas_mosaic?")
+                raise RuntimeError("No datasets found for datasetType = {:s}".format(dataset2))
             self.log.info("tract: {:d} ".format(dataRef1.dataId["tract"]))
             self.log.info("ccdListPerTract1: {:s} ".format(ccdListPerTract1))
-            dataId1 = dataRefListTract1[0].dataId
-            butler1 = dataRefListTract1[0].getButler()
-            metadata1 = butler1.get("calexp_md", dataId1)
-            camera1 = butler1.get("camera")
-            filenamer = Filenamer(dataRefListTract1[0].getButler(), "plotCompareVisit", dataId1)
-            butler2 = dataRefListTract2[0].getButler()
-            metadata2 = butler2.get("calexp_md", dataRefListTract2[0].dataId)
-            # Check metadata to see if stack used was HSC
-            hscRun1 = checkHscStack(metadata1)
-            hscRun2 = checkHscStack(metadata2)
             doReadFootprints = None
             if self.config.doPlotFootprintNpix:
                 doReadFootprints = "light"
             commonZpCat1, catalog1, commonZpCat2, catalog2 = (
                 self.readCatalogs(dataRefListTract1, dataRefListTract2, "src", hscRun1=hscRun1,
                                   hscRun2=hscRun2, doReadFootprints=doReadFootprints))
-
             try:
                 self.zpLabel = self.zpLabel + " " + self.catLabel
             except:
@@ -594,7 +617,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             self.log.info("Number of matches (maxDist = {0:.2f} arcsec) = {1:d}".format(
                     self.config.matchRadius, len(catalog)))
 
-
+            filenamer = Filenamer(dataRefListTract1[0].getButler(), "plotCompareVisit", dataId1)
             if self.config.doPlotFootprintNpix:
                 self.plotFootprint(catalog, filenamer, dataId1, butler=butler1, camera=camera1,
                                    ccdList=ccdListPerTract1, hscRun=hscRun2,
@@ -687,20 +710,21 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             commonZpCat2 = srcCat2.copy(True)
             commonZpCat2 = calibrateSourceCatalog(commonZpCat2, self.config.analysis.commonZp)
             commonZpCatList2.append(commonZpCat2)
-            if self.config.doApplyUberCal:
-                if hscRun is not None:
+            if self.config.doApplyUberCal1:
+                if hscRun1 is not None:
                     if not dataRef1.datasetExists("wcs_hsc_md") or not dataRef1.datasetExists("fcr_hsc_md"):
                         continue
+                elif not dataRef1.datasetExists("wcs_md") or not dataRef1.datasetExists("fcr_md"):
+                    continue
+            if self.config.doApplyUberCal2:
+                if hscRun2 is not None:
                     if not dataRef2.datasetExists("wcs_hsc_md") or not dataRef2.datasetExists("fcr_hsc_md"):
                         continue
-                else:
-                    if not dataRef1.datasetExists("wcs_md") or not dataRef1.datasetExists("fcr_md"):
-                        continue
-                    if not dataRef2.datasetExists("wcs_md") or not dataRef2.datasetExists("fcr_md"):
-                        continue
-            srcCat1 = self.calibrateCatalogs(dataRef1, srcCat1, metadata1)
+                elif not dataRef2.datasetExists("wcs_md") or not dataRef2.datasetExists("fcr_md"):
+                    continue
+            srcCat1 = self.calibrateCatalogs(dataRef1, srcCat1, metadata1, self.config.doApplyUberCal1)
             catList1.append(srcCat1)
-            srcCat2 = self.calibrateCatalogs(dataRef2, srcCat2, metadata2)
+            srcCat2 = self.calibrateCatalogs(dataRef2, srcCat2, metadata2, self.config.doApplyUberCal2)
             catList2.append(srcCat2)
 
         if len(catList1) == 0:
@@ -708,24 +732,28 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         return (concatenateCatalogs(commonZpCatList1), concatenateCatalogs(catList1),
                 concatenateCatalogs(commonZpCatList2), concatenateCatalogs(catList2))
 
-    def calibrateCatalogs(self, dataRef, catalog, metadata):
+    def calibrateCatalogs(self, dataRef, catalog, metadata, doApplyUberCal):
         self.zp = 0.0
         try:
             self.zpLabel = self.zpLabel
         except:
             self.zpLabel = None
-        if self.config.doApplyUberCal:
+        if doApplyUberCal:
             calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
-            self.zpLabel = "MEAS_MOSAIC"
             if self.zpLabel is None:
                 self.log.info("Applying meas_mosaic calibration to catalog")
+                self.zpLabel = "MEAS_MOSAIC_1"
+            elif len(self.zpLabel) < 20:
+                self.zpLabel += " MEAS_MOSAIC_2"
         else:
             # Scale fluxes to measured zeropoint
             self.zp = 2.5*np.log10(metadata.get("FLUXMAG0"))
             if self.zpLabel is None:
                 self.log.info("Using 2.5*log10(FLUXMAG0) = {:.4f} from FITS header for zeropoint".format(
                     self.zp))
-            self.zpLabel = "FLUXMAG0"
+                self.zpLabel = "FLUXMAG0_1"
+            elif len(self.zpLabel) < 20:
+                self.zpLabel += " FLUXMAG0_2"
             calibrated = calibrateSourceCatalog(catalog, self.zp)
 
         return calibrated

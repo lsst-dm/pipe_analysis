@@ -220,17 +220,19 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
         # Check metadata to see if stack used was HSC
         metadata = butler.get("calexp_md", dataIdCopy)
         hscRun = checkHscStack(metadata)
-        if zpLabel == "MEAS_MOSAIC":
-            result = applyMosaicResultsExposure(dataRef, calexp=calexp)
+        if zpLabel is not None:
+            if zpLabel == "MEAS_MOSAIC" or "MEAS_MOSAIC_1" in zpLabel:
+                result = applyMosaicResultsExposure(dataRef, calexp=calexp)
 
         wcs = calexp.getWcs()
         w = calexp.getWidth()
         h = calexp.getHeight()
-        if hscRun and zpLabel == "MEAS_MOSAIC":
-            nQuarter = calexp.getDetector().getOrientation().getNQuarter()
-            if nQuarter%2 != 0:
-                w = calexp.getHeight()
-                h = calexp.getWidth()
+        if zpLabel is not None:
+            if hscRun and (zpLabel == "MEAS_MOSAIC" or "MEAS_MOSAIC_1" in zpLabel):
+                nQuarter = calexp.getDetector().getOrientation().getNQuarter()
+                if nQuarter%2 != 0:
+                    w = calexp.getHeight()
+                    h = calexp.getWidth()
 
         ras = list()
         decs = list()

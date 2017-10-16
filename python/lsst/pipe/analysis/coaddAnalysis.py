@@ -977,25 +977,33 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                    hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel, postFix=postFix)
 
     def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
-                      tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                      flagsCat=None, highlightList=None):
+                      tractInfo=None, patchList=None, hscRun1=None, hscRun2=None, matchRadius=None,
+                      zpLabel=None, flagsCat=None, highlightList=None):
         unitStr = "arcsec"
         if self.config.toMilli:
             unitStr = "mas"
         distEnforcer = None
+        centroidStr1, centroidStr2 = "base_SdssCentroid", "base_SdssCentroid"
+        if bool(hscRun1) ^ bool(hscRun2):
+            if hscRun1 is None:
+                centroidStr1 = "base_SdssCentroid_Rot"
+            if hscRun2 is None:
+                centroidStr2 = "base_SdssCentroid_Rot"
+
+        hscRun = hscRun1 if hscRun1 is not None else hscRun2
         shortName = "diff_x"
         self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, CentroidDiff("x", centroid1="base_SdssCentroid"),
-                 "Run Comparison: x offset (arcsec)", shortName, self.config.analysis, prefix="first_",
-                 qMin=-0.3, qMax=0.3, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
+        Analysis(catalog, CentroidDiff("x", centroid1=centroidStr1, centroid2=centroidStr2),
+                 "Run Comparison: x offset (%s)" % unitStr, shortName, self.config.analysis, prefix="first_",
+                 qMin=-0.08, qMax=0.08, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
                  ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, butler=butler, camera=camera,
                            ccdList=ccdList, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
                            matchRadius=matchRadius, zpLabel=zpLabel)
         shortName = "diff_y"
         self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, CentroidDiff("y", centroid1="base_SdssCentroid"),
-                 "Run Comparison: y offset (arcsec)", shortName, self.config.analysis, prefix="first_",
-                 qMin=-0.1, qMax=0.1, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
+        Analysis(catalog, CentroidDiff("y", centroid1=centroidStr1, centroid2=centroidStr2),
+                 "Run Comparison: y offset (%s)" % unitStr, shortName, self.config.analysis, prefix="first_",
+                 qMin=-0.08, qMax=0.08, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
                  ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, butler=butler, camera=camera,
                            ccdList=ccdList, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
                            matchRadius=matchRadius, zpLabel=zpLabel)
