@@ -63,6 +63,7 @@ class CosmosLabeller(StarGalaxyLabeller):
 
 
 def labelZp(zpLabel, plt, axis, xLoc, yLoc, rotation=0, fontSize=9, color="k"):
+    fontSize = int(fontSize - min(3, len(zpLabel)/10))
     plt.text(xLoc, yLoc, "zp: " + zpLabel, ha="center", va="center", fontsize=fontSize, rotation=rotation,
              transform=axis.transAxes, color=color)
 

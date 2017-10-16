@@ -852,6 +852,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
         # Check metadata to see if stack used was HSC
         butler1 = patchRefList1[indexExists1].getButler()
+        camera1 = butler1.get("camera")
         forcedMd1 = butler1.get("deepCoadd_forced_src", patchRefList1[indexExists1].dataId).getMetadata()
         hscRun1 = checkHscStack(forcedMd1)
         skymap1 = butler1.get("deepCoadd_skyMap")
@@ -917,12 +918,18 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         self.log.info("\nNumber of sources in catalogs: first = {0:d} and second = {1:d}".format(
                 len(forced1), len(forced2)))
 
+        self.unitScale = 1.0
+        if self.config.toMilli:
+            self.unitScale = 1000.0
+
         if self.config.doPlotMags:
-            self.plotMags(forced, filenamer, dataId, tractInfo=tractInfo1, patchList=patchList1,
-                          hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+            self.plotMags(forced, filenamer, dataId, butler=butler1, camera=camera1,
+                          tractInfo=tractInfo1, patchList=patchList1, hscRun=hscRun2,
+                          matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
         if self.config.doPlotCentroids:
-            self.plotCentroids(forced, filenamer, dataId, tractInfo=tractInfo1, patchList=patchList1,
-                          hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+            self.plotCentroids(forced, filenamer, dataId, butler=butler1, camera=camera1,
+                               tractInfo=tractInfo1, patchList=patchList1, hscRun1=hscRun1, hscRun2=hscRun2,
+                               matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
 
     def readCatalogs(self, patchRefList, dataset, index=0):
         catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS) for
@@ -974,6 +981,9 @@ class CompareCoaddAnalysisTask(CmdLineTask):
     def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                       tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
                       flagsCat=None, highlightList=None):
+        unitStr = "arcsec"
+        if self.config.toMilli:
+            unitStr = "mas"
         distEnforcer = None
         shortName = "diff_x"
         self.log.info("shortName = {:s}".format(shortName))
