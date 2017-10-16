@@ -10,6 +10,7 @@ np.seterr(all="ignore")
 from collections import defaultdict
 
 from lsst.daf.persistence.butler import Butler
+from lsst.pex.config import Field
 from lsst.pipe.base import ArgumentParser, TaskRunner, TaskError
 from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
@@ -146,6 +147,20 @@ class CcdAnalysis(Analysis):
         plt.close(fig)
 
 
+class VisitAnalysisConfig(CoaddAnalysisConfig):
+    doApplyUberCal = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input?" +
+                           " FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
+
+    def validate(self):
+        super(CoaddAnalysisConfig, self).validate()
+        if self.doApplyUberCal:
+            try:
+                import lsst.meas.mosaic
+            except ImportError:
+                raise ValueError("Cannot apply uber calibrations because meas_mosaic could not be imported."
+                                 "\nEither setup meas_mosaic or run with --doApplyUberCal=False")
+
+
 class VisitAnalysisRunner(TaskRunner):
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
@@ -160,7 +175,7 @@ class VisitAnalysisRunner(TaskRunner):
 
 class VisitAnalysisTask(CoaddAnalysisTask):
     _DefaultName = "visitAnalysis"
-    ConfigClass = CoaddAnalysisConfig
+    ConfigClass = VisitAnalysisConfig
     RunnerClass = VisitAnalysisRunner
     AnalysisClass = CcdAnalysis
 

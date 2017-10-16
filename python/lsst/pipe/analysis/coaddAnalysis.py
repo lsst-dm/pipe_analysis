@@ -67,8 +67,6 @@ class CoaddAnalysisConfig(Config):
     fluxToPlotList = ListField(dtype=str, default=["base_GaussianFlux", "ext_photometryKron_KronFlux",
                                                    "modelfit_CModel"],
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(base_PsfFlux)")
-    doApplyUberCal = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input?" +
-                           " FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
 
     def saveToStream(self, outfile, root="root"):
         """Required for loading colorterms from a Config outside the 'lsst' namespace"""
