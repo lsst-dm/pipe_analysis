@@ -183,6 +183,7 @@ class ColorAnalysisTask(CmdLineTask):
             butler = patchRef.getButler()
             dataId = patchRef.dataId
             break
+        camera = butler.get("camera")
 
         # Check to see if stack used was HSC...need to use deepCoadd_forced_src cat because
         # deepCoadd_calexp is persisted to a different location in HSC stack...ughhh!
@@ -210,8 +211,8 @@ class ColorAnalysisTask(CmdLineTask):
         writeParquet(forced, tableFilenamer(dataId, description='forced'))
 
         self.plotStarColors(forced, filenamer, NumStarLabeller(len(forcedCatalogsByFilter)), dataId,
-                            tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
-        self.plotStarColorColor(forcedCatalogsByFilter, filenamer, dataId, tractInfo=tractInfo,
+                            camera=camera, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
+        self.plotStarColorColor(forcedCatalogsByFilter, filenamer, dataId, camera=camera, tractInfo=tractInfo,
                                 patchList=patchList, hscRun=hscRun)
 
     def readCatalogs(self, patchRefList, dataset):
@@ -323,7 +324,7 @@ class ColorAnalysisTask(CmdLineTask):
                                labeller=OverlapsStarGalaxyLabeller("g_", "i_"),
                                qMin=-0.5, qMax=0.5,).plotAll(dataId, filenamer, self.log)
 
-    def plotStarColors(self, catalog, filenamer, labeller, dataId, butler=None, tractInfo=None,
+    def plotStarColors(self, catalog, filenamer, labeller, dataId, butler=None, camera=None, tractInfo=None,
                        patchList=None, hscRun=None):
         for col, transform in self.config.transforms.items():
             if not transform.plot or col not in catalog.schema:
@@ -333,12 +334,12 @@ class ColorAnalysisTask(CmdLineTask):
             self.AnalysisClass(catalog, ColorValueInRange(col, transform.requireGreater,
                                                           transform.requireLess),
                                col, shortName, self.config.analysis, flags=["bad"], labeller=labeller,
-                               qMin=-0.2, qMax=0.2,).plotAll(dataId, filenamer, self.log, butler=butler,
-                                                             tractInfo=tractInfo, patchList=patchList,
-                                                             hscRun=hscRun)
+                               qMin=-0.2, qMax=0.2,
+                               ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera,
+                                         tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
 
-    def plotStarColorColor(self, catalogs, filenamer, dataId, butler=None, tractInfo=None, patchList=None,
-                           hscRun=None):
+    def plotStarColorColor(self, catalogs, filenamer, dataId, butler=None, camera=None, tractInfo=None,
+                           patchList=None, hscRun=None):
         num = len(catalogs.values()[0])
         zp = 0.0
         mags = {ff: zp - 2.5*np.log10(catalogs[ff][self.fluxColumn]) for ff in catalogs}
@@ -367,14 +368,14 @@ class ColorAnalysisTask(CmdLineTask):
             poly = colorColorPlot(dataId, filenamer(dataId, description="gri", style="fit"), self.log,
                                   color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"), "g - r", "r - i",
                                   xRange=(-0.5, 2.0), yRange=(-0.5, 2.0), order=3, xFitRange=(0.3, 1.1),
-                                  hscRun=hscRun)
+                                  camera=camera, hscRun=hscRun)
             shortName = "gri"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, 0.3, 1.1), "griPerp",
                                shortName, self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
-                                         Enforcer(requireLess={"star": {"stdev": 0.05}}),
+                                         Enforcer(requireLess={"star": {"stdev": 0.05}}), camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
         if filters.issuperset(set(("HSC-R", "HSC-I", "HSC-Z"))):
             poly = colorColorPlot(dataId, filenamer(dataId, description="riz", style="fit"), self.log,
@@ -386,7 +387,7 @@ class ColorAnalysisTask(CmdLineTask):
                                self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
-                                         Enforcer(requireLess={"star": {"stdev": 0.02}}),
+                                         Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
         if filters.issuperset(set(("HSC-I", "HSC-Z", "HSC-Y"))):
             poly = colorColorPlot(dataId, filenamer(dataId, description="izy", style="fit"), self.log,
@@ -398,7 +399,7 @@ class ColorAnalysisTask(CmdLineTask):
                                self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
-                                         Enforcer(requireLess={"star": {"stdev": 0.02}}),
+                                         Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
 
         if filters.issuperset(set(("HSC-Z", "NB0921", "HSC-Y"))):
@@ -412,7 +413,7 @@ class ColorAnalysisTask(CmdLineTask):
                                self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
-                                         Enforcer(requireLess={"star": {"stdev": 0.02}}),
+                                         Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
 
 
@@ -425,7 +426,7 @@ class ColorAnalysisTask(CmdLineTask):
 
 
 def colorColorPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=None, yRange=None, order=1,
-                   iterations=1, rej=3.0, xFitRange=None, numBins=51, hscRun=None, logger=None):
+                   iterations=1, rej=3.0, xFitRange=None, numBins=51, hscRun=None, logger=None, camera=None):
     fig, axes = plt.subplots(1, 2)
     axes[0].tick_params(labelsize=9)
     axes[1].tick_params(labelsize=9)
@@ -505,6 +506,8 @@ def colorColorPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=None, y
     axes[1].annotate(tractStr, xy=(0.5, 1.04), xycoords="axes fraction", ha="center", va="center",
                      fontsize=10, color="green")
 
+    if camera is not None:
+        labelCamera(camera, plt, axes[0], 0.5, 1.04)
     if hscRun is not None:
         axes[0].set_title("HSC stack run: " + hscRun, color="#800080")
 
