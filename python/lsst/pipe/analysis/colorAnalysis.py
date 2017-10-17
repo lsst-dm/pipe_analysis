@@ -26,6 +26,7 @@ __all__ = ["ColorTransform", "ivezicTransforms", "straightTransforms", "NumStarL
 
 class ColorTransform(Config):
     description = Field(dtype=str, doc="Description of the color transform")
+    subDescription = Field(dtype=str, doc="Sub-description of the color transform (added detail)")
     plot = Field(dtype=bool, default=True, doc="Plot this color?")
     coeffs = DictField(keytype=str, itemtype=float, doc="Coefficients for each filter")
     requireGreater = DictField(keytype=str, itemtype=float, default={},
@@ -34,9 +35,10 @@ class ColorTransform(Config):
                             doc="Maximum values for colors so that this is useful")
 
     @classmethod
-    def fromValues(cls, description, plot, coeffs, requireGreater={}, requireLess={}):
+    def fromValues(cls, description, subDescription, plot, coeffs, requireGreater={}, requireLess={}):
         self = cls()
         self.description = description
+        self.subDescription = subDescription
         self.plot = plot
         self.coeffs = coeffs
         self.requireGreater = requireGreater
@@ -44,29 +46,29 @@ class ColorTransform(Config):
         return self
 
 ivezicTransforms = {
-    "wPerp": ColorTransform.fromValues("Ivezic w perpendicular", True,
+    "wPerp": ColorTransform.fromValues("Ivezic w perpendicular", " (griBlue)", True,
                                        {"HSC-G": -0.227, "HSC-R": 0.792, "HSC-I": -0.567, "": 0.050},
                                        {"wPara": -0.2}, {"wPara": 0.6}),
-    "xPerp": ColorTransform.fromValues("Ivezic x perpendicular", True,
+    "xPerp": ColorTransform.fromValues("Ivezic x perpendicular", " (griRed)", True,
                                        {"HSC-G": 0.707, "HSC-R": -0.707, "": -0.988},
                                        {"xPara": 0.8}, {"xPara": 1.6}),
-    "yPerp": ColorTransform.fromValues("Ivezic y perpendicular", True,
+    "yPerp": ColorTransform.fromValues("Ivezic y perpendicular", " (rizRed)", True,
                                        {"HSC-R": -0.270, "HSC-I": 0.800, "HSC-Z": -0.534, "": 0.054},
                                        {"yPara": 0.1}, {"yPara": 1.2}),
-    "wPara": ColorTransform.fromValues("Ivezic w parallel", False,
+    "wPara": ColorTransform.fromValues("Ivezic w parallel", " (griBlue)", False,
                                        {"HSC-G": 0.928, "HSC-R": -0.556, "HSC-I": -0.372, "": -0.425}),
-    "xPara": ColorTransform.fromValues("Ivezic x parallel", False, {"HSC-R": 1.0, "HSC-I": -1.0}),
-    "yPara": ColorTransform.fromValues("Ivezic y parallel", False,
+    "xPara": ColorTransform.fromValues("Ivezic x parallel", " (griRed)", False, {"HSC-R": 1.0, "HSC-I": -1.0}),
+    "yPara": ColorTransform.fromValues("Ivezic y parallel", " (rizRed)", False,
                                        {"HSC-R": 0.895, "HSC-I": -0.448, "HSC-Z": -0.447, "": -0.600}),
 }
 
 straightTransforms = {
-    "g": ColorTransform.fromValues("HSC-G", True, {"HSC-G": 1.0}),
-    "r": ColorTransform.fromValues("HSC-R", True, {"HSC-R": 1.0}),
-    "i": ColorTransform.fromValues("HSC-I", True, {"HSC-I": 1.0}),
-    "z": ColorTransform.fromValues("HSC-Z", True, {"HSC-Z": 1.0}),
-    "y": ColorTransform.fromValues("HSC-Y", True, {"HSC-Y": 1.0}),
-    "n921": ColorTransform.fromValues("NB0921", True, {"NB0921": 1.0}),
+    "g": ColorTransform.fromValues("HSC-G", "", True, {"HSC-G": 1.0}),
+    "r": ColorTransform.fromValues("HSC-R", "", True, {"HSC-R": 1.0}),
+    "i": ColorTransform.fromValues("HSC-I", "", True, {"HSC-I": 1.0}),
+    "z": ColorTransform.fromValues("HSC-Z", "", True, {"HSC-Z": 1.0}),
+    "y": ColorTransform.fromValues("HSC-Y", "", True, {"HSC-Y": 1.0}),
+    "n921": ColorTransform.fromValues("NB0921", "", True, {"NB0921": 1.0}),
 }
 
 
@@ -260,7 +262,7 @@ class ColorAnalysisTask(CmdLineTask):
                     doAdd = False
                     # if all(ff in catalogs for ff in transforms[col].coeffs):
             if doAdd:
-                schema.addField(col, float, transforms[col].description)
+                schema.addField(col, float, transforms[col].description + transforms[col].subDescription)
         schema.addField("numStarFlags", type=np.int32, doc="Number of times source was flagged as star")
         badKey = schema.addField("bad", type="Flag", doc="Is this a bad source?")
         schema.addField(self.fluxColumn, type=np.float64, doc="Flux from filter " + self.config.fluxFilter)
@@ -337,11 +339,11 @@ class ColorAnalysisTask(CmdLineTask):
             if not transform.plot or col not in catalog.schema:
                 continue
             shortName = "color_" + col
-            self.log.info("shortName = {:s}".format(shortName))
+            self.log.info("shortName = {:s}".format(shortName + transform.subDescription))
             self.AnalysisClass(catalog, ColorValueInRange(col, transform.requireGreater,
                                                           transform.requireLess, unitScale=self.unitScale),
-                               "%s (%s)" % (col, unitStr), shortName, self.config.analysis, flags=["bad"],
-                               labeller=labeller, qMin=-0.2, qMax=0.2,
+                               "%s (%s)" % (col + transform.subDescription, unitStr), shortName,
+                               self.config.analysis, flags=["bad"], labeller=labeller, qMin=-0.2, qMax=0.2,
                                ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
 
