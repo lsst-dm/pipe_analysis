@@ -521,7 +521,7 @@ class CoaddAnalysisTask(CmdLineTask):
                           postFix="", flagsCat=None):
         stats = None #self.config.analysis.stats()
         shortName = "footNpix"
-        self.log.info("shortName = {:s}".format(shortName))
+        self.log.info("shortName = {:s}".format(shortName + "Hist"))
         self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
                            self.config.analysis, flags=["base_Footprint_nPix_flag"], qMin=0, qMax=3000,
                            labeller=StarGalaxyLabeller(), flagsCat=flagsCat,

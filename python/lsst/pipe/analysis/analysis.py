@@ -120,11 +120,13 @@ class Analysis(object):
             for name in labeller.plot:
                 if (self.stats[name].num) == 0:
                     raise RuntimeError("No good data points to plot for sample labelled: {:}".format(name))
-            # Ensure plot limits always encompass at least mean +/- 2.5*stdev
+            # Ensure plot limits always encompass at least mean +/- 2.5*stdev and clipped stats range
             if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar"]):
-                self.qMin = min(self.qMin, self.stats["star"].mean - 2.5*self.stats["star"].stdev)
+                self.qMin = min(self.qMin, self.stats["star"].mean - 2.5*self.stats["star"].stdev,
+                                self.stats["star"].median - 1.1*self.stats["star"].clip)
             if not any(ss in self.shortName for ss in ["footNpix", "pStar"]):
-                self.qMax = max(self.qMax, self.stats["star"].mean + 2.5*self.stats["star"].stdev)
+                self.qMax = max(self.qMax, self.stats["star"].mean + 2.5*self.stats["star"].stdev,
+                                self.stats["star"].median + 1.1*self.stats["star"].clip)
 
     def plotAgainstMag(self, filename, stats=None, camera=None, ccdList=None, tractInfo=None, patchList=None,
                        hscRun=None, matchRadius=None, zpLabel=None):
@@ -407,7 +409,7 @@ class Analysis(object):
             magThreshold += 1.0  # plot to fainter mags for galaxies
         good = (self.mag < magThreshold if magThreshold > 0 else np.ones(len(self.mag), dtype=bool))
 
-        if ((dataName == "star" or "matches" in filename or "compareUnforced" in filename) and
+        if ((dataName == "star" or "matches" in filename or "compare" in filename) and
             "pStar" not in filename and "race-" not in filename):
             vMin, vMax = 0.4*self.qMin, 0.4*self.qMax
             if "-mag_"  in filename or  any(ss in filename for ss in ["compareUnforced", "overlap"]):
