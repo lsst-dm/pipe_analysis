@@ -10,6 +10,7 @@ np.seterr(all="ignore")
 from collections import defaultdict
 
 from lsst.daf.persistence.butler import Butler
+from lsst.pex.config import Field
 from lsst.pipe.base import ArgumentParser, TaskRunner, TaskError
 from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
@@ -26,7 +27,7 @@ import lsst.afw.table as afwTable
 class CcdAnalysis(Analysis):
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
                 tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None, postFix="",
-                plotRunStats=True, highlightList=None):
+                plotRunStats=True, highlightList=None, haveFpCoords=None):
         stats = self.stats
         if self.config.doPlotCcdXy:
             self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix), stats=stats,
@@ -146,6 +147,20 @@ class CcdAnalysis(Analysis):
         plt.close(fig)
 
 
+class VisitAnalysisConfig(CoaddAnalysisConfig):
+    doApplyUberCal = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input?" +
+                           " FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
+
+    def validate(self):
+        super(CoaddAnalysisConfig, self).validate()
+        if self.doApplyUberCal:
+            try:
+                import lsst.meas.mosaic
+            except ImportError:
+                raise ValueError("Cannot apply uber calibrations because meas_mosaic could not be imported."
+                                 "\nEither setup meas_mosaic or run with --doApplyUberCal=False")
+
+
 class VisitAnalysisRunner(TaskRunner):
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
@@ -160,7 +175,7 @@ class VisitAnalysisRunner(TaskRunner):
 
 class VisitAnalysisTask(CoaddAnalysisTask):
     _DefaultName = "visitAnalysis"
-    ConfigClass = CoaddAnalysisConfig
+    ConfigClass = VisitAnalysisConfig
     RunnerClass = VisitAnalysisRunner
     AnalysisClass = CcdAnalysis
 
@@ -184,69 +199,56 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             tractList = [int(tractStr) for tractStr in tract.split('^')]
         dataRefListPerTract = [None]*len(tractList)
         for i, tract in enumerate(tractList):
-            dataRefListPerTract[i] = [dataRef for dataRef in dataRefList if dataRef.dataId["tract"] == tract]
+            dataRefListPerTract[i] = [dataRef for dataRef in dataRefList if dataRef.dataId["tract"] == tract
+                                      and dataRef.datasetExists("src")]
         commonZpDone = False
         for i, dataRefListTract in enumerate(dataRefListPerTract):
             if len(dataRefListTract) == 0:
                 self.log.info("No data found for tract: {:d}".format(tractList[i]))
                 continue
-            butler = dataRefListTract[0].getButler()
-            camera = butler.get("camera")
-            dataId = dataRefListTract[0].dataId
-            self.log.info("dataId: {!s:s}".format(dataId))
-            # Check metadata to see if stack used was HSC
-            metadata = butler.get("calexp_md", dataRefListTract[0].dataId)
-            hscRun = checkHscStack(metadata)
-            dataset = "src"
-            if self.config.doApplyUberCal:
-                if hscRun is not None:
-                    dataset = "wcs_hsc_md"
-                else:
-                    dataset = "wcs_md"
+            repoInfo = getRepoInfo(dataRefListTract[0], doApplyUberCal=self.config.doApplyUberCal)
+            self.log.info("dataId: {!s:s}".format(repoInfo.dataId))
             ccdListPerTract = [dataRef.dataId["ccd"] for dataRef in dataRefListTract if
-                               dataRef.datasetExists(dataset)]
+                               dataRef.datasetExists(repoInfo.dataset)]
             if len(ccdListPerTract) == 0:
                 if self.config.doApplyUberCal:
-                    self.log.fatal("No dataset found...are you sure you ran meas_mosaic? "
-                                   "If not, run with --config doApplyUberCal=False")
-                raise RuntimeError("No datasets found for datasetType = {:s}".format(dataset))
-            filterName = dataId["filter"]
-            filenamer = Filenamer(butler, "plotVisit", dataRefListTract[0].dataId)
+                    self.log.fatal("No data found for {:s} datset...are you sure you ran meas_mosaic? "
+                                   "If not, run with --config doApplyUberCal=False".format(repoInfo.dataset))
+                raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo.dataset))
+            filenamer = Filenamer(repoInfo.butler, "plotVisit", repoInfo.dataId)
             if any(doPlot for doPlot in [self.config.doPlotFootprintNpix, self.config.doPlotQuiver,
                               self.config.doPlotMags, self.config.doPlotSizes, self.config.doPlotCentroids,
                               self.config.doPlotStarGalaxy]):
-                commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", hscRun=hscRun)
-                if hscRun and self.config.doAddAperFluxHsc:
+                commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", hscRun=repoInfo.hscRun)
+                if repoInfo.hscRun and self.config.doAddAperFluxHsc:
                     self.log.info("HSC run: adding aperture flux to schema...")
                     catalog = addApertureFluxesHSC(catalog, prefix="")
 
             # Create and write parquet tables
-            tableFilenamer = Filenamer(butler, 'qaTableVisit', dataRefListTract[0].dataId)
-            writeParquet(catalog, tableFilenamer(dataRefListTract[0].dataId, description='catalog'))
-            writeParquet(commonZpCat, tableFilenamer(dataRefListTract[0].dataId, description='commonZp'))
+            tableFilenamer = Filenamer(repoInfo.butler, 'qaTableVisit', repoInfo.dataId)
+            writeParquet(catalog, tableFilenamer(repoInfo.dataId, description='catalog'))
+            writeParquet(commonZpCat, tableFilenamer(repoInfo.dataId, description='commonZp'))
 
             try:
                 self.zpLabel = self.zpLabel + " " + self.catLabel
             except:
                 pass
 
-            self.unitScale = 1.0
-            if self.config.toMilli:
-                self.unitScale = 1000.0
-
             if self.config.doPlotFootprintNpix:
                 catalog = addFootprintNPix(catalog)
-                self.plotFootprintHist(catalog, filenamer(dataId, description="footNpix", style="hist"),
-                                       dataId, butler=butler, camera=camera, ccdList=ccdListPerTract,
-                                       hscRun=hscRun, zpLabel=self.zpLabel)
-                self.plotFootprint(catalog, filenamer, dataId, butler=butler, camera=camera,
-                                   ccdList=ccdListPerTract, hscRun=hscRun, zpLabel=self.zpLabel,
-                                   plotRunStats=False, highlightList=[("parent", 0, "yellow"), ])
+                self.plotFootprintHist(catalog,
+                                       filenamer(repoInfo.dataId, description="footNpix", style="hist"),
+                                       repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
+                                       ccdList=ccdListPerTract, hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
+                self.plotFootprint(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
+                                   camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
+                                   zpLabel=self.zpLabel, plotRunStats=False,
+                                   highlightList=[("parent", 0, "yellow"), ])
 
             if self.config.doPlotQuiver:
-                self.plotQuiver(catalog, filenamer(dataId, description="ellipResids", style="quiver"),
-                                dataId=dataId, butler=butler, camera=camera, ccdList=ccdListPerTract,
-                                hscRun=hscRun, zpLabel=self.zpLabel, scale=2)
+                self.plotQuiver(catalog, filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
+                                dataId=repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
+                                ccdList=ccdListPerTract, hscRun=repoInfo.hscRun, zpLabel=self.zpLabel, scale=2)
 
             # Create mag comparison plots using common ZP
             if self.config.doPlotMags and not commonZpDone:
@@ -255,42 +257,49 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     zpLabel = zpLabel + " " + self.catLabel
                 except:
                     pass
-                self.plotMags(commonZpCat, filenamer, dataId, butler=butler, camera=camera, ccdList=ccdList,
-                              hscRun=hscRun, zpLabel=zpLabel,
+                self.plotMags(commonZpCat, filenamer, repoInfo.dataId, butler=repoInfo.butler,
+                              camera=repoInfo.camera, ccdList=ccdList, hscRun=repoInfo.hscRun, zpLabel=zpLabel,
                               fluxToPlotList=["base_GaussianFlux", "base_CircularApertureFlux_12_0"],
                               postFix="_commonZp")
                 commonZpDone = True
             # Now source catalog calibrated to either FLUXMAG0 or meas_mosaic result for remainder of plots
             if self.config.doPlotSizes:
                 if "base_SdssShape_psf_xx" in catalog.schema:
-                    self.plotSizes(catalog, filenamer, dataId, butler=butler, camera=camera,
-                                   ccdList=ccdListPerTract, hscRun=hscRun, zpLabel=self.zpLabel)
+                    self.plotSizes(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
+                                   camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
+                                   zpLabel=self.zpLabel)
                 else:
                     self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
             if self.config.doPlotMags:
-                self.plotMags(catalog, filenamer, dataId, butler=butler, camera=camera,
-                              ccdList=ccdListPerTract, hscRun=hscRun, zpLabel=self.zpLabel)
+                self.plotMags(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
+                              camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
+                              zpLabel=self.zpLabel)
             if self.config.doPlotCentroids:
-                self.plotCentroidXY(catalog, filenamer, dataId, butler=butler, camera=camera,
-                                    ccdList=ccdListPerTract, hscRun=hscRun, zpLabel=self.zpLabel)
+                self.plotCentroidXY(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
+                                    camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
+                                    zpLabel=self.zpLabel)
             if self.config.doPlotStarGalaxy:
                 if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
-                    self.plotStarGal(catalog, filenamer, dataId, butler=butler, camera=camera,
-                                     ccdList=ccdListPerTract, hscRun=hscRun, zpLabel=self.zpLabel)
+                    self.plotStarGal(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
+                                     camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
+                                     zpLabel=self.zpLabel)
                 else:
                     self.log.warn("Cannot run plotStarGal: " +
                                   "ext_shapeHSM_HsmSourceMoments_xx not in catalog.schema")
             if self.config.doPlotMatches:
                 matches = self.readSrcMatches(dataRefListTract, "src")
-                self.plotMatches(matches, filterName, filenamer, dataId, butler=butler, camera=camera,
-                                 ccdList=ccdListPerTract, hscRun=hscRun, zpLabel=self.zpLabel)
+                self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
+                                 butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
+                                 hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
 
             for cat in self.config.externalCatalogs:
                 if self.config.photoCatName not in cat:
                     with andCatalog(cat):
-                        matches = self.matchCatalog(catalog, filterName, self.config.externalCatalogs[cat])
-                        self.plotMatches(matches, filterName, filenamer, dataId, butler=butler,
-                                         camera=camera, ccdList=ccdListPerTract, hscRun=hscRun,
+                        matches = self.matchCatalog(catalog, repoInfo.filterName,
+                                                    self.config.externalCatalogs[cat])
+                        self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
+                                         butler=repoInfo.butler, camera=repoInfo.camera,
+                                         ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
                                          matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
 
     def readCatalogs(self, dataRefList, dataset, hscRun=None):
@@ -453,6 +462,17 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
         return calibrated
 
+class CompareVisitAnalysisConfig(VisitAnalysisConfig):
+    doApplyUberCal1 = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input1?" +
+                            " FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
+    doApplyUberCal2 = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input2?" +
+                            " FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
+
+    def setDefaults(self):
+        VisitAnalysisConfig.setDefaults(self)
+        # Use a tighter match radius for comparing runs: they are calibrated and we want to avoid mis-matches
+        self.matchRadius = 0.2
+
 class CompareVisitAnalysisRunner(TaskRunner):
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
@@ -460,7 +480,13 @@ class CompareVisitAnalysisRunner(TaskRunner):
         kwargs["tract"] = parsedCmd.tract
         while os.path.exists(os.path.join(parentDir, "_parent")):
             parentDir = os.path.realpath(os.path.join(parentDir, "_parent"))
-        butler2 = Butler(root=os.path.join(parentDir, "rerun", parsedCmd.rerun2), calibRoot=parsedCmd.calib)
+        # New butler requires identical RepositoryArgs and RepositoryCfg and mapperArgs={} is NOT
+        # considered equivalent to mapperArgs={'calibRoot': None}, so only use if pasedCmd.calib
+        # is not None
+        butlerArgs = dict(root=os.path.join(parentDir, "rerun", parsedCmd.rerun2))
+        if parsedCmd.calib is not None:
+            butlerArgs["calibRoot"] = parsedCmd.calib
+        butler2 = Butler(**butlerArgs)
         idParser = parsedCmd.id.__class__(parsedCmd.id.level)
         idParser.idList = parsedCmd.id.idList
         idParser.datasetType = parsedCmd.id.datasetType
@@ -479,7 +505,7 @@ class CompareVisitAnalysisRunner(TaskRunner):
 
 
 class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
-    ConfigClass = CompareCoaddAnalysisConfig
+    ConfigClass = CompareVisitAnalysisConfig
     RunnerClass = CompareVisitAnalysisRunner
     _DefaultName = "compareVisitAnalysis"
 
@@ -513,12 +539,15 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         if len(dataRefListPerTract1) != len(dataRefListPerTract2):
             raise TaskError("Lengths of comparison dataRefLists do not match!")
         commonZpDone = False
-        dataset = "src"
-        if self.config.doApplyUberCal:
-            if hscRun is not None:
-                dataset = "wcs_hsc_md"
-            else:
-                dataset = "wcs_md"
+
+        # Get a butler and dataId for each dataset.  Needed for feeding a butler and camera into the
+        # plotting functions (for labelling the camera and plotting ccd outlines) in addition to
+        # determining if the data were processed with the HSC stack.  We assume all processing in a
+        # given rerun is self-consistent, so only need one valid dataId per comparison rerun.
+        for dataRefListTract1, dataRefListTract2 in zip(dataRefListPerTract1, dataRefListPerTract2):
+            repoInfo1 = getRepoInfo(dataRefListTract1[0], doApplyUberCal=self.config.doApplyUberCal1)
+            repoInfo2 = getRepoInfo(dataRefListTract2[0], doApplyUberCal=self.config.doApplyUberCal2)
+            break
 
         i = -1
         for dataRefListTract1, dataRefListTract2 in zip(dataRefListPerTract1, dataRefListPerTract2):
@@ -530,40 +559,37 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 self.log.info("No data found in --rerun2 for tract: {:d}".format(tractList[i]))
                 continue
             ccdListPerTract1 = [dataRef1.dataId["ccd"] for dataRef1 in dataRefListTract1 if
-                                dataRef1.datasetExists(dataset)]
+                                dataRef1.datasetExists(repoInfo1.dataset)]
+            ccdListPerTract2 = [dataRef2.dataId["ccd"] for dataRef2 in dataRefListTract2 if
+                                dataRef2.datasetExists(repoInfo2.dataset)]
             if len(ccdListPerTract1) == 0:
-                if self.config.doApplyUberCal:
-                    self.log.fatal("No dataset found...are you sure you ran meas_mosaic?")
-                raise RuntimeError("No datasets found for datasetType = {:s}".format(dataset))
+                if self.config.doApplyUberCal1 and "wcs" in repoInfo1.dataset:
+                    self.log.fatal("No data found for {:s} dataset...are you sure you ran meas_mosaic? If "
+                                   "not, run with --config doApplyUberCal1=False".format(repoInfo1.dataset))
+                raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo1.dataset))
+            if len(ccdListPerTract2) == 0:
+                if self.config.doApplyUberCal2 and "wcs" in repoInfo2.dataset2:
+                    self.log.fatal("No data found for {:s} dataset...are you sure you ran meas_mosaic? If "
+                                   "not, run with --config doApplyUberCal2=False".format(repoInfo2.dataset))
+                raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo2.dataset))
             self.log.info("tract: {:d} ".format(dataRef1.dataId["tract"]))
             self.log.info("ccdListPerTract1: {:s} ".format(ccdListPerTract1))
-            dataId1 = dataRefListTract1[0].dataId
-            butler1 = dataRefListTract1[0].getButler()
-            metadata1 = butler1.get("calexp_md", dataId1)
-            camera1 = butler1.get("camera")
-            filenamer = Filenamer(dataRefListTract1[0].getButler(), "plotCompareVisit", dataId1)
-            butler2 = dataRefListTract2[0].getButler()
-            metadata2 = butler2.get("calexp_md", dataRefListTract2[0].dataId)
-            # Check metadata to see if stack used was HSC
-            hscRun1 = checkHscStack(metadata1)
-            hscRun2 = checkHscStack(metadata2)
             doReadFootprints = None
             if self.config.doPlotFootprintNpix:
                 doReadFootprints = "light"
             commonZpCat1, catalog1, commonZpCat2, catalog2 = (
-                self.readCatalogs(dataRefListTract1, dataRefListTract2, "src", hscRun1=hscRun1,
-                                  hscRun2=hscRun2, doReadFootprints=doReadFootprints))
-
+                self.readCatalogs(dataRefListTract1, dataRefListTract2, "src", hscRun1=repoInfo1.hscRun,
+                                  hscRun2=repoInfo2.hscRun, doReadFootprints=doReadFootprints))
             try:
                 self.zpLabel = self.zpLabel + " " + self.catLabel
             except:
                 pass
 
-            if hscRun2 and self.config.doAddAperFluxHsc:
+            if repoInfo2.hscRun and self.config.doAddAperFluxHsc:
                 self.log.info("HSC run: adding aperture flux to schema...")
                 catalog2 = addApertureFluxesHSC(catalog2, prefix="")
 
-            if hscRun1 and self.config.doAddAperFluxHsc:
+            if repoInfo1.hscRun and self.config.doAddAperFluxHsc:
                 self.log.info("HSC run: adding aperture flux to schema...")
                 catalog1 = addApertureFluxesHSC(catalog1, prefix="")
 
@@ -579,10 +605,10 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             self.log.info("Number of matches (maxDist = {0:.2f} arcsec) = {1:d}".format(
                     self.config.matchRadius, len(catalog)))
 
-
+            filenamer = Filenamer(repoInfo1.butler, "plotCompareVisit", repoInfo1.dataId)
             if self.config.doPlotFootprintNpix:
-                self.plotFootprint(catalog, filenamer, dataId1, butler=butler1, camera=camera1,
-                                   ccdList=ccdListPerTract1, hscRun=hscRun2,
+                self.plotFootprint(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
+                                   camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=repoInfo2.hscRun,
                                    matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
 
             # Create mag comparison plots using common ZP
@@ -593,36 +619,70 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 except:
                     pass
 
-                self.plotMags(commonZpCat, filenamer, dataId1, butler=butler1, camera=camera1,
-                              ccdList=fullCcdList, hscRun=hscRun2, matchRadius=self.config.matchRadius,
-                              zpLabel=zpLabel,
+                self.plotMags(commonZpCat, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
+                              camera=repoInfo1.camera, ccdList=fullCcdList, hscRun=repoInfo2.hscRun,
+                              matchRadius=self.config.matchRadius, zpLabel=zpLabel,
                               fluxToPlotList=["base_GaussianFlux", "base_CircularApertureFlux_12_0"],
                               postFix="_commonZp")
                 commonZpDone = True
 
             if self.config.doPlotMags:
-                self.plotMags(catalog, filenamer, dataId1, butler=butler1, camera=camera1,
-                              ccdList=ccdListPerTract1,
-                              hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                self.plotMags(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
+                              camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=repoInfo2.hscRun,
+                              matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
             if self.config.doPlotSizes:
                 if ("first_base_SdssShape_psf_xx" in catalog.schema and
                     "second_base_SdssShape_psf_xx" in catalog.schema):
-                    self.plotSizes(catalog, filenamer, dataId1, butler=butler1, camera=camera1,
-                                   ccdList=ccdListPerTract1,
-                                   hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                    self.plotSizes(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
+                                   camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=repoInfo2.hscRun,
+                                   matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
                 else:
                     self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
             if self.config.doApCorrs:
-                self.plotApCorrs(catalog, filenamer, dataId1, butler=butler1, camera=camera1,
-                                 ccdList=ccdListPerTract1,
-                                 hscRun=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                self.plotApCorrs(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
+                                 camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=repoInfo2.hscRun,
+                                 matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
             if self.config.doPlotCentroids:
-                self.plotCentroids(catalog, filenamer, dataId1, butler=butler1, camera=camera1,
-                                   ccdList=ccdListPerTract1, hscRun1=hscRun1,
-                                   hscRun2=hscRun2, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                self.plotCentroids(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
+                                   camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun1=repoInfo1.hscRun,
+                                   hscRun2=repoInfo2.hscRun, matchRadius=self.config.matchRadius,
+                                   zpLabel=self.zpLabel)
 
     def readCatalogs(self, dataRefList1, dataRefList2, dataset, hscRun1=None, hscRun2=None,
                      doReadFootprints=None):
+        """Read in and concatenate catalogs of type dataset in lists of data references
+
+        Parameters
+        ----------
+        dataRefList1 : `list` of `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+           A list of butler data references whose catalogs of dataset type are to be read in
+        dataRefList2 : `list` of `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+           A second list of butler data references whose catalogs of dataset type are to be read in and
+           compared against the catalogs associated with dataRefList1
+        dataset : `str`
+           Name of the catalog dataset to be read in
+        hscRun1, hscRun2 : `NoneType` or `str`, optional
+           If the processing was done with an HSC stack (now obsolete, but processing runs still exist),
+           contains the value of the fits card HSCPIPE_VERSION for the given repository (the default is None)
+        doReadFootprints : `NoneType` or `str`, optional
+           A string dictating if and what type of Footprint to read in along with the catalog
+           None (the default): do not read in Footprints
+           light: read in regular Footprints (include SpanSet and list of peaks per Footprint)
+           heavy: read in HeavyFootprints (include regular Footprint plus flux values per Footprint)
+
+        Raises
+        ------
+        `TaskError`
+           If no data is read in for either dataRefList
+
+        Returns
+        -------
+        `list` of 4 concatenated `lsst.afw.table.source.source.SourceCatalog`
+           The concatenated catalogs returned are (common ZP calibrated of dataRefList1,
+           sfm or uber calibrated of dataRefList1, common ZP calibrated of dataRefList2,
+           sfm or uber calibrated of dataRefList2)
+
+        """
         catList1 = []
         commonZpCatList1 = []
         catList2 = []
@@ -672,121 +732,95 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             commonZpCat2 = srcCat2.copy(True)
             commonZpCat2 = calibrateSourceCatalog(commonZpCat2, self.config.analysis.commonZp)
             commonZpCatList2.append(commonZpCat2)
-            if self.config.doApplyUberCal:
-                if hscRun is not None:
+            if self.config.doApplyUberCal1:
+                if hscRun1 is not None:
                     if not dataRef1.datasetExists("wcs_hsc_md") or not dataRef1.datasetExists("fcr_hsc_md"):
                         continue
+                elif not dataRef1.datasetExists("wcs_md") or not dataRef1.datasetExists("fcr_md"):
+                    continue
+            if self.config.doApplyUberCal2:
+                if hscRun2 is not None:
                     if not dataRef2.datasetExists("wcs_hsc_md") or not dataRef2.datasetExists("fcr_hsc_md"):
                         continue
-                else:
-                    if not dataRef1.datasetExists("wcs_md") or not dataRef1.datasetExists("fcr_md"):
-                        continue
-                    if not dataRef2.datasetExists("wcs_md") or not dataRef2.datasetExists("fcr_md"):
-                        continue
-            srcCat1 = self.calibrateCatalogs(dataRef1, srcCat1, metadata1)
+                elif not dataRef2.datasetExists("wcs_md") or not dataRef2.datasetExists("fcr_md"):
+                    continue
+            srcCat1 = self.calibrateCatalogs(dataRef1, srcCat1, metadata1, self.config.doApplyUberCal1)
             catList1.append(srcCat1)
-            srcCat2 = self.calibrateCatalogs(dataRef2, srcCat2, metadata2)
+            srcCat2 = self.calibrateCatalogs(dataRef2, srcCat2, metadata2, self.config.doApplyUberCal2)
             catList2.append(srcCat2)
 
         if len(catList1) == 0:
             raise TaskError("No catalogs read: %s" % ([dataRefList1[0].dataId for dataRef1 in dataRefList1]))
+        if len(catList2) == 0:
+            raise TaskError("No catalogs read: %s" % ([dataRefList2[0].dataId for dataRef2 in dataRefList2]))
         return (concatenateCatalogs(commonZpCatList1), concatenateCatalogs(catList1),
                 concatenateCatalogs(commonZpCatList2), concatenateCatalogs(catList2))
 
-    def calibrateCatalogs(self, dataRef, catalog, metadata):
+    def calibrateCatalogs(self, dataRef, catalog, metadata, doApplyUberCal):
+        """Determine and apply appropriate flux calibration to the catalog
+
+        Parameters
+        ----------
+        dataRef : `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+           A dataRef is needed for call to meas_mosaic's applyMosaicResultsCatalog() in
+           utils' calibrateSourceCatalogMosaic()
+        catalog : `lsst.afw.table.source.source.SourceCatalog`
+           The catalog to which the calibration is applied in place
+        metadata : `lsst.daf.base.propertyContainer.propertyList.PropertyList`
+           The metadata associated with the catalog to obtain the FLUXMAG0 zeropoint
+        doApplyUberCal : `bool`
+           If True: Apply the flux and wcs uber calibrations from meas_mosaic to the caltalog
+           If False: Apply the FLUXMAG0 flux calibration from single frame processing to the catalog
+        """
         self.zp = 0.0
         try:
             self.zpLabel = self.zpLabel
         except:
             self.zpLabel = None
-        if self.config.doApplyUberCal:
+        if doApplyUberCal:
             calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
-            self.zpLabel = "MEAS_MOSAIC"
             if self.zpLabel is None:
                 self.log.info("Applying meas_mosaic calibration to catalog")
+                self.zpLabel = "MEAS_MOSAIC_1"
+            elif len(self.zpLabel) < 20:
+                self.zpLabel += " MEAS_MOSAIC_2"
         else:
             # Scale fluxes to measured zeropoint
             self.zp = 2.5*np.log10(metadata.get("FLUXMAG0"))
             if self.zpLabel is None:
                 self.log.info("Using 2.5*log10(FLUXMAG0) = {:.4f} from FITS header for zeropoint".format(
                     self.zp))
-            self.zpLabel = "FLUXMAG0"
+                self.zpLabel = "FLUXMAG0_1"
+            elif len(self.zpLabel) < 20:
+                self.zpLabel += " FLUXMAG0_2"
             calibrated = calibrateSourceCatalog(catalog, self.zp)
 
         return calibrated
-
-    def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, hscRun=None,
-                 matchRadius=None, zpLabel=None, fluxToPlotList=None, postFix="", highlightList=None):
-        unitStr = "mag"
-        if self.config.toMilli:
-            unitStr = "mmag"
-        if fluxToPlotList is None:
-            fluxToPlotList = self.config.fluxToPlotList
-        enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
-        for col in fluxToPlotList:
-            if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
-                shortName = "diff_" + col + postFix
-                self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, MagDiffCompare(col + "_flux", unitScale=self.unitScale),
-                         "Run Comparison: %s mag diff (%s)" % (fluxToPlotString(col), unitStr), shortName,
-                         self.config.analysis, prefix="first_", qMin=-0.05, qMax=0.05, flags=[col + "_flag"],
-                         errFunc=MagDiffErr(col + "_flux"), labeller=OverlapsStarGalaxyLabeller(),
-                         unitScale=self.unitScale,
-                         ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
-                                   camera=camera, ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
-                                   zpLabel=zpLabel)
-
-    def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
-                      tractInfo=None, patchList=None, hscRun1=None, hscRun2=None, matchRadius=None,
-                      zpLabel=None, flagsCat=None, highlightList=None):
-        distEnforcer = None
-        shortName = "diff_x"
-        self.log.info("shortName = {:s}".format(shortName))
-        centroidStr1, centroidStr2 = "base_SdssCentroid", "base_SdssCentroid"
-        if (hscRun1 is not None) != (hscRun2 is not None):
-            if hscRun1 is None:
-                centroidStr1 = "base_SdssCentroid_Rot"
-            if hscRun2 is None:
-                centroidStr2 = "base_SdssCentroid_Rot"
-        Analysis(catalog, CentroidDiff("x", centroid1=centroidStr1, centroid2=centroidStr2),
-                 "Run Comparison: x offset (arcsec)", shortName, self.config.analysis, prefix="first_",
-                 qMin=-0.08, qMax=0.08, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
-                 ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, butler=butler, camera=camera,
-                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
-                           hscRun=(hscRun1 or hscRun2), matchRadius=matchRadius, zpLabel=zpLabel)
-        shortName = "diff_y"
-        self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, CentroidDiff("y", centroid1=centroidStr1, centroid2=centroidStr2),
-                 "Run Comparison: y offset (arcsec)", shortName, self.config.analysis, prefix="first_",
-                 qMin=-0.08, qMax=0.08, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
-                 ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, butler=butler, camera=camera,
-                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
-                           hscRun=(hscRun1 or hscRun2), matchRadius=matchRadius, zpLabel=zpLabel)
 
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, hscRun=None,
                  matchRadius=None, zpLabel=None):
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in ["base_PsfFlux"]:
             if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
-                shortName = "trace_"
+                shortName = "trace"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, sdssTraceSizeCompare(), "SdssShape Trace Radius Diff (%)", shortName,
-                         self.config.analysis, flags=[col + "_flag"], prefix="first_",
+                Analysis(catalog, sdssTraceSizeCompare(), "SdssShape Trace Radius Diff (%)",
+                         shortName, self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-0.5, qMax=1.5,
                          labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
-                shortName = "psfTrace_"
+                shortName = "psfTrace"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, sdssPsfTraceSizeCompare(), "SdssShape PSF Trace Radius Diff (%)", shortName,
-                         self.config.analysis, flags=[col + "_flag"], prefix="first_",
+                Analysis(catalog, sdssPsfTraceSizeCompare(), " SdssShape PSF Trace Radius Diff (%)",
+                         shortName, self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-1.1, qMax=1.1,
                          labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
-                shortName = "sdssXx_"
+                shortName = "sdssXx"
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, sdssXxCompare(), "SdssShape xx Moment Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
@@ -795,7 +829,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
-                shortName = "sdssYy_"
+                shortName = "sdssYy"
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, sdssYyCompare(), "SdssShape yy Moment Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
@@ -805,7 +839,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
 
-                shortName = "hsmTrace_"
+                shortName = "hsmTrace"
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, hsmTraceSizeCompare(), "HSM Trace Radius Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
@@ -814,7 +848,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
-                shortName = "hsmPsfTrace_"
+                shortName = "hsmPsfTrace"
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, hsmPsfTraceSizeCompare(), "HSM PSF Trace Radius Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
@@ -834,7 +868,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 shortName = "diff_" + col + "_apCorr"
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, ApCorrDiffCompare(col + "_apCorr"),
-                         "Run Comparison: %s apCorr diff" % fluxToPlotString(col),
+                         "  Run Comparison: %s apCorr diff" % fluxToPlotString(col),
                          shortName, self.config.analysis,
                          prefix="first_", qMin=-0.025, qMax=0.025, flags=[col + "_flag_apCorr"],
                          errFunc=ApCorrDiffErr(col + "_apCorr"), labeller=OverlapsStarGalaxyLabeller(),

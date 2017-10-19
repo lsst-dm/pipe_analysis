@@ -14,12 +14,16 @@ except ImportError:
 from contextlib import contextmanager
 
 from lsst.daf.persistence.safeFileIo import safeMakeDir
-from lsst.meas.mosaic.updateExposure import applyMosaicResultsCatalog
 from lsst.pipe.base import Struct
 
 import lsst.afw.geom as afwGeom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
+
+try:
+    from lsst.meas.mosaic.updateExposure import applyMosaicResultsCatalog
+except ImportError:
+    applyMosaicResultsCatalog = None
 
 __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCompare",
            "ApCorrDiffCompare", "AstrometryDiff", "sdssTraceSize", "hsmTraceSize",
@@ -31,7 +35,8 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "checkIdLists", "checkPatchOverlap", "joinCatalogs", "getFluxKeys", "addColumnsToSchema",
            "addApertureFluxesHSC", "addFpPoint", "addFootprintNPix", "addRotPoint",
            "calibrateSourceCatalogMosaic", "calibrateSourceCatalog", "calibrateCoaddSourceCatalog",
-           "backoutApCorr", "matchJanskyToDn", "checkHscStack", "fluxToPlotString", "andCatalog", "writeParquet"]
+           "backoutApCorr", "matchJanskyToDn", "checkHscStack", "fluxToPlotString", "andCatalog",
+           "writeParquet", "getRepoInfo"]
 
 def writeParquet(table, path):
     """
@@ -174,17 +179,18 @@ class ApCorrDiffCompare(object):
 
 class AstrometryDiff(object):
     """Functor to calculate difference between astrometry"""
-    def __init__(self, first, second, declination=None, unitScale=1.0):
+    def __init__(self, first, second, declination1=None, declination2=None, unitScale=1.0):
         self.first = first
         self.second = second
-        self.declination = declination
+        self.declination1 = declination1
+        self.declination2 = declination2
         self.unitScale = unitScale
     def __call__(self, catalog):
         first = catalog[self.first]
         second = catalog[self.second]
-        cosDec = np.cos(catalog[self.declination]) if self.declination is not None else 1.0
-        return (first - second)*cosDec*(1.0*afwGeom.radians).asArcseconds()*self.unitScale
-
+        cosDec1 = np.cos(catalog[self.declination1]) if self.declination1 is not None else 1.0
+        cosDec2 = np.cos(catalog[self.declination2]) if self.declination2 is not None else 1.0
+        return (first*cosDec1 - second*cosDec2)*(1.0*afwGeom.radians).asArcseconds()*self.unitScale
 
 class sdssTraceSize(object):
     """Functor to calculate SDSS trace radius size for sources"""
@@ -837,3 +843,49 @@ def andCatalog(version):
         yield
     finally:
         eups.setup("astrometry_net_data", current, noRecursion=True)
+
+def getRepoInfo(dataRef, coaddName=None, doApplyUberCal=False):
+    """Obtain the relevant repository information for the given dataRef
+
+    Parameters
+    ----------
+    dataRef : `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+       The data reference for which the relevant repository information is to be retrieved
+    coaddName : `str`, optional
+       The base name of the coadd (e.g. deep or goodSeeing) if dataRef is for coadd level processing
+    doApplyUberCal : `bool`, optional
+      If True: Set the appropriate dataset type for the uber calibration from meas_mosaic
+      If False (the default): Set the dataset type to the source catalog from single frame processing
+    """
+    butler = dataRef.getButler()
+    camera = butler.get("camera")
+    dataId = dataRef.dataId
+    filterName = dataId["filter"]
+    isCoadd = True if dataId.has_key("patch") else False
+    # Check metadata to see if stack used was HSC
+    metaStr = coaddName + "Coadd_forced_src" if coaddName is not None else "calexp_md"
+    metadata = butler.get(metaStr, dataId)
+    hscRun = checkHscStack(metadata)
+    dataset = "src"
+    if doApplyUberCal:
+        dataset = "wcs_hsc_md" if hscRun is not None else "wcs_md"
+    skymap =  butler.get(coaddName + "Coadd_skyMap") if coaddName is not None else None
+    wcs = None
+    tractInfo = None
+    if isCoadd:
+        coaddDatatype = "Coadd_calexp_hsc" if hscRun else "Coadd_calexp"
+        coadd = butler.get(coaddName + coaddDatatype, dataId)
+        wcs = coadd.getWcs()
+        tractInfo = skymap[dataId["tract"]]
+    return Struct(
+        butler = butler,
+        camera = camera,
+        dataId = dataId,
+        filterName = filterName,
+        metadata = metadata,
+        hscRun = hscRun,
+        dataset = dataset,
+        skymap = skymap,
+        wcs = wcs,
+        tractInfo = tractInfo,
+    )

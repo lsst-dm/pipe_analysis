@@ -46,6 +46,7 @@ class AnalysisConfig(Config):
     doPlotRaDec = Field(dtype=bool, default=False, doc="Make delta vs. Ra and Dec plots?")
     doPlotFP = Field(dtype=bool, default=False, doc="Make FocalPlane plots?")
     doPlotCcdXy = Field(dtype=bool, default=False, doc="Make plots as a function of CCD x and y?")
+    doPlotTractOutline = Field(dtype=bool, default=True, doc="Plot tract outline (may be a bit slow)?")
 
 
 class Analysis(object):
@@ -115,11 +116,17 @@ class Analysis(object):
                                     colorList[value], self.quantityError, name in labeller.plot) for
                          name, value in labeller.labels.items()}
             self.stats = self.statistics(forcedMean=forcedMean)
-            # Ensure plot limits always encompass at least mean +/- 2.5*stdev
+            # Make sure you have some good data to plot
+            for name in labeller.plot:
+                if (self.stats[name].num) == 0:
+                    raise RuntimeError("No good data points to plot for sample labelled: {:}".format(name))
+            # Ensure plot limits always encompass at least mean +/- 2.5*stdev and clipped stats range
             if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar"]):
-                self.qMin = min(self.qMin, self.stats["star"].mean - 2.5*self.stats["star"].stdev)
+                self.qMin = min(self.qMin, self.stats["star"].mean - 2.5*self.stats["star"].stdev,
+                                self.stats["star"].median - 1.1*self.stats["star"].clip)
             if not any(ss in self.shortName for ss in ["footNpix", "pStar"]):
-                self.qMax = max(self.qMax, self.stats["star"].mean + 2.5*self.stats["star"].stdev)
+                self.qMax = max(self.qMax, self.stats["star"].mean + 2.5*self.stats["star"].stdev,
+                                self.stats["star"].median + 1.1*self.stats["star"].clip)
 
     def plotAgainstMag(self, filename, stats=None, camera=None, ccdList=None, tractInfo=None, patchList=None,
                        hscRun=None, matchRadius=None, zpLabel=None):
@@ -166,7 +173,7 @@ class Analysis(object):
         rect_scatter = [left, bottom, width, height]
         rect_histx = [left, bottom_h, width, 0.23]
         rect_histy = [left_h, bottom, 0.20, height]
-        topRight = [left_h - 0.015, bottom_h + 0.0, 0.23, 0.23]
+        topRight = [left_h + 0.003, bottom_h + 0.01, 0.22, 0.22]
         # start with a rectangular Figure
         plt.figure(1)
 
@@ -188,11 +195,10 @@ class Analysis(object):
                 axTopRight.set_aspect("equal")
                 plotCameraOutline(plt, axTopRight, camera, ccdList)
 
-        # VERY slow for our 'rings' skymap
-        #if tractInfo is not None and len(patchList) > 0:
-        #    axTopRight = plt.axes(topRight)
-        #    axTopRight.set_aspect("equal")
-        #    plotTractOutline(axTopRight, tractInfo, patchList)
+        if self.config.doPlotTractOutline and tractInfo is not None and len(patchList) > 0:
+            axTopRight = plt.axes(topRight)
+            axTopRight.set_aspect("equal")
+            plotTractOutline(axTopRight, tractInfo, patchList)
 
         inLimits = self.data["star"].quantity < self.qMax
         inLimits &= self.data["star"].quantity > self.qMin
@@ -320,10 +326,12 @@ class Analysis(object):
         axHistx.legend(fontsize=7, loc=2)
         axHisty.legend(fontsize=7)
         # Label total number of objects of each data type
-        xLoc, yLoc = 0.17, 1.405
+        xLoc, yLoc = 0.09, 1.405
+        lenNameMax = 0
         for name, data in self.data.items():
-            if name == "galaxy" and len(data.mag) > 0:
-                xLoc += 0.035
+            if len(data.mag) > 0:
+                lenNameMax = len(name) if len(name) > lenNameMax else lenNameMax
+        xLoc += 0.02*lenNameMax
 
         for name, data in self.data.items():
             if len(data.mag) == 0:
@@ -401,8 +409,8 @@ class Analysis(object):
             magThreshold += 1.0  # plot to fainter mags for galaxies
         good = (self.mag < magThreshold if magThreshold > 0 else np.ones(len(self.mag), dtype=bool))
 
-        if ((dataName == "star" or "matches" in filename or "compareUnforced" in filename) and
-            "pStar" not in filename and "race_" not in filename):
+        if ((dataName == "star" or "matches" in filename or "compare" in filename) and
+            "pStar" not in filename and "race-" not in filename):
             vMin, vMax = 0.4*self.qMin, 0.4*self.qMax
             if "-mag_"  in filename or  any(ss in filename for ss in ["compareUnforced", "overlap"]):
                 vMin, vMax = 0.6*vMin, 0.6*vMax
@@ -412,7 +420,7 @@ class Analysis(object):
             vMin, vMax = 1.5*self.qMin, 0.5*self.qMax
         elif "raceDiff" in filename or "Resids" in filename:
             vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
-        elif "race_" in filename:
+        elif "race-" in filename:
             yDelta = 0.05*(self.qMax - self.qMin)
             vMin, vMax = self.qMin + yDelta, self.qMax - yDelta
         elif "pStar" in filename:
@@ -439,15 +447,15 @@ class Analysis(object):
             plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=zpLabel)
 
         if tractInfo is not None and patchList is not None:
-            for ip, patch in enumerate(tractInfo):
-                if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
-                    raPatch, decPatch = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
-                    raMin = min(np.round(min(raPatch) - pad, 2), raMin)
-                    raMax = max(np.round(max(raPatch) + pad, 2), raMax)
-                    decMin = min(np.round(min(decPatch) - pad, 2), decMin)
-                    decMax = max(np.round(max(decPatch) + pad, 2), decMax)
+            patchBoundary = getRaDecMinMaxPatchList(patchList, tractInfo, pad=pad, nDecimals=2, raMin=raMin,
+                                                    raMax=raMax, decMin=decMin, decMax=decMax)
+            raMin = patchBoundary.raMin
+            raMax = patchBoundary.raMax
+            decMin = patchBoundary.decMin
+            decMax = patchBoundary.decMax
             plotPatchOutline(axes, tractInfo, patchList)
 
+        stats0 = None
         for name, data in self.data.items():
             if name is not dataName:
                 continue
@@ -460,6 +468,8 @@ class Analysis(object):
             axes.scatter(ra[selection], dec[selection], s=ptSize, marker="o", lw=0, label=name,
                          c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax)
 
+        if stats0 is None:  # No data to plot
+            return
         axes.set_xlabel("RA (deg)")
         axes.set_ylabel("Dec (deg)")
 
@@ -689,7 +699,7 @@ class Analysis(object):
                                  stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,
                                  tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
                                  matchRadius=matchRadius, zpLabel=zpLabel, dataName="galaxy")
-        if "diff_" in self.shortName:
+        if "diff_" in self.shortName and stats["split"].num > 0:
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky-split" + postFix),
                                  stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,
                                  tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
@@ -707,8 +717,6 @@ class Analysis(object):
         """Calculate statistics on quantity"""
         stats = {}
         for name, data in self.data.items():
-            if len(data.mag) == 0:
-                continue
             good = data.mag < self.magThreshold
             stats[name] = self.calculateStats(data.quantity, good, forcedMean=forcedMean)
             if self.quantityError is not None:
