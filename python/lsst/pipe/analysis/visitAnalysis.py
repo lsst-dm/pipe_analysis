@@ -160,7 +160,7 @@ class VisitAnalysisConfig(CoaddAnalysisConfig):
                 import lsst.meas.mosaic
             except ImportError:
                 raise ValueError("Cannot apply uber calibrations because meas_mosaic could not be imported."
-                                 "\nEither setup meas_mosaic or run with --doApplyUberCal=False")
+                                 "\nEither setup meas_mosaic or run with --config doApplyUberCal=False")
 
 
 class VisitAnalysisRunner(TaskRunner):
@@ -480,6 +480,17 @@ class CompareVisitAnalysisConfig(VisitAnalysisConfig):
         VisitAnalysisConfig.setDefaults(self)
         # Use a tighter match radius for comparing runs: they are calibrated and we want to avoid mis-matches
         self.matchRadius = 0.2
+
+    def validate(self):
+        super(CoaddAnalysisConfig, self).validate()
+        if self.doApplyUberCal1 or self.doApplyUberCal2:
+            try:
+                import lsst.meas.mosaic
+            except ImportError:
+                raise ValueError("Cannot apply uber calibrations because meas_mosaic could not be imported."
+                                 "\nEither setup meas_mosaic or run with --config doApplyUberCal1=False "
+                                 "doApplyUberCal2=False")
+
 
 class CompareVisitAnalysisRunner(TaskRunner):
     @staticmethod
