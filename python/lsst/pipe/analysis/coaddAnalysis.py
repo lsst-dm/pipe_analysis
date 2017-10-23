@@ -1051,7 +1051,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
     def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                       tractInfo=None, patchList=None, hscRun1=None, hscRun2=None, matchRadius=None,
                       zpLabel=None, forcedStr=None, flagsCat=None, highlightList=None):
-        unitStr = "mas" if self.config.toMilli else "arcsec"
+        unitStr = "milliPixels" if self.config.toMilli else "pixels"
         distEnforcer = None
         centroidStr1, centroidStr2 = "base_SdssCentroid", "base_SdssCentroid"
         if bool(hscRun1) ^ bool(hscRun2):
@@ -1063,7 +1063,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         hscRun = hscRun1 if hscRun1 is not None else hscRun2
         shortName = "diff_x"
         self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, CentroidDiff("x", centroid1=centroidStr1, centroid2=centroidStr2),
+        Analysis(catalog, CentroidDiff("x", centroid1=centroidStr1, centroid2=centroidStr2,
+                                       unitScale=self.unitScale),
                  "Run Comparison: x offset (%s)" % unitStr, shortName, self.config.analysis, prefix="first_",
                  qMin=-0.08, qMax=0.08, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
                  ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, butler=butler, camera=camera,
@@ -1071,13 +1072,15 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                            matchRadius=matchRadius, zpLabel=zpLabel, forcedStr=forcedStr)
         shortName = "diff_y"
         self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, CentroidDiff("y", centroid1=centroidStr1, centroid2=centroidStr2),
+        Analysis(catalog, CentroidDiff("y", centroid1=centroidStr1, centroid2=centroidStr2,
+                                       unitScale=self.unitScale),
                  "Run Comparison: y offset (%s)" % unitStr, shortName, self.config.analysis, prefix="first_",
                  qMin=-0.08, qMax=0.08, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
                  ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, butler=butler, camera=camera,
                            ccdList=ccdList, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
                            matchRadius=matchRadius, zpLabel=zpLabel, forcedStr=forcedStr)
 
+        unitStr = "mas" if self.config.toMilli else "arcsec"
         shortName = "diff_raCosDec"
         self.log.info("shortName = {:s}".format(shortName))
         Analysis(catalog, AstrometryDiff("first_coord_ra", "second_coord_ra", declination1="first_coord_dec",

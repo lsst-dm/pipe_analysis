@@ -394,17 +394,18 @@ class ApCorrDiffErr(object):
 class CentroidDiff(object):
     """Functor to calculate difference in astrometry"""
     def __init__(self, component, first="first_", second="second_", centroid1="base_SdssCentroid",
-                 centroid2="base_SdssCentroid"):
+                 centroid2="base_SdssCentroid", unitScale=1.0):
         self.component = component
         self.first = first
         self.second = second
         self.centroid1 = centroid1
         self.centroid2 = centroid2
+        self.unitScale = unitScale
 
     def __call__(self, catalog):
         first = self.first + self.centroid1 + "_" + self.component
         second = self.second + self.centroid2 + "_" + self.component
-        return catalog[first] - catalog[second]
+        return (catalog[first] - catalog[second])*self.unitScale
 
 class CentroidDiffErr(CentroidDiff):
     """Functor to calculate difference error for astrometry"""
@@ -418,7 +419,8 @@ class CentroidDiffErr(CentroidDiff):
         subkeys2 = [catalog.schema[secondx].asKey(), catalog.schema[secondy].asKey()]
         menu = {"x": 0, "y": 1}
 
-        return np.hypot(catalog[subkeys1[menu[self.component]]], catalog[subkeys2[menu[self.component]]])
+        return np.hypot(catalog[subkeys1[menu[self.component]]],
+                        catalog[subkeys2[menu[self.component]]])*self.unitScale
 
 
 def deconvMom(catalog):
