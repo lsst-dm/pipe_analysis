@@ -126,13 +126,18 @@ class Analysis(object):
             for name in labeller.plot:
                 if (self.stats[name].num) == 0:
                     raise RuntimeError("No good data points to plot for sample labelled: {:}".format(name))
-            # Ensure plot limits always encompass at least mean +/- 2.5*stdev and clipped stats range
+            # Ensure plot limits always encompass at least mean +/- 2.5*stdev, at most mean +/- 12.0*stddev,
+            # and clipped stats range + 15%
             if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar"]):
-                self.qMin = min(self.qMin, self.stats["star"].mean - 2.5*self.stats["star"].stdev,
-                                self.stats["star"].median - 1.1*self.stats["star"].clip)
+                self.qMin = max(min(self.qMin, self.stats["star"].mean - 2.5*self.stats["star"].stdev,
+                                self.stats["star"].median - 1.15*self.stats["star"].clip),
+                                min(self.stats["star"].mean - 12.0*self.stats["star"].stdev,
+                                    -0.005*self.unitScale))
             if not any(ss in self.shortName for ss in ["footNpix", "pStar"]):
-                self.qMax = max(self.qMax, self.stats["star"].mean + 2.5*self.stats["star"].stdev,
-                                self.stats["star"].median + 1.1*self.stats["star"].clip)
+                self.qMax = min(max(self.qMax, self.stats["star"].mean + 2.5*self.stats["star"].stdev,
+                                self.stats["star"].median + 1.15*self.stats["star"].clip),
+                                max(self.stats["star"].mean + 12.0*self.stats["star"].stdev,
+                                    0.005*self.unitScale))
 
     def plotAgainstMag(self, filename, stats=None, camera=None, ccdList=None, tractInfo=None, patchList=None,
                        hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None):
@@ -457,9 +462,9 @@ class Analysis(object):
         if dataName == "galaxy" and "deconvMom" in filename:
             vMin, vMax = -0.1, 3.0*self.qMax
         if dataName == "galaxy" and "-mag_" in filename:
-            vMin = 2.0*self.qMin
-            if dataName == "galaxy" and "GaussianFlux" in filename:
-                vMin, vMax = 3.0*self.qMin, 0.0
+            vMin = 3.0*self.qMin
+            if "GaussianFlux" in filename:
+                vMin, vMax = 5.0*self.qMin, 0.0
         if (dataName == "galaxy" and ("CircularApertureFlux" in filename or "KronFlux" in filename) and
             "compare" not in filename and "overlap" not in filename):
             vMin, vMax = 4.0*self.qMin, 1.0*self.qMax
