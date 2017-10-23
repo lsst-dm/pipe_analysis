@@ -264,21 +264,10 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                               postFix="_commonZp")
                 commonZpDone = True
             # Now source catalog calibrated to either FLUXMAG0 or meas_mosaic result for remainder of plots
-            if self.config.doPlotSizes:
-                if "base_SdssShape_psf_xx" in catalog.schema:
-                    self.plotSizes(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                                   camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
-                                   zpLabel=self.zpLabel)
-                else:
-                    self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
             if self.config.doPlotMags:
                 self.plotMags(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
                               camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
                               zpLabel=self.zpLabel)
-            if self.config.doPlotCentroids and self.haveFpCoords:
-                self.plotCentroidXY(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                                    camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
-                                    zpLabel=self.zpLabel)
             if self.config.doPlotStarGalaxy:
                 if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
                     self.plotStarGal(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
@@ -287,6 +276,17 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 else:
                     self.log.warn("Cannot run plotStarGal: " +
                                   "ext_shapeHSM_HsmSourceMoments_xx not in catalog.schema")
+            if self.config.doPlotSizes:
+                if "base_SdssShape_psf_xx" in catalog.schema:
+                    self.plotSizes(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
+                                   camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
+                                   zpLabel=self.zpLabel)
+                else:
+                    self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
+            if self.config.doPlotCentroids and self.haveFpCoords:
+                self.plotCentroidXY(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
+                                    camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
+                                    zpLabel=self.zpLabel)
             if self.config.doPlotMatches:
                 matches = self.readSrcMatches(dataRefListTract, "src")
                 self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
