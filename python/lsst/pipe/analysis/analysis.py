@@ -7,8 +7,7 @@ from matplotlib.ticker import NullFormatter, AutoMinorLocator
 import numpy as np
 np.seterr(all="ignore")
 
-from lsst.pex.config import (Config, Field, ConfigField, ListField, DictField, ConfigDictField,
-                             ConfigurableField)
+from lsst.pex.config import Config, Field, ListField, DictField
 
 from .utils import *
 from .plotUtils import *
@@ -442,7 +441,7 @@ class Analysis(object):
         if ((dataName == "star" or "matches" in filename or "compare" in filename) and
             "pStar" not in filename and "race-" not in filename):
             vMin, vMax = 0.4*self.qMin, 0.4*self.qMax
-            if "-mag_"  in filename or  any(ss in filename for ss in ["compareUnforced", "overlap"]):
+            if "-mag_" in filename or any(ss in filename for ss in ["compareUnforced", "overlap"]):
                 vMin, vMax = 0.6*vMin, 0.6*vMax
             if "-matches_mag" in filename:
                 vMax = -vMin

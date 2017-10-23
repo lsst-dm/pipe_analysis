@@ -14,8 +14,9 @@ except ImportError:
 from contextlib import contextmanager
 
 from lsst.daf.persistence.safeFileIo import safeMakeDir
-from lsst.pipe.base import Struct
+from lsst.pipe.base import Struct, TaskError
 
+import lsst.afw.cameraGeom as cameraGeom
 import lsst.afw.geom as afwGeom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
@@ -41,12 +42,12 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
 def writeParquet(table, path):
     """
     Write an afwTable into Parquet format
-    
+
     Parameters
     ----------
-    table : afwTable
+    table : `lsst.afw.table.source.source.SourceCatalog`
         Table to be written to parquet
-    path : str
+    path : `str`
         Path to which to write.  Must end in ".parq".
 
     Returns
@@ -462,8 +463,8 @@ def concatenateCatalogs(catalogList):
 
 def joinMatches(matches, first="first_", second="second_"):
     if len(matches)==0:
-        return [] # empty
-        
+        return []
+
     mapperList = afwTable.SchemaMapper.join([matches[0].first.schema,
                                                 matches[0].second.schema],
                                             [first, second])
@@ -781,7 +782,7 @@ def backoutApCorr(catalog):
     """
     ii = 0
     for k in catalog.schema.getNames():
-        if "_flux" in k and k[:-5] + "_apCorr" in src.schema.getNames() and "_apCorr" not in k:
+        if "_flux" in k and k[:-5] + "_apCorr" in catalog.schema.getNames() and "_apCorr" not in k:
             if ii == 0:
                 print("Backing out apcorr for:", k)
                 ii += 1

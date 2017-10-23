@@ -16,7 +16,7 @@ from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError
 from lsst.coadd.utils import TractDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
 from lsst.meas.astrom import AstrometryConfig
-from lsst.meas.extensions.astrometryNet import LoadAstrometryNetObjectsTask, LoadAstrometryNetObjectsConfig
+from lsst.meas.extensions.astrometryNet import LoadAstrometryNetObjectsTask
 from lsst.pipe.tasks.colorterms import Colorterm, ColortermLibrary
 
 from lsst.meas.algorithms import LoadIndexedReferenceObjectsTask
@@ -196,7 +196,6 @@ class CoaddAnalysisTask(CmdLineTask):
 
         # Create and write parquet tables
         tableFilenamer = Filenamer(repoInfo.butler, 'qaTableCoadd', repoInfo.dataId)
-
         if haveForced:
             writeParquet(forced, tableFilenamer(repoInfo.dataId, description='forced'))
         writeParquet(unforced, tableFilenamer(repoInfo.dataId, description='unforced'))
@@ -983,7 +982,6 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             forced1 = unforced1
             forced2 = unforced2
         forced = self.matchCatalogs(forced1, forced2)
-        unforced = self.matchCatalogs(unforced1, unforced2)
 
         self.log.info("\nNumber of sources in catalogs: first = {0:d} and second = {1:d}".format(
                 len(forced1), len(forced2)))

@@ -14,10 +14,8 @@ from lsst.pex.config import Field
 from lsst.pipe.base import ArgumentParser, TaskRunner, TaskError
 from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
-from lsst.meas.extensions.astrometryNet import LoadAstrometryNetObjectsTask
 from .analysis import Analysis
-from .coaddAnalysis import (CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisConfig,
-                            CompareCoaddAnalysisTask)
+from .coaddAnalysis import CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisTask
 from .utils import *
 from .plotUtils import *
 
@@ -418,7 +416,6 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 self.log.warn("No matches for {:s}".format(dataRef.dataId))
                 continue
 
-            zp = -2.5*np.log10(metadata.get("FLUXMAG0"))
             matchMeta = butler.get(dataset, dataRef.dataId,
                                    flags=afwTable.SOURCE_IO_NO_FOOTPRINTS).getTable().getMetadata()
             catalog = matchesToCatalog(matches, matchMeta)

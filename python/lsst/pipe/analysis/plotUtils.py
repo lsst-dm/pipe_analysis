@@ -169,7 +169,6 @@ def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
     for ccd in camera:
         if ccd.getId() in intCcdList:
             ccdCorners = ccd.getCorners(cameraGeom.FOCAL_PLANE)
-            ccdCenter = ccd.getCenter(cameraGeom.FOCAL_PLANE).getPoint()
             plt.gca().add_patch(patches.Rectangle(ccdCorners[0], *list(ccdCorners[2] - ccdCorners[0]),
                                                   fill=True, facecolor="y", edgecolor="k", ls="solid"))
     axes.set_xlim(-camLimits, camLimits)
