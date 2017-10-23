@@ -49,6 +49,10 @@ class AnalysisConfig(Config):
     doPlotFP = Field(dtype=bool, default=False, doc="Make FocalPlane plots?")
     doPlotCcdXy = Field(dtype=bool, default=False, doc="Make plots as a function of CCD x and y?")
     doPlotTractOutline = Field(dtype=bool, default=True, doc="Plot tract outline (may be a bit slow)?")
+    visitClassFluxRatio = Field(dtype=float, default=0.95,
+                                doc="Flux ratio for visit level star/galaxy classifiaction")
+    coaddClassFluxRatio = Field(dtype=float, default=0.985,
+                                doc="Flux ratio for coadd level star/galaxy classifiaction")
 
 
 class Analysis(object):
@@ -215,6 +219,17 @@ class Analysis(object):
                 inLimits = self.data["star"].quantity < self.qMax
                 inLimits &= self.data["star"].quantity > self.qMin
 
+        # Make sure plot limit extends low enough to show star/galaxy separation line.
+        # Add delta as opposed to directly changing self.qMin to not affect other plots
+        deltaMin = 0.0
+        if self.data.has_key("galaxy") and len(self.data["galaxy"].quantity) > 0 and "-mag_" in filename:
+            if "GaussianFlux" in filename:
+                galMin = np.round(2.5*np.log10(self.config.visitClassFluxRatio) - 0.015, 2)*self.unitScale
+                deltaMin = self.qMin - galMin
+            if "CModel" in filename:
+                galMin = np.round(2.5*np.log10(self.config.coaddClassFluxRatio) - 0.015, 2)*self.unitScale
+                deltaMin = self.qMin - galMin
+
         magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
         if "matches" in filename:  # narrow magnitude plotting limits for matches
             magMin += 1
@@ -226,15 +241,15 @@ class Analysis(object):
                 magMax = self.config.magPlotStarMax[filterStr]
 
         axScatter.set_xlim(magMin, magMax)
-        yDelta = 0.01*(self.qMax - self.qMin)
-        axScatter.set_ylim(self.qMin + yDelta, self.qMax - yDelta)
+        yDelta = 0.01*(self.qMax - (self.qMin - deltaMin))
+        axScatter.set_ylim((self.qMin - deltaMin) + yDelta, self.qMax - yDelta)
 
         nxDecimal = int(-1.0*np.around(np.log10(0.05*abs(magMax - magMin)) - 0.5))
         xBinwidth = min(0.1, np.around(0.05*abs(magMax - magMin), nxDecimal))
         xBins = np.arange(magMin + 0.5*xBinwidth, magMax + 0.5*xBinwidth, xBinwidth)
-        nyDecimal = int(-1.0*np.around(np.log10(0.05*abs(self.qMax - self.qMin)) - 0.5))
-        yBinwidth = max(0.5/10**nyDecimal, np.around(0.02*abs(self.qMax - self.qMin), nyDecimal))
-        yBins = np.arange(self.qMin - 0.5*yBinwidth, self.qMax + 0.55*yBinwidth, yBinwidth)
+        nyDecimal = int(-1.0*np.around(np.log10(0.05*abs(self.qMax - (self.qMin- deltaMin))) - 0.5))
+        yBinwidth = max(0.5/10**nyDecimal, np.around(0.02*abs(self.qMax - (self.qMin - deltaMin)), nyDecimal))
+        yBins = np.arange((self.qMin - deltaMin) - 0.5*yBinwidth, self.qMax + 0.55*yBinwidth, yBinwidth)
         axHistx.set_xlim(axScatter.get_xlim())
         axHisty.set_ylim(axScatter.get_ylim())
         axHistx.set_yscale("log", nonposy="clip")
