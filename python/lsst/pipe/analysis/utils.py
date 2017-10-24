@@ -34,21 +34,25 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "e1ResidsHsm", "e2ResidsHsm", "FootNpixDiffCompare", "MagDiffErr", "ApCorrDiffErr", "CentroidDiff",
            "CentroidDiffErr", "deconvMom", "deconvMomStarGal", "concatenateCatalogs", "joinMatches",
            "checkIdLists", "checkPatchOverlap", "joinCatalogs", "getFluxKeys", "addColumnsToSchema",
-           "addApertureFluxesHSC", "addFpPoint", "addFootprintNPix", "addRotPoint",
-           "calibrateSourceCatalogMosaic", "calibrateSourceCatalog", "calibrateCoaddSourceCatalog",
-           "backoutApCorr", "matchJanskyToDn", "checkHscStack", "fluxToPlotString", "andCatalog",
-           "writeParquet", "getRepoInfo", "findCcdKey", "getCcdNameRefList", "getDataExistsRefList"]
+           "addApertureFluxesHSC", "addFpPoint", "addFootprintNPix", "addRotPoint", "makeBadArray",
+           "addQaBadFlag", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
+           "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
+           "fluxToPlotString", "andCatalog", "writeParquet", "getRepoInfo", "findCcdKey",
+           "getCcdNameRefList", "getDataExistsRefList"]
 
-def writeParquet(table, path):
+def writeParquet(table, path, badArray=None):
     """
     Write an afwTable into Parquet format
 
     Parameters
     ----------
     table : `lsst.afw.table.source.source.SourceCatalog`
-        Table to be written to parquet
+       Table to be written to parquet
     path : `str`
-        Path to which to write.  Must end in ".parq".
+       Path to which to write.  Must end in ".parq".
+    badArray : `numpy.ndarray`, optional
+       Boolean array with same length as catalog whose values indicate wether the source was deemed
+       innapropriate for qa analyses
 
     Returns
     -------
@@ -67,9 +71,13 @@ def writeParquet(table, path):
 
     if not path.endswith('.parq'):
         raise ValueError('Please provide a filename ending in .parq.')
+
+    if badArray is not None:
+        table = addQaBadFlag(table, badArray)  # add flag indicating source "badness" for qa analyses
     df = table.asAstropy().to_pandas()
     df = df.set_index('id', drop=True)
     fastparquet.write(path, df)
+
 
 class Filenamer(object):
     """Callable that provides a filename given a style"""
@@ -732,6 +740,77 @@ def addRotPoint(catalog, width, height, nQuarter, prefix=""):
     aliases = newCatalog.schema.getAliasMap()
     for k, v in catalog[0].schema.getAliasMap().items():
         aliases.set(k, v)
+    return newCatalog
+
+def makeBadArray(catalog, flagList=[], onlyReadStars=False):
+    """Create a boolean array indicating sources deemed unsuitable for qa analyses
+
+    Sets value to True for unisolated objects (deblend_nChild > 0) and any of the flags listed
+    in self.config.analysis.flags.  If self.config.onlyReadStars is True, sets boolean as True
+    for all galaxies classified as extended (base_ClassificationExtendedness_value > 0.5).
+
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.source.source.SourceCatalog`
+       The source catalog under consideration
+    flagList : `list`
+       The list of flags for which, if any is set for a given source, set bad entry to True for
+       that source
+
+    Returns
+    -------
+    badArray : `numpy.ndarray`
+       Boolean array with same length as catalog whose values indicate wether the source was deemed
+       innapropriate for qa analyses
+    """
+    bad = np.zeros(len(catalog), dtype=bool)
+    bad |= catalog["deblend_nChild"] > 0  # Exclude non-deblended (i.e parents)
+    for flag in flagList:
+        bad |= catalog[flag]
+    if onlyReadStars and "base_ClassificationExtendedness_value" in catalog.schema:
+        bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
+    return bad
+
+def addQaBadFlag(catalog, badArray):
+    """Add a flag for any sources deemed not appropriate for qa analyses
+
+    This flag is being added for the benefit of the Parquet files being written to disk
+    for subsequent interactive QA analysis.
+
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.source.source.SourceCatalog`
+       Source catalog to which flag will be added.
+    badArray : `numpy.ndarray`
+       Boolean array with same length as catalog whose values indicate wether the source was deemed
+       innapropriate for qa analyses.
+
+    Raises
+    ------
+    `RuntimeError`
+       If lengths of catalog and badArray are not equal.
+
+    Returns
+    -------
+    newCatalog : `lsst.afw.table.source.source.SourceCatalog`
+       Source catalog with badQaFlag column added.
+
+
+    """
+    if len(catalog) != len(badArray):
+        raise RuntimeError('Lengths of catalog and bad objects array do not match.')
+
+    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
+    mapper.addMinimalSchema(catalog[0].schema)
+    schema = mapper.getOutputSchema()
+    qaBadFlag = schema.addField("qaBad_flag", type="Flag", doc="Set to True for any source deemed bad for qa")
+    newCatalog = afwTable.SourceCatalog(schema)
+    newCatalog.reserve(len(catalog))
+
+    for i, src in enumerate(catalog):
+        row = newCatalog.addNew()
+        row.assign(src, mapper)
+        row.set(qaBadFlag, bool(badArray[i]))
     return newCatalog
 
 def calibrateSourceCatalogMosaic(dataRef, catalog, fluxKeys=None, errKeys=None, zp=27.0):

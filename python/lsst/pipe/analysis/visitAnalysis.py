@@ -218,14 +218,26 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                               self.config.doPlotMags, self.config.doPlotSizes, self.config.doPlotCentroids,
                               self.config.doPlotStarGalaxy]):
                 commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", hscRun=repoInfo.hscRun)
-                if repoInfo.hscRun and self.config.doAddAperFluxHsc:
-                    self.log.info("HSC run: adding aperture flux to schema...")
-                    catalog = addApertureFluxesHSC(catalog, prefix="")
+
+            # Set boolean arrays indicating sources deemed unsuitable for qa analyses
+            self.catLabel = "nChild = 0"
+            bad = makeBadArray(catalog, flagList=self.config.analysis.flags,
+                               onlyReadStars=self.config.onlyReadStars)
+            badCommonZp = makeBadArray(commonZpCat, flagList=self.config.analysis.flags,
+                               onlyReadStars=self.config.onlyReadStars)
 
             # Create and write parquet tables
             tableFilenamer = Filenamer(repoInfo.butler, 'qaTableVisit', repoInfo.dataId)
-            writeParquet(catalog, tableFilenamer(repoInfo.dataId, description='catalog'))
-            writeParquet(commonZpCat, tableFilenamer(repoInfo.dataId, description='commonZp'))
+            writeParquet(catalog, tableFilenamer(repoInfo.dataId, description='catalog'), badArray=bad)
+            writeParquet(commonZpCat,tableFilenamer(repoInfo.dataId, description='commonZp'),
+                         badArray=badCommonZp)
+            if self.config.writeParquetOnly:
+                self.log.info("Exiting after writing Parquet tables.  No plots generated.")
+                return
+
+            # purge the catalogs of flagged sources
+            catalog = catalog[~bad].copy(deep=True)
+            commonZpCat = commonZpCat[~badCommonZp].copy(deep=True)
 
             try:
                 self.zpLabel = self.zpLabel + " " + self.catLabel
@@ -233,7 +245,6 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 pass
 
             if self.config.doPlotFootprintNpix:
-                catalog = addFootprintNPix(catalog)
                 self.plotFootprintHist(catalog,
                                        filenamer(repoInfo.dataId, description="footNpix", style="hist"),
                                        repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
@@ -314,14 +325,6 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 aliasMap = catalog.schema.getAliasMap()
                 for lsstName, otherName in self.config.srcSchemaMap.items():
                     aliasMap.set(lsstName, otherName)
-            # purge the catalogs of flagged sources
-            bad = np.zeros(len(catalog), dtype=bool)
-            bad |= catalog["deblend_nChild"] > 0
-            self.catLabel = "nChild = 0"
-            for flag in self.config.analysis.flags:
-                if flag in catalog.schema:
-                    bad |= catalog[flag]
-            catalog = catalog[~bad].copy(deep=True)
 
             butler = dataRef.getButler()
             metadata = butler.get("calexp_md", dataRef.dataId)
@@ -335,6 +338,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 xFp = catalog["base_FPPosition_x"]
                 if len(xFp[np.where(np.isfinite(xFp))]) <= 0:
                     self.haveFpCoords = False
+            if self.config.doPlotFootprintNpix:
+                catalog = addFootprintNPix(catalog)
+            if hscRun and self.config.doAddAperFluxHsc:
+                self.log.info("HSC run: adding aperture flux to schema...")
+                catalog = addApertureFluxesHSC(catalog, prefix="")
             # Optionally backout aperture corrections
             if self.config.doBackoutApCorr:
                 catalog = backoutApCorr(catalog)
@@ -593,30 +601,36 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             commonZpCat1, catalog1, commonZpCat2, catalog2 = (
                 self.readCatalogs(dataRefListTract1, dataRefListTract2, "src", hscRun1=repoInfo1.hscRun,
                                   hscRun2=repoInfo2.hscRun, doReadFootprints=doReadFootprints))
-            try:
-                self.zpLabel = self.zpLabel + " " + self.catLabel
-            except:
-                pass
 
-            if repoInfo2.hscRun and self.config.doAddAperFluxHsc:
-                self.log.info("HSC run: adding aperture flux to schema...")
-                catalog2 = addApertureFluxesHSC(catalog2, prefix="")
+            # Set boolean arrays indicating sources deemed unsuitable for qa analyses
+            self.catLabel = "nChild = 0"
+            bad1 = makeBadArray(catalog1, flagList=self.config.analysis.flags,
+                                onlyReadStars=self.config.onlyReadStars)
+            bad2 = makeBadArray(catalog2, flagList=self.config.analysis.flags,
+                                onlyReadStars=self.config.onlyReadStars)
+            badCommonZp1 = makeBadArray(commonZpCat1, flagList=self.config.analysis.flags,
+                                        onlyReadStars=self.config.onlyReadStars)
+            badCommonZp2 = makeBadArray(commonZpCat2, flagList=self.config.analysis.flags,
+                                        onlyReadStars=self.config.onlyReadStars)
 
-            if repoInfo1.hscRun and self.config.doAddAperFluxHsc:
-                self.log.info("HSC run: adding aperture flux to schema...")
-                catalog1 = addApertureFluxesHSC(catalog1, prefix="")
+            # purge the catalogs of flagged sources
+            catalog1 = catalog1[~bad1].copy(deep=True)
+            catalog2 = catalog2[~bad2].copy(deep=True)
+            commonZpCat1 = commonZpCat1[~badCommonZp1].copy(deep=True)
+            commonZpCat2 = commonZpCat2[~badCommonZp2].copy(deep=True)
 
             self.log.info("\nNumber of sources in catalogs: first = {0:d} and second = {1:d}".format(
                     len(catalog1), len(catalog2)))
             commonZpCat = self.matchCatalogs(commonZpCat1, commonZpCat2)
             catalog = self.matchCatalogs(catalog1, catalog2)
 
-            if self.config.doBackoutApCorr:
-                commonZpCat = backoutApCorr(commonZpCat)
-                catalog = backoutApCorr(catalog)
-
             self.log.info("Number of matches (maxDist = {0:.2f} arcsec) = {1:d}".format(
                     self.config.matchRadius, len(catalog)))
+
+            try:
+                self.zpLabel = self.zpLabel + " " + self.catLabel
+            except:
+                pass
 
             filenamer = Filenamer(repoInfo1.butler, "plotCompareVisit", repoInfo1.dataId)
             if self.config.doPlotFootprintNpix:
@@ -718,9 +732,10 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                     aliasMap = cat.schema.getAliasMap()
                     for lsstName, otherName in self.config.srcSchemaMap.items():
                         aliasMap.set(lsstName, otherName)
-            srcCat1 = srcCat1[srcCat1["deblend_nChild"] == 0].copy(True) # Exclude non-deblended objects
-            srcCat2 = srcCat2[srcCat2["deblend_nChild"] == 0].copy(True) # Exclude non-deblended objects
-            self.catLabel = "nChild = 0"
+            if self.config.doBackoutApCorr:
+                srcCat1 = backoutApCorr(srcCat1)
+                srcCat2 = backoutApCorr(srcCat2)
+
             butler1 = dataRef1.getButler()
             butler2 = dataRef2.getButler()
             metadata1 = butler1.get("calexp_md", dataRef1.dataId)
@@ -737,6 +752,13 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 srcCat1 = addRotPoint(srcCat1, calexp1.getWidth(), calexp1.getHeight(), nQuarter)
             if hscRun1 is not None and hscRun2 is None:
                 srcCat2 = addRotPoint(srcCat2, calexp2.getWidth(), calexp2.getHeight(), nQuarter)
+
+            if hscRun1 and self.config.doAddAperFluxHsc:
+                self.log.info("HSC run: adding aperture flux to schema1...")
+                srcCat1 = addApertureFluxesHSC(srcCat1, prefix="")
+            if hscRun2 and self.config.doAddAperFluxHsc:
+                self.log.info("HSC run: adding aperture flux to schema2...")
+                srcCat2 = addApertureFluxesHSC(srcCat2, prefix="")
 
             # Scale fluxes to common zeropoint to make basic comparison plots without calibrated ZP influence
             commonZpCat1 = srcCat1.copy(True)

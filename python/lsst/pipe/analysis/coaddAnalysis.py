@@ -71,6 +71,8 @@ class CoaddAnalysisConfig(Config):
     fluxToPlotList = ListField(dtype=str, default=["base_GaussianFlux", "ext_photometryKron_KronFlux",
                                                    "modelfit_CModel"],
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(base_PsfFlux)")
+    writeParquetOnly = Field(dtype=bool, default=False,
+                             doc="Only write out Parquet tables (i.e. do not produce any plots)?")
 
     def saveToStream(self, outfile, root="root"):
         """Required for loading colorterms from a Config outside the 'lsst' namespace"""
@@ -174,12 +176,29 @@ class CoaddAnalysisTask(CmdLineTask):
                                          not (repoInfo.hscRun and flag == "slot_Centroid_flag")])
         forcedStr = "forced" if haveForced else "unforced"
 
-        # purge the catalogs of flagged sources
-        bad = np.zeros(len(unforced), dtype=bool)
-        bad |= unforced["deblend_nChild"] > 0  # Exclude non-deblended
+        if self.config.doPlotFootprintNpix:
+            unforced = addFootprintNPix(unforced, fromCat=unforced)
+            if haveForced:
+                forced = addFootprintNPix(forced, fromCat=unforced)
+
+        # Set boolean array indicating sources deemed unsuitable for qa analyses
         self.catLabel = "nChild = 0"
-        for flag in self.config.analysis.flags:
-            bad |= unforced[flag]
+        bad = makeBadArray(unforced, flagList=self.config.analysis.flags,
+                           onlyReadStars=self.config.onlyReadStars)
+        if haveForced:
+            bad |= makeBadArray(forced, flagList=self.config.analysis.flags,
+                                onlyReadStars=self.config.onlyReadStars)
+
+        # Create and write parquet tables
+        tableFilenamer = Filenamer(repoInfo.butler, 'qaTableCoadd', repoInfo.dataId)
+        if haveForced:
+            writeParquet(forced, tableFilenamer(repoInfo.dataId, description='forced'), badArray=bad)
+        writeParquet(unforced, tableFilenamer(repoInfo.dataId, description='unforced'), badArray=bad)
+        if self.config.writeParquetOnly:
+            self.log.info("Exiting after writing Parquet tables.  No plots generated.")
+            return
+
+        # Purge the catalogs of flagged sources
         unforced = unforced[~bad].copy(deep=True)
         if haveForced:
             forced = forced[~bad].copy(deep=True)
@@ -194,14 +213,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
         flagsCat = unforced
 
-        # Create and write parquet tables
-        tableFilenamer = Filenamer(repoInfo.butler, 'qaTableCoadd', repoInfo.dataId)
-        if haveForced:
-            writeParquet(forced, tableFilenamer(repoInfo.dataId, description='forced'))
-        writeParquet(unforced, tableFilenamer(repoInfo.dataId, description='unforced'))
-
         if self.config.doPlotFootprintNpix:
-            forced = addFootprintNPix(forced, fromCat=unforced)
             self.plotFootprintHist(forced, filenamer(repoInfo.dataId, description="footNpix", style="hist"),
                                    repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
                                    tractInfo=repoInfo.tractInfo, patchList=patchList, hscRun=repoInfo.hscRun,
@@ -282,9 +294,6 @@ class CoaddAnalysisTask(CmdLineTask):
                    patchRef in patchRefList if patchRef.datasetExists(dataset)]
         if len(catList) == 0:
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
-        if self.config.onlyReadStars and "base_ClassificationExtendedness_value" in catList[0].schema:
-            catList = [cat[cat["base_ClassificationExtendedness_value"] < 0.5].copy(deep=True)
-                       for cat in catList]
         return concatenateCatalogs(catList)
 
     def readSrcMatches(self, dataRefList, dataset, hscRun=None, wcs=None):
@@ -966,13 +975,19 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                             self.log.warn("Could not find base_SdssCentroid (or equivalent) flags")
         forcedStr = "forced" if haveForced else "unforced"
 
-        # purge the catalogs of flagged sources
-        bad1 = np.zeros(len(unforced1), dtype=bool)
-        bad2 = np.zeros(len(unforced2), dtype=bool)
-        for flag in self.config.analysis.flags:
-            bad1 |= unforced1[flag]
-            bad2 |= unforced2[flag]
+        # Set boolean array indicating sources deemed unsuitable for qa analyses
+        self.catLabel = "nChild = 0"
+        bad1 = makeBadArray(unforced1, flagList=self.config.analysis.flags,
+                            onlyReadStars=self.config.onlyReadStars)
+        bad2 = makeBadArray(unforced2, flagList=self.config.analysis.flags,
+                            onlyReadStars=self.config.onlyReadStars)
+        if haveForced:
+            bad1 |= makeBadArray(forced1, flagList=self.config.analysis.flags,
+                                 onlyReadStars=self.config.onlyReadStars)
+            bad2 |= makeBadArray(forced2, flagList=self.config.analysis.flags,
+                                 onlyReadStars=self.config.onlyReadStars)
 
+        # Purge the catalogs of flagged sources
         unforced1 = unforced1[~bad1].copy(deep=True)
         unforced2 = unforced2[~bad2].copy(deep=True)
         if haveForced:
