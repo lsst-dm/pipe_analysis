@@ -633,7 +633,7 @@ def addApertureFluxesHSC(catalog, prefix=""):
 
 def addFpPoint(det, catalog, prefix=""):
     # Compute Focal Plane coordinates for SdssCentroid of each source and add to schema
-    mapper = afwTable.SchemaMapper(catalog[0].schema)
+    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
     schema = mapper.getOutputSchema()
     fpName = prefix + "base_FPPosition"
@@ -657,16 +657,11 @@ def addFpPoint(det, catalog, prefix=""):
             row.set(fpFlag, True)
         row.set(fpxKey, fpPoint[0])
         row.set(fpyKey, fpPoint[1])
-
-    aliases = newCatalog.schema.getAliasMap()
-    for k, v in catalog[0].schema.getAliasMap().items():
-        aliases.set(k, v)
-
     return newCatalog
 
 def addFootprintNPix(catalog, fromCat=None, prefix=""):
     # Retrieve the number of pixels in an sources footprint and add to schema
-    mapper = afwTable.SchemaMapper(catalog[0].schema)
+    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
     schema = mapper.getOutputSchema()
     fpName = prefix + "base_Footprint_nPix"
@@ -689,11 +684,6 @@ def addFootprintNPix(catalog, fromCat=None, prefix=""):
             footNpix = 0 # used to be np.nan, but didn't work.
             row.set(fpFlag, True)
         row.set(fpKey, footNpix)
-
-    aliases = newCatalog.schema.getAliasMap()
-    for k, v in catalog[0].schema.getAliasMap().items():
-        aliases.set(k, v)
-
     return newCatalog
 
 def rotatePixelCoord(s, width, height, nQuarter):
@@ -716,7 +706,7 @@ def rotatePixelCoord(s, width, height, nQuarter):
 
 def addRotPoint(catalog, width, height, nQuarter, prefix=""):
     # Compute rotated CCD pixel coords for comparing LSST vs HSC run centroids
-    mapper = afwTable.SchemaMapper(catalog[0].schema)
+    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
     schema = mapper.getOutputSchema()
     rotName = prefix + "base_SdssCentroid_Rot"
@@ -737,9 +727,6 @@ def addRotPoint(catalog, width, height, nQuarter, prefix=""):
         row.set(rotxKey, rotPoint[0])
         row.set(rotyKey, rotPoint[1])
 
-    aliases = newCatalog.schema.getAliasMap()
-    for k, v in catalog[0].schema.getAliasMap().items():
-        aliases.set(k, v)
     return newCatalog
 
 def makeBadArray(catalog, flagList=[], onlyReadStars=False):
