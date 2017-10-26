@@ -259,7 +259,7 @@ class ColorAnalysisTask(CmdLineTask):
             if doAdd:
                 schema.addField(col, float, transforms[col].description + transforms[col].subDescription)
         schema.addField("numStarFlags", type=np.int32, doc="Number of times source was flagged as star")
-        badKey = schema.addField("bad", type="Flag", doc="Is this a bad source?")
+        badKey = schema.addField("qaBad_flag", type="Flag", doc="Is this a bad source for color qa analyses?")
         schema.addField(self.fluxColumn, type=np.float64, doc="Flux from filter " + self.config.fluxFilter)
 
         # Copy basics (id, RA, Dec)
@@ -338,7 +338,8 @@ class ColorAnalysisTask(CmdLineTask):
             self.AnalysisClass(catalog, ColorValueInRange(col, transform.requireGreater,
                                                           transform.requireLess, unitScale=self.unitScale),
                                "%s (%s)" % (col + transform.subDescription, unitStr), shortName,
-                               self.config.analysis, flags=["bad"], labeller=labeller, qMin=-0.2, qMax=0.2,
+                               self.config.analysis, flags=["qaBad_flag"], labeller=labeller,
+                               qMin=-0.2, qMax=0.2,
                                ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
 
@@ -393,7 +394,7 @@ class ColorAnalysisTask(CmdLineTask):
             shortName = "gri"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, 0.3, 1.1), "griPerp",
-                               shortName, self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
+                               shortName, self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.05}}), camera=camera,
@@ -415,7 +416,7 @@ class ColorAnalysisTask(CmdLineTask):
             shortName = "riz"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly), "rizPerp", shortName,
-                               self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
+                               self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
@@ -428,7 +429,7 @@ class ColorAnalysisTask(CmdLineTask):
             shortName = "izy"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly), "izyPerp", shortName,
-                               self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
+                               self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
@@ -443,7 +444,7 @@ class ColorAnalysisTask(CmdLineTask):
             shortName = "z9y"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly), "z9yPerp", shortName,
-                               self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
+                               self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
