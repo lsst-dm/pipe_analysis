@@ -124,6 +124,8 @@ class ColorAnalysisConfig(Config):
     srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
                              doc="Mapping between different stack (e.g. HSC vs. LSST) schema names")
     toMilli = Field(dtype=bool, default=True, doc="Print stats in milli units (i.e. mas, mmag)?")
+    writeParquetOnly = Field(dtype=bool, default=False,
+                             doc="Only write out Parquet tables (i.e. do not produce any plots)?")
 
     def setDefaults(self):
         Config.setDefaults(self)
@@ -211,6 +213,9 @@ class ColorAnalysisTask(CmdLineTask):
         # Create and write parquet tables
         tableFilenamer = Filenamer(repoInfo.butler, 'qaTableColor', repoInfo.dataId)
         writeParquet(forced, tableFilenamer(repoInfo.dataId, description='forced'))
+        if self.config.writeParquetOnly:
+            self.log.info("Exiting after writing Parquet tables.  No plots generated.")
+            return
 
         self.plotStarColors(forced, filenamer, NumStarLabeller(len(forcedCatalogsByFilter)), repoInfo.dataId,
                             camera=repoInfo.camera, tractInfo=repoInfo.tractInfo, patchList=patchList,
