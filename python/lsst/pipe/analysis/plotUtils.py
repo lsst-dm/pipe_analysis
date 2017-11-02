@@ -252,7 +252,7 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
     for ccd in ccdList:
         ccdKey = findCcdKey(dataId)
         ccdLabelStr = str(ccd)
-        if dataId.has_key("raft"):
+        if "raft" in dataId:
             if len(ccd) != 4 :
                 if len(ccd) > 4 :
                     errorStr = "Only raft/sensor combos with x,y coords 0 through 9 have been accommodated"

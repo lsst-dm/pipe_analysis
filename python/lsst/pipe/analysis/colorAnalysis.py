@@ -147,7 +147,7 @@ class ColorAnalysisRunner(TaskRunner):
         for tract in tractFilterRefs:
             filterRefs = tractFilterRefs[tract]
             patchesForFilters = [set(patchRef.dataId["patch"] for patchRef in patchRefList) for
-                                 patchRefList in filterRefs.itervalues()]
+                                 patchRefList in filterRefs.values()]
             if len(patchesForFilters) == 0:
                 parsedCmd.log.warn("No input data found for tract {:d}".format(tract))
                 bad.append(tract)
@@ -158,7 +158,7 @@ class ColorAnalysisRunner(TaskRunner):
         for tract in bad:
             del tractFilterRefs[tract]
 
-        return [(filterRefs, kwargs) for filterRefs in tractFilterRefs.itervalues()]
+        return [(filterRefs, kwargs) for filterRefs in tractFilterRefs.values()]
 
 
 class ColorAnalysisTask(CmdLineTask):
@@ -181,12 +181,12 @@ class ColorAnalysisTask(CmdLineTask):
 
     def run(self, patchRefsByFilter):
         patchList = []
-        for patchRefList in patchRefsByFilter.itervalues():
+        for patchRefList in patchRefsByFilter.values():
             for dataRef in patchRefList:
                 if dataRef.dataId["filter"] == self.config.fluxFilter:
                     patchList.append(dataRef.dataId["patch"] )
 
-        for patchRefList in patchRefsByFilter.itervalues():
+        for patchRefList in patchRefsByFilter.values():
             repoInfo = getRepoInfo(patchRefList[0], coaddName=self.config.coaddName,
                                    coaddDataset="Coadd_forced_src")
             break
@@ -195,14 +195,14 @@ class ColorAnalysisTask(CmdLineTask):
         unforcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList,
                                                           self.config.coaddName + "Coadd_meas") for
                                     ff, patchRefList in patchRefsByFilter.items()}
-        for cat in unforcedCatalogsByFilter.itervalues():
+        for cat in unforcedCatalogsByFilter.values():
             calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
         unforced = self.transformCatalogs(unforcedCatalogsByFilter, self.config.transforms,
                                           hscRun=repoInfo.hscRun)
         forcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList,
                                                         self.config.coaddName + "Coadd_forced_src") for
                                   ff, patchRefList in patchRefsByFilter.items()}
-        for cat in forcedCatalogsByFilter.itervalues():
+        for cat in forcedCatalogsByFilter.values():
             calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
         # self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
         forced = self.transformCatalogs(forcedCatalogsByFilter, self.config.transforms,
@@ -235,7 +235,7 @@ class ColorAnalysisTask(CmdLineTask):
 
         template = catalogs.values()[0]
         num = len(template)
-        assert all(len(cat) == num for cat in catalogs.itervalues())
+        assert all(len(cat) == num for cat in catalogs.values())
 
         mapper = afwTable.SchemaMapper(template.schema)
         mapper.addMinimalSchema(afwTable.SourceTable.makeMinimalSchema())
@@ -282,7 +282,7 @@ class ColorAnalysisTask(CmdLineTask):
 
         # Flag bad values
         bad = np.zeros(num, dtype=bool)
-        for dataCat, flagsCat in zip(catalogs.itervalues(), flagsCats.itervalues()):
+        for dataCat, flagsCat in zip(catalogs.values(), flagsCats.values()):
             if not checkIdLists(dataCat, flagsCat):
                 raise RuntimeError(
                     "Catalog being used for flags does not have the same object list as the data catalog")
@@ -295,7 +295,7 @@ class ColorAnalysisTask(CmdLineTask):
 
         # Star/galaxy
         numStarFlags = np.zeros(num)
-        for cat in catalogs.itervalues():
+        for cat in catalogs.values():
             numStarFlags += np.where(cat[self.classificationColumn] < 0.5, 1, 0)
         new["numStarFlags"][:] = numStarFlags
 
@@ -349,17 +349,17 @@ class ColorAnalysisTask(CmdLineTask):
         mags = {ff: zp - 2.5*np.log10(catalogs[ff][self.fluxColumn]) for ff in catalogs}
 
         bad = np.zeros(num, dtype=bool)
-        for cat in catalogs.itervalues():
+        for cat in catalogs.values():
             for flag in self.flags:
                 if flag in cat.schema:
                     bad |= cat[flag]
 
         bright = np.ones(num, dtype=bool)
-        for mm in mags.itervalues():
+        for mm in mags.values():
             bright &= mm < self.config.analysis.magThreshold
 
         numStarFlags = np.zeros(num)
-        for cat in catalogs.itervalues():
+        for cat in catalogs.values():
             numStarFlags += np.where(cat[self.classificationColumn] < 0.5, 1, 0)
 
         good = (numStarFlags == len(catalogs)) & np.logical_not(bad) & bright
@@ -604,7 +604,7 @@ class SkyAnalysisRunner(TaskRunner):
                 filterName = patchRef.dataId["filter"]
                 filterRefs[filterName].append(patchRef)
 
-        return [(refList, kwargs) for refList in filterRefs.itervalues()]
+        return [(refList, kwargs) for refList in filterRefs.values()]
 
 
 class SkyAnalysisTask(CoaddAnalysisTask):

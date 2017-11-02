@@ -517,7 +517,7 @@ class CompareVisitAnalysisRunner(TaskRunner):
             visits1[ref1.dataId["visit"]].append(ref1)
             visits2[ref2.dataId["visit"]].append(ref2)
         return [(refs1, dict(dataRefList2=refs2, **kwargs)) for
-                refs1, refs2 in zip(visits1.itervalues(), visits2.itervalues())]
+                refs1, refs2 in zip(visits1.values(), visits2.values())]
 
 
 class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
@@ -541,7 +541,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             tractList = [0, ]
         else:
             tractList = [int(tractStr) for tractStr in tract.split('^')]
-        self.log.debug("tractList = {:s}".format(tractList))
+        self.log.debug("tractList = {}".format(tractList))
         dataRefListPerTract1 = [None]*len(tractList)
         dataRefListPerTract2 = [None]*len(tractList)
         for i, tract in enumerate(tractList):
@@ -585,8 +585,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                     self.log.fatal("No data found for {:s} dataset...are you sure you ran meas_mosaic? If "
                                    "not, run with --config doApplyUberCal2=False".format(repoInfo2.dataset))
                 raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo2.dataset))
-            self.log.info("tract: {:d} ".format(dataRef1.dataId["tract"]))
-            self.log.info("ccdListPerTract1: {:s} ".format(ccdListPerTract1))
+            self.log.info("tract: {:d} ".format(repoInfo1.dataId["tract"]))
+            self.log.info("ccdListPerTract1: {} ".format(ccdListPerTract1))
             doReadFootprints = None
             if self.config.doPlotFootprintNpix:
                 doReadFootprints = "light"

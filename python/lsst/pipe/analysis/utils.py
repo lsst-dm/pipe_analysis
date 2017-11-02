@@ -864,7 +864,7 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
     camera = butler.get("camera")
     dataId = dataRef.dataId
     filterName = dataId["filter"]
-    isCoadd = True if dataId.has_key("patch") else False
+    isCoadd = True if "patch" in dataId else False
     ccdKey = None if isCoadd else findCcdKey(dataId)
     # Check metadata to see if stack used was HSC
     metaStr = coaddName + coaddDataset if coaddName is not None else "calexp_md"
@@ -915,7 +915,7 @@ def findCcdKey(dataId):
     ccdKey = None
     ccdKeyList = ["ccd", "sensor", "camcol"]
     for ss in ccdKeyList:
-        if dataId.has_key(ss):
+        if ss in dataId:
             ccdKey = ss
             break
     if ccdKey is None:
@@ -926,7 +926,7 @@ def findCcdKey(dataId):
 def getCcdNameRefList(dataRefList):
     ccdNameRefList = None
     ccdKey = findCcdKey(dataRefList[0].dataId)
-    if dataRefList[0].dataId.has_key("raft"):
+    if "raft" in dataRefList[0].dataId:
         ccdNameRefList = [re.sub("[,]", "", str(dataRef.dataId["raft"]) + str(dataRef.dataId[ccdKey])) for
                           dataRef in dataRefList]
     else:
@@ -941,7 +941,7 @@ def getCcdNameRefList(dataRefList):
 def getDataExistsRefList(dataRefList, dataset):
     dataExistsRefList = None
     ccdKey = findCcdKey(dataRefList[0].dataId)
-    if dataRefList[0].dataId.has_key("raft"):
+    if "raft" in dataRefList[0].dataId:
         dataExistsRefList = [re.sub("[,]", "", str(dataRef.dataId["raft"]) + str(dataRef.dataId[ccdKey])) for
                              dataRef in dataRefList if dataRef.datasetExists(dataset)]
     else:

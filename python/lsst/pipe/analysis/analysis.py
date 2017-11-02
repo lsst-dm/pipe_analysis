@@ -226,7 +226,7 @@ class Analysis(object):
         # Make sure plot limit extends low enough to show star/galaxy separation line.
         # Add delta as opposed to directly changing self.qMin to not affect other plots
         deltaMin = 0.0
-        if self.data.has_key("galaxy") and len(self.data["galaxy"].quantity) > 0 and "-mag_" in filename:
+        if "galaxy" in self.data and len(self.data["galaxy"].quantity) > 0 and "-mag_" in filename:
             if "GaussianFlux" in filename:
                 galMin = np.round(2.5*np.log10(self.config.visitClassFluxRatio) - 0.015, 2)*self.unitScale
                 deltaMin = self.qMin - galMin
