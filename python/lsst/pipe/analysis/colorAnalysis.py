@@ -238,7 +238,7 @@ class ColorAnalysisTask(CmdLineTask):
         if flagsCats is None:
             flagsCats = catalogs
 
-        template = catalogs.values()[0]
+        template = list(catalogs.values())[0]
         num = len(template)
         assert all(len(cat) == num for cat in catalogs.values())
 
@@ -350,7 +350,7 @@ class ColorAnalysisTask(CmdLineTask):
 
     def plotStarColorColor(self, catalogs, filenamer, dataId, butler=None, camera=None, tractInfo=None,
                            patchList=None, hscRun=None):
-        num = len(catalogs.values()[0])
+        num = len(list(catalogs.values())[0])
         zp = 0.0
         mags = {ff: zp - 2.5*np.log10(catalogs[ff][self.fluxColumn]) for ff in catalogs}
 
@@ -539,12 +539,17 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=
     distance *= unitScale
     q1, median, q3 = np.percentile(distance, [25, 50, 75])
     good = np.logical_not(np.abs(distance - median) > 3.0*0.74*(q3 - q1))
-    log.info(("Statistics from {0:s} of Distance to polynomial ({9:s}): {7:s}\'star\': " +
+    log.info(("Statistics from {0:} of Distance to polynomial ({9:s}): {7:s}\'star\': " +
               "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; " +
               "median={5:.4f}; clip={6:.4f}; forcedMean=None){8:s}").format(
             dataId, distance[good].mean(), distance[good].std(), len(xx[keep]), len(xx),
             np.median(distance[good]), 3.0*0.74*(q3 - q1), "{", "}", unitStr))
-    log.info("Polynomial fit: {:2}".format(polyStr.translate(None, "${}")))
+    # The following is a Python 2 vs Python 3 issue
+    try:
+        log.info("Polynomial fit: {:2}".format(polyStr.translate(None, "${}")))
+    except:
+        translationTable = dict.fromkeys(map(ord, "${}"), None)
+        log.info("Polynomial fit: {:2}".format(polyStr.translate(translationTable)))
     meanStr = "mean = {0:5.2f} ({1:s})".format(distance[good].mean(), unitStr)
     stdStr = "  std = {0:5.2f} ({1:s})".format(distance[good].std(), unitStr)
     tractStr = "tract: {:d}".format(dataId["tract"])
