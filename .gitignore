@@ -16,3 +16,4 @@ doc/html
 doc/xml
 tests/.tests
 version.py
+__pycache__

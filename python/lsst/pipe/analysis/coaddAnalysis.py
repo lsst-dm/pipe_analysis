@@ -16,7 +16,7 @@ from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError
 from lsst.coadd.utils import TractDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
 from lsst.meas.astrom import AstrometryConfig
-from lsst.meas.extensions.astrometryNet import LoadAstrometryNetObjectsTask, LoadAstrometryNetObjectsConfig
+from lsst.meas.extensions.astrometryNet import LoadAstrometryNetObjectsTask
 from lsst.pipe.tasks.colorterms import Colorterm, ColortermLibrary
 
 from lsst.meas.algorithms import LoadIndexedReferenceObjectsTask
@@ -122,45 +122,57 @@ class CoaddAnalysisTask(CmdLineTask):
         self.unitScale = 1000.0 if self.config.toMilli else 1.0
 
     def run(self, patchRefList, cosmos=None):
-        # Purge patchRefLists of non-existant datasets
-        patchRefList = [patchRef for patchRef in patchRefList if
-                        patchRef.datasetExists(self.config.coaddName + "Coadd_forced_src")]
-        patchList = [patchRef.dataId["patch"] for patchRef in patchRefList]
-        if len(patchList) == 0:
+        haveForced = True  # do forced datasets exits (may not for single band datasets)
+        dataset = "Coadd_forced_src"
+        patchRefExistsList = [patchRef for patchRef in patchRefList if
+                              patchRef.datasetExists(self.config.coaddName + dataset)]
+        if len(patchRefExistsList) == 0:
+            haveForced = False
+        if not haveForced:
+            self.log.warn("No forced dataset exist for patRefList: %s.\nPlotting unforced results only." %
+                          ([patchRef.dataId for patchRef in patchRefList]))
+            dataset = "Coadd_meas"
+            patchRefExistsList = [patchRef for patchRef in patchRefList if
+                                  patchRef.datasetExists(self.config.coaddName + dataset)]
+        if len(patchRefExistsList) == 0:
             raise TaskError("No data exists in patRefList: %s" %
                             ([patchRef.dataId for patchRef in patchRefList]))
+        patchList = [patchRef.dataId["patch"] for patchRef in patchRefExistsList]
         self.log.info("patchList size: {:d}".format(len(patchList)))
-        repoInfo = getRepoInfo(patchRefList[0], coaddName=self.config.coaddName)
+        repoInfo = getRepoInfo(patchRefExistsList[0], coaddName=self.config.coaddName, coaddDataset=dataset)
         filenamer = Filenamer(repoInfo.butler, self.outputDataset, repoInfo.dataId)
         if (self.config.doPlotMags or self.config.doPlotStarGalaxy or self.config.doPlotOverlaps or
             self.config.doPlotCompareUnforced or cosmos or self.config.externalCatalogs):
-            forced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_forced_src")
-            forced = self.calibrateCatalogs(forced, wcs=repoInfo.wcs)
-            unforced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_meas")
+            if haveForced:
+                forced = self.readCatalogs(patchRefExistsList, self.config.coaddName + "Coadd_forced_src")
+                forced = self.calibrateCatalogs(forced, wcs=repoInfo.wcs)
+            unforced = self.readCatalogs(patchRefExistsList, self.config.coaddName + "Coadd_meas")
             unforced = self.calibrateCatalogs(unforced, wcs=repoInfo.wcs)
 
         # Set an alias map for differing src naming conventions of different stacks (if any)
         if repoInfo.hscRun is not None and self.config.srcSchemaMap is not None:
-            for aliasMap in [forced.schema.getAliasMap(), unforced.schema.getAliasMap()]:
+            coaddList = [unforced.schema.getAliasMap(), ]
+            if haveForced:
+                coaddList += [forced.schema.getAliasMap()]
+            for aliasMap in coaddList:
                 for lsstName, otherName in self.config.srcSchemaMap.items():
                     aliasMap.set(lsstName, otherName)
 
-        # copy over some fields from unforced to forced catalog
-        flagsToCopy = ["base_SdssShape_flag", "base_SdssShape_xx", "base_SdssShape_yy", "base_SdssShape_xy",
-                       "base_SdssShape_psf_xx", "base_SdssShape_psf_yy", "base_SdssShape_psf_xy",
-                       "ext_shapeHSM_HsmSourceMoments_xx", "ext_shapeHSM_HsmSourceMoments_yy",
-                       "ext_shapeHSM_HsmSourceMoments_xy", "ext_shapeHSM_HsmPsfMoments_xx",
-                       "ext_shapeHSM_HsmPsfMoments_yy", "ext_shapeHSM_HsmPsfMoments_xy", "deblend_nChild",
-                       "calib_psfUsed","calib_psfCandidate"]
-                       #, "calib_psfReserved"]
-        forced = addColumnsToSchema(unforced, forced,
-                                    [flag for flag in flagsToCopy + list(self.config.analysis.flags) if
-                                     flag not in forced.schema and
-                                     not (repoInfo.hscRun and flag == "slot_Centroid_flag")])
-
-
-        if self.config.doPlotFootprintNpix:
-            forced = addFootprintNPix(forced, fromCat=unforced)
+        if haveForced:
+            # copy over some fields from unforced to forced catalog
+            flagsToCopy = ["base_SdssShape_flag", "base_SdssShape_xx", "base_SdssShape_yy",
+                           "base_SdssShape_xy", "base_SdssShape_psf_xx", "base_SdssShape_psf_yy",
+                           "base_SdssShape_psf_xy", "ext_shapeHSM_HsmSourceMoments_xx",
+                           "ext_shapeHSM_HsmSourceMoments_yy", "ext_shapeHSM_HsmSourceMoments_xy",
+                           "ext_shapeHSM_HsmPsfMoments_xx", "ext_shapeHSM_HsmPsfMoments_yy",
+                           "ext_shapeHSM_HsmPsfMoments_xy", "deblend_nChild", "calib_psfUsed",
+                           "calib_psfCandidate", "base_ClassificationExtendedness_value",
+                           "base_ClassificationExtendedness_flag"]
+            forced = addColumnsToSchema(unforced, forced,
+                                        [flag for flag in flagsToCopy + list(self.config.analysis.flags) if
+                                         flag not in forced.schema and flag in unforced.schema and
+                                         not (repoInfo.hscRun and flag == "slot_Centroid_flag")])
+        forcedStr = "forced" if haveForced else "unforced"
 
         # purge the catalogs of flagged sources
         bad = np.zeros(len(unforced), dtype=bool)
@@ -168,20 +180,28 @@ class CoaddAnalysisTask(CmdLineTask):
         self.catLabel = "nChild = 0"
         for flag in self.config.analysis.flags:
             bad |= unforced[flag]
-        forced = forced[~bad].copy(deep=True)
         unforced = unforced[~bad].copy(deep=True)
+        if haveForced:
+            forced = forced[~bad].copy(deep=True)
+        else:
+            forced = unforced
         self.zpLabel = self.zpLabel + " " + self.catLabel
-        print("len(forced) = ", len(forced), "  len(unforced) = ",len(unforced))
+        if haveForced:
+            self.log.info("\nNumber of sources in catalogs: unforced = {0:d} and forced = {1:d}".format(
+                len(unforced), len(forced)))
+        else:
+            self.log.info("\nNumber of sources in catalog: unforced = {0:d}".format(len(unforced)))
 
         flagsCat = unforced
 
         # Create and write parquet tables
         tableFilenamer = Filenamer(repoInfo.butler, 'qaTableCoadd', repoInfo.dataId)
-
-        writeParquet(forced, tableFilenamer(repoInfo.dataId, description='forced'))
+        if haveForced:
+            writeParquet(forced, tableFilenamer(repoInfo.dataId, description='forced'))
         writeParquet(unforced, tableFilenamer(repoInfo.dataId, description='unforced'))
 
         if self.config.doPlotFootprintNpix:
+            forced = addFootprintNPix(forced, fromCat=unforced)
             self.plotFootprintHist(forced, filenamer(repoInfo.dataId, description="footNpix", style="hist"),
                                    repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
                                    tractInfo=repoInfo.tractInfo, patchList=patchList, hscRun=repoInfo.hscRun,
@@ -194,29 +214,30 @@ class CoaddAnalysisTask(CmdLineTask):
             self.plotQuiver(forced, filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
                             dataId=repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
                             tractInfo=repoInfo.tractInfo, patchList=patchList, hscRun=repoInfo.hscRun,
-                            zpLabel=self.zpLabel, scale=2)
+                            zpLabel=self.zpLabel, forcedStr=forcedStr, scale=2)
 
         if self.config.doPlotMags:
             self.plotMags(forced, filenamer, repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
                           tractInfo=repoInfo.tractInfo, patchList=patchList, hscRun=repoInfo.hscRun,
-                          zpLabel=self.zpLabel, flagsCat=flagsCat)
+                          zpLabel=self.zpLabel, forcedStr=forcedStr, flagsCat=flagsCat)
         if self.config.doPlotStarGalaxy:
             if "ext_shapeHSM_HsmSourceMoments_xx" in unforced.schema:
                 self.plotStarGal(unforced, filenamer, repoInfo.dataId, butler=repoInfo.butler,
                                  camera=repoInfo.camera, tractInfo=repoInfo.tractInfo, patchList=patchList,
-                                 hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
+                                 hscRun=repoInfo.hscRun, zpLabel=self.zpLabel, forcedStr=forcedStr)
             else:
                 self.log.warn("Cannot run plotStarGal: ext_shapeHSM_HsmSourceMoments_xx not in forced.schema")
         if self.config.doPlotSizes:
-            if "base_SdssShape_psf_xx" in forced.schema:
+            if all (ss in forced.schema for ss in ["base_SdssShape_psf_xx", "calib_psfUsed"]):
                 self.plotSizes(forced, filenamer, repoInfo.dataId, butler=repoInfo.butler,
                                camera=repoInfo.camera, tractInfo=repoInfo.tractInfo, patchList=patchList,
-                               hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
+                               hscRun=repoInfo.hscRun, zpLabel=self.zpLabel, forcedStr=forcedStr)
             else:
-                self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
+                self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx and/or calib_psfUsed "
+                              "not in catalog.schema")
         if cosmos:
             self.plotCosmos(forced, filenamer, cosmos, dataId)
-        if self.config.doPlotCompareUnforced:
+        if self.config.doPlotCompareUnforced and haveForced:
             self.plotCompareUnforced(forced, unforced, filenamer, repoInfo.dataId, butler=repoInfo.butler,
                                      camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
                                      patchList=patchList, hscRun=repoInfo.hscRun,
@@ -227,20 +248,26 @@ class CoaddAnalysisTask(CmdLineTask):
             if not overlappingPatches:
                 self.log.info("No overlapping patches...skipping overlap plots")
             else:
-                overlaps = self.overlaps(forced, unforced)
+                if haveForced:
+                    overlaps = self.overlaps(forced, unforced)
                 self.log.info("Number of overlap objects matched = {:d}".format(len(overlaps)))
                 if len(overlaps) > 0:
                     self.plotOverlaps(overlaps, filenamer, repoInfo.dataId, butler=repoInfo.butler,
                                       camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
                                       patchList=patchList, hscRun=repoInfo.hscRun,
-                                      matchRadius=self.config.matchOverlapRadius, zpLabel=self.zpLabel)
+                                      matchRadius=self.config.matchOverlapRadius, zpLabel=self.zpLabel,
+                                      forcedStr=forcedStr)
 
         if self.config.doPlotMatches:
-            matches = self.readSrcMatches(patchRefList, self.config.coaddName + "Coadd_forced_src",
-                                          hscRun=repoInfo.hscRun, wcs=repoInfo.wcs)
+            if haveForced:
+                matches = self.readSrcMatches(patchRefExistsList, self.config.coaddName + "Coadd_forced_src",
+                                              hscRun=repoInfo.hscRun, wcs=repoInfo.wcs)
+            else:
+                matches = self.readSrcMatches(patchRefExistsList, self.config.coaddName + "Coadd_meas",
+                                              hscRun=repoInfo.hscRun, wcs=repoInfo.wcs)
             self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId, butler=repoInfo.butler,
                              camera=repoInfo.camera, tractInfo=repoInfo.tractInfo, patchList=patchList,
-                             hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
+                             hscRun=repoInfo.hscRun, zpLabel=self.zpLabel, forcedStr=forcedStr)
 
         for cat in self.config.externalCatalogs:
             with andCatalog(cat):
@@ -248,7 +275,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
                                  butler=repoInfo.butler, camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
                                  patchList=patchList, hscRun=repoInfo.hscRun, zpLabel=self.zpLabel,
-                                 matchRadius=self.config.matchRadius)
+                                 forcedStr=forcedStr, matchRadius=self.config.matchRadius)
 
     def readCatalogs(self, patchRefList, dataset):
         catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS) for
@@ -270,7 +297,18 @@ class CoaddAnalysisTask(CmdLineTask):
 
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
+            flagsToCopy = ["deblend_nChild", "calib_psfUsed", "calib_psfCandidate",
+                           "base_ClassificationExtendedness_value", "base_ClassificationExtendedness_flag"]
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+            if dataset != "deepCoadd_meas" and any(ss not in catalog.schema for ss in flagsToCopy):
+                unforced = dataRef.get("deepCoadd_meas", immediate=True,
+                                       flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+                # copy over some fields from unforced to forced catalog
+                catalog = addColumnsToSchema(unforced, catalog,
+                                        [flag for flag in flagsToCopy + list(self.config.analysis.flags) if
+                                         flag not in catalog.schema and flag in unforced.schema and
+                                         not (hscRun and flag == "slot_Centroid_flag")])
+
             catalog = self.calibrateCatalogs(catalog, wcs=wcs)
 
             if dataset.startswith("deepCoadd_"):
@@ -343,8 +381,8 @@ class CoaddAnalysisTask(CmdLineTask):
         return calibrated
 
     def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
-                 patchList=None, hscRun=None, matchRadius=None, zpLabel=None, fluxToPlotList=None,
-                 postFix="", flagsCat=None):
+                 patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
+                 fluxToPlotList=None, postFix="", flagsCat=None):
         if fluxToPlotList is None:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
@@ -362,10 +400,10 @@ class CoaddAnalysisTask(CmdLineTask):
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                             zpLabel=zpLabel)
+                                             zpLabel=zpLabel, forcedStr=forcedStr)
 
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
-                  patchList=None, hscRun=None, matchRadius=None, zpLabel=None, flagsCat=None):
+                  patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None, flagsCat=None):
         enforcer = None
         unitStr = " (milli)" if self.config.toMilli else ""
         for col in ["base_PsfFlux", ]:
@@ -389,7 +427,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                             zpLabel=zpLabel)
+                                             zpLabel=zpLabel, forcedStr=forcedStr)
                 shortName = "hsmTrace"
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog, hsmTraceSize(),
@@ -400,7 +438,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                             zpLabel=zpLabel)
+                                             zpLabel=zpLabel, forcedStr=forcedStr)
             if col + "_flux" in catalog.schema:
                 shortName = "psfTraceDiff"
                 self.log.info("shortName = {:s}".format(shortName))
@@ -412,7 +450,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                             zpLabel=zpLabel)
+                                             zpLabel=zpLabel, forcedStr=forcedStr)
                 shortName = "psfHsmTraceDiff"
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog, psfHsmTraceSizeDiff(),
@@ -423,7 +461,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                             zpLabel=zpLabel)
+                                             zpLabel=zpLabel, forcedStr=forcedStr)
                 shortName = "e1Resids"
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog, e1ResidsSdss(unitScale=self.unitScale),
@@ -434,7 +472,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                             zpLabel=zpLabel)
+                                             zpLabel=zpLabel, forcedStr=forcedStr)
                 shortName = "e1ResidsHsm"
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog, e1ResidsHsm(unitScale=self.unitScale),
@@ -445,7 +483,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                             zpLabel=zpLabel)
+                                             zpLabel=zpLabel, forcedStr=forcedStr)
                 shortName = "e2Resids"
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog, e2ResidsSdss(unitScale=self.unitScale),
@@ -456,7 +494,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                             zpLabel=zpLabel)
+                                             zpLabel=zpLabel, forcedStr=forcedStr)
                 shortName = "e2ResidsHsm"
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog, e2ResidsHsm(unitScale=self.unitScale),
@@ -467,11 +505,11 @@ class CoaddAnalysisTask(CmdLineTask):
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                             zpLabel=zpLabel)
+                                             zpLabel=zpLabel, forcedStr=forcedStr)
 
     def plotCentroidXY(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                        tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                       flagsCat=None):
+                       forcedStr=None, flagsCat=None):
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in ["base_SdssCentroid_x", "base_SdssCentroid_y"]:
             if col in catalog.schema:
@@ -481,22 +519,24 @@ class CoaddAnalysisTask(CmdLineTask):
                                    labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
                                    ).plotFP(dataId, filenamer, self.log, enforcer=enforcer, camera=camera,
                                             ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
-                                            zpLabel=zpLabel)
+                                            zpLabel=zpLabel, forcedStr=forcedStr)
 
     def plotFootprint(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                       tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                      postFix="", flagsCat=None, plotRunStats=False, highlightList=None):
+                      forcedStr=None, postFix="", flagsCat=None, plotRunStats=False, highlightList=None):
         enforcer = None
-        shortName = "footNpix_calib_psfUsed"
-        self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
-                           self.config.analysis, flags=["base_Footprint_nPix_flag"],
-                           goodKeys=["calib_psfUsed"], qMin=-100, qMax=2000, labeller=StarGalaxyLabeller(),
-                           flagsCat=flagsCat,
-                           ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
-                                     camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
-                                     hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
-                                     plotRunStats=plotRunStats, highlightList=highlightList)
+        if "calib_psfUsed" in catalog.schema:
+            shortName = "footNpix_calib_psfUsed"
+            self.log.info("shortName = {:s}".format(shortName))
+            self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
+                               self.config.analysis, flags=["base_Footprint_nPix_flag"],
+                               goodKeys=["calib_psfUsed"], qMin=-100, qMax=2000,
+                               labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                               ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
+                                         camera=camera, ccdList=ccdList, tractInfo=tractInfo,
+                                         patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
+                                         zpLabel=zpLabel, forcedStr=forcedStr, plotRunStats=plotRunStats,
+                                         highlightList=highlightList)
         shortName = "footNpix"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
@@ -505,7 +545,7 @@ class CoaddAnalysisTask(CmdLineTask):
                            ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                      camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
                                      hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
-                                     plotRunStats=plotRunStats)
+                                     forcedStr=forcedStr, plotRunStats=plotRunStats)
 
     def plotFootprintHist(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                           tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
@@ -521,7 +561,8 @@ class CoaddAnalysisTask(CmdLineTask):
                                            filterStr=dataId['filter'])
 
     def plotStarGal(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
-                    patchList=None, hscRun=None, matchRadius=None, zpLabel=None, flagsCat=None):
+                    patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
+                    flagsCat=None):
         enforcer = None
         shortName = "pStar"
         self.log.info("shortName = {:s}".format(shortName))
@@ -529,7 +570,8 @@ class CoaddAnalysisTask(CmdLineTask):
                            qMin=-0.1, qMax=1.39, labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
                            ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                      camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
-                                     hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
+                                     hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
+                                     forcedStr=forcedStr)
         shortName = "deconvMom"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(catalog, deconvMom, "Deconvolved moments (unforced)", shortName,
@@ -539,7 +581,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.2}}),
                                      butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                      patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                     zpLabel=zpLabel)
+                                     zpLabel=zpLabel, forcedStr=forcedStr)
 
     def plotCompareUnforced(self, forced, unforced, filenamer, dataId, butler=None, camera=None, ccdList=None,
                             tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
@@ -572,17 +614,17 @@ class CoaddAnalysisTask(CmdLineTask):
                 return True
         return False
 
-    def overlaps(self, forcedCat, flagsCat):
+    def overlaps(self, catalog, flagsCat):
         # Don't include parents of blended objects
-        noParentsForcedCat = forcedCat[flagsCat["deblend_nChild"] == 0].copy(deep=True)
-        matches = afwTable.matchRaDec(noParentsForcedCat, self.config.matchOverlapRadius*afwGeom.arcseconds)
+        noParentsCat = catalog[flagsCat["deblend_nChild"] == 0].copy(deep=True)
+        matches = afwTable.matchRaDec(noParentsCat, self.config.matchOverlapRadius*afwGeom.arcseconds)
         if len(matches) == 0:
             self.log.info("Did not find any overlapping matches")
         return joinMatches(matches, "first_", "second_")
 
     def plotOverlaps(self, overlaps, filenamer, dataId, butler=None, camera=None, ccdList=None,
                      tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                     fluxToPlotList=None, flagsCat=None):
+                     forcedStr=None, fluxToPlotList=None, flagsCat=None):
         if fluxToPlotList is None:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
@@ -600,7 +642,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                    ).plotAll(dataId, filenamer, self.log, enforcer=magEnforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                             zpLabel=zpLabel)
+                                             zpLabel=zpLabel, forcedStr=forcedStr)
         unitStr = "mas" if self.config.toMilli else "arcsec"
         distEnforcer = Enforcer(requireLess={"star": {"stdev": 0.005*self.unitScale}})
         shortName = "overlap_distance"
@@ -612,11 +654,12 @@ class CoaddAnalysisTask(CmdLineTask):
                            forcedMean=0.0, unitScale=self.unitScale,
                            ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, butler=butler,
                                      camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
-                                     hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
+                                     hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
+                                     forcedStr=forcedStr)
 
     def plotMatches(self, matches, filterName, filenamer, dataId, description="matches", butler=None,
                     camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None,
-                    zpLabel=None, flagsCat=None):
+                    zpLabel=None, forcedStr=None, flagsCat=None):
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = None # Enforcer(requireLess={"star": {"stdev": 0.030*self.unitScale}}),
 
@@ -639,7 +682,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                          camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                          patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                         zpLabel=zpLabel)
+                                         zpLabel=zpLabel, forcedStr=forcedStr)
         if "src_calib_photometryUsed" in matches.schema:
             shortName = description + "_mag_calib_photometryUsed"
             self.log.info("shortName = {:s}".format(shortName))
@@ -652,7 +695,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                          camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                          patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                         zpLabel=zpLabel)
+                                         zpLabel=zpLabel, forcedStr=forcedStr)
         shortName = description + "_mag"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_flux", ct, zp=0.0,
@@ -662,7 +705,8 @@ class CoaddAnalysisTask(CmdLineTask):
                            unitScale=self.unitScale,
                            ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                      camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
-                                     hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
+                                     hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
+                                     forcedStr=forcedStr)
 
         unitStr = "mas" if self.config.toMilli else "arcsec"
         if "src_calib_astrometryUsed" in matches.schema:
@@ -678,7 +722,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                          camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                          patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                         zpLabel=zpLabel)
+                                         zpLabel=zpLabel, forcedStr=forcedStr)
         shortName = description + "_distance"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches,
@@ -691,7 +735,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
                                      butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                      patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                     zpLabel=zpLabel)
+                                     zpLabel=zpLabel, forcedStr=forcedStr)
         if "src_calib_astrometryUsed" in matches.schema:
             shortName = description + "_raCosDec_calib_astrometryUsed"
             self.log.info("shortName = {:s}".format(shortName))
@@ -707,7 +751,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                          camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                          patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                         zpLabel=zpLabel)
+                                         zpLabel=zpLabel, forcedStr=forcedStr)
         shortName = description + "_raCosDec"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra",
@@ -721,7 +765,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
                                      butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                      patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                     zpLabel=zpLabel)
+                                     zpLabel=zpLabel, forcedStr=forcedStr)
         if "src_calib_astrometryUsed" in matches.schema:
             shortName = description + "_ra_calib_astrometryUsed"
             self.log.info("shortName = {:s}".format(shortName))
@@ -735,7 +779,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                          camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                          patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                         zpLabel=zpLabel)
+                                         zpLabel=zpLabel, forcedStr=forcedStr)
         shortName = description + "_ra"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra", unitScale=self.unitScale),
@@ -747,7 +791,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
                                      butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                      patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                     zpLabel=zpLabel)
+                                     zpLabel=zpLabel, forcedStr=forcedStr)
         if "src_calib_astrometryUsed" in matches.schema:
             shortName = description + "_dec_calib_astrometryUsed"
             self.log.info("shortName = {:s}".format(shortName))
@@ -761,7 +805,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                          camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                          patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                         zpLabel=zpLabel)
+                                         zpLabel=zpLabel, forcedStr=forcedStr)
         shortName = description + "_dec"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches, AstrometryDiff("src_coord_dec", "ref_coord_dec", unitScale=self.unitScale),
@@ -772,7 +816,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
                                      butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                      patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                     zpLabel=zpLabel)
+                                     zpLabel=zpLabel, forcedStr=forcedStr)
 
     def plotCosmos(self, catalog, filenamer, cosmos, dataId):
         labeller = CosmosLabeller(cosmos, self.config.matchRadius*afwGeom.arcseconds)
@@ -796,7 +840,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def plotQuiver(self, catalog, filenamer, dataId=None, butler=None, camera=None, ccdList=None,
                    tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                   postFix="", flagsCat=None, scale=1):
+                   forcedStr=None, postFix="", flagsCat=None, scale=1):
         stats = None #self.config.analysis.stats()
         shortName = "quiver"
         self.log.info("shortName = {:s}".format(shortName))
@@ -804,7 +848,8 @@ class CoaddAnalysisTask(CmdLineTask):
                            self.config.analysis, labeller=None,
                            ).plotQuiver(catalog, filenamer, stats=stats, dataId=dataId, butler=butler,
                                         camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                                        patchList=patchList,hscRun=hscRun, zpLabel=zpLabel, scale=scale)
+                                        patchList=patchList,hscRun=hscRun, zpLabel=zpLabel,
+                                        forcedStr=forcedStr, scale=scale)
 
     def _getConfigName(self):
         return None
@@ -860,20 +905,36 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         self.unitScale = 1000.0 if self.config.toMilli else 1.0
 
     def run(self, patchRefList1, patchRefList2):
-        # Purge patchRefLists of non-existant datasets
-        patchRefList1 = [dataRef1 for dataRef1 in patchRefList1 if
-                         dataRef1.datasetExists(self.config.coaddName + "Coadd_forced_src")]
-        patchRefList2 = [dataRef2 for dataRef2 in patchRefList2 if
-                         dataRef2.datasetExists(self.config.coaddName + "Coadd_forced_src")]
-        patchList1 = [dataRef1.dataId["patch"] for dataRef1 in patchRefList1 if
-                      dataRef1.datasetExists(self.config.coaddName + "Coadd_forced_src")]
+        haveForced = True  # do forced datasets exits (may not for single band datasets)
+        dataset = "Coadd_forced_src"
+        patchRefExistsList1 = [patchRef1 for patchRef1 in patchRefList1 if
+                               patchRef1.datasetExists(self.config.coaddName + dataset)]
+        if len(patchRefExistsList1) == 0:
+            haveForced = False
 
-        repoInfo1 = getRepoInfo(patchRefList1[0], coaddName=self.config.coaddName)
-        repoInfo2 = getRepoInfo(patchRefList2[0], coaddName=self.config.coaddName)
-        forced1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_forced_src")
-        forced1 = self.calibrateCatalogs(forced1, wcs=repoInfo1.wcs)
-        forced2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_forced_src")
-        forced2 = self.calibrateCatalogs(forced2, wcs=repoInfo2.wcs)
+        if not haveForced:
+            self.log.warn("No forced dataset exist for tract: {0:d} filter: {1:s}.  "
+                          "Plotting unforced results only.".format(patchRefList1[0].dataId["tract"],
+                                                                     patchRefList1[0].dataId["filter"]))
+            dataset = "Coadd_meas"
+            patchRefExistsList1 = [patchRef1 for patchRef1 in patchRefList1 if
+                                   patchRef1.datasetExists(self.config.coaddName + dataset)]
+        if len(patchRefExistsList1) == 0:
+            raise TaskError("No data exists in patRefList1: %s" %
+                            ([patchRef1.dataId for patchRef1 in patchRefList1]))
+        patchRefList2 = [dataRef2 for dataRef2 in patchRefList2 if
+                         dataRef2.datasetExists(self.config.coaddName + dataset)]
+
+        patchList1 = [dataRef1.dataId["patch"] for dataRef1 in patchRefList1 if
+                      dataRef1.datasetExists(self.config.coaddName + dataset)]
+
+        repoInfo1 = getRepoInfo(patchRefList1[0], coaddName=self.config.coaddName, coaddDataset=dataset)
+        repoInfo2 = getRepoInfo(patchRefList2[0], coaddName=self.config.coaddName, coaddDataset=dataset)
+        if haveForced:
+            forced1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_forced_src")
+            forced1 = self.calibrateCatalogs(forced1, wcs=repoInfo1.wcs)
+            forced2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_forced_src")
+            forced2 = self.calibrateCatalogs(forced2, wcs=repoInfo2.wcs)
         unforced1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_meas")
         unforced1 = self.calibrateCatalogs(unforced1, wcs=repoInfo1.wcs)
         unforced2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_meas")
@@ -881,9 +942,12 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
         # Set an alias map for differing src naming conventions of different stacks (if any)
         if self.config.srcSchemaMap:
-            for hscRun, catalog in zip([repoInfo1.hscRun, repoInfo2.hscRun, repoInfo1.hscRun,
-                                        repoInfo2.hscRun],
-                                       [forced1, forced2, unforced1, unforced2]):
+            repoList = [repoInfo1.hscRun, repoInfo2.hscRun]
+            coaddList = [unforced1, unforced2]
+            if haveForced:
+                repoList += repoList
+                coaddList += [forced1, forced2]
+            for hscRun, catalog in zip(repoList, coaddList):
                 if hscRun:
                     aliasMap = catalog.schema.getAliasMap()
                     for lsstName, otherName in self.config.srcSchemaMap.items():
@@ -900,6 +964,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                             aliasMap.set("base_SdssCentroid_flag", "base_TransformedCentroid_flag")
                         else:
                             self.log.warn("Could not find base_SdssCentroid (or equivalent) flags")
+        forcedStr = "forced" if haveForced else "unforced"
 
         # purge the catalogs of flagged sources
         bad1 = np.zeros(len(unforced1), dtype=bool)
@@ -908,13 +973,15 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             bad1 |= unforced1[flag]
             bad2 |= unforced2[flag]
 
-        forced1 = forced1[~bad1].copy(deep=True)
         unforced1 = unforced1[~bad1].copy(deep=True)
-        forced2 = forced2[~bad2].copy(deep=True)
         unforced2 = unforced2[~bad2].copy(deep=True)
-
+        if haveForced:
+            forced1 = forced1[~bad1].copy(deep=True)
+            forced2 = forced2[~bad2].copy(deep=True)
+        else:
+            forced1 = unforced1
+            forced2 = unforced2
         forced = self.matchCatalogs(forced1, forced2)
-        unforced = self.matchCatalogs(unforced1, unforced2)
 
         self.log.info("\nNumber of sources in catalogs: first = {0:d} and second = {1:d}".format(
                 len(forced1), len(forced2)))
@@ -924,12 +991,13 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             hscRun = repoInfo1.hscRun if repoInfo1.hscRun is not None else repoInfo2.hscRun
             self.plotMags(forced, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
                           camera=repoInfo1.camera, tractInfo=repoInfo1.tractInfo, patchList=patchList1,
-                          hscRun=hscRun, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                          hscRun=hscRun, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel,
+                          forcedStr=forcedStr)
         if self.config.doPlotCentroids:
             self.plotCentroids(forced, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
                                camera=repoInfo1.camera, tractInfo=repoInfo1.tractInfo, patchList=patchList1,
                                hscRun1=repoInfo1.hscRun, hscRun2=repoInfo2.hscRun,
-                               matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                               matchRadius=self.config.matchRadius, zpLabel=self.zpLabel, forcedStr=forcedStr)
 
     def readCatalogs(self, patchRefList, dataset):
         catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS) for
@@ -957,8 +1025,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         return calibrated
 
     def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
-                 patchList=None, hscRun=None, matchRadius=None, zpLabel=None, fluxToPlotList=None,
-                 postFix="", flagsCat=None, highlightList=None):
+                 patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
+                 fluxToPlotList=None, postFix="", flagsCat=None, highlightList=None):
         if fluxToPlotList is None:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
@@ -980,8 +1048,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
     def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                       tractInfo=None, patchList=None, hscRun1=None, hscRun2=None, matchRadius=None,
-                      zpLabel=None, flagsCat=None, highlightList=None):
-        unitStr = "mas" if self.config.toMilli else "arcsec"
+                      zpLabel=None, forcedStr=None, flagsCat=None, highlightList=None):
+        unitStr = "milliPixels" if self.config.toMilli else "pixels"
         distEnforcer = None
         centroidStr1, centroidStr2 = "base_SdssCentroid", "base_SdssCentroid"
         if bool(hscRun1) ^ bool(hscRun2):
@@ -993,20 +1061,24 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         hscRun = hscRun1 if hscRun1 is not None else hscRun2
         shortName = "diff_x"
         self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, CentroidDiff("x", centroid1=centroidStr1, centroid2=centroidStr2),
+        Analysis(catalog, CentroidDiff("x", centroid1=centroidStr1, centroid2=centroidStr2,
+                                       unitScale=self.unitScale),
                  "Run Comparison: x offset (%s)" % unitStr, shortName, self.config.analysis, prefix="first_",
                  qMin=-0.08, qMax=0.08, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
                  ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, butler=butler, camera=camera,
                            ccdList=ccdList, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
-                           matchRadius=matchRadius, zpLabel=zpLabel)
+                           matchRadius=matchRadius, zpLabel=zpLabel, forcedStr=forcedStr)
         shortName = "diff_y"
         self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, CentroidDiff("y", centroid1=centroidStr1, centroid2=centroidStr2),
+        Analysis(catalog, CentroidDiff("y", centroid1=centroidStr1, centroid2=centroidStr2,
+                                       unitScale=self.unitScale),
                  "Run Comparison: y offset (%s)" % unitStr, shortName, self.config.analysis, prefix="first_",
                  qMin=-0.08, qMax=0.08, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
                  ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, butler=butler, camera=camera,
                            ccdList=ccdList, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
-                           matchRadius=matchRadius, zpLabel=zpLabel)
+                           matchRadius=matchRadius, zpLabel=zpLabel, forcedStr=forcedStr)
+
+        unitStr = "mas" if self.config.toMilli else "arcsec"
         shortName = "diff_raCosDec"
         self.log.info("shortName = {:s}".format(shortName))
         Analysis(catalog, AstrometryDiff("first_coord_ra", "second_coord_ra", declination1="first_coord_dec",
@@ -1017,7 +1089,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                  flagsCat=flagsCat, unitScale=self.unitScale,
                  ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera, ccdList=ccdList,
                            tractInfo=tractInfo, patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                           zpLabel=zpLabel)
+                           zpLabel=zpLabel, forcedStr=forcedStr)
         shortName = "diff_ra"
         self.log.info("shortName = {:s}".format(shortName))
         Analysis(catalog, AstrometryDiff("first_coord_ra", "second_coord_ra", declination1=None,
@@ -1027,7 +1099,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                  labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat, unitScale=self.unitScale,
                  ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera, ccdList=ccdList,
                            tractInfo=tractInfo, patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                           zpLabel=zpLabel)
+                           zpLabel=zpLabel, forcedStr=forcedStr)
         shortName = "diff_dec"
         self.log.info("shortName = {:s}".format(shortName))
         Analysis(catalog, AstrometryDiff("first_coord_dec", "second_coord_dec", unitScale=self.unitScale),
@@ -1036,11 +1108,11 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                  labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat, unitScale=self.unitScale,
                  ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera, ccdList=ccdList,
                            tractInfo=tractInfo, patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                           zpLabel=zpLabel)
+                           zpLabel=zpLabel, forcedStr=forcedStr)
 
     def plotFootprint(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                       tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                      postFix="", flagsCat=None, highlightList=None):
+                      forcedStr=None, postFix="", flagsCat=None, highlightList=None):
         enforcer = None
         shortName = "diff_footNpix"
         col = "base_Footprint_nPix"
@@ -1050,7 +1122,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                  labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat,
                  ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler, camera=camera,
                            ccdList=ccdList, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
-                           matchRadius=matchRadius, zpLabel=zpLabel, postFix=postFix)
+                           matchRadius=matchRadius, zpLabel=zpLabel, forcedStr=forcedStr, postFix=postFix)
         shortName = "diff_footNpix_calib_psfUsed"
         self.log.info("shortName = {:s}".format(shortName))
         Analysis(catalog, FootNpixDiffCompare(col), "Run Comparison: Footprint nPix diff (psfUsed)", shortName,
@@ -1058,7 +1130,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                  flags=[col + "_flag"], labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat,
                  ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler, camera=camera,
                            ccdList=ccdList, tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
-                           matchRadius=matchRadius, zpLabel=zpLabel, postFix=postFix,
+                           matchRadius=matchRadius, zpLabel=zpLabel, forcedStr=forcedStr, postFix=postFix,
                            highlightList=highlightList)
     def _getConfigName(self):
         return None

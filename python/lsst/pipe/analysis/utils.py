@@ -14,8 +14,9 @@ except ImportError:
 from contextlib import contextmanager
 
 from lsst.daf.persistence.safeFileIo import safeMakeDir
-from lsst.pipe.base import Struct
+from lsst.pipe.base import Struct, TaskError
 
+import lsst.afw.cameraGeom as cameraGeom
 import lsst.afw.geom as afwGeom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
@@ -36,17 +37,17 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "addApertureFluxesHSC", "addFpPoint", "addFootprintNPix", "addRotPoint",
            "calibrateSourceCatalogMosaic", "calibrateSourceCatalog", "calibrateCoaddSourceCatalog",
            "backoutApCorr", "matchJanskyToDn", "checkHscStack", "fluxToPlotString", "andCatalog",
-           "writeParquet", "getRepoInfo"]
+           "writeParquet", "getRepoInfo", "findCcdKey", "getCcdNameRefList", "getDataExistsRefList"]
 
 def writeParquet(table, path):
     """
     Write an afwTable into Parquet format
-    
+
     Parameters
     ----------
-    table : afwTable
+    table : `lsst.afw.table.source.source.SourceCatalog`
         Table to be written to parquet
-    path : str
+    path : `str`
         Path to which to write.  Must end in ".parq".
 
     Returns
@@ -394,17 +395,18 @@ class ApCorrDiffErr(object):
 class CentroidDiff(object):
     """Functor to calculate difference in astrometry"""
     def __init__(self, component, first="first_", second="second_", centroid1="base_SdssCentroid",
-                 centroid2="base_SdssCentroid"):
+                 centroid2="base_SdssCentroid", unitScale=1.0):
         self.component = component
         self.first = first
         self.second = second
         self.centroid1 = centroid1
         self.centroid2 = centroid2
+        self.unitScale = unitScale
 
     def __call__(self, catalog):
         first = self.first + self.centroid1 + "_" + self.component
         second = self.second + self.centroid2 + "_" + self.component
-        return catalog[first] - catalog[second]
+        return (catalog[first] - catalog[second])*self.unitScale
 
 class CentroidDiffErr(CentroidDiff):
     """Functor to calculate difference error for astrometry"""
@@ -418,7 +420,8 @@ class CentroidDiffErr(CentroidDiff):
         subkeys2 = [catalog.schema[secondx].asKey(), catalog.schema[secondy].asKey()]
         menu = {"x": 0, "y": 1}
 
-        return np.hypot(catalog[subkeys1[menu[self.component]]], catalog[subkeys2[menu[self.component]]])
+        return np.hypot(catalog[subkeys1[menu[self.component]]],
+                        catalog[subkeys2[menu[self.component]]])*self.unitScale
 
 
 def deconvMom(catalog):
@@ -460,8 +463,8 @@ def concatenateCatalogs(catalogList):
 
 def joinMatches(matches, first="first_", second="second_"):
     if len(matches)==0:
-        return [] # empty
-        
+        return []
+
     mapperList = afwTable.SchemaMapper.join([matches[0].first.schema,
                                                 matches[0].second.schema],
                                             [first, second])
@@ -779,7 +782,7 @@ def backoutApCorr(catalog):
     """
     ii = 0
     for k in catalog.schema.getNames():
-        if "_flux" in k and k[:-5] + "_apCorr" in src.schema.getNames() and "_apCorr" not in k:
+        if "_flux" in k and k[:-5] + "_apCorr" in catalog.schema.getNames() and "_apCorr" not in k:
             if ii == 0:
                 print("Backing out apcorr for:", k)
                 ii += 1
@@ -844,7 +847,7 @@ def andCatalog(version):
     finally:
         eups.setup("astrometry_net_data", current, noRecursion=True)
 
-def getRepoInfo(dataRef, coaddName=None, doApplyUberCal=False):
+def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False):
     """Obtain the relevant repository information for the given dataRef
 
     Parameters
@@ -861,9 +864,10 @@ def getRepoInfo(dataRef, coaddName=None, doApplyUberCal=False):
     camera = butler.get("camera")
     dataId = dataRef.dataId
     filterName = dataId["filter"]
-    isCoadd = True if dataId.has_key("patch") else False
+    isCoadd = True if "patch" in dataId else False
+    ccdKey = None if isCoadd else findCcdKey(dataId)
     # Check metadata to see if stack used was HSC
-    metaStr = coaddName + "Coadd_forced_src" if coaddName is not None else "calexp_md"
+    metaStr = coaddName + coaddDataset if coaddName is not None else "calexp_md"
     metadata = butler.get(metaStr, dataId)
     hscRun = checkHscStack(metadata)
     dataset = "src"
@@ -882,6 +886,7 @@ def getRepoInfo(dataRef, coaddName=None, doApplyUberCal=False):
         camera = camera,
         dataId = dataId,
         filterName = filterName,
+        ccdKey = ccdKey,
         metadata = metadata,
         hscRun = hscRun,
         dataset = dataset,
@@ -889,3 +894,62 @@ def getRepoInfo(dataRef, coaddName=None, doApplyUberCal=False):
         wcs = wcs,
         tractInfo = tractInfo,
     )
+
+def findCcdKey(dataId):
+    """Determine the convention for identifying a "ccd" for the current camera
+
+    Parameters
+    ----------
+    dataId : `instance` of `lsst.daf.persistence.DataId`
+
+    Raises
+    ------
+    `RuntimeError`
+       If "ccd" key could not be identified from the current hardwired list
+
+    Returns
+    -------
+    ccdKey : `str`
+       The string associated with the "ccd" key.
+    """
+    ccdKey = None
+    ccdKeyList = ["ccd", "sensor", "camcol"]
+    for ss in ccdKeyList:
+        if ss in dataId:
+            ccdKey = ss
+            break
+    if ccdKey is None:
+        raise RuntimeError("Could not identify ccd key for dataId: %s: \nNot in list of known keys: %s" %
+                           (dataId, ccdKeyList))
+    return ccdKey
+
+def getCcdNameRefList(dataRefList):
+    ccdNameRefList = None
+    ccdKey = findCcdKey(dataRefList[0].dataId)
+    if "raft" in dataRefList[0].dataId:
+        ccdNameRefList = [re.sub("[,]", "", str(dataRef.dataId["raft"]) + str(dataRef.dataId[ccdKey])) for
+                          dataRef in dataRefList]
+    else:
+        ccdNameRefList = [dataRef.dataId[ccdKey] for dataRef in dataRefList]
+    # cull multiple entries
+    ccdNameRefList = list(set(ccdNameRefList))
+
+    if ccdNameRefList is None:
+        raise RuntimeError("Failed to create ccdNameRefList")
+    return ccdNameRefList
+
+def getDataExistsRefList(dataRefList, dataset):
+    dataExistsRefList = None
+    ccdKey = findCcdKey(dataRefList[0].dataId)
+    if "raft" in dataRefList[0].dataId:
+        dataExistsRefList = [re.sub("[,]", "", str(dataRef.dataId["raft"]) + str(dataRef.dataId[ccdKey])) for
+                             dataRef in dataRefList if dataRef.datasetExists(dataset)]
+    else:
+        dataExistsRefList = [dataRef.dataId[ccdKey] for dataRef in dataRefList if
+                             dataRef.datasetExists(dataset)]
+    # cull multiple entries
+    dataExistsRefList = list(set(dataExistsRefList))
+
+    if dataExistsRefList is None:
+        raise RuntimeError("dataExistsRef list is empty")
+    return dataExistsRefList

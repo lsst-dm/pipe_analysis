@@ -14,10 +14,8 @@ from lsst.pex.config import Field
 from lsst.pipe.base import ArgumentParser, TaskRunner, TaskError
 from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
-from lsst.meas.extensions.astrometryNet import LoadAstrometryNetObjectsTask
 from .analysis import Analysis
-from .coaddAnalysis import (CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisConfig,
-                            CompareCoaddAnalysisTask)
+from .coaddAnalysis import CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisTask
 from .utils import *
 from .plotUtils import *
 
@@ -26,13 +24,13 @@ import lsst.afw.table as afwTable
 
 class CcdAnalysis(Analysis):
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
-                tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None, postFix="",
-                plotRunStats=True, highlightList=None, haveFpCoords=None):
+                tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
+                postFix="", plotRunStats=True, highlightList=None, haveFpCoords=None):
         stats = self.stats
         if self.config.doPlotCcdXy:
-            self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix), stats=stats,
-                         hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
-        if self.config.doPlotFP:
+            self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix),
+                         stats=self.stats, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
+        if self.config.doPlotFP and haveFpCoords:
             self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa" + postFix),
                                 stats=stats, camera=camera, ccdList=ccdList, hscRun=hscRun,
                                 matchRadius=matchRadius, zpLabel=zpLabel)
@@ -42,10 +40,10 @@ class CcdAnalysis(Analysis):
                                 postFix=postFix, plotRunStats=plotRunStats, highlightList=highlightList)
 
     def plotFP(self, dataId, filenamer, log, enforcer=None, camera=None, ccdList=None, hscRun=None,
-               matchRadius=None, zpLabel=None):
+               matchRadius=None, zpLabel=None, forcedStr=None):
         self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa"), stats=self.stats,
                             camera=camera, ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
-                            zpLabel=zpLabel)
+                            zpLabel=zpLabel, forcedStr=forcedStr)
 
     def plotCcd(self, filename, centroid="base_SdssCentroid", cmap=plt.cm.nipy_spectral, idBits=32,
                 visitMultiplier=200, stats=None, hscRun=None, matchRadius=None, zpLabel=None):
@@ -99,12 +97,12 @@ class CcdAnalysis(Analysis):
         cb.set_label("CCD index", rotation=270, labelpad=15)
         labelVisit(filename, plt, axes[0], 0.5, 1.1)
         if zpLabel is not None:
-            labelZp(zpLabel, plt, axes[0], 0.08, -0.11, color="green")
+            plotText(zpLabel, plt, axes[0], 0.08, -0.11, prefix="zp: ", color="green")
         fig.savefig(filename)
         plt.close(fig)
 
     def plotFocalPlane(self, filename, cmap=plt.cm.Spectral, stats=None, camera=None, ccdList=None,
-                       hscRun=None, matchRadius=None, zpLabel=None, fontSize=8):
+                       hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None, fontSize=8):
         """Plot quantity colormaped on the focal plane"""
         xFp = self.catalog[self.prefix + "base_FPPosition_x"]
         yFp = self.catalog[self.prefix + "base_FPPosition_y"]
@@ -142,7 +140,9 @@ class CcdAnalysis(Analysis):
         if camera is not None:
             labelCamera(camera, plt, axes, 0.5, 1.09)
         if zpLabel is not None:
-            labelZp(zpLabel, plt, axes, 0.08, -0.1, color="green")
+            plotText(zpLabel, plt, axes, 0.08, -0.1, prefix="zp: ", color="green")
+        if forcedStr is not None:
+            plotText(forcedStr, plt, axes, 0.86, -0.1, prefix="cat: ", color="green")
         fig.savefig(filename)
         plt.close(fig)
 
@@ -158,7 +158,7 @@ class VisitAnalysisConfig(CoaddAnalysisConfig):
                 import lsst.meas.mosaic
             except ImportError:
                 raise ValueError("Cannot apply uber calibrations because meas_mosaic could not be imported."
-                                 "\nEither setup meas_mosaic or run with --doApplyUberCal=False")
+                                 "\nEither setup meas_mosaic or run with --config doApplyUberCal=False")
 
 
 class VisitAnalysisRunner(TaskRunner):
@@ -190,9 +190,6 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
     def run(self, dataRefList, tract=None):
         self.log.info("dataRefList size: {:d}".format(len(dataRefList)))
-        ccdList = [dataRef.dataId["ccd"] for dataRef in dataRefList]
-        # cull multiple entries
-        ccdList = list(set(ccdList))
         if tract is None:
             tractList = [0, ]
         else:
@@ -208,8 +205,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 continue
             repoInfo = getRepoInfo(dataRefListTract[0], doApplyUberCal=self.config.doApplyUberCal)
             self.log.info("dataId: {!s:s}".format(repoInfo.dataId))
-            ccdListPerTract = [dataRef.dataId["ccd"] for dataRef in dataRefListTract if
-                               dataRef.datasetExists(repoInfo.dataset)]
+            ccdListPerTract = getDataExistsRefList(dataRefListTract, repoInfo.dataset)
+            self.log.info("Exising data for tract {:d}: ccdListPerTract = {}".
+                          format(tractList[i], ccdListPerTract))
             if len(ccdListPerTract) == 0:
                 if self.config.doApplyUberCal:
                     self.log.fatal("No data found for {:s} datset...are you sure you ran meas_mosaic? "
@@ -258,26 +256,16 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 except:
                     pass
                 self.plotMags(commonZpCat, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                              camera=repoInfo.camera, ccdList=ccdList, hscRun=repoInfo.hscRun, zpLabel=zpLabel,
+                              camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
+                              zpLabel=zpLabel,
                               fluxToPlotList=["base_GaussianFlux", "base_CircularApertureFlux_12_0"],
                               postFix="_commonZp")
                 commonZpDone = True
             # Now source catalog calibrated to either FLUXMAG0 or meas_mosaic result for remainder of plots
-            if self.config.doPlotSizes:
-                if "base_SdssShape_psf_xx" in catalog.schema:
-                    self.plotSizes(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                                   camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
-                                   zpLabel=self.zpLabel)
-                else:
-                    self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
             if self.config.doPlotMags:
                 self.plotMags(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
                               camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
                               zpLabel=self.zpLabel)
-            if self.config.doPlotCentroids:
-                self.plotCentroidXY(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                                    camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
-                                    zpLabel=self.zpLabel)
             if self.config.doPlotStarGalaxy:
                 if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
                     self.plotStarGal(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
@@ -286,6 +274,17 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 else:
                     self.log.warn("Cannot run plotStarGal: " +
                                   "ext_shapeHSM_HsmSourceMoments_xx not in catalog.schema")
+            if self.config.doPlotSizes:
+                if "base_SdssShape_psf_xx" in catalog.schema:
+                    self.plotSizes(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
+                                   camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
+                                   zpLabel=self.zpLabel)
+                else:
+                    self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
+            if self.config.doPlotCentroids and self.haveFpCoords:
+                self.plotCentroidXY(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
+                                    camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
+                                    zpLabel=self.zpLabel)
             if self.config.doPlotMatches:
                 matches = self.readSrcMatches(dataRefListTract, "src")
                 self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
@@ -305,6 +304,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
     def readCatalogs(self, dataRefList, dataset, hscRun=None):
         catList = []
         commonZpCatList = []
+        self.haveFpCoords = True
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
                 continue
@@ -327,10 +327,14 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             metadata = butler.get("calexp_md", dataRef.dataId)
 
             # Compute Focal Plane coordinates for each source if not already there
-            if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
-                exp = butler.get("calexp", dataRef.dataId)
-                det = exp.getDetector()
-                catalog = addFpPoint(det, catalog)
+            if self.config.doPlotCentroids or self.config.doPlotFP and self.haveFpCoords:
+                if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
+                    exp = butler.get("calexp", dataRef.dataId)
+                    det = exp.getDetector()
+                    catalog = addFpPoint(det, catalog)
+                xFp = catalog["base_FPPosition_x"]
+                if len(xFp[np.where(np.isfinite(xFp))]) <= 0:
+                    self.haveFpCoords = False
             # Optionally backout aperture corrections
             if self.config.doBackoutApCorr:
                 catalog = backoutApCorr(catalog)
@@ -412,7 +416,6 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 self.log.warn("No matches for {:s}".format(dataRef.dataId))
                 continue
 
-            zp = -2.5*np.log10(metadata.get("FLUXMAG0"))
             matchMeta = butler.get(dataset, dataRef.dataId,
                                    flags=afwTable.SOURCE_IO_NO_FOOTPRINTS).getTable().getMetadata()
             catalog = matchesToCatalog(matches, matchMeta)
@@ -431,9 +434,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 for lsstName, otherName in self.config.srcSchemaMap.items():
                     aliasMap.set("src_" + lsstName, "src_" + otherName)
             # To avoid multiple counting when visit overlaps multiple tracts
-            if (dataRef.dataId['visit'], dataRef.dataId['ccd']) not in dataIdSubList:
+            noTractId = dataRef.dataId.copy()
+            noTractId.pop("tract")
+            if noTractId not in dataIdSubList:
                 catList.append(catalog)
-            dataIdSubList.append((dataRef.dataId["visit"], dataRef.dataId["ccd"]))
+            dataIdSubList.append(noTractId)
 
         if len(catList) == 0:
             raise TaskError("No matches read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
@@ -473,6 +478,17 @@ class CompareVisitAnalysisConfig(VisitAnalysisConfig):
         # Use a tighter match radius for comparing runs: they are calibrated and we want to avoid mis-matches
         self.matchRadius = 0.2
 
+    def validate(self):
+        super(CoaddAnalysisConfig, self).validate()
+        if self.doApplyUberCal1 or self.doApplyUberCal2:
+            try:
+                import lsst.meas.mosaic
+            except ImportError:
+                raise ValueError("Cannot apply uber calibrations because meas_mosaic could not be imported."
+                                 "\nEither setup meas_mosaic or run with --config doApplyUberCal1=False "
+                                 "doApplyUberCal2=False")
+
+
 class CompareVisitAnalysisRunner(TaskRunner):
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
@@ -501,7 +517,7 @@ class CompareVisitAnalysisRunner(TaskRunner):
             visits1[ref1.dataId["visit"]].append(ref1)
             visits2[ref2.dataId["visit"]].append(ref2)
         return [(refs1, dict(dataRefList2=refs2, **kwargs)) for
-                refs1, refs2 in zip(visits1.itervalues(), visits2.itervalues())]
+                refs1, refs2 in zip(visits1.values(), visits2.values())]
 
 
 class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
@@ -521,14 +537,11 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
 
     def run(self, dataRefList1, dataRefList2, tract=None):
         # This is for the commonZP plots (i.e. all ccds regardless of tract)
-        fullCcdList = list(set(
-                [dataRef1.dataId["ccd"] for dataRef1 in dataRefList1 if dataRef1.datasetExists("src")]))
-
         if tract is None:
             tractList = [0, ]
         else:
             tractList = [int(tractStr) for tractStr in tract.split('^')]
-        self.log.debug("tractList = {:s}".format(tractList))
+        self.log.debug("tractList = {}".format(tractList))
         dataRefListPerTract1 = [None]*len(tractList)
         dataRefListPerTract2 = [None]*len(tractList)
         for i, tract in enumerate(tractList):
@@ -549,6 +562,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             repoInfo2 = getRepoInfo(dataRefListTract2[0], doApplyUberCal=self.config.doApplyUberCal2)
             break
 
+        fullCcdList = getDataExistsRefList(dataRefList1, repoInfo1.dataset)
+
         i = -1
         for dataRefListTract1, dataRefListTract2 in zip(dataRefListPerTract1, dataRefListPerTract2):
             i += 1
@@ -558,10 +573,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             if len(dataRefListTract2) == 0:
                 self.log.info("No data found in --rerun2 for tract: {:d}".format(tractList[i]))
                 continue
-            ccdListPerTract1 = [dataRef1.dataId["ccd"] for dataRef1 in dataRefListTract1 if
-                                dataRef1.datasetExists(repoInfo1.dataset)]
-            ccdListPerTract2 = [dataRef2.dataId["ccd"] for dataRef2 in dataRefListTract2 if
-                                dataRef2.datasetExists(repoInfo2.dataset)]
+            ccdListPerTract1 = getDataExistsRefList(dataRefListTract1, repoInfo1.dataset)
+            ccdListPerTract2 = getDataExistsRefList(dataRefListTract2, repoInfo2.dataset)
             if len(ccdListPerTract1) == 0:
                 if self.config.doApplyUberCal1 and "wcs" in repoInfo1.dataset:
                     self.log.fatal("No data found for {:s} dataset...are you sure you ran meas_mosaic? If "
@@ -572,8 +585,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                     self.log.fatal("No data found for {:s} dataset...are you sure you ran meas_mosaic? If "
                                    "not, run with --config doApplyUberCal2=False".format(repoInfo2.dataset))
                 raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo2.dataset))
-            self.log.info("tract: {:d} ".format(dataRef1.dataId["tract"]))
-            self.log.info("ccdListPerTract1: {:s} ".format(ccdListPerTract1))
+            self.log.info("tract: {:d} ".format(repoInfo1.dataId["tract"]))
+            self.log.info("ccdListPerTract1: {} ".format(ccdListPerTract1))
             doReadFootprints = None
             if self.config.doPlotFootprintNpix:
                 doReadFootprints = "light"
