@@ -152,7 +152,7 @@ class VisitAnalysisConfig(CoaddAnalysisConfig):
                            " FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
 
     def validate(self):
-        super(CoaddAnalysisConfig, self).validate()
+        CoaddAnalysisConfig.validate(self)
         if self.doApplyUberCal:
             try:
                 import lsst.meas.mosaic
@@ -227,13 +227,14 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                onlyReadStars=self.config.onlyReadStars)
 
             # Create and write parquet tables
-            tableFilenamer = Filenamer(repoInfo.butler, 'qaTableVisit', repoInfo.dataId)
-            writeParquet(catalog, tableFilenamer(repoInfo.dataId, description='catalog'), badArray=bad)
-            writeParquet(commonZpCat,tableFilenamer(repoInfo.dataId, description='commonZp'),
-                         badArray=badCommonZp)
-            if self.config.writeParquetOnly:
-                self.log.info("Exiting after writing Parquet tables.  No plots generated.")
-                return
+            if self.config.doWriteParquetTables:
+                tableFilenamer = Filenamer(repoInfo.butler, 'qaTableVisit', repoInfo.dataId)
+                writeParquet(catalog, tableFilenamer(repoInfo.dataId, description='catalog'), badArray=bad)
+                writeParquet(commonZpCat,tableFilenamer(repoInfo.dataId, description='commonZp'),
+                             badArray=badCommonZp)
+                if self.config.writeParquetOnly:
+                    self.log.info("Exiting after writing Parquet tables.  No plots generated.")
+                    return
 
             # purge the catalogs of flagged sources
             catalog = catalog[~bad].copy(deep=True)

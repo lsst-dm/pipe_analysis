@@ -71,6 +71,10 @@ class CoaddAnalysisConfig(Config):
     fluxToPlotList = ListField(dtype=str, default=["base_GaussianFlux", "ext_photometryKron_KronFlux",
                                                    "modelfit_CModel"],
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(base_PsfFlux)")
+    doWriteParquetTables = Field(dtype=bool, default=True,
+                                 doc=("Write out Parquet tables (for subsequent interactive analysis)?"
+                                      "\nNOTE: if True but fastparquet package is unavailable, a warning is "
+                                      "issued and table writing is skipped."))
     writeParquetOnly = Field(dtype=bool, default=False,
                              doc="Only write out Parquet tables (i.e. do not produce any plots)?")
 
@@ -85,6 +89,10 @@ class CoaddAnalysisConfig(Config):
         self.analysisMatches.magThreshold = 21.0  # External catalogs like PS1 & SDSS used smaller telescopes
         self.refObjLoader.ref_dataset_name = "ps1_pv3_3pi_20170110"
 
+    def validate(self):
+        Config.validate(self)
+        if self.writeParquetOnly and not self.doWriteParquetTables:
+            raise ValueError("Cannot writeParquetOnly if doWriteParquetTables is False")
 
 class CoaddAnalysisRunner(TaskRunner):
     @staticmethod
@@ -190,13 +198,14 @@ class CoaddAnalysisTask(CmdLineTask):
                                 onlyReadStars=self.config.onlyReadStars)
 
         # Create and write parquet tables
-        tableFilenamer = Filenamer(repoInfo.butler, 'qaTableCoadd', repoInfo.dataId)
-        if haveForced:
-            writeParquet(forced, tableFilenamer(repoInfo.dataId, description='forced'), badArray=bad)
-        writeParquet(unforced, tableFilenamer(repoInfo.dataId, description='unforced'), badArray=bad)
-        if self.config.writeParquetOnly:
-            self.log.info("Exiting after writing Parquet tables.  No plots generated.")
-            return
+        if self.config.doWriteParquetTables:
+            tableFilenamer = Filenamer(repoInfo.butler, 'qaTableCoadd', repoInfo.dataId)
+            if haveForced:
+                writeParquet(forced, tableFilenamer(repoInfo.dataId, description='forced'), badArray=bad)
+            writeParquet(unforced, tableFilenamer(repoInfo.dataId, description='unforced'), badArray=bad)
+            if self.config.writeParquetOnly:
+                self.log.info("Exiting after writing Parquet tables.  No plots generated.")
+                return
 
         # Purge the catalogs of flagged sources
         unforced = unforced[~bad].copy(deep=True)

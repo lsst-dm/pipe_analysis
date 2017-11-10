@@ -126,12 +126,20 @@ class ColorAnalysisConfig(Config):
     toMilli = Field(dtype=bool, default=True, doc="Print stats in milli units (i.e. mas, mmag)?")
     writeParquetOnly = Field(dtype=bool, default=False,
                              doc="Only write out Parquet tables (i.e. do not produce any plots)?")
+    doWriteParquetTables = Field(dtype=bool, default=True,
+                                 doc=("Write out Parquet tables (for subsequent interactive analysis)?"
+                                      "\nNOTE: if True but fastparquet package is unavailable, a warning is "
+                                      "issued and table writing is skipped."))
 
     def setDefaults(self):
         Config.setDefaults(self)
         self.transforms = ivezicTransforms
         self.analysis.flags = []  # We remove bad source ourself
 
+    def validate(self):
+        Config.validate(self)
+        if self.writeParquetOnly and not self.doWriteParquetTables:
+            raise ValueError("Cannot writeParquetOnly if doWriteParquetTables is False")
 
 class ColorAnalysisRunner(TaskRunner):
     @staticmethod
@@ -211,11 +219,12 @@ class ColorAnalysisTask(CmdLineTask):
                                         flagsCats=unforcedCatalogsByFilter, hscRun=repoInfo.hscRun)
 
         # Create and write parquet tables
-        tableFilenamer = Filenamer(repoInfo.butler, 'qaTableColor', repoInfo.dataId)
-        writeParquet(forced, tableFilenamer(repoInfo.dataId, description='forced'))
-        if self.config.writeParquetOnly:
-            self.log.info("Exiting after writing Parquet tables.  No plots generated.")
-            return
+        if self.config.doWriteParquetTables:
+            tableFilenamer = Filenamer(repoInfo.butler, 'qaTableColor', repoInfo.dataId)
+            writeParquet(forced, tableFilenamer(repoInfo.dataId, description='forced'))
+            if self.config.writeParquetOnly:
+                self.log.info("Exiting after writing Parquet tables.  No plots generated.")
+                return
 
         self.plotStarColors(forced, filenamer, NumStarLabeller(len(forcedCatalogsByFilter)), repoInfo.dataId,
                             camera=repoInfo.camera, tractInfo=repoInfo.tractInfo, patchList=patchList,
