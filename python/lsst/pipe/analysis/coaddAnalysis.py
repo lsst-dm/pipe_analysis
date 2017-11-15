@@ -299,8 +299,34 @@ class CoaddAnalysisTask(CmdLineTask):
                                  forcedStr=forcedStr, matchRadius=self.config.matchRadius)
 
     def readCatalogs(self, patchRefList, dataset):
-        catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS) for
-                   patchRef in patchRefList if patchRef.datasetExists(dataset)]
+        """Read in and concatenate catalogs of type dataset in lists of data references
+
+        Before appending each catalog to a single list, an extra column indicating the
+        patch is added to the catalog.  This is useful for the subsequent interactive
+        QA analysis.
+
+        Parameters
+        ----------
+        patchRefList : `list` of `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+           A list of butler data references whose catalogs of dataset type are to be read in
+        dataset : `str`
+           Name of the catalog dataset to be read in
+
+        Raises
+        ------
+        `TaskError`
+           If no data is read in for the dataRefList
+
+        Returns
+        -------
+        `list` of concatenated `lsst.afw.table.source.source.SourceCatalog`s
+        """
+        catList = []
+        for patchRef in patchRefList:
+            if patchRef.datasetExists(dataset):
+                cat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+                cat = addPatchColumn(cat, patchRef.dataId["patch"])
+                catList.append(cat)
         if len(catList) == 0:
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
         return concatenateCatalogs(catList)

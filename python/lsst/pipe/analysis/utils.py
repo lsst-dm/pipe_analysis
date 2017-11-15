@@ -35,9 +35,9 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "CentroidDiffErr", "deconvMom", "deconvMomStarGal", "concatenateCatalogs", "joinMatches",
            "checkIdLists", "checkPatchOverlap", "joinCatalogs", "getFluxKeys", "addColumnsToSchema",
            "addApertureFluxesHSC", "addFpPoint", "addFootprintNPix", "addRotPoint", "makeBadArray",
-           "addQaBadFlag", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
-           "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
-           "fluxToPlotString", "andCatalog", "writeParquet", "getRepoInfo", "findCcdKey",
+           "addQaBadFlag", "addCcdColumn", "addPatchColumn", "calibrateSourceCatalogMosaic",
+           "calibrateSourceCatalog", "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn",
+           "checkHscStack", "fluxToPlotString", "andCatalog", "writeParquet", "getRepoInfo", "findCcdKey",
            "getCcdNameRefList", "getDataExistsRefList"]
 
 def writeParquet(table, path, badArray=None):
@@ -798,6 +798,92 @@ def addQaBadFlag(catalog, badArray):
         row = newCatalog.addNew()
         row.assign(src, mapper)
         row.set(qaBadFlag, bool(badArray[i]))
+    return newCatalog
+
+def addCcdColumn(catalog, ccd):
+    """Add a column indicating the ccd number of the calexp on which the source was detected
+
+    This column is being added for the benefit of the Parquet files being written to disk the
+    subsequent interactive QA analysis.
+
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.source.source.SourceCatalog`
+       Source catalog to which ccd column will be added.
+    ccd : `int` or `str`
+       The ccd id for the catalog.
+
+    Raises
+    ------
+    `RuntimeError`
+       If ccd type is not int or str (not yet accommodated).
+
+    Returns
+    -------
+    newCatalog : `lsst.afw.table.source.source.SourceCatalog`
+       Source catalog with ccd column added.
+    """
+    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
+    mapper.addMinimalSchema(catalog[0].schema)
+    schema = mapper.getOutputSchema()
+    fieldName = "ccdId"
+    fieldDoc = "Id of CCD on which source was detected"
+
+    if type(ccd) is int:
+        ccdKey = schema.addField(fieldName, type="I", doc=fieldDoc)
+    elif type(ccd) is str:
+        ccdKey = schema.addField(fieldName, type=str, size=len(ccd), doc=fieldDoc)
+    else:
+        raise RuntimeError(("Have only accommdated str or int ccd types.  Type provided was: {}").
+                           format(type(ccd)))
+
+    newCatalog = afwTable.SourceCatalog(schema)
+    newCatalog.reserve(len(catalog))
+
+    for src in catalog:
+        row = newCatalog.addNew()
+        row.assign(src, mapper)
+        row.set(ccdKey, ccd)
+    return newCatalog
+
+def addPatchColumn(catalog, patch):
+    """Add a column indicating the patch number of the coadd on which the source was detected
+
+    This column is being added for the benefit of the Parquet files being written to disk the
+    subsequent interactive QA analysis.
+
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.source.source.SourceCatalog`
+       Source catalog to which patch column will be added.
+    patch : `str`
+       The patch id for the catalog
+
+    Raises
+    ------
+    `RuntimeError`
+       If patch type is not str
+
+    Returns
+    -------
+    newCatalog : `lsst.afw.table.source.source.SourceCatalog`
+       Source catalog with patch column added.
+    """
+    if type(patch) is not str:
+        raise RuntimeError(("Have only accommdated str patch type.  Type provided was: {}").
+                           format(type(patch)))
+    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
+    mapper.addMinimalSchema(catalog[0].schema)
+    schema = mapper.getOutputSchema()
+    patchKey = schema.addField("patchId", type=str, size=len(patch), doc="Patch on which source was detected")
+
+    newCatalog = afwTable.SourceCatalog(schema)
+    newCatalog.reserve(len(catalog))
+
+    for src in catalog:
+        row = newCatalog.addNew()
+        row.assign(src, mapper)
+        row.set(patchKey, patch)
     return newCatalog
 
 def calibrateSourceCatalogMosaic(dataRef, catalog, fluxKeys=None, errKeys=None, zp=27.0):

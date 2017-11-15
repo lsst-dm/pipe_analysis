@@ -217,7 +217,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if any(doPlot for doPlot in [self.config.doPlotFootprintNpix, self.config.doPlotQuiver,
                               self.config.doPlotMags, self.config.doPlotSizes, self.config.doPlotCentroids,
                               self.config.doPlotStarGalaxy]):
-                commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", hscRun=repoInfo.hscRun)
+                commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", repoInfo.ccdKey,
+                                                         hscRun=repoInfo.hscRun)
 
             # Set boolean arrays indicating sources deemed unsuitable for qa analyses
             self.catLabel = "nChild = 0"
@@ -313,7 +314,38 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                          ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
                                          matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
 
-    def readCatalogs(self, dataRefList, dataset, hscRun=None):
+    def readCatalogs(self, dataRefList, dataset, ccdKey, hscRun=None):
+        """Read in and concatenate catalogs of type dataset in lists of data references
+
+        Before appending each catalog to a single list, an extra column indicating the
+        ccd is added to the catalog.  This is useful for the subsequent interactive QA
+        analysis.  Also added to the catalog are columns with the focal plane coordinate
+        (if not already present) and the number of pixels in the object's footprint.
+        Finally, the catalogs are calibrated according to the self.config.doApplyUberCal
+        config parameter: meas_mosaic wcs and flux calibrations if True, FLUXMAG0 zeropoint
+        calibration from processCcd.py if False.
+
+        Parameters
+        ----------
+        dataRefList : `list` of `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+           A list of butler data references whose catalogs of dataset type are to be read in
+        dataset : `str`
+           Name of the catalog dataset to be read in
+        ccdKey : `str`
+           The key name associated with a ccd
+        hscRun : `NoneType` or `str`, optional
+           If the processing was done with an HSC stack (now obsolete, but processing runs still exist),
+           contains the value of the fits card HSCPIPE_VERSION for the given repository (the default is None)
+
+        Raises
+        ------
+        `TaskError`
+           If no data is read in for the dataRefList
+
+        Returns
+        -------
+        `list` of concatenated updated and calibrated `lsst.afw.table.source.source.SourceCatalog`s
+        """
         catList = []
         commonZpCatList = []
         self.haveFpCoords = True
@@ -329,6 +361,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
             butler = dataRef.getButler()
             metadata = butler.get("calexp_md", dataRef.dataId)
+
+            # Add ccdId column (useful to have in Parquet tables for subsequent interactive analysis)
+            catalog = addCcdColumn(catalog, dataRef.dataId[ccdKey])
 
             # Compute Focal Plane coordinates for each source if not already there
             if self.config.doPlotCentroids or self.config.doPlotFP and self.haveFpCoords:
