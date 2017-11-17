@@ -34,21 +34,25 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "e1ResidsHsm", "e2ResidsHsm", "FootNpixDiffCompare", "MagDiffErr", "ApCorrDiffErr", "CentroidDiff",
            "CentroidDiffErr", "deconvMom", "deconvMomStarGal", "concatenateCatalogs", "joinMatches",
            "checkIdLists", "checkPatchOverlap", "joinCatalogs", "getFluxKeys", "addColumnsToSchema",
-           "addApertureFluxesHSC", "addFpPoint", "addFootprintNPix", "addRotPoint",
-           "calibrateSourceCatalogMosaic", "calibrateSourceCatalog", "calibrateCoaddSourceCatalog",
-           "backoutApCorr", "matchJanskyToDn", "checkHscStack", "fluxToPlotString", "andCatalog",
-           "writeParquet", "getRepoInfo", "findCcdKey", "getCcdNameRefList", "getDataExistsRefList"]
+           "addApertureFluxesHSC", "addFpPoint", "addFootprintNPix", "addRotPoint", "makeBadArray",
+           "addQaBadFlag", "addCcdColumn", "addPatchColumn", "calibrateSourceCatalogMosaic",
+           "calibrateSourceCatalog", "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn",
+           "checkHscStack", "fluxToPlotString", "andCatalog", "writeParquet", "getRepoInfo", "findCcdKey",
+           "getCcdNameRefList", "getDataExistsRefList"]
 
-def writeParquet(table, path):
+def writeParquet(table, path, badArray=None):
     """
     Write an afwTable into Parquet format
 
     Parameters
     ----------
     table : `lsst.afw.table.source.source.SourceCatalog`
-        Table to be written to parquet
+       Table to be written to parquet
     path : `str`
-        Path to which to write.  Must end in ".parq".
+       Path to which to write.  Must end in ".parq".
+    badArray : `numpy.ndarray`, optional
+       Boolean array with same length as catalog whose values indicate wether the source was deemed
+       innapropriate for qa analyses
 
     Returns
     -------
@@ -67,9 +71,13 @@ def writeParquet(table, path):
 
     if not path.endswith('.parq'):
         raise ValueError('Please provide a filename ending in .parq.')
+
+    if badArray is not None:
+        table = addQaBadFlag(table, badArray)  # add flag indicating source "badness" for qa analyses
     df = table.asAstropy().to_pandas()
     df = df.set_index('id', drop=True)
     fastparquet.write(path, df)
+
 
 class Filenamer(object):
     """Callable that provides a filename given a style"""
@@ -625,7 +633,7 @@ def addApertureFluxesHSC(catalog, prefix=""):
 
 def addFpPoint(det, catalog, prefix=""):
     # Compute Focal Plane coordinates for SdssCentroid of each source and add to schema
-    mapper = afwTable.SchemaMapper(catalog[0].schema)
+    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
     schema = mapper.getOutputSchema()
     fpName = prefix + "base_FPPosition"
@@ -649,16 +657,11 @@ def addFpPoint(det, catalog, prefix=""):
             row.set(fpFlag, True)
         row.set(fpxKey, fpPoint[0])
         row.set(fpyKey, fpPoint[1])
-
-    aliases = newCatalog.schema.getAliasMap()
-    for k, v in catalog[0].schema.getAliasMap().items():
-        aliases.set(k, v)
-
     return newCatalog
 
 def addFootprintNPix(catalog, fromCat=None, prefix=""):
     # Retrieve the number of pixels in an sources footprint and add to schema
-    mapper = afwTable.SchemaMapper(catalog[0].schema)
+    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
     schema = mapper.getOutputSchema()
     fpName = prefix + "base_Footprint_nPix"
@@ -681,11 +684,6 @@ def addFootprintNPix(catalog, fromCat=None, prefix=""):
             footNpix = 0 # used to be np.nan, but didn't work.
             row.set(fpFlag, True)
         row.set(fpKey, footNpix)
-
-    aliases = newCatalog.schema.getAliasMap()
-    for k, v in catalog[0].schema.getAliasMap().items():
-        aliases.set(k, v)
-
     return newCatalog
 
 def rotatePixelCoord(s, width, height, nQuarter):
@@ -708,7 +706,7 @@ def rotatePixelCoord(s, width, height, nQuarter):
 
 def addRotPoint(catalog, width, height, nQuarter, prefix=""):
     # Compute rotated CCD pixel coords for comparing LSST vs HSC run centroids
-    mapper = afwTable.SchemaMapper(catalog[0].schema)
+    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
     schema = mapper.getOutputSchema()
     rotName = prefix + "base_SdssCentroid_Rot"
@@ -729,9 +727,163 @@ def addRotPoint(catalog, width, height, nQuarter, prefix=""):
         row.set(rotxKey, rotPoint[0])
         row.set(rotyKey, rotPoint[1])
 
-    aliases = newCatalog.schema.getAliasMap()
-    for k, v in catalog[0].schema.getAliasMap().items():
-        aliases.set(k, v)
+    return newCatalog
+
+def makeBadArray(catalog, flagList=[], onlyReadStars=False):
+    """Create a boolean array indicating sources deemed unsuitable for qa analyses
+
+    Sets value to True for unisolated objects (deblend_nChild > 0) and any of the flags listed
+    in self.config.analysis.flags.  If self.config.onlyReadStars is True, sets boolean as True
+    for all galaxies classified as extended (base_ClassificationExtendedness_value > 0.5).
+
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.source.source.SourceCatalog`
+       The source catalog under consideration
+    flagList : `list`
+       The list of flags for which, if any is set for a given source, set bad entry to True for
+       that source
+
+    Returns
+    -------
+    badArray : `numpy.ndarray`
+       Boolean array with same length as catalog whose values indicate wether the source was deemed
+       innapropriate for qa analyses
+    """
+    bad = np.zeros(len(catalog), dtype=bool)
+    bad |= catalog["deblend_nChild"] > 0  # Exclude non-deblended (i.e parents)
+    for flag in flagList:
+        bad |= catalog[flag]
+    if onlyReadStars and "base_ClassificationExtendedness_value" in catalog.schema:
+        bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
+    return bad
+
+def addQaBadFlag(catalog, badArray):
+    """Add a flag for any sources deemed not appropriate for qa analyses
+
+    This flag is being added for the benefit of the Parquet files being written to disk
+    for subsequent interactive QA analysis.
+
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.source.source.SourceCatalog`
+       Source catalog to which flag will be added.
+    badArray : `numpy.ndarray`
+       Boolean array with same length as catalog whose values indicate wether the source was deemed
+       innapropriate for qa analyses.
+
+    Raises
+    ------
+    `RuntimeError`
+       If lengths of catalog and badArray are not equal.
+
+    Returns
+    -------
+    newCatalog : `lsst.afw.table.source.source.SourceCatalog`
+       Source catalog with badQaFlag column added.
+
+
+    """
+    if len(catalog) != len(badArray):
+        raise RuntimeError('Lengths of catalog and bad objects array do not match.')
+
+    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
+    mapper.addMinimalSchema(catalog[0].schema)
+    schema = mapper.getOutputSchema()
+    qaBadFlag = schema.addField("qaBad_flag", type="Flag", doc="Set to True for any source deemed bad for qa")
+    newCatalog = afwTable.SourceCatalog(schema)
+    newCatalog.reserve(len(catalog))
+
+    for i, src in enumerate(catalog):
+        row = newCatalog.addNew()
+        row.assign(src, mapper)
+        row.set(qaBadFlag, bool(badArray[i]))
+    return newCatalog
+
+def addCcdColumn(catalog, ccd):
+    """Add a column indicating the ccd number of the calexp on which the source was detected
+
+    This column is being added for the benefit of the Parquet files being written to disk the
+    subsequent interactive QA analysis.
+
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.source.source.SourceCatalog`
+       Source catalog to which ccd column will be added.
+    ccd : `int` or `str`
+       The ccd id for the catalog.
+
+    Raises
+    ------
+    `RuntimeError`
+       If ccd type is not int or str (not yet accommodated).
+
+    Returns
+    -------
+    newCatalog : `lsst.afw.table.source.source.SourceCatalog`
+       Source catalog with ccd column added.
+    """
+    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
+    mapper.addMinimalSchema(catalog[0].schema)
+    schema = mapper.getOutputSchema()
+    fieldName = "ccdId"
+    fieldDoc = "Id of CCD on which source was detected"
+
+    if type(ccd) is int:
+        ccdKey = schema.addField(fieldName, type="I", doc=fieldDoc)
+    elif type(ccd) is str:
+        ccdKey = schema.addField(fieldName, type=str, size=len(ccd), doc=fieldDoc)
+    else:
+        raise RuntimeError(("Have only accommdated str or int ccd types.  Type provided was: {}").
+                           format(type(ccd)))
+
+    newCatalog = afwTable.SourceCatalog(schema)
+    newCatalog.reserve(len(catalog))
+
+    for src in catalog:
+        row = newCatalog.addNew()
+        row.assign(src, mapper)
+        row.set(ccdKey, ccd)
+    return newCatalog
+
+def addPatchColumn(catalog, patch):
+    """Add a column indicating the patch number of the coadd on which the source was detected
+
+    This column is being added for the benefit of the Parquet files being written to disk the
+    subsequent interactive QA analysis.
+
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.source.source.SourceCatalog`
+       Source catalog to which patch column will be added.
+    patch : `str`
+       The patch id for the catalog
+
+    Raises
+    ------
+    `RuntimeError`
+       If patch type is not str
+
+    Returns
+    -------
+    newCatalog : `lsst.afw.table.source.source.SourceCatalog`
+       Source catalog with patch column added.
+    """
+    if type(patch) is not str:
+        raise RuntimeError(("Have only accommdated str patch type.  Type provided was: {}").
+                           format(type(patch)))
+    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
+    mapper.addMinimalSchema(catalog[0].schema)
+    schema = mapper.getOutputSchema()
+    patchKey = schema.addField("patchId", type=str, size=len(patch), doc="Patch on which source was detected")
+
+    newCatalog = afwTable.SourceCatalog(schema)
+    newCatalog.reserve(len(catalog))
+
+    for src in catalog:
+        row = newCatalog.addNew()
+        row.assign(src, mapper)
+        row.set(patchKey, patch)
     return newCatalog
 
 def calibrateSourceCatalogMosaic(dataRef, catalog, fluxKeys=None, errKeys=None, zp=27.0):

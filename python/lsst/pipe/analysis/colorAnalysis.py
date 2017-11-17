@@ -124,12 +124,22 @@ class ColorAnalysisConfig(Config):
     srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
                              doc="Mapping between different stack (e.g. HSC vs. LSST) schema names")
     toMilli = Field(dtype=bool, default=True, doc="Print stats in milli units (i.e. mas, mmag)?")
+    writeParquetOnly = Field(dtype=bool, default=False,
+                             doc="Only write out Parquet tables (i.e. do not produce any plots)?")
+    doWriteParquetTables = Field(dtype=bool, default=True,
+                                 doc=("Write out Parquet tables (for subsequent interactive analysis)?"
+                                      "\nNOTE: if True but fastparquet package is unavailable, a warning is "
+                                      "issued and table writing is skipped."))
 
     def setDefaults(self):
         Config.setDefaults(self)
         self.transforms = ivezicTransforms
         self.analysis.flags = []  # We remove bad source ourself
 
+    def validate(self):
+        Config.validate(self)
+        if self.writeParquetOnly and not self.doWriteParquetTables:
+            raise ValueError("Cannot writeParquetOnly if doWriteParquetTables is False")
 
 class ColorAnalysisRunner(TaskRunner):
     @staticmethod
@@ -209,8 +219,12 @@ class ColorAnalysisTask(CmdLineTask):
                                         flagsCats=unforcedCatalogsByFilter, hscRun=repoInfo.hscRun)
 
         # Create and write parquet tables
-        tableFilenamer = Filenamer(repoInfo.butler, 'qaTableColor', repoInfo.dataId)
-        writeParquet(forced, tableFilenamer(repoInfo.dataId, description='forced'))
+        if self.config.doWriteParquetTables:
+            tableFilenamer = Filenamer(repoInfo.butler, 'qaTableColor', repoInfo.dataId)
+            writeParquet(forced, tableFilenamer(repoInfo.dataId, description='forced'))
+            if self.config.writeParquetOnly:
+                self.log.info("Exiting after writing Parquet tables.  No plots generated.")
+                return
 
         self.plotStarColors(forced, filenamer, NumStarLabeller(len(forcedCatalogsByFilter)), repoInfo.dataId,
                             camera=repoInfo.camera, tractInfo=repoInfo.tractInfo, patchList=patchList,
@@ -219,8 +233,36 @@ class ColorAnalysisTask(CmdLineTask):
                                 tractInfo=repoInfo.tractInfo, patchList=patchList, hscRun=repoInfo.hscRun)
 
     def readCatalogs(self, patchRefList, dataset):
-        catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS) for
-                   patchRef in patchRefList if patchRef.datasetExists(dataset)]
+        """Read in and concatenate catalogs of type dataset in lists of data references
+
+        Before appending each catalog to a single list, an extra column indicating the
+        patch is added to the catalog.  This is useful for the subsequent interactive
+        QA analysis.
+
+        Parameters
+        ----------
+        patchRefList : `list` of `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+           A list of butler data references whose catalogs of dataset type are to be read in
+        dataset : `str`
+           Name of the catalog dataset to be read in
+
+        Raises
+        ------
+        `TaskError`
+           If no data is read in for the dataRefList
+
+        Returns
+        -------
+        `list` of concatenated `lsst.afw.table.source.source.SourceCatalog`s
+        """
+        catList = []
+        for patchRef in patchRefList:
+            if patchRef.datasetExists(dataset):
+                cat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+                cat = addPatchColumn(cat, patchRef.dataId["patch"])
+                catList.append(cat)
+        if len(catList) == 0:
+            raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
         return concatenateCatalogs(catList)
 
     def transformCatalogs(self, catalogs, transforms, flagsCats=None, hscRun=None):
@@ -233,7 +275,7 @@ class ColorAnalysisTask(CmdLineTask):
         if flagsCats is None:
             flagsCats = catalogs
 
-        template = catalogs.values()[0]
+        template = list(catalogs.values())[0]
         num = len(template)
         assert all(len(cat) == num for cat in catalogs.values())
 
@@ -259,7 +301,7 @@ class ColorAnalysisTask(CmdLineTask):
             if doAdd:
                 schema.addField(col, float, transforms[col].description + transforms[col].subDescription)
         schema.addField("numStarFlags", type=np.int32, doc="Number of times source was flagged as star")
-        badKey = schema.addField("bad", type="Flag", doc="Is this a bad source?")
+        badKey = schema.addField("qaBad_flag", type="Flag", doc="Is this a bad source for color qa analyses?")
         schema.addField(self.fluxColumn, type=np.float64, doc="Flux from filter " + self.config.fluxFilter)
 
         # Copy basics (id, RA, Dec)
@@ -338,13 +380,14 @@ class ColorAnalysisTask(CmdLineTask):
             self.AnalysisClass(catalog, ColorValueInRange(col, transform.requireGreater,
                                                           transform.requireLess, unitScale=self.unitScale),
                                "%s (%s)" % (col + transform.subDescription, unitStr), shortName,
-                               self.config.analysis, flags=["bad"], labeller=labeller, qMin=-0.2, qMax=0.2,
+                               self.config.analysis, flags=["qaBad_flag"], labeller=labeller,
+                               qMin=-0.2, qMax=0.2,
                                ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
 
     def plotStarColorColor(self, catalogs, filenamer, dataId, butler=None, camera=None, tractInfo=None,
                            patchList=None, hscRun=None):
-        num = len(catalogs.values()[0])
+        num = len(list(catalogs.values())[0])
         zp = 0.0
         mags = {ff: zp - 2.5*np.log10(catalogs[ff][self.fluxColumn]) for ff in catalogs}
 
@@ -393,7 +436,7 @@ class ColorAnalysisTask(CmdLineTask):
             shortName = "gri"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, 0.3, 1.1), "griPerp",
-                               shortName, self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
+                               shortName, self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.05}}), camera=camera,
@@ -415,7 +458,7 @@ class ColorAnalysisTask(CmdLineTask):
             shortName = "riz"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly), "rizPerp", shortName,
-                               self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
+                               self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
@@ -428,7 +471,7 @@ class ColorAnalysisTask(CmdLineTask):
             shortName = "izy"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly), "izyPerp", shortName,
-                               self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
+                               self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
@@ -443,7 +486,7 @@ class ColorAnalysisTask(CmdLineTask):
             shortName = "z9y"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly), "z9yPerp", shortName,
-                               self.config.analysis, flags=["bad"], qMin=-0.1, qMax=0.1,
+                               self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
@@ -533,12 +576,17 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=
     distance *= unitScale
     q1, median, q3 = np.percentile(distance, [25, 50, 75])
     good = np.logical_not(np.abs(distance - median) > 3.0*0.74*(q3 - q1))
-    log.info(("Statistics from {0:s} of Distance to polynomial ({9:s}): {7:s}\'star\': " +
+    log.info(("Statistics from {0:} of Distance to polynomial ({9:s}): {7:s}\'star\': " +
               "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; " +
               "median={5:.4f}; clip={6:.4f}; forcedMean=None){8:s}").format(
             dataId, distance[good].mean(), distance[good].std(), len(xx[keep]), len(xx),
             np.median(distance[good]), 3.0*0.74*(q3 - q1), "{", "}", unitStr))
-    log.info("Polynomial fit: {:2}".format(polyStr.translate(None, "${}")))
+    # The following is a Python 2 vs Python 3 issue
+    try:
+        log.info("Polynomial fit: {:2}".format(polyStr.translate(None, "${}")))
+    except:
+        translationTable = dict.fromkeys(map(ord, "${}"), None)
+        log.info("Polynomial fit: {:2}".format(polyStr.translate(translationTable)))
     meanStr = "mean = {0:5.2f} ({1:s})".format(distance[good].mean(), unitStr)
     stdStr = "  std = {0:5.2f} ({1:s})".format(distance[good].std(), unitStr)
     tractStr = "tract: {:d}".format(dataId["tract"])
