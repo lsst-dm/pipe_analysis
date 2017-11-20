@@ -694,7 +694,9 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             if self.config.doPlotMags:
                 self.plotMags(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
                               camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=repoInfo2.hscRun,
-                              matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                              matchRadius=self.config.matchRadius, zpLabel=self.zpLabel,
+                              highlightList=[("first_calib_psfUsed", 0, "yellow"),
+                                             ("second_calib_psfUsed", 0, "green")])
             if self.config.doPlotSizes:
                 if ("first_base_SdssShape_psf_xx" in catalog.schema and
                     "second_base_SdssShape_psf_xx" in catalog.schema):

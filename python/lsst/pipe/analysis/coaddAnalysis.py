@@ -1064,7 +1064,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             self.plotMags(forced, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
                           camera=repoInfo1.camera, tractInfo=repoInfo1.tractInfo, patchList=patchList1,
                           hscRun=hscRun, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel,
-                          forcedStr=forcedStr)
+                          forcedStr=forcedStr, highlightList=[("first_calib_psfUsed", 0, "yellow"),
+                                                              ("second_calib_psfUsed", 0, "green")])
         if self.config.doPlotCentroids:
             self.plotCentroids(forced, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
                                camera=repoInfo1.camera, tractInfo=repoInfo1.tractInfo, patchList=patchList1,
@@ -1116,7 +1117,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                          labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat, unitScale=self.unitScale,
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
-                                   hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
+                                   hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
+                                   highlightList=highlightList)
 
     def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                       tractInfo=None, patchList=None, hscRun1=None, hscRun2=None, matchRadius=None,

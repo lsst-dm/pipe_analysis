@@ -315,13 +315,13 @@ class Analysis(object):
                     highlightSelection = data.catalog[flag] > threshValue
                     if name == "star":
                         dataPoints.append(axScatter.scatter(
-                                data.mag[highlightSelection], data.quantity[highlightSelection], s=ptSize,
-                                marker="o", lw=0.75, facecolors="none", edgecolors=color, label=flag,
-                                alpha=alpha))
+                                data.mag[highlightSelection], data.quantity[highlightSelection],
+                                s=1.2*ptSize, marker="o", lw=0.7, facecolors="none", edgecolors=color,
+                                label=flag, alpha=alpha))
                     else:
                         axScatter.scatter(
-                            data.mag[highlightSelection], data.quantity[highlightSelection], s=ptSize,
-                            marker="o", lw=0.75, facecolors="none", edgecolors=color, label=flag, alpha=alpha)
+                            data.mag[highlightSelection], data.quantity[highlightSelection], s=1.2*ptSize,
+                            marker="o", lw=0.7, facecolors="none", edgecolors=color, label=flag, alpha=alpha)
 
             axHistx.hist(data.mag, bins=xBins, color=histColor, alpha=0.6, label=name)
             axHisty.hist(data.quantity, bins=yBins, color=histColor, alpha=0.6, orientation="horizontal",
@@ -418,7 +418,7 @@ class Analysis(object):
 
     def plotSkyPosition(self, filename, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
                         camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
-                        matchRadius=None, zpLabel=None, forcedStr=None, dataName="star"):
+                        matchRadius=None, zpLabel=None, highlightList=None, forcedStr=None, dataName="star"):
         """Plot quantity as a function of position"""
         pad = 0.02 # Number of degrees to pad the axis ranges
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
@@ -498,6 +498,20 @@ class Analysis(object):
             axes.scatter(ra[selection], dec[selection], s=ptSize, marker="o", lw=0, label=name,
                          c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax)
 
+            if highlightList is not None:
+                alpha = 1.0
+                for flag, threshValue, color in highlightList:
+                    color = "magenta" if color == "yellow" else "black"
+                    highlightSelection = (self.catalog[flag] > threshValue) & selection
+                    if name == "star":
+                        axes.scatter(ra[highlightSelection], dec[highlightSelection], s=0.4*ptSize,
+                                     marker=".", facecolors=color, edgecolors="none", label=flag,
+                                     alpha=alpha)
+                    else:
+                        axes.scatter(ra[highlightSelection], dec[highlightSelection], s=0.4*ptSize,
+                                     marker=".", facecolors=color, edgecolors="none", label=flag,
+                                     alpha=alpha)
+
         if stats0 is None:  # No data to plot
             return
         axes.set_xlabel("RA (deg)")
@@ -521,7 +535,10 @@ class Analysis(object):
             plotText(zpLabel, plt, axes, 0.13, -0.09, prefix="zp: ", color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
-        axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
+        if highlightList is not None:
+            axes.legend(loc='upper left', bbox_to_anchor=(-0.05, 1.15), fancybox=True, shadow=True, fontsize=7)
+        else:
+            axes.legend(loc='upper left', bbox_to_anchor=(-0.02, 1.08), fancybox=True, shadow=True, fontsize=9)
 
         meanStr = "{0.mean:.4f}".format(stats0)
         stdevStr = "{0.stdev:.4f}".format(stats0)
@@ -728,7 +745,8 @@ class Analysis(object):
         self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky-stars" + postFix),
                              stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,
                              tractInfo=tractInfo, patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                             zpLabel=zpLabel, forcedStr=forcedStr, dataName="star")
+                             zpLabel=zpLabel, highlightList=highlightList, forcedStr=forcedStr,
+                             dataName="star")
 
         if (not any(ss in self.shortName for ss in
                     ["pStar", "race", "Xx_", "Yy_", "Resids", "psfUsed", "photometryUsed",
