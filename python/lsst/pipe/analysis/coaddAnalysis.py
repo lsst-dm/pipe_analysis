@@ -914,6 +914,9 @@ class CompareCoaddAnalysisConfig(CoaddAnalysisConfig):
     def setDefaults(self):
         CoaddAnalysisConfig.setDefaults(self)
         self.matchRadius = 0.2
+        if "base_PsfFlux" not in self.fluxToPlotList:
+            self.fluxToPlotList.append("base_PsfFlux")  # Add PSF flux to default list for comparison scripts
+
 
 class CompareCoaddAnalysisRunner(TaskRunner):
     @staticmethod
