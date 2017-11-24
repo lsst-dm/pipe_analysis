@@ -31,13 +31,14 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "psfSdssTraceSizeDiff", "psfHsmTraceSizeDiff", "sdssTraceSizeCompare", "sdssXxCompare",
            "sdssYyCompare", "hsmTraceSizeCompare", "hsmMomentsXxCompare", "hsmMomentsYyCompare",
            "sdssPsfTraceSizeCompare", "hsmPsfTraceSizeCompare", "e1ResidsSdss", "e2ResidsSdss",
-           "e1ResidsHsm", "e2ResidsHsm", "FootNpixDiffCompare", "MagDiffErr", "ApCorrDiffErr", "CentroidDiff",
-           "CentroidDiffErr", "deconvMom", "deconvMomStarGal", "concatenateCatalogs", "joinMatches",
-           "checkIdLists", "checkPatchOverlap", "joinCatalogs", "getFluxKeys", "addColumnsToSchema",
-           "addApertureFluxesHSC", "addFpPoint", "addFootprintNPix", "addRotPoint", "makeBadArray",
-           "addQaBadFlag", "addCcdColumn", "addPatchColumn", "calibrateSourceCatalogMosaic",
-           "calibrateSourceCatalog", "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn",
-           "checkHscStack", "fluxToPlotString", "andCatalog", "writeParquet", "getRepoInfo", "findCcdKey",
+           "e1ResidsHsm", "e2ResidsHsm", "e1ResidsHsmRegauss", "e2ResidsHsmRegauss", "FootNpixDiffCompare",
+           "MagDiffErr", "ApCorrDiffErr", "CentroidDiff", "CentroidDiffErr", "deconvMom",
+           "deconvMomStarGal", "concatenateCatalogs", "joinMatches", "checkIdLists", "checkPatchOverlap",
+           "joinCatalogs", "getFluxKeys", "addColumnsToSchema", "addApertureFluxesHSC", "addFpPoint",
+           "addFootprintNPix", "addRotPoint", "makeBadArray", "addQaBadFlag", "addCcdColumn",
+           "addPatchColumn", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
+           "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
+           "fluxToPlotString", "andCatalog", "writeParquet", "getRepoInfo", "findCcdKey",
            "getCcdNameRefList", "getDataExistsRefList"]
 
 def writeParquet(table, path, badArray=None):
@@ -357,6 +358,30 @@ class e2ResidsHsm(object):
     def __call__(self, catalog):
         srcE2 = (2.0*catalog["ext_shapeHSM_HsmSourceMoments_xy"]/
                  (catalog["ext_shapeHSM_HsmSourceMoments_xx"] + catalog["ext_shapeHSM_HsmSourceMoments_yy"]))
+        psfE2 = (2.0*catalog["ext_shapeHSM_HsmPsfMoments_xy"]/
+                 (catalog["ext_shapeHSM_HsmPsfMoments_xx"] + catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
+        e2Resids = srcE2 - psfE2
+        return np.array(e2Resids)*self.unitScale
+
+
+class e1ResidsHsmRegauss(object):
+    """Functor to calculate HSM e1 ellipticity residuals for a given object and psf model"""
+    def __init__(self, unitScale=1.0):
+        self.unitScale = unitScale
+    def __call__(self, catalog):
+        srcE1 = catalog["ext_shapeHSM_HsmShapeRegauss_e1"]
+        psfE1 = ((catalog["ext_shapeHSM_HsmPsfMoments_xx"] - catalog["ext_shapeHSM_HsmPsfMoments_yy"])/
+                 (catalog["ext_shapeHSM_HsmPsfMoments_xx"] + catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
+        e1Resids = srcE1 - psfE1
+        return np.array(e1Resids)*self.unitScale
+
+
+class e2ResidsHsmRegauss(object):
+    """Functor to calculate HSM e1 ellipticity residuals for a given object and psf model"""
+    def __init__(self, unitScale=1.0):
+        self.unitScale = unitScale
+    def __call__(self, catalog):
+        srcE2 = catalog["ext_shapeHSM_HsmShapeRegauss_e2"]
         psfE2 = (2.0*catalog["ext_shapeHSM_HsmPsfMoments_xy"]/
                  (catalog["ext_shapeHSM_HsmPsfMoments_xx"] + catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
         e2Resids = srcE2 - psfE2

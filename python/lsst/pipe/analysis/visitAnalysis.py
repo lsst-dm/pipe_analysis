@@ -711,9 +711,15 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                  matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
             if self.config.doPlotCentroids:
                 self.plotCentroids(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
-                                   camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun1=repoInfo1.hscRun,
-                                   hscRun2=repoInfo2.hscRun, matchRadius=self.config.matchRadius,
-                                   zpLabel=self.zpLabel)
+                                   camera=repoInfo1.camera, ccdList=ccdListPerTract1,
+                                   hscRun1=repoInfo1.hscRun, hscRun2=repoInfo2.hscRun,
+                                   matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+            if self.config.doPlotStarGalaxy:
+                self.plotStarGal(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
+                                 camera=repoInfo1.camera,  ccdList=ccdListPerTract1,
+                                 hscRun1=repoInfo1.hscRun, hscRun2=repoInfo2.hscRun,
+                                 matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+
 
     def readCatalogs(self, dataRefList1, dataRefList2, dataset, hscRun1=None, hscRun2=None,
                      doReadFootprints=None):
