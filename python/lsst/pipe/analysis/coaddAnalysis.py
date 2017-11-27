@@ -71,6 +71,19 @@ class CoaddAnalysisConfig(Config):
     fluxToPlotList = ListField(dtype=str, default=["base_GaussianFlux", "ext_photometryKron_KronFlux",
                                                    "modelfit_CModel"],
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(base_PsfFlux)")
+    columnsToCopy = ListField(dtype=str,
+                              default=["base_SdssShape_flag", "base_SdssShape_xx", "base_SdssShape_yy",
+                                       "base_SdssShape_xy", "base_SdssShape_psf_xx", "base_SdssShape_psf_yy",
+                                       "base_SdssShape_psf_xy", "ext_shapeHSM_HsmSourceMoments_xx",
+                                       "ext_shapeHSM_HsmSourceMoments_yy", "ext_shapeHSM_HsmSourceMoments_xy",
+                                       "ext_shapeHSM_HsmPsfMoments_xx", "ext_shapeHSM_HsmPsfMoments_yy",
+                                       "ext_shapeHSM_HsmPsfMoments_xy",
+                                       "ext_shapeHSM_HsmShapeRegauss_resolution",
+                                       "ext_shapeHSM_HsmShapeRegauss_e1", "ext_shapeHSM_HsmShapeRegauss_e2",
+                                       "ext_shapeHSM_HsmShapeRegauss_flag", "deblend_nChild", "calib_psfUsed",
+                                       "calib_psfCandidate", "base_ClassificationExtendedness_value",
+                                       "base_ClassificationExtendedness_flag"],
+                              doc="List of columns to copy from one source catalog to another.")
     doWriteParquetTables = Field(dtype=bool, default=True,
                                  doc=("Write out Parquet tables (for subsequent interactive analysis)?"
                                       "\nNOTE: if True but fastparquet package is unavailable, a warning is "
@@ -170,18 +183,11 @@ class CoaddAnalysisTask(CmdLineTask):
 
         if haveForced:
             # copy over some fields from unforced to forced catalog
-            flagsToCopy = ["base_SdssShape_flag", "base_SdssShape_xx", "base_SdssShape_yy",
-                           "base_SdssShape_xy", "base_SdssShape_psf_xx", "base_SdssShape_psf_yy",
-                           "base_SdssShape_psf_xy", "ext_shapeHSM_HsmSourceMoments_xx",
-                           "ext_shapeHSM_HsmSourceMoments_yy", "ext_shapeHSM_HsmSourceMoments_xy",
-                           "ext_shapeHSM_HsmPsfMoments_xx", "ext_shapeHSM_HsmPsfMoments_yy",
-                           "ext_shapeHSM_HsmPsfMoments_xy", "deblend_nChild", "calib_psfUsed",
-                           "calib_psfCandidate", "base_ClassificationExtendedness_value",
-                           "base_ClassificationExtendedness_flag"]
             forced = addColumnsToSchema(unforced, forced,
-                                        [flag for flag in flagsToCopy + list(self.config.analysis.flags) if
-                                         flag not in forced.schema and flag in unforced.schema and
-                                         not (repoInfo.hscRun and flag == "slot_Centroid_flag")])
+                                        [col for col in list(self.config.columnsToCopy) +
+                                         list(self.config.analysis.flags) if
+                                         col not in forced.schema and col in unforced.schema and
+                                         not (repoInfo.hscRun and col == "slot_Centroid_flag")])
         forcedStr = "forced" if haveForced else "unforced"
 
         if self.config.doPlotFootprintNpix:
@@ -341,17 +347,17 @@ class CoaddAnalysisTask(CmdLineTask):
 
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
-            flagsToCopy = ["deblend_nChild", "calib_psfUsed", "calib_psfCandidate",
-                           "base_ClassificationExtendedness_value", "base_ClassificationExtendedness_flag"]
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-            if dataset != "deepCoadd_meas" and any(ss not in catalog.schema for ss in flagsToCopy):
+            if dataset != "deepCoadd_meas" and any(ss not in catalog.schema
+                                                   for ss in self.config.columnsToCopy):
                 unforced = dataRef.get("deepCoadd_meas", immediate=True,
                                        flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
                 # copy over some fields from unforced to forced catalog
                 catalog = addColumnsToSchema(unforced, catalog,
-                                        [flag for flag in flagsToCopy + list(self.config.analysis.flags) if
-                                         flag not in catalog.schema and flag in unforced.schema and
-                                         not (hscRun and flag == "slot_Centroid_flag")])
+                                        [col for col in list(self.config.columnsToCopy) +
+                                         list(self.config.analysis.flags) if
+                                         col not in catalog.schema and col in unforced.schema and
+                                         not (hscRun and col == "slot_Centroid_flag")])
 
             catalog = self.calibrateCatalogs(catalog, wcs=wcs)
 
@@ -1009,6 +1015,19 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                         else:
                             self.log.warn("Could not find base_SdssCentroid (or equivalent) flags")
         forcedStr = "forced" if haveForced else "unforced"
+
+        if haveForced:
+            # copy over some fields from unforced to forced catalog
+            forced1 = addColumnsToSchema(unforced1, forced1,
+                                         [col for col in list(self.config.columnsToCopy) +
+                                          list(self.config.analysis.flags) if
+                                          col not in forced1.schema and col in unforced1.schema and
+                                          not (repoInfo1.hscRun and col == "slot_Centroid_flag")])
+            forced2 = addColumnsToSchema(unforced2, forced2,
+                                         [col for col in list(self.config.columnsToCopy) +
+                                          list(self.config.analysis.flags) if
+                                          col not in forced2.schema and col in unforced2.schema and
+                                          not (repoInfo2.hscRun and col == "slot_Centroid_flag")])
 
         # Set boolean array indicating sources deemed unsuitable for qa analyses
         self.catLabel = "nChild = 0"
