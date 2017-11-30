@@ -754,7 +754,7 @@ class Analysis(object):
                              dataName="star")
 
         if (not any(ss in self.shortName for ss in
-                    ["pStar", "race", "Xx_", "Yy_", "Resids", "psfUsed", "photometryUsed",
+                    ["pStar", "race", "Xx", "Yy", "Resids", "psfUsed", "photometryUsed",
                      "gri", "riz", "izy", "z9y", "color_"])):
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky-gals" + postFix),
                                  stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,
