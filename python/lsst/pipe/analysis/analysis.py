@@ -673,9 +673,17 @@ class Analysis(object):
                     decMax = max(np.round(max(decPatch) + pad, 2), decMax)
             plotPatchOutline(axes, tractInfo, patchList)
 
-        e1 = e1ResidsSdss()
+        if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+            compareCol = "ext_shapeHSM_HsmSourceMoments"
+            psfCompareCol = "ext_shapeHSM_HsmPsfMoments"
+            shapeAlgorithm = "HSM"
+        else:
+            compareCol = "base_SdssShape"
+            psfCompareCol = "base_SdssShape_psf"
+            shapeAlgorithm = "SDSS"
+        e1 = e1Resids(compareCol, psfCompareCol)
         e1 = e1(catalog)
-        e2 = e2ResidsSdss()
+        e2 = e2Resids(compareCol, psfCompareCol)
         e2 = e2(catalog)
         e = np.sqrt(e1**2 +e2**2)
 
@@ -701,17 +709,16 @@ class Analysis(object):
 
         x0 = 0.86
         lenStr = 0.1 + 0.022*(max(max(len(meanStr), len(stdevStr)) - 6, 0))
-        axes.annotate("mean = ", xy=(x0, 1.08),
-                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
-        axes.annotate(meanStr, xy=(x0 + lenStr, 1.08),
-                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
-        axes.annotate("stdev = ", xy=(x0, 1.035),
-                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
-        axes.annotate(stdevStr,  xy=(x0 + lenStr, 1.035),
-                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
-        axes.annotate(r"N = {0}".format(stats0.num),
-                      xy=(x0 + lenStr + 0.02, 1.035),
-                      xycoords="axes fraction", ha="left", va="center", fontsize=8)
+        axes.annotate("mean = ", xy=(x0, 1.08), xycoords="axes fraction",
+                      ha="right", va="center", fontsize=8)
+        axes.annotate(meanStr, xy=(x0 + lenStr, 1.08), xycoords="axes fraction",
+                      ha="right", va="center", fontsize=8)
+        axes.annotate("stdev = ", xy=(x0, 1.035), xycoords="axes fraction",
+                      ha="right", va="center", fontsize=8)
+        axes.annotate(stdevStr,  xy=(x0 + lenStr, 1.035), xycoords="axes fraction",
+                      ha="right", va="center", fontsize=8)
+        axes.annotate(r"N = {0}".format(stats0.num), xy=(x0 + lenStr + 0.02, 1.035), xycoords="axes fraction",
+                      ha="left", va="center", fontsize=8)
 
         if hscRun is not None:
             axes.set_title("HSC stack run: " + hscRun, color="#800080")
@@ -720,8 +727,9 @@ class Analysis(object):
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
             plotText(zpLabel, plt, axes, 0.13, -0.1, prefix="zp: ", color="green")
+        plotText(shapeAlgorithm, plt, axes, 0.74, -0.1, prefix="Shape Alg: ", fontSize=8, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes, 0.85, -0.1, prefix="cat: ", color="green")
+            plotText(forcedStr, plt, axes, 0.97, -0.1, prefix="cat: ", fontSize=8, color="green")
         axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
 
         fig.savefig(filename)
