@@ -965,6 +965,7 @@ def fluxToPlotString(fluxToPlot):
     """Return a more succint string for fluxes for label plotting
     """
     fluxStrMap = {"base_PsfFlux_flux": "PSF",
+                  "base_PsfFlux": "PSF",
                   "base_GaussianFlux": "Gaussian",
                   "ext_photometryKron_KronFlux": "Kron",
                   "modelfit_CModel": "CModel",

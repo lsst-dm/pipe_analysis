@@ -521,6 +521,8 @@ class CompareVisitAnalysisConfig(VisitAnalysisConfig):
         VisitAnalysisConfig.setDefaults(self)
         # Use a tighter match radius for comparing runs: they are calibrated and we want to avoid mis-matches
         self.matchRadius = 0.2
+        if "base_PsfFlux" not in self.fluxToPlotList:
+            self.fluxToPlotList.append("base_PsfFlux")  # Add PSF flux to default list for comparison scripts
 
     def validate(self):
         super(CoaddAnalysisConfig, self).validate()
@@ -692,7 +694,9 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             if self.config.doPlotMags:
                 self.plotMags(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
                               camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=repoInfo2.hscRun,
-                              matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                              matchRadius=self.config.matchRadius, zpLabel=self.zpLabel,
+                              highlightList=[("first_calib_psfUsed", 0, "yellow"),
+                                             ("second_calib_psfUsed", 0, "green")])
             if self.config.doPlotSizes:
                 if ("first_base_SdssShape_psf_xx" in catalog.schema and
                     "second_base_SdssShape_psf_xx" in catalog.schema):
