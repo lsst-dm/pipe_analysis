@@ -128,12 +128,12 @@ class Analysis(object):
                     raise RuntimeError("No good data points to plot for sample labelled: {:}".format(name))
             # Ensure plot limits always encompass at least mean +/- 2.5*stdev, at most mean +/- 12.0*stddev,
             # and clipped stats range + 15%
-            if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar"]):
+            if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar", "resolution"]):
                 self.qMin = max(min(self.qMin, self.stats["star"].mean - 2.5*self.stats["star"].stdev,
                                 self.stats["star"].median - 1.15*self.stats["star"].clip),
                                 min(self.stats["star"].mean - 12.0*self.stats["star"].stdev,
                                     -0.005*self.unitScale))
-            if not any(ss in self.shortName for ss in ["footNpix", "pStar"]):
+            if not any(ss in self.shortName for ss in ["footNpix", "pStar", "resolution"]):
                 self.qMax = min(max(self.qMax, self.stats["star"].mean + 2.5*self.stats["star"].stdev,
                                 self.stats["star"].median + 1.15*self.stats["star"].clip),
                                 max(self.stats["star"].mean + 12.0*self.stats["star"].stdev,
@@ -440,7 +440,7 @@ class Analysis(object):
         good = (self.mag < magThreshold if magThreshold > 0 else np.ones(len(self.mag), dtype=bool))
 
         if ((dataName == "star" or "matches" in filename or "compare" in filename) and
-            "pStar" not in filename and "race-" not in filename):
+            "pStar" not in filename and "race-" not in filename and "resolution" not in filename):
             vMin, vMax = 0.4*self.qMin, 0.4*self.qMax
             if "-mag_" in filename or any(ss in filename for ss in ["compareUnforced", "overlap"]):
                 vMin, vMax = 0.6*vMin, 0.6*vMax
@@ -455,12 +455,17 @@ class Analysis(object):
             vMin, vMax = self.qMin + yDelta, self.qMax - yDelta
         elif "pStar" in filename:
             vMin, vMax = 0.0, 1.0
+        elif "resolution" in filename and "compare" not in filename:
+            vMin, vMax = 0.0, 0.2
         else:
             vMin, vMax = self.qMin, self.qMax
-        if dataName == "star" and "deconvMom" in filename:
-            vMin, vMax = -0.1, 0.1
-        if dataName == "galaxy" and "deconvMom" in filename:
-            vMin, vMax = -0.1, 3.0*self.qMax
+        if "compare" not in filename:
+            if dataName == "star" and "deconvMom" in filename:
+                vMin, vMax = -0.1, 0.1
+            if dataName == "galaxy" and "deconvMom" in filename:
+                vMin, vMax = -0.1, 3.0*self.qMax
+            if dataName == "galaxy" and "resolution" in filename:
+                vMin, vMax = 0.0, 1.0
         if dataName == "galaxy" and "-mag_" in filename:
             vMin = 3.0*self.qMin
             if "GaussianFlux" in filename:
@@ -668,9 +673,17 @@ class Analysis(object):
                     decMax = max(np.round(max(decPatch) + pad, 2), decMax)
             plotPatchOutline(axes, tractInfo, patchList)
 
-        e1 = e1ResidsSdss()
+        if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+            compareCol = "ext_shapeHSM_HsmSourceMoments"
+            psfCompareCol = "ext_shapeHSM_HsmPsfMoments"
+            shapeAlgorithm = "HSM"
+        else:
+            compareCol = "base_SdssShape"
+            psfCompareCol = "base_SdssShape_psf"
+            shapeAlgorithm = "SDSS"
+        e1 = e1Resids(compareCol, psfCompareCol)
         e1 = e1(catalog)
-        e2 = e2ResidsSdss()
+        e2 = e2Resids(compareCol, psfCompareCol)
         e2 = e2(catalog)
         e = np.sqrt(e1**2 +e2**2)
 
@@ -696,17 +709,16 @@ class Analysis(object):
 
         x0 = 0.86
         lenStr = 0.1 + 0.022*(max(max(len(meanStr), len(stdevStr)) - 6, 0))
-        axes.annotate("mean = ", xy=(x0, 1.08),
-                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
-        axes.annotate(meanStr, xy=(x0 + lenStr, 1.08),
-                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
-        axes.annotate("stdev = ", xy=(x0, 1.035),
-                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
-        axes.annotate(stdevStr,  xy=(x0 + lenStr, 1.035),
-                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
-        axes.annotate(r"N = {0}".format(stats0.num),
-                      xy=(x0 + lenStr + 0.02, 1.035),
-                      xycoords="axes fraction", ha="left", va="center", fontsize=8)
+        axes.annotate("mean = ", xy=(x0, 1.08), xycoords="axes fraction",
+                      ha="right", va="center", fontsize=8)
+        axes.annotate(meanStr, xy=(x0 + lenStr, 1.08), xycoords="axes fraction",
+                      ha="right", va="center", fontsize=8)
+        axes.annotate("stdev = ", xy=(x0, 1.035), xycoords="axes fraction",
+                      ha="right", va="center", fontsize=8)
+        axes.annotate(stdevStr,  xy=(x0 + lenStr, 1.035), xycoords="axes fraction",
+                      ha="right", va="center", fontsize=8)
+        axes.annotate(r"N = {0}".format(stats0.num), xy=(x0 + lenStr + 0.02, 1.035), xycoords="axes fraction",
+                      ha="left", va="center", fontsize=8)
 
         if hscRun is not None:
             axes.set_title("HSC stack run: " + hscRun, color="#800080")
@@ -715,8 +727,9 @@ class Analysis(object):
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
             plotText(zpLabel, plt, axes, 0.13, -0.1, prefix="zp: ", color="green")
+        plotText(shapeAlgorithm, plt, axes, 0.74, -0.1, prefix="Shape Alg: ", fontSize=8, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes, 0.85, -0.1, prefix="cat: ", color="green")
+            plotText(forcedStr, plt, axes, 0.97, -0.1, prefix="cat: ", fontSize=8, color="green")
         axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
 
         fig.savefig(filename)
@@ -749,7 +762,7 @@ class Analysis(object):
                              dataName="star")
 
         if (not any(ss in self.shortName for ss in
-                    ["pStar", "race", "Xx_", "Yy_", "Resids", "psfUsed", "photometryUsed",
+                    ["pStar", "race", "Xx", "Yy", "Resids", "psfUsed", "photometryUsed",
                      "gri", "riz", "izy", "z9y", "color_"])):
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky-gals" + postFix),
                                  stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,

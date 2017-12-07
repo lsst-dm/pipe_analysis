@@ -711,9 +711,15 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                  matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
             if self.config.doPlotCentroids:
                 self.plotCentroids(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
-                                   camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun1=repoInfo1.hscRun,
-                                   hscRun2=repoInfo2.hscRun, matchRadius=self.config.matchRadius,
-                                   zpLabel=self.zpLabel)
+                                   camera=repoInfo1.camera, ccdList=ccdListPerTract1,
+                                   hscRun1=repoInfo1.hscRun, hscRun2=repoInfo2.hscRun,
+                                   matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+            if self.config.doPlotStarGalaxy:
+                self.plotStarGal(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
+                                 camera=repoInfo1.camera,  ccdList=ccdListPerTract1,
+                                 hscRun1=repoInfo1.hscRun, hscRun2=repoInfo2.hscRun,
+                                 matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+
 
     def readCatalogs(self, dataRefList1, dataRefList2, dataset, hscRun1=None, hscRun2=None,
                      doReadFootprints=None):
@@ -878,8 +884,9 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         for col in ["base_PsfFlux"]:
             if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
                 shortName = "trace"
+                compareCol = "base_SdssShape"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, sdssTraceSizeCompare(), "SdssShape Trace Radius Diff (%)",
+                Analysis(catalog, traceSizeCompare(compareCol), "SdssShape Trace Radius Diff (%)",
                          shortName, self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-0.5, qMax=1.5,
                          labeller=OverlapsStarGalaxyLabeller(),
@@ -887,8 +894,9 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
                 shortName = "psfTrace"
+                compareCol = "base_SdssShape_psf"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, sdssPsfTraceSizeCompare(), " SdssShape PSF Trace Radius Diff (%)",
+                Analysis(catalog, traceSizeCompare(compareCol), " SdssShape PSF Trace Radius Diff (%)",
                          shortName, self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-1.1, qMax=1.1,
                          labeller=OverlapsStarGalaxyLabeller(),
@@ -896,8 +904,9 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
                 shortName = "sdssXx"
+                compareCol = "base_SdssShape_xx"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, sdssXxCompare(), "SdssShape xx Moment Diff (%)", shortName,
+                Analysis(catalog, percentDiff(compareCol), "SdssShape xx Moment Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-0.5, qMax=1.5,
                          labeller=OverlapsStarGalaxyLabeller(),
@@ -905,8 +914,9 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
                 shortName = "sdssYy"
+                compareCol = "base_SdssShape_yy"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, sdssYyCompare(), "SdssShape yy Moment Diff (%)", shortName,
+                Analysis(catalog, percentDiff(compareCol), "SdssShape yy Moment Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-0.5, qMax=1.5,
                          labeller=OverlapsStarGalaxyLabeller(),
@@ -915,8 +925,9 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                    matchRadius=matchRadius, zpLabel=zpLabel)
 
                 shortName = "hsmTrace"
+                compareCol = "ext_shapeHSM_HsmSourceMoments"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, hsmTraceSizeCompare(), "HSM Trace Radius Diff (%)", shortName,
+                Analysis(catalog, traceSizeCompare(compareCol), "HSM Trace Radius Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-0.5, qMax=1.5,
                          labeller=OverlapsStarGalaxyLabeller(),
@@ -924,8 +935,9 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
                                    matchRadius=matchRadius, zpLabel=zpLabel)
                 shortName = "hsmPsfTrace"
+                compareCol = "ext_shapeHSM_HsmPsfMoments"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, hsmPsfTraceSizeCompare(), "HSM PSF Trace Radius Diff (%)", shortName,
+                Analysis(catalog, traceSizeCompare(compareCol), "HSM PSF Trace Radius Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-1.1, qMax=1.1,
                          labeller=OverlapsStarGalaxyLabeller(),
@@ -942,7 +954,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             if "first_" + col + "_apCorr" in catalog.schema and "second_" + col + "_apCorr" in catalog.schema:
                 shortName = "diff_" + col + "_apCorr"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, ApCorrDiffCompare(col + "_apCorr"),
+                Analysis(catalog, MagDiffCompare(col + "_apCorr"),
                          "  Run Comparison: %s apCorr diff" % fluxToPlotString(col),
                          shortName, self.config.analysis,
                          prefix="first_", qMin=-0.025, qMax=0.025, flags=[col + "_flag_apCorr"],
