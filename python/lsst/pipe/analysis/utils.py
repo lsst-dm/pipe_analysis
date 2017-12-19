@@ -942,6 +942,7 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
     camera = butler.get("camera")
     dataId = dataRef.dataId
     filterName = dataId["filter"]
+    genericFilterName = afwImage.Filter(afwImage.Filter(filterName).getId()).getName()
     isCoadd = True if "patch" in dataId else False
     ccdKey = None if isCoadd else findCcdKey(dataId)
     # Check metadata to see if stack used was HSC
@@ -964,6 +965,7 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
         camera = camera,
         dataId = dataId,
         filterName = filterName,
+        genericFilterName = genericFilterName,
         ccdKey = ccdKey,
         metadata = metadata,
         hscRun = hscRun,
