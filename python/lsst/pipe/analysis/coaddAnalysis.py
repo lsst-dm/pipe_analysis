@@ -188,6 +188,17 @@ class CoaddAnalysisTask(CmdLineTask):
                                          list(self.config.analysis.flags) if
                                          col not in forced.schema and col in unforced.schema and
                                          not (repoInfo.hscRun and col == "slot_Centroid_flag")])
+            # Add the reference band flags for forced photometry to forced catalog
+            refBandCat = self.readCatalogs(patchRefExistsList, self.config.coaddName + "Coadd_ref")
+            if len(forced) != len(refBandCat):
+                raise RuntimeError(("Lengths of forced (N = {0:d}) and ref (N = {0:d}) cats don't match").
+                                   format(len(forced), len(refBandCat)))
+            refBandList = list(s.field.getName() for s in refBandCat.schema if "merge_measurement_"
+                               in s.field.getName())
+            forced = addColumnsToSchema(refBandCat, forced,
+                                        [col for col in refBandList if col not in forced.schema and
+                                         col in refBandCat.schema])
+
         forcedStr = "forced" if haveForced else "unforced"
 
         if self.config.doPlotFootprintNpix:
