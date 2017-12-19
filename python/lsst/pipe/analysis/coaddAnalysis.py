@@ -255,9 +255,17 @@ class CoaddAnalysisTask(CmdLineTask):
                             zpLabel=self.zpLabel, forcedStr=forcedStr, scale=2)
 
         if self.config.doPlotMags:
-            self.plotMags(forced, filenamer, repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
-                          tractInfo=repoInfo.tractInfo, patchList=patchList, hscRun=repoInfo.hscRun,
-                          zpLabel=self.zpLabel, forcedStr=forcedStr, flagsCat=flagsCat)
+            self.plotMags(unforced, filenamer, repoInfo.dataId, butler=repoInfo.butler,
+                          camera=repoInfo.camera, tractInfo=repoInfo.tractInfo, patchList=patchList,
+                          hscRun=repoInfo.hscRun, zpLabel=self.zpLabel, forcedStr="unforced",
+                          postFix="_unforced", flagsCat=flagsCat)
+            if haveForced:
+                self.plotMags(forced, filenamer, repoInfo.dataId, butler=repoInfo.butler,
+                              camera=repoInfo.camera, tractInfo=repoInfo.tractInfo, patchList=patchList,
+                              hscRun=repoInfo.hscRun, zpLabel=self.zpLabel, forcedStr=forcedStr,
+                              postFix="_forced", flagsCat=flagsCat,
+                              highlightList=[("merge_measurement_" + repoInfo.genericFilterName, 0,
+                                              "yellow"),])
         if self.config.doPlotStarGalaxy:
             if "ext_shapeHSM_HsmSourceMoments_xx" in unforced.schema:
                 self.plotStarGal(unforced, filenamer, repoInfo.dataId, butler=repoInfo.butler,
@@ -443,7 +451,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                  patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
-                 fluxToPlotList=None, postFix="", flagsCat=None):
+                 fluxToPlotList=None, postFix="", flagsCat=None, highlightList=None):
         if fluxToPlotList is None:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
@@ -461,7 +469,8 @@ class CoaddAnalysisTask(CmdLineTask):
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                             zpLabel=zpLabel, forcedStr=forcedStr)
+                                             zpLabel=zpLabel, forcedStr=forcedStr,
+                                             highlightList=highlightList)
 
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                   patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None, flagsCat=None):
