@@ -446,6 +446,9 @@ class CoaddAnalysisTask(CmdLineTask):
             else:
                 for src in catalog:
                     src.updateCoord(wcs)
+        # Optionally backout aperture corrections
+        if self.config.doBackoutApCorr:
+            catalog = backoutApCorr(catalog)
         calibrated = calibrateCoaddSourceCatalog(catalog, self.config.analysis.coaddZp)
         return calibrated
 
