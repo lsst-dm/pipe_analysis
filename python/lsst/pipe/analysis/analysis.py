@@ -230,10 +230,10 @@ class Analysis(object):
         if "galaxy" in self.data and len(self.data["galaxy"].quantity) > 0 and "-mag_" in filename:
             if "GaussianFlux" in filename:
                 galMin = np.round(2.5*np.log10(self.config.visitClassFluxRatio) - 0.015, 2)*self.unitScale
-                deltaMin = self.qMin - galMin
+                deltaMin = max(0.0, self.qMin - galMin)
             if "CModel" in filename:
                 galMin = np.round(2.5*np.log10(self.config.coaddClassFluxRatio) - 0.015, 2)*self.unitScale
-                deltaMin = self.qMin - galMin
+                deltaMin = max(0.0, self.qMin - galMin)
 
         magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
         if "matches" in filename:  # narrow magnitude plotting limits for matches
