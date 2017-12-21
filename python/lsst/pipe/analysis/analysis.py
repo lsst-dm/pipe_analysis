@@ -295,15 +295,19 @@ class Analysis(object):
                 if self.calibUsedOnly == 0 and plotRunStats:
                     belowThresh = data.mag < magMax  # set lower if you want to truncate plotted running stats
                     numHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins))
-                    syHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
-                                                    weights=data.quantity[belowThresh])
-                    syHist2, datahist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
-                                                     weights=data.quantity[belowThresh]**2)
-                    meanHist = syHist/numHist
-                    stdHist = np.sqrt(syHist2/numHist - meanHist*meanHist)
-                    runStats.append(axScatter.errorbar((dataHist[1:] + dataHist[:-1])/2, meanHist,
-                                                       yerr=stdHist, fmt="o", mfc=cornflowerBlue, mec="k",
-                                                       ms=2, ecolor="k", label="Running stats\n(all stars)"))
+                    # Only plot running stats if there are a significant number of data points per bin.
+                    # Computed here as the mean number in the brightest 20% of the bins which we require
+                    # to be greater than 5.
+                    if numHist[0:max(1, int(0.2*len(xSyBins)))].mean() > 5:
+                        syHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
+                                                        weights=data.quantity[belowThresh])
+                        syHist2, datahist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
+                                                         weights=data.quantity[belowThresh]**2)
+                        meanHist = syHist/numHist
+                        stdHist = np.sqrt(syHist2/numHist - meanHist*meanHist)
+                        runStats.append(axScatter.errorbar((dataHist[1:] + dataHist[:-1])/2, meanHist,
+                                        yerr=stdHist, fmt="o", mfc=cornflowerBlue, mec="k",
+                                        ms=2, ecolor="k", label="Running\nstats (all\nstars)"))
 
             # plot data.  Appending in dataPoints for the sake of the legend
             dataPoints.append(axScatter.scatter(data.mag, data.quantity, s=ptSize, marker="o",
