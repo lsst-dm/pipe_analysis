@@ -309,23 +309,23 @@ class Analysis(object):
                                         yerr=stdHist, fmt="o", mfc=cornflowerBlue, mec="k",
                                         ms=2, ecolor="k", label="Running\nstats (all\nstars)"))
 
-            # plot data.  Appending in dataPoints for the sake of the legend
-            dataPoints.append(axScatter.scatter(data.mag, data.quantity, s=ptSize, marker="o",
-                                                facecolors=data.color, edgecolors="none", label=name,
-                                                alpha=alpha))
-
             if highlightList is not None:
+                # Make highlight as a background ring of larger size than the data point size
                 for flag, threshValue, color in highlightList:
+                    label = flag.replace("merge_measurement", "ref")
                     highlightSelection = data.catalog[flag] > threshValue
                     if name == "star":
                         dataPoints.append(axScatter.scatter(
                                 data.mag[highlightSelection], data.quantity[highlightSelection],
-                                s=1.2*ptSize, marker="o", lw=0.7, facecolors="none", edgecolors=color,
-                                label=flag, alpha=alpha))
+                                s=1.3*ptSize, marker="o", facecolors="none", edgecolors=color, label=label))
                     else:
-                        axScatter.scatter(
-                            data.mag[highlightSelection], data.quantity[highlightSelection], s=1.2*ptSize,
-                            marker="o", lw=0.7, facecolors="none", edgecolors=color, label=flag, alpha=alpha)
+                        axScatter.scatter(data.mag[highlightSelection], data.quantity[highlightSelection],
+                                          s=1.3*ptSize, marker="o", facecolors="none", edgecolors=color)
+
+            # Plot data.  Appending in dataPoints for the sake of the legend
+            dataPoints.append(axScatter.scatter(data.mag, data.quantity, s=ptSize, marker="o",
+                                                facecolors=data.color, edgecolors="none", label=name,
+                                                alpha=alpha))
 
             axHistx.hist(data.mag, bins=xBins, color=histColor, alpha=0.6, label=name)
             axHisty.hist(data.quantity, bins=yBins, color=histColor, alpha=0.6, orientation="horizontal",
@@ -504,22 +504,17 @@ class Analysis(object):
                 ptSize = 0.7*setPtSize(len(data.mag))
             stats0 = self.calculateStats(data.quantity, good[data.selection])
             selection = data.selection & good
+            if highlightList is not None:
+                # Make highlight as a background ring of larger size than the data point size
+                for flag, threshValue, color in highlightList:
+                    label = flag.replace("merge_measurement", "ref")
+                    # Only a white "halo" really shows up here, so ignore color
+                    highlightSelection = (self.catalog[flag] > threshValue) & selection
+                    axes.scatter(ra[highlightSelection], dec[highlightSelection], s=1.4*ptSize,
+                                 marker="o", facecolors="none", edgecolors="white", label=label)
+
             axes.scatter(ra[selection], dec[selection], s=ptSize, marker="o", lw=0, label=name,
                          c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax)
-
-            if highlightList is not None:
-                alpha = 1.0
-                for flag, threshValue, color in highlightList:
-                    color = "magenta" if color == "yellow" else "black"
-                    highlightSelection = (self.catalog[flag] > threshValue) & selection
-                    if name == "star":
-                        axes.scatter(ra[highlightSelection], dec[highlightSelection], s=0.4*ptSize,
-                                     marker=".", facecolors=color, edgecolors="none", label=flag,
-                                     alpha=alpha)
-                    else:
-                        axes.scatter(ra[highlightSelection], dec[highlightSelection], s=0.4*ptSize,
-                                     marker=".", facecolors=color, edgecolors="none", label=flag,
-                                     alpha=alpha)
 
         if stats0 is None:  # No data to plot
             return
@@ -771,8 +766,8 @@ class Analysis(object):
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky-gals" + postFix),
                                  stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,
                                  tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
-                                 matchRadius=matchRadius, zpLabel=zpLabel, forcedStr=forcedStr,
-                                 dataName="galaxy")
+                                 matchRadius=matchRadius, zpLabel=zpLabel, highlightList=highlightList,
+                                 forcedStr=forcedStr, dataName="galaxy")
         if "diff_" in self.shortName and stats["split"].num > 0:
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky-split" + postFix),
                                  stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,
