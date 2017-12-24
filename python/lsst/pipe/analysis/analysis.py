@@ -518,13 +518,12 @@ class Analysis(object):
 
         if stats0 is None:  # No data to plot
             return
-        axes.set_xlabel("RA (deg)")
-        axes.set_ylabel("Dec (deg)")
+        filterStr = dataId['filter'] if dataId is not None else ''
+        axes.set_xlabel("RA (deg) [{0:s}]".format(filterStr))
+        axes.set_ylabel("Dec (deg) [{0:s}]".format(filterStr))
 
         axes.set_xlim(raMax, raMin)
         axes.set_ylim(decMin, decMax)
-
-        filterStr = dataId['filter'] if dataId is not None else ''
 
         mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vMin, vmax=vMax))
         mappable._A = []        # fake up the array of the scalar mappable. Urgh...
@@ -695,8 +694,9 @@ class Analysis(object):
 
         getQuiver(ra, dec, e1, e2, axes, color=plt.cm.jet(nz(e)), scale=scale, width=0.002, label=catStr)
 
-        axes.set_xlabel("RA (deg)")
-        axes.set_ylabel("Dec (deg)")
+        filterStr = dataId['filter'] if dataId is not None else ''
+        axes.set_xlabel("RA (deg) [{0:s}]".format(filterStr))
+        axes.set_ylabel("Dec (deg) [{0:s}]".format(filterStr))
 
         axes.set_xlim(raMax, raMin)
         axes.set_ylim(decMin, decMax)
@@ -726,9 +726,9 @@ class Analysis(object):
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
             plotText(zpLabel, plt, axes, 0.13, -0.1, prefix="zp: ", color="green")
-        plotText(shapeAlgorithm, plt, axes, 0.74, -0.1, prefix="Shape Alg: ", fontSize=8, color="green")
+        plotText(shapeAlgorithm, plt, axes, 0.77, -0.1, prefix="Shape Alg: ", fontSize=8, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes, 0.97, -0.1, prefix="cat: ", fontSize=8, color="green")
+            plotText(forcedStr, plt, axes, 0.99, -0.1, prefix="cat: ", fontSize=8, color="green")
         axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
 
         fig.savefig(filename)
