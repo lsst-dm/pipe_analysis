@@ -969,8 +969,8 @@ class CoaddAnalysisTask(CmdLineTask):
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(catalog, None, "%s" % shortName, shortName,
                            self.config.analysis, labeller=None,
-                           ).plotQuiver(catalog, filenamer, stats=stats, dataId=dataId, butler=butler,
-                                        camera=camera, ccdList=ccdList, tractInfo=tractInfo,
+                           ).plotQuiver(catalog, filenamer, self.log, stats=stats, dataId=dataId,
+                                        butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                         patchList=patchList,hscRun=hscRun, zpLabel=zpLabel,
                                         forcedStr=forcedStr, scale=scale)
 

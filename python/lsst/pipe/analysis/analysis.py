@@ -618,7 +618,7 @@ class Analysis(object):
         fig.savefig(filename)
         plt.close(fig)
 
-    def plotQuiver(self, catalog, filename, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
+    def plotQuiver(self, catalog, filename, log, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
                    camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
                    matchRadius=None, zpLabel=None, forcedStr=None, dataName="star", scale=1):
         """Plot ellipticity residuals quiver plot"""
@@ -703,6 +703,7 @@ class Analysis(object):
 
         good = np.ones(len(e), dtype=bool)
         stats0 = self.calculateStats(e, good)
+        log.info("Statistics from %s of %s: %s" % (dataId, self.quantityName, stats0))
         meanStr = "{0.mean:.4f}".format(stats0)
         stdevStr = "{0.stdev:.4f}".format(stats0)
 
