@@ -230,10 +230,10 @@ class Analysis(object):
         if "galaxy" in self.data and len(self.data["galaxy"].quantity) > 0 and "-mag_" in filename:
             if "GaussianFlux" in filename:
                 galMin = np.round(2.5*np.log10(self.config.visitClassFluxRatio) - 0.015, 2)*self.unitScale
-                deltaMin = self.qMin - galMin
+                deltaMin = max(0.0, self.qMin - galMin)
             if "CModel" in filename:
                 galMin = np.round(2.5*np.log10(self.config.coaddClassFluxRatio) - 0.015, 2)*self.unitScale
-                deltaMin = self.qMin - galMin
+                deltaMin = max(0.0, self.qMin - galMin)
 
         magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
         if "matches" in filename:  # narrow magnitude plotting limits for matches
@@ -295,33 +295,37 @@ class Analysis(object):
                 if self.calibUsedOnly == 0 and plotRunStats:
                     belowThresh = data.mag < magMax  # set lower if you want to truncate plotted running stats
                     numHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins))
-                    syHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
-                                                    weights=data.quantity[belowThresh])
-                    syHist2, datahist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
-                                                     weights=data.quantity[belowThresh]**2)
-                    meanHist = syHist/numHist
-                    stdHist = np.sqrt(syHist2/numHist - meanHist*meanHist)
-                    runStats.append(axScatter.errorbar((dataHist[1:] + dataHist[:-1])/2, meanHist,
-                                                       yerr=stdHist, fmt="o", mfc=cornflowerBlue, mec="k",
-                                                       ms=2, ecolor="k", label="Running stats\n(all stars)"))
-
-            # plot data.  Appending in dataPoints for the sake of the legend
-            dataPoints.append(axScatter.scatter(data.mag, data.quantity, s=ptSize, marker="o",
-                                                facecolors=data.color, edgecolors="none", label=name,
-                                                alpha=alpha))
+                    # Only plot running stats if there are a significant number of data points per bin.
+                    # Computed here as the mean number in the brightest 20% of the bins which we require
+                    # to be greater than 5.
+                    if numHist[0:max(1, int(0.2*len(xSyBins)))].mean() > 5:
+                        syHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
+                                                        weights=data.quantity[belowThresh])
+                        syHist2, datahist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
+                                                         weights=data.quantity[belowThresh]**2)
+                        meanHist = syHist/numHist
+                        stdHist = np.sqrt(syHist2/numHist - meanHist*meanHist)
+                        runStats.append(axScatter.errorbar((dataHist[1:] + dataHist[:-1])/2, meanHist,
+                                        yerr=stdHist, fmt="o", mfc=cornflowerBlue, mec="k",
+                                        ms=2, ecolor="k", label="Running\nstats (all\nstars)"))
 
             if highlightList is not None:
+                # Make highlight as a background ring of larger size than the data point size
                 for flag, threshValue, color in highlightList:
+                    label = flag.replace("merge_measurement", "ref")
                     highlightSelection = data.catalog[flag] > threshValue
                     if name == "star":
                         dataPoints.append(axScatter.scatter(
                                 data.mag[highlightSelection], data.quantity[highlightSelection],
-                                s=1.2*ptSize, marker="o", lw=0.7, facecolors="none", edgecolors=color,
-                                label=flag, alpha=alpha))
+                                s=1.3*ptSize, marker="o", facecolors="none", edgecolors=color, label=label))
                     else:
-                        axScatter.scatter(
-                            data.mag[highlightSelection], data.quantity[highlightSelection], s=1.2*ptSize,
-                            marker="o", lw=0.7, facecolors="none", edgecolors=color, label=flag, alpha=alpha)
+                        axScatter.scatter(data.mag[highlightSelection], data.quantity[highlightSelection],
+                                          s=1.3*ptSize, marker="o", facecolors="none", edgecolors=color)
+
+            # Plot data.  Appending in dataPoints for the sake of the legend
+            dataPoints.append(axScatter.scatter(data.mag, data.quantity, s=ptSize, marker="o",
+                                                facecolors=data.color, edgecolors="none", label=name,
+                                                alpha=alpha))
 
             axHistx.hist(data.mag, bins=xBins, color=histColor, alpha=0.6, label=name)
             axHisty.hist(data.quantity, bins=yBins, color=histColor, alpha=0.6, orientation="horizontal",
@@ -500,32 +504,26 @@ class Analysis(object):
                 ptSize = 0.7*setPtSize(len(data.mag))
             stats0 = self.calculateStats(data.quantity, good[data.selection])
             selection = data.selection & good
+            if highlightList is not None:
+                # Make highlight as a background ring of larger size than the data point size
+                for flag, threshValue, color in highlightList:
+                    label = flag.replace("merge_measurement", "ref")
+                    # Only a white "halo" really shows up here, so ignore color
+                    highlightSelection = (self.catalog[flag] > threshValue) & selection
+                    axes.scatter(ra[highlightSelection], dec[highlightSelection], s=1.4*ptSize,
+                                 marker="o", facecolors="none", edgecolors="white", label=label)
+
             axes.scatter(ra[selection], dec[selection], s=ptSize, marker="o", lw=0, label=name,
                          c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax)
 
-            if highlightList is not None:
-                alpha = 1.0
-                for flag, threshValue, color in highlightList:
-                    color = "magenta" if color == "yellow" else "black"
-                    highlightSelection = (self.catalog[flag] > threshValue) & selection
-                    if name == "star":
-                        axes.scatter(ra[highlightSelection], dec[highlightSelection], s=0.4*ptSize,
-                                     marker=".", facecolors=color, edgecolors="none", label=flag,
-                                     alpha=alpha)
-                    else:
-                        axes.scatter(ra[highlightSelection], dec[highlightSelection], s=0.4*ptSize,
-                                     marker=".", facecolors=color, edgecolors="none", label=flag,
-                                     alpha=alpha)
-
         if stats0 is None:  # No data to plot
             return
-        axes.set_xlabel("RA (deg)")
-        axes.set_ylabel("Dec (deg)")
+        filterStr = dataId['filter'] if dataId is not None else ''
+        axes.set_xlabel("RA (deg) [{0:s}]".format(filterStr))
+        axes.set_ylabel("Dec (deg) [{0:s}]".format(filterStr))
 
         axes.set_xlim(raMax, raMin)
         axes.set_ylim(decMin, decMax)
-
-        filterStr = dataId['filter'] if dataId is not None else ''
 
         mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vMin, vmax=vMax))
         mappable._A = []        # fake up the array of the scalar mappable. Urgh...
@@ -620,12 +618,24 @@ class Analysis(object):
         fig.savefig(filename)
         plt.close(fig)
 
-    def plotQuiver(self, catalog, filename, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
+    def plotQuiver(self, catalog, filename, log, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
                    camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
                    matchRadius=None, zpLabel=None, forcedStr=None, dataName="star", scale=1):
         """Plot ellipticity residuals quiver plot"""
+
+        # Use HSM algorithm results if present, if not, use SDSS Shape
+        if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+            compareCol = "ext_shapeHSM_HsmSourceMoments"
+            psfCompareCol = "ext_shapeHSM_HsmPsfMoments"
+            shapeAlgorithm = "HSM"
+            flags = ["ext_shapeHSM_HsmSourceMoments_flag", "ext_shapeHSM_HsmPsfMoments_flag"]
+        else:
+            compareCol = "base_SdssShape"
+            psfCompareCol = "base_SdssShape_psf"
+            shapeAlgorithm = "SDSS"
+            flags = ["base_SdssShape_flag", "base_SdssShape_flag_psf"]
+
         # Cull the catalog of flagged sources
-        flags = ["base_SdssShape_flag", ]
         bad = np.zeros(len(catalog), dtype=bool)
         bad |= catalog["deblend_nChild"] > 0
         for flag in flags:
@@ -673,14 +683,6 @@ class Analysis(object):
                     decMax = max(np.round(max(decPatch) + pad, 2), decMax)
             plotPatchOutline(axes, tractInfo, patchList)
 
-        if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
-            compareCol = "ext_shapeHSM_HsmSourceMoments"
-            psfCompareCol = "ext_shapeHSM_HsmPsfMoments"
-            shapeAlgorithm = "HSM"
-        else:
-            compareCol = "base_SdssShape"
-            psfCompareCol = "base_SdssShape_psf"
-            shapeAlgorithm = "SDSS"
         e1 = e1Resids(compareCol, psfCompareCol)
         e1 = e1(catalog)
         e2 = e2Resids(compareCol, psfCompareCol)
@@ -696,14 +698,16 @@ class Analysis(object):
 
         getQuiver(ra, dec, e1, e2, axes, color=plt.cm.jet(nz(e)), scale=scale, width=0.002, label=catStr)
 
-        axes.set_xlabel("RA (deg)")
-        axes.set_ylabel("Dec (deg)")
+        filterStr = dataId['filter'] if dataId is not None else ''
+        axes.set_xlabel("RA (deg) [{0:s}]".format(filterStr))
+        axes.set_ylabel("Dec (deg) [{0:s}]".format(filterStr))
 
         axes.set_xlim(raMax, raMin)
         axes.set_ylim(decMin, decMax)
 
         good = np.ones(len(e), dtype=bool)
         stats0 = self.calculateStats(e, good)
+        log.info("Statistics from %s of %s: %s" % (dataId, self.quantityName, stats0))
         meanStr = "{0.mean:.4f}".format(stats0)
         stdevStr = "{0.stdev:.4f}".format(stats0)
 
@@ -727,9 +731,9 @@ class Analysis(object):
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
             plotText(zpLabel, plt, axes, 0.13, -0.1, prefix="zp: ", color="green")
-        plotText(shapeAlgorithm, plt, axes, 0.74, -0.1, prefix="Shape Alg: ", fontSize=8, color="green")
+        plotText(shapeAlgorithm, plt, axes, 0.77, -0.1, prefix="Shape Alg: ", fontSize=8, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes, 0.97, -0.1, prefix="cat: ", fontSize=8, color="green")
+            plotText(forcedStr, plt, axes, 0.99, -0.1, prefix="cat: ", fontSize=8, color="green")
         axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
 
         fig.savefig(filename)
@@ -767,8 +771,8 @@ class Analysis(object):
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky-gals" + postFix),
                                  stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,
                                  tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
-                                 matchRadius=matchRadius, zpLabel=zpLabel, forcedStr=forcedStr,
-                                 dataName="galaxy")
+                                 matchRadius=matchRadius, zpLabel=zpLabel, highlightList=highlightList,
+                                 forcedStr=forcedStr, dataName="galaxy")
         if "diff_" in self.shortName and stats["split"].num > 0:
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style="sky-split" + postFix),
                                  stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,

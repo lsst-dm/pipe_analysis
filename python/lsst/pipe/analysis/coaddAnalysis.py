@@ -73,9 +73,11 @@ class CoaddAnalysisConfig(Config):
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(base_PsfFlux)")
     columnsToCopy = ListField(dtype=str,
                               default=["base_SdssShape_flag", "base_SdssShape_xx", "base_SdssShape_yy",
-                                       "base_SdssShape_xy", "base_SdssShape_psf_xx", "base_SdssShape_psf_yy",
-                                       "base_SdssShape_psf_xy", "ext_shapeHSM_HsmSourceMoments_xx",
-                                       "ext_shapeHSM_HsmSourceMoments_yy", "ext_shapeHSM_HsmSourceMoments_xy",
+                                       "base_SdssShape_xy", "base_SdssShape_flag_psf",
+                                       "base_SdssShape_psf_xx", "base_SdssShape_psf_yy",
+                                       "base_SdssShape_psf_xy", "ext_shapeHSM_HsmSourceMoments_flag",
+                                       "ext_shapeHSM_HsmSourceMoments_xx", "ext_shapeHSM_HsmSourceMoments_yy",
+                                       "ext_shapeHSM_HsmSourceMoments_xy", "ext_shapeHSM_HsmPsfMoments_flag",
                                        "ext_shapeHSM_HsmPsfMoments_xx", "ext_shapeHSM_HsmPsfMoments_yy",
                                        "ext_shapeHSM_HsmPsfMoments_xy",
                                        "ext_shapeHSM_HsmShapeRegauss_resolution",
@@ -188,6 +190,17 @@ class CoaddAnalysisTask(CmdLineTask):
                                          list(self.config.analysis.flags) if
                                          col not in forced.schema and col in unforced.schema and
                                          not (repoInfo.hscRun and col == "slot_Centroid_flag")])
+            # Add the reference band flags for forced photometry to forced catalog
+            refBandCat = self.readCatalogs(patchRefExistsList, self.config.coaddName + "Coadd_ref")
+            if len(forced) != len(refBandCat):
+                raise RuntimeError(("Lengths of forced (N = {0:d}) and ref (N = {0:d}) cats don't match").
+                                   format(len(forced), len(refBandCat)))
+            refBandList = list(s.field.getName() for s in refBandCat.schema if "merge_measurement_"
+                               in s.field.getName())
+            forced = addColumnsToSchema(refBandCat, forced,
+                                        [col for col in refBandList if col not in forced.schema and
+                                         col in refBandCat.schema])
+
         forcedStr = "forced" if haveForced else "unforced"
 
         if self.config.doPlotFootprintNpix:
@@ -238,15 +251,23 @@ class CoaddAnalysisTask(CmdLineTask):
                                hscRun=repoInfo.hscRun, zpLabel=self.zpLabel, flagsCat=flagsCat)
 
         if self.config.doPlotQuiver:
-            self.plotQuiver(forced, filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
+            self.plotQuiver(unforced, filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
                             dataId=repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
                             tractInfo=repoInfo.tractInfo, patchList=patchList, hscRun=repoInfo.hscRun,
-                            zpLabel=self.zpLabel, forcedStr=forcedStr, scale=2)
+                            zpLabel=self.zpLabel, forcedStr="unforced", scale=2)
 
         if self.config.doPlotMags:
-            self.plotMags(forced, filenamer, repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
-                          tractInfo=repoInfo.tractInfo, patchList=patchList, hscRun=repoInfo.hscRun,
-                          zpLabel=self.zpLabel, forcedStr=forcedStr, flagsCat=flagsCat)
+            self.plotMags(unforced, filenamer, repoInfo.dataId, butler=repoInfo.butler,
+                          camera=repoInfo.camera, tractInfo=repoInfo.tractInfo, patchList=patchList,
+                          hscRun=repoInfo.hscRun, zpLabel=self.zpLabel, forcedStr="unforced",
+                          postFix="_unforced", flagsCat=flagsCat)
+            if haveForced:
+                self.plotMags(forced, filenamer, repoInfo.dataId, butler=repoInfo.butler,
+                              camera=repoInfo.camera, tractInfo=repoInfo.tractInfo, patchList=patchList,
+                              hscRun=repoInfo.hscRun, zpLabel=self.zpLabel, forcedStr=forcedStr,
+                              postFix="_forced", flagsCat=flagsCat,
+                              highlightList=[("merge_measurement_" + repoInfo.genericFilterName, 0,
+                                              "yellow"),])
         if self.config.doPlotStarGalaxy:
             if "ext_shapeHSM_HsmSourceMoments_xx" in unforced.schema:
                 self.plotStarGal(unforced, filenamer, repoInfo.dataId, butler=repoInfo.butler,
@@ -427,12 +448,15 @@ class CoaddAnalysisTask(CmdLineTask):
             else:
                 for src in catalog:
                     src.updateCoord(wcs)
+        # Optionally backout aperture corrections
+        if self.config.doBackoutApCorr:
+            catalog = backoutApCorr(catalog)
         calibrated = calibrateCoaddSourceCatalog(catalog, self.config.analysis.coaddZp)
         return calibrated
 
     def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                  patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
-                 fluxToPlotList=None, postFix="", flagsCat=None):
+                 fluxToPlotList=None, postFix="", flagsCat=None, highlightList=None):
         if fluxToPlotList is None:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
@@ -450,7 +474,8 @@ class CoaddAnalysisTask(CmdLineTask):
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                             zpLabel=zpLabel, forcedStr=forcedStr)
+                                             zpLabel=zpLabel, forcedStr=forcedStr,
+                                             highlightList=highlightList)
 
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                   patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None, flagsCat=None):
@@ -946,8 +971,8 @@ class CoaddAnalysisTask(CmdLineTask):
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(catalog, None, "%s" % shortName, shortName,
                            self.config.analysis, labeller=None,
-                           ).plotQuiver(catalog, filenamer, stats=stats, dataId=dataId, butler=butler,
-                                        camera=camera, ccdList=ccdList, tractInfo=tractInfo,
+                           ).plotQuiver(catalog, filenamer, self.log, stats=stats, dataId=dataId,
+                                        butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                         patchList=patchList,hscRun=hscRun, zpLabel=zpLabel,
                                         forcedStr=forcedStr, scale=scale)
 
@@ -1114,8 +1139,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             self.plotMags(forced, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
                           camera=repoInfo1.camera, tractInfo=repoInfo1.tractInfo, patchList=patchList1,
                           hscRun=hscRun, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel,
-                          forcedStr=forcedStr, highlightList=[("first_calib_psfUsed", 0, "yellow"),
-                                                              ("second_calib_psfUsed", 0, "green")])
+                          forcedStr=forcedStr)
         if self.config.doPlotCentroids:
             self.plotCentroids(forced, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
                                camera=repoInfo1.camera, tractInfo=repoInfo1.tractInfo, patchList=patchList1,

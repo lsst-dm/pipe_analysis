@@ -861,7 +861,7 @@ def backoutApCorr(catalog):
     for k in catalog.schema.getNames():
         if "_flux" in k and k[:-5] + "_apCorr" in catalog.schema.getNames() and "_apCorr" not in k:
             if ii == 0:
-                print("Backing out apcorr for:", k)
+                print("Backing out aperture corrections to fluxes")
                 ii += 1
             catalog[k] /= catalog[k[:-5] + "_apCorr"]
     return catalog
@@ -942,6 +942,7 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
     camera = butler.get("camera")
     dataId = dataRef.dataId
     filterName = dataId["filter"]
+    genericFilterName = afwImage.Filter(afwImage.Filter(filterName).getId()).getName()
     isCoadd = True if "patch" in dataId else False
     ccdKey = None if isCoadd else findCcdKey(dataId)
     # Check metadata to see if stack used was HSC
@@ -964,6 +965,7 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
         camera = camera,
         dataId = dataId,
         filterName = filterName,
+        genericFilterName = genericFilterName,
         ccdKey = ccdKey,
         metadata = metadata,
         hscRun = hscRun,
