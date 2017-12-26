@@ -1139,8 +1139,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             self.plotMags(forced, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
                           camera=repoInfo1.camera, tractInfo=repoInfo1.tractInfo, patchList=patchList1,
                           hscRun=hscRun, matchRadius=self.config.matchRadius, zpLabel=self.zpLabel,
-                          forcedStr=forcedStr, highlightList=[("first_calib_psfUsed", 0, "yellow"),
-                                                              ("second_calib_psfUsed", 0, "green")])
+                          forcedStr=forcedStr)
         if self.config.doPlotCentroids:
             self.plotCentroids(forced, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
                                camera=repoInfo1.camera, tractInfo=repoInfo1.tractInfo, patchList=patchList1,
