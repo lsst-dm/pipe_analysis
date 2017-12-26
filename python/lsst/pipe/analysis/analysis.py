@@ -622,8 +622,20 @@ class Analysis(object):
                    camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
                    matchRadius=None, zpLabel=None, forcedStr=None, dataName="star", scale=1):
         """Plot ellipticity residuals quiver plot"""
+
+        # Use HSM algorithm results if present, if not, use SDSS Shape
+        if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+            compareCol = "ext_shapeHSM_HsmSourceMoments"
+            psfCompareCol = "ext_shapeHSM_HsmPsfMoments"
+            shapeAlgorithm = "HSM"
+            flags = ["ext_shapeHSM_HsmSourceMoments_flag", "ext_shapeHSM_HsmPsfMoments_flag"]
+        else:
+            compareCol = "base_SdssShape"
+            psfCompareCol = "base_SdssShape_psf"
+            shapeAlgorithm = "SDSS"
+            flags = ["base_SdssShape_flag", "base_SdssShape_flag_psf"]
+
         # Cull the catalog of flagged sources
-        flags = ["base_SdssShape_flag", ]
         bad = np.zeros(len(catalog), dtype=bool)
         bad |= catalog["deblend_nChild"] > 0
         for flag in flags:
@@ -671,14 +683,6 @@ class Analysis(object):
                     decMax = max(np.round(max(decPatch) + pad, 2), decMax)
             plotPatchOutline(axes, tractInfo, patchList)
 
-        if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
-            compareCol = "ext_shapeHSM_HsmSourceMoments"
-            psfCompareCol = "ext_shapeHSM_HsmPsfMoments"
-            shapeAlgorithm = "HSM"
-        else:
-            compareCol = "base_SdssShape"
-            psfCompareCol = "base_SdssShape_psf"
-            shapeAlgorithm = "SDSS"
         e1 = e1Resids(compareCol, psfCompareCol)
         e1 = e1(catalog)
         e2 = e2Resids(compareCol, psfCompareCol)

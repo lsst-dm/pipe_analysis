@@ -73,9 +73,11 @@ class CoaddAnalysisConfig(Config):
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(base_PsfFlux)")
     columnsToCopy = ListField(dtype=str,
                               default=["base_SdssShape_flag", "base_SdssShape_xx", "base_SdssShape_yy",
-                                       "base_SdssShape_xy", "base_SdssShape_psf_xx", "base_SdssShape_psf_yy",
-                                       "base_SdssShape_psf_xy", "ext_shapeHSM_HsmSourceMoments_xx",
-                                       "ext_shapeHSM_HsmSourceMoments_yy", "ext_shapeHSM_HsmSourceMoments_xy",
+                                       "base_SdssShape_xy", "base_SdssShape_flag_psf",
+                                       "base_SdssShape_psf_xx", "base_SdssShape_psf_yy",
+                                       "base_SdssShape_psf_xy", "ext_shapeHSM_HsmSourceMoments_flag",
+                                       "ext_shapeHSM_HsmSourceMoments_xx", "ext_shapeHSM_HsmSourceMoments_yy",
+                                       "ext_shapeHSM_HsmSourceMoments_xy", "ext_shapeHSM_HsmPsfMoments_flag",
                                        "ext_shapeHSM_HsmPsfMoments_xx", "ext_shapeHSM_HsmPsfMoments_yy",
                                        "ext_shapeHSM_HsmPsfMoments_xy",
                                        "ext_shapeHSM_HsmShapeRegauss_resolution",
@@ -249,10 +251,10 @@ class CoaddAnalysisTask(CmdLineTask):
                                hscRun=repoInfo.hscRun, zpLabel=self.zpLabel, flagsCat=flagsCat)
 
         if self.config.doPlotQuiver:
-            self.plotQuiver(forced, filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
+            self.plotQuiver(unforced, filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
                             dataId=repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
                             tractInfo=repoInfo.tractInfo, patchList=patchList, hscRun=repoInfo.hscRun,
-                            zpLabel=self.zpLabel, forcedStr=forcedStr, scale=2)
+                            zpLabel=self.zpLabel, forcedStr="unforced", scale=2)
 
         if self.config.doPlotMags:
             self.plotMags(unforced, filenamer, repoInfo.dataId, butler=repoInfo.butler,
