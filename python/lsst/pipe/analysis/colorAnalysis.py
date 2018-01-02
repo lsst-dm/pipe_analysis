@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 
 import matplotlib
-matplotlib.use("Agg")
+matplotlib.use("Agg")  # noqa #402
 import matplotlib.pyplot as plt
 import numpy as np
-np.seterr(all="ignore")
+np.seterr(all="ignore")  # noqa #402
 import functools
 
 from collections import defaultdict
@@ -14,8 +14,9 @@ from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner
 from lsst.coadd.utils import TractDataIdContainer
 from .analysis import Analysis, AnalysisConfig
 from .coaddAnalysis import CoaddAnalysisTask
-from .utils import *
-from .plotUtils import *
+from .utils import (Filenamer, Enforcer, concatenateCatalogs, checkIdLists, addPatchColumn,
+                    calibrateCoaddSourceCatalog, writeParquet, getRepoInfo)
+from .plotUtils import OverlapsStarGalaxyLabeller, labelCamera
 
 import lsst.afw.table as afwTable
 
@@ -45,6 +46,7 @@ class ColorTransform(Config):
         self.requireLess = requireLess
         return self
 
+
 ivezicTransforms = {
     "wPerp": ColorTransform.fromValues("Ivezic w perpendicular", " (griBlue)", True,
                                        {"HSC-G": -0.227, "HSC-R": 0.792, "HSC-I": -0.567, "": 0.050},
@@ -57,7 +59,8 @@ ivezicTransforms = {
                                        {"yPara": 0.1}, {"yPara": 1.2}),
     "wPara": ColorTransform.fromValues("Ivezic w parallel", " (griBlue)", False,
                                        {"HSC-G": 0.928, "HSC-R": -0.556, "HSC-I": -0.372, "": -0.425}),
-    "xPara": ColorTransform.fromValues("Ivezic x parallel", " (griRed)", False, {"HSC-R": 1.0, "HSC-I": -1.0}),
+    "xPara": ColorTransform.fromValues("Ivezic x parallel", " (griRed)", False,
+                                       {"HSC-R": 1.0, "HSC-I": -1.0}),
     "yPara": ColorTransform.fromValues("Ivezic y parallel", " (rizRed)", False,
                                        {"HSC-R": 0.895, "HSC-I": -0.448, "HSC-Z": -0.447, "": -0.600}),
 }
@@ -75,8 +78,10 @@ straightTransforms = {
 class NumStarLabeller(object):
     labels = {"star": 0, "maybe": 1, "notStar": 2}
     plot = ["star"]
+
     def __init__(self, numBands):
         self.numBands = numBands
+
     def __call__(self, catalog):
         return np.array([0 if nn == self.numBands else 2 if nn == 0 else 1 for nn in catalog["numStarFlags"]])
 
@@ -128,8 +133,8 @@ class ColorAnalysisConfig(Config):
                              doc="Only write out Parquet tables (i.e. do not produce any plots)?")
     doWriteParquetTables = Field(dtype=bool, default=True,
                                  doc=("Write out Parquet tables (for subsequent interactive analysis)?"
-                                      "\nNOTE: if True but fastparquet package is unavailable, a warning is "
-                                      "issued and table writing is skipped."))
+                                      "\nNOTE: if True but fastparquet package is unavailable, a warning "
+                                      "is issued and table writing is skipped."))
 
     def setDefaults(self):
         Config.setDefaults(self)
@@ -140,6 +145,7 @@ class ColorAnalysisConfig(Config):
         Config.validate(self)
         if self.writeParquetOnly and not self.doWriteParquetTables:
             raise ValueError("Cannot writeParquetOnly if doWriteParquetTables is False")
+
 
 class ColorAnalysisRunner(TaskRunner):
     @staticmethod
@@ -158,7 +164,7 @@ class ColorAnalysisRunner(TaskRunner):
             filterRefs = tractFilterRefs[tract]
             patchesForFilters = [set(patchRef.dataId["patch"] for patchRef in patchRefList) for
                                  patchRefList in filterRefs.values()]
-            if len(patchesForFilters) == 0:
+            if not patchesForFilters:
                 parsedCmd.log.warn("No input data found for tract {:d}".format(tract))
                 bad.append(tract)
                 continue
@@ -194,7 +200,7 @@ class ColorAnalysisTask(CmdLineTask):
         for patchRefList in patchRefsByFilter.values():
             for dataRef in patchRefList:
                 if dataRef.dataId["filter"] == self.config.fluxFilter:
-                    patchList.append(dataRef.dataId["patch"] )
+                    patchList.append(dataRef.dataId["patch"])
 
         for patchRefList in patchRefsByFilter.values():
             repoInfo = getRepoInfo(patchRefList[0], coaddName=self.config.coaddName,
@@ -261,7 +267,7 @@ class ColorAnalysisTask(CmdLineTask):
                 cat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
                 cat = addPatchColumn(cat, patchRef.dataId["patch"])
                 catList.append(cat)
-        if len(catList) == 0:
+        if not catList:
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
         return concatenateCatalogs(catList)
 
@@ -297,7 +303,6 @@ class ColorAnalysisTask(CmdLineTask):
             for ff in transforms[col].coeffs:
                 if ff != "" and ff not in catalogs:
                     doAdd = False
-                    # if all(ff in catalogs for ff in transforms[col].coeffs):
             if doAdd:
                 schema.addField(col, float, transforms[col].description + transforms[col].subDescription)
         schema.addField("numStarFlags", type=np.int32, doc="Number of times source was flagged as star")
@@ -363,7 +368,8 @@ class ColorAnalysisTask(CmdLineTask):
             catalog.writeFits("gi.fits")
             shortName = "galaxy-TEST"
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(catalog, GalaxyColor("modelfit_CModel_flux", "slot_CalibFlux_flux", "g_", "i_"),
+            self.AnalysisClass(catalog,
+                               GalaxyColor("modelfit_CModel_flux", "slot_CalibFlux_flux", "g_", "i_"),
                                "(g-i)_cmodel - (g-i)_CalibFlux", shortName, self.config.analysis,
                                flags=["modelfit_CModel_flag", "slot_CalibFlux_flag"], prefix="i_",
                                labeller=OverlapsStarGalaxyLabeller("g_", "i_"),
@@ -417,17 +423,17 @@ class ColorAnalysisTask(CmdLineTask):
             xFitRange2 = transform.requireLess["wPara"]
             wPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description="gri-wFit", style="fit"),
                                              self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
-                                             "g - r", "r - i", xRange=(-0.5, 2.0), yRange=(-0.5, 2.0), order=1,
-                                             xFitRange=(xFitRange1, xFitRange2), camera=camera, hscRun=hscRun,
-                                             unitScale=self.unitScale)
+                                             "g - r", "r - i", xRange=(-0.5, 2.0), yRange=(-0.5, 2.0),
+                                             order=1, xFitRange=(xFitRange1, xFitRange2), camera=camera,
+                                             hscRun=hscRun, unitScale=self.unitScale)
             transform = self.config.transforms["xPerp"]
             xFitRange1 = transform.requireGreater["xPara"]
             xFitRange2 = transform.requireLess["xPara"]
             xPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description="gri-xFit", style="fit"),
                                              self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
-                                             "g - r", "r - i", xRange=(-0.5, 2.0), yRange=(-0.5, 2.0), order=1,
-                                             xFitRange=(xFitRange1, xFitRange2), camera=camera, hscRun=hscRun,
-                                             unitScale=self.unitScale)
+                                             "g - r", "r - i", xRange=(-0.5, 2.0), yRange=(-0.5, 2.0),
+                                             order=1, xFitRange=(xFitRange1, xFitRange2), camera=camera,
+                                             hscRun=hscRun, unitScale=self.unitScale)
             # Lower branch only; upper branch is noisy due to astrophysics
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description="gri", style="fit"), self.log,
                                   color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"), "g - r", "r - i",
@@ -448,9 +454,9 @@ class ColorAnalysisTask(CmdLineTask):
             xFitRange2 = transform.requireLess["yPara"]
             yPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description="riz-yFit", style="fit"),
                                              self.log, color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"),
-                                             "r - i", "i - z", xRange=(-0.5, 2.0), yRange=(-0.4, 0.8), order=1,
-                                             xFitRange=(xFitRange1, xFitRange2), camera=camera, hscRun=hscRun,
-                                             unitScale=self.unitScale)
+                                             "r - i", "i - z", xRange=(-0.5, 2.0), yRange=(-0.4, 0.8),
+                                             order=1, xFitRange=(xFitRange1, xFitRange2), camera=camera,
+                                             hscRun=hscRun, unitScale=self.unitScale)
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description="riz", style="fit"), self.log,
                                          color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"), "r - i", "i - z",
                                          xRange=(-0.5, 2.0), yRange=(-0.4, 0.8), order=3, camera=camera,
@@ -492,11 +498,12 @@ class ColorAnalysisTask(CmdLineTask):
                                          Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
 
-
     def _getConfigName(self):
         return None
+
     def _getMetadataName(self):
         return None
+
     def _getEupsVersionsName(self):
         return None
 
@@ -581,12 +588,8 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=
               "median={5:.4f}; clip={6:.4f}; forcedMean=None){8:s}").format(
             dataId, distance[good].mean(), distance[good].std(), len(xx[keep]), len(xx),
             np.median(distance[good]), 3.0*0.74*(q3 - q1), "{", "}", unitStr))
-    # The following is a Python 2 vs Python 3 issue
-    try:
-        log.info("Polynomial fit: {:2}".format(polyStr.translate(None, "${}")))
-    except:
-        translationTable = dict.fromkeys(map(ord, "${}"), None)
-        log.info("Polynomial fit: {:2}".format(polyStr.translate(translationTable)))
+    # Get rid of LaTeX-specific characters for log message printing
+    log.info("Polynomial fit: {:2}".format("".join(x for x in polyStr if x not in "{}$")))
     meanStr = "mean = {0:5.2f} ({1:s})".format(distance[good].mean(), unitStr)
     stdStr = "  std = {0:5.2f} ({1:s})".format(distance[good].std(), unitStr)
     tractStr = "tract: {:d}".format(dataId["tract"])
