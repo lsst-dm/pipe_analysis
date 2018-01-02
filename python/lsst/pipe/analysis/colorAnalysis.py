@@ -197,15 +197,14 @@ class ColorAnalysisTask(CmdLineTask):
 
     def run(self, patchRefsByFilter):
         patchList = []
+        repoInfo = None
         for patchRefList in patchRefsByFilter.values():
             for dataRef in patchRefList:
                 if dataRef.dataId["filter"] == self.config.fluxFilter:
                     patchList.append(dataRef.dataId["patch"])
-
-        for patchRefList in patchRefsByFilter.values():
-            repoInfo = getRepoInfo(patchRefList[0], coaddName=self.config.coaddName,
-                                   coaddDataset="Coadd_forced_src")
-            break
+                    if repoInfo is None:
+                        repoInfo = getRepoInfo(dataRef, coaddName=self.config.coaddName,
+                                               coaddDataset="Coadd_forced_src")
 
         filenamer = Filenamer(repoInfo.butler, "plotColor", repoInfo.dataId)
         unforcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList,
