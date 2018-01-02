@@ -27,7 +27,7 @@ class AnalysisConfig(Config):
                                "base_ClassificationExtendedness_flag"])
     clip = Field(dtype=float, default=4.0, doc="Rejection threshold (stdev)")
     magThreshold = Field(dtype=float, default=21.0, doc="Magnitude threshold to apply")
-    magPlotMin = Field(dtype=float, default=14.0, doc="Minimum magnitude to plot")
+    magPlotMin = Field(dtype=float, default=14.5, doc="Minimum magnitude to plot")
     magPlotMax = Field(dtype=float, default=26.0, doc="Maximum magnitude to plot")
     magPlotStarMin = DictField(
         keytype=str,
@@ -242,22 +242,29 @@ class Analysis(object):
         if "matches" in filename:  # narrow magnitude plotting limits for matches
             magMin += 1
             magMax -= 1
-        if self.calibUsedOnly > 0:
+        if self.calibUsedOnly > 0 or "color" in filename or "visit" not in filename:
             if filterStr in self.config.magPlotStarMin.keys():
                 magMin = self.config.magPlotStarMin[filterStr]
+        if self.calibUsedOnly > 0 or "color" in filename:
             if filterStr in self.config.magPlotStarMax.keys():
                 magMax = self.config.magPlotStarMax[filterStr]
-
+                if "color" in filename:
+                    magMax -= 1.5
         axScatter.set_xlim(magMin, magMax)
         yDelta = 0.01*(self.qMax - (self.qMin - deltaMin))
         axScatter.set_ylim((self.qMin - deltaMin) + yDelta, self.qMax - yDelta)
 
+        # Get current y limits for scatter plot to base histogram bin sizing on
+        axScatterY1 = axScatter.get_ylim()[0]
+        axScatterY2 = axScatter.get_ylim()[1]
+
         nxDecimal = int(-1.0*np.around(np.log10(0.05*abs(magMax - magMin)) - 0.5))
         xBinwidth = min(0.1, np.around(0.05*abs(magMax - magMin), nxDecimal))
         xBins = np.arange(magMin + 0.5*xBinwidth, magMax + 0.5*xBinwidth, xBinwidth)
-        nyDecimal = int(-1.0*np.around(np.log10(0.05*abs(self.qMax - (self.qMin - deltaMin))) - 0.5))
-        yBinwidth = max(0.5/10**nyDecimal, np.around(0.02*abs(self.qMax - (self.qMin - deltaMin)), nyDecimal))
-        yBins = np.arange((self.qMin - deltaMin) - 0.5*yBinwidth, self.qMax + 0.55*yBinwidth, yBinwidth)
+        nyDecimal = int(-1.0*np.around(np.log10(0.05*abs(axScatterY2 - (axScatterY1 - deltaMin))) - 0.5))
+        yBinwidth = max(0.5/10**nyDecimal, np.around(0.02*abs(axScatterY2 - (axScatterY1 - deltaMin)),
+                                                     nyDecimal))
+        yBins = np.arange((axScatterY1 - deltaMin) - 0.5*yBinwidth, axScatterY2 + 0.55*yBinwidth, yBinwidth)
         axHistx.set_xlim(axScatter.get_xlim())
         axHisty.set_ylim(axScatter.get_ylim())
         axHistx.set_yscale("log", nonposy="clip")
