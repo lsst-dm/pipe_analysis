@@ -128,17 +128,17 @@ class Analysis(object):
             for name in labeller.plot:
                 if (self.stats[name].num) == 0:
                     raise RuntimeError("No good data points to plot for sample labelled: {:}".format(name))
-            # Ensure plot limits always encompass at least mean +/- 2.5*stdev, at most mean +/- 12.0*stddev,
-            # and clipped stats range + 15%
+            # Ensure plot limits always encompass at least mean +/- 6.0*stdev, at most mean +/- 20.0*stddev,
+            # and clipped stats range + 25%
             if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar", "resolution"]):
-                self.qMin = max(min(self.qMin, self.stats["star"].mean - 2.5*self.stats["star"].stdev,
-                                self.stats["star"].median - 1.15*self.stats["star"].clip),
-                                min(self.stats["star"].mean - 12.0*self.stats["star"].stdev,
+                self.qMin = max(min(self.qMin, self.stats["star"].mean - 6.0*self.stats["star"].stdev,
+                                self.stats["star"].median - 1.25*self.stats["star"].clip),
+                                min(self.stats["star"].mean - 20.0*self.stats["star"].stdev,
                                     -0.005*self.unitScale))
             if not any(ss in self.shortName for ss in ["footNpix", "pStar", "resolution"]):
-                self.qMax = min(max(self.qMax, self.stats["star"].mean + 2.5*self.stats["star"].stdev,
-                                self.stats["star"].median + 1.15*self.stats["star"].clip),
-                                max(self.stats["star"].mean + 12.0*self.stats["star"].stdev,
+                self.qMax = min(max(self.qMax, self.stats["star"].mean + 6.0*self.stats["star"].stdev,
+                                self.stats["star"].median + 1.25*self.stats["star"].clip),
+                                max(self.stats["star"].mean + 20.0*self.stats["star"].stdev,
                                     0.005*self.unitScale))
 
     def plotAgainstMag(self, filename, stats=None, camera=None, ccdList=None, tractInfo=None, patchList=None,
@@ -227,15 +227,15 @@ class Analysis(object):
                 inLimits = self.data["star"].quantity < self.qMax
                 inLimits &= self.data["star"].quantity > self.qMin
 
-        # Make sure plot limit extends low enough to show star/galaxy separation line.
+        # Make sure plot limit extends low enough to show well below the star/galaxy separation line.
         # Add delta as opposed to directly changing self.qMin to not affect other plots
         deltaMin = 0.0
         if "galaxy" in self.data and len(self.data["galaxy"].quantity) > 0 and "-mag_" in filename:
             if "GaussianFlux" in filename:
-                galMin = np.round(2.5*np.log10(self.config.visitClassFluxRatio) - 0.015, 2)*self.unitScale
+                galMin = np.round(2.5*np.log10(self.config.visitClassFluxRatio) - 0.08, 2)*self.unitScale
                 deltaMin = max(0.0, self.qMin - galMin)
             if "CModel" in filename:
-                galMin = np.round(2.5*np.log10(self.config.coaddClassFluxRatio) - 0.015, 2)*self.unitScale
+                galMin = np.round(2.5*np.log10(self.config.coaddClassFluxRatio) - 0.08, 2)*self.unitScale
                 deltaMin = max(0.0, self.qMin - galMin)
 
         magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
