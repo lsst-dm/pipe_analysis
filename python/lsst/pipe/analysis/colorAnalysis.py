@@ -415,6 +415,7 @@ class ColorAnalysisTask(CmdLineTask):
         combined = self.transformCatalogs(catalogs, straightTransforms, hscRun=hscRun)[good].copy(True)
         filters = set(catalogs.keys())
         color = lambda c1, c2: (mags[c1] - mags[c2])[good]
+        unitStr = "mmag" if self.config.toMilli else "mag"
         if filters.issuperset(set(("HSC-G", "HSC-R", "HSC-I"))):
             # Do a linear fit to regions defined in Ivezic transforms
             transform = self.config.transforms["wPerp"]
@@ -438,10 +439,11 @@ class ColorAnalysisTask(CmdLineTask):
                                   color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"), "g - r", "r - i",
                                   xRange=(-0.5, 2.0), yRange=(-0.5, 2.0), order=3, xFitRange=(0.3, 1.1),
                                   camera=camera, hscRun=hscRun, unitScale=self.unitScale)
-            shortName = "gri"
+            shortName = "griDistance"
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, 0.3, 1.1), "griPerp",
-                               shortName, self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
+            self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, 0.3, 1.1),
+                               "griDistance (%s)" % unitStr, shortName, self.config.analysis,
+                               flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.05}}), camera=camera,
@@ -460,10 +462,11 @@ class ColorAnalysisTask(CmdLineTask):
                                          color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"), "r - i", "i - z",
                                          xRange=(-0.5, 2.0), yRange=(-0.4, 0.8), order=3, camera=camera,
                                          hscRun=hscRun, unitScale=self.unitScale)
-            shortName = "riz"
+            shortName = "rizDistance"
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly), "rizPerp", shortName,
-                               self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
+            self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly),
+                               "rizDistance (%s)" % unitStr, shortName, self.config.analysis,
+                               flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
@@ -473,10 +476,11 @@ class ColorAnalysisTask(CmdLineTask):
                                          color("HSC-I", "HSC-Z"), color("HSC-Z", "HSC-Y"), "i - z", "z - y",
                                          xRange=(-0.4, 0.8), yRange=(-0.3, 0.5), order=3, camera=camera,
                                          hscRun=hscRun, unitScale=self.unitScale)
-            shortName = "izy"
+            shortName = "izyDistance"
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly), "izyPerp", shortName,
-                               self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
+            self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly),
+                               "izyDistance (%s)" % unitStr, shortName, self.config.analysis,
+                               flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
@@ -488,10 +492,11 @@ class ColorAnalysisTask(CmdLineTask):
                                          "z-n921", "n921-y", xRange=(-0.2, 0.2), yRange=(-0.1, 0.2),
                                          order=2, xFitRange=(-0.05, 0.15), camera=camera, hscRun=hscRun,
                                          unitScale=self.unitScale)
-            shortName = "z9y"
+            shortName = "z9yDistance"
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly), "z9yPerp", shortName,
-                               self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
+            self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly),
+                               "z9yDistance (%s)" % unitStr, shortName, self.config.analysis,
+                               flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
@@ -592,7 +597,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=
     meanStr = "mean = {0:5.2f} ({1:s})".format(distance[good].mean(), unitStr)
     stdStr = "  std = {0:5.2f} ({1:s})".format(distance[good].std(), unitStr)
     tractStr = "tract: {:d}".format(dataId["tract"])
-    axes[1].set_xlabel("Distance to polynomial fit (mag)")
+    axes[1].set_xlabel("Distance to polynomial fit ({:s})".format(unitStr))
     axes[1].set_ylabel("Number")
     axes[1].set_yscale("log", nonposy="clip")
     axes[1].hist(distance[good], numBins, range=(-0.05*unitScale, 0.05*unitScale), normed=False)
