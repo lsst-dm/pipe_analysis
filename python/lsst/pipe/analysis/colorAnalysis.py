@@ -10,7 +10,7 @@ import functools
 from collections import defaultdict
 
 from lsst.pex.config import Config, Field, ConfigField, ListField, DictField, ConfigDictField
-from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner
+from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError
 from lsst.coadd.utils import TractDataIdContainer
 from .analysis import Analysis, AnalysisConfig
 from .coaddAnalysis import CoaddAnalysisTask
@@ -127,7 +127,10 @@ class ColorAnalysisConfig(Config):
     analysis = ConfigField(dtype=AnalysisConfig, doc="Analysis plotting options")
     transforms = ConfigDictField(keytype=str, itemtype=ColorTransform, default={},
                                  doc="Color transformations to analyse")
-    fluxFilter = Field(dtype=str, default="HSC-I", doc="Filter to use for plotting against magnitude")
+    fluxFilter = Field(dtype=str, default="HSC-I", doc=("Filter to use for plotting against magnitude and "
+                                                        "setting star/galaxy classification"))
+    fluxFilterGeneric = Field(dtype=str, default="i", doc=("Filter to use for plotting against magnitude "
+                                                           "and setting star/galaxy classification"))
     srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
                              doc="Mapping between different stack (e.g. HSC vs. LSST) schema names")
     toMilli = Field(dtype=bool, default=True, doc="Print stats in milli units (i.e. mas, mmag)?")
@@ -201,9 +204,23 @@ class ColorAnalysisTask(CmdLineTask):
     def run(self, patchRefsByFilter):
         patchList = []
         repoInfo = None
+        self.fluxFilter = None
         for patchRefList in patchRefsByFilter.values():
             for dataRef in patchRefList:
                 if dataRef.dataId["filter"] == self.config.fluxFilter:
+                    self.fluxFilter = self.config.fluxFilter
+                    break
+                if dataRef.dataId["filter"] == self.config.fluxFilterGeneric:
+                    self.fluxFilter = self.config.fluxFilterGeneric
+                    break
+        if self.fluxFilter is None:
+            raise TaskError("Flux filter from config not found (neither {0:s} nor the generic {1:s}".
+                            format(self.config.fluxFilter, self.config.fluxFilterGeneric))
+        self.log.info("Flux filter for plotting and primary star/galaxy classifiation is: {0:s}".
+                      format(self.fluxFilter))
+        for patchRefList in patchRefsByFilter.values():
+            for dataRef in patchRefList:
+                if dataRef.dataId["filter"] == self.fluxFilter:
                     patchList.append(dataRef.dataId["patch"])
                     if repoInfo is None:
                         repoInfo = getRepoInfo(dataRef, coaddName=self.config.coaddName,
@@ -309,7 +326,7 @@ class ColorAnalysisTask(CmdLineTask):
                 schema.addField(col, float, transforms[col].description + transforms[col].subDescription)
         schema.addField("numStarFlags", type=np.int32, doc="Number of times source was flagged as star")
         badKey = schema.addField("qaBad_flag", type="Flag", doc="Is this a bad source for color qa analyses?")
-        schema.addField(self.fluxColumn, type=np.float64, doc="Flux from filter " + self.config.fluxFilter)
+        schema.addField(self.fluxColumn, type=np.float64, doc="Flux from filter " + self.fluxFilter)
 
         # Copy basics (id, RA, Dec)
         new = afwTable.SourceCatalog(schema)
@@ -348,7 +365,7 @@ class ColorAnalysisTask(CmdLineTask):
             numStarFlags += np.where(cat[self.classificationColumn] < 0.5, 1, 0)
         new["numStarFlags"][:] = numStarFlags
 
-        new[self.fluxColumn][:] = catalogs[self.config.fluxFilter][self.fluxColumn]
+        new[self.fluxColumn][:] = catalogs[self.fluxFilter][self.fluxColumn]
 
         return new
 
