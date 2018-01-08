@@ -120,8 +120,10 @@ class GalaxyColor(object):
 class ColorAnalysisConfig(Config):
     coaddName = Field(dtype=str, default="deep", doc="Name for coadd")
     flags = ListField(dtype=str, doc="Flags of objects to ignore",
-                      default=["base_SdssCentroid_flag", "base_PixelFlags_flag_saturatedCenter",
-                               "base_PixelFlags_flag_interpolatedCenter", "base_PsfFlux_flag"])
+                      default=["base_SdssCentroid_flag", "slot_Centroid_flag", "base_PsfFlux_flag",
+                               "base_PixelFlags_flag_saturatedCenter",
+                               "base_PixelFlags_flag_interpolatedCenter",
+                               "base_ClassificationExtendedness_flag"])
     analysis = ConfigField(dtype=AnalysisConfig, doc="Analysis plotting options")
     transforms = ConfigDictField(keytype=str, itemtype=ColorTransform, default={},
                                  doc="Color transformations to analyse")
@@ -140,6 +142,7 @@ class ColorAnalysisConfig(Config):
         Config.setDefaults(self)
         self.transforms = ivezicTransforms
         self.analysis.flags = []  # We remove bad source ourself
+        self.analysis.magThreshold = 22.0  # RHL requested this limit
 
     def validate(self):
         Config.validate(self)
