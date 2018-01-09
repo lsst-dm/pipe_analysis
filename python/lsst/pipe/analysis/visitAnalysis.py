@@ -372,7 +372,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             catalog = addCcdColumn(catalog, dataRef.dataId[ccdKey])
 
             # Compute Focal Plane coordinates for each source if not already there
-            if self.config.doPlotCentroids or self.config.doPlotFP and self.haveFpCoords:
+            if self.config.doPlotCentroids or self.config.analysisMatches.doPlotFP and self.haveFpCoords:
                 if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
                     exp = butler.get("calexp", dataRef.dataId)
                     det = exp.getDetector()
