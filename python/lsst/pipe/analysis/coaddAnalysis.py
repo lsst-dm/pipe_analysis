@@ -102,7 +102,7 @@ class CoaddAnalysisConfig(Config):
         Config.setDefaults(self)
         # self.externalCatalogs = {"sdss-dr9-fink-v5b": astrom}
         self.analysisMatches.magThreshold = 21.0  # External catalogs like PS1 & SDSS used smaller telescopes
-        self.refObjLoader.ref_dataset_name = "ps1_pv3_3pi_20170110"
+        # self.refObjLoader.ref_dataset_name = "ps1_pv3_3pi_20170110"
 
     def validate(self):
         Config.validate(self)
