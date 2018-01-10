@@ -21,6 +21,7 @@ from . import plotUtils
 import lsst.afw.table as afwTable
 
 np.seterr(all="ignore")
+matplotlib.rcParams['savefig.dpi'] = 300
 
 
 class CcdAnalysis(Analysis):
