@@ -231,27 +231,27 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", repoInfo.ccdKey,
                                                          hscRun=repoInfo.hscRun)
 
-            # Set boolean arrays indicating sources deemed unsuitable for qa analyses
-            self.catLabel = "nChild = 0"
-            bad = utils.makeBadArray(catalog, flagList=self.config.analysis.flags,
-                                     onlyReadStars=self.config.onlyReadStars)
-            badCommonZp = utils.makeBadArray(commonZpCat, flagList=self.config.analysis.flags,
-                                             onlyReadStars=self.config.onlyReadStars)
+                # Set boolean arrays indicating sources deemed unsuitable for qa analyses
+                self.catLabel = "nChild = 0"
+                bad = utils.makeBadArray(catalog, flagList=self.config.analysis.flags,
+                                         onlyReadStars=self.config.onlyReadStars)
+                badCommonZp = utils.makeBadArray(commonZpCat, flagList=self.config.analysis.flags,
+                                                 onlyReadStars=self.config.onlyReadStars)
 
-            # Create and write parquet tables
-            if self.config.doWriteParquetTables:
-                tableFilenamer = utils.Filenamer(repoInfo.butler, 'qaTableVisit', repoInfo.dataId)
-                utils.writeParquet(catalog, tableFilenamer(
-                    repoInfo.dataId, description='catalog'), badArray=bad)
-                utils.writeParquet(commonZpCat, tableFilenamer(repoInfo.dataId, description='commonZp'),
-                                   badArray=badCommonZp)
-                if self.config.writeParquetOnly:
-                    self.log.info("Exiting after writing Parquet tables.  No plots generated.")
-                    return
+                # Create and write parquet tables
+                if self.config.doWriteParquetTables:
+                    tableFilenamer = utils.Filenamer(repoInfo.butler, 'qaTableVisit', repoInfo.dataId)
+                    utils.writeParquet(catalog, tableFilenamer(
+                        repoInfo.dataId, description='catalog'), badArray=bad)
+                    utils.writeParquet(commonZpCat, tableFilenamer(repoInfo.dataId, description='commonZp'),
+                                       badArray=badCommonZp)
+                    if self.config.writeParquetOnly:
+                        self.log.info("Exiting after writing Parquet tables.  No plots generated.")
+                        return
 
-            # purge the catalogs of flagged sources
-            catalog = catalog[~bad].copy(deep=True)
-            commonZpCat = commonZpCat[~badCommonZp].copy(deep=True)
+                # purge the catalogs of flagged sources
+                catalog = catalog[~bad].copy(deep=True)
+                commonZpCat = commonZpCat[~badCommonZp].copy(deep=True)
 
             try:
                 self.zpLabel = self.zpLabel + " " + self.catLabel
