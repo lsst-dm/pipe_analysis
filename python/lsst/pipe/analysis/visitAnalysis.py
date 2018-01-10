@@ -24,6 +24,7 @@ np.seterr(all="ignore")
 
 
 class CcdAnalysis(Analysis):
+
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
                 tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
                 postFix="", plotRunStats=True, highlightList=None, haveFpCoords=None):
@@ -56,7 +57,7 @@ class CcdAnalysis(Analysis):
         if vMin == vMax:
             vMin, vMax = vMin - 2, vMax + 2
             self.log.info("Only one CCD ({0:d}) to analyze: setting vMin ({1:d}), vMax ({2:d})".format(
-                    ccd.min(), vMin, vMax))
+                ccd.min(), vMin, vMax))
         good = (self.mag < self.config.magThreshold if self.config.magThreshold > 0 else
                 np.ones(len(self.mag), dtype=bool))
         fig, axes = plt.subplots(2, 1)
@@ -81,10 +82,12 @@ class CcdAnalysis(Analysis):
         axes[1].set_xlabel("y_ccd")
         fig.text(0.02, 0.5, self.quantityName, ha="center", va="center", rotation="vertical")
         if stats is not None:
-            plotUtils.annotateAxes(filename, plt, axes[0], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
-                         hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
-            plotUtils.annotateAxes(filename, plt, axes[1], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
-                         hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
+            plotUtils.annotateAxes(filename, plt, axes[0], stats, "star",
+                                   self.config.magThreshold, x0=0.03, yOff=0.07,
+                                   hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
+            plotUtils.annotateAxes(filename, plt, axes[1], stats, "star",
+                                   self.config.magThreshold, x0=0.03, yOff=0.07,
+                                   hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
         axes[0].set_xlim(-100, 2150)
         axes[1].set_xlim(-100, 4300)
         axes[0].set_ylim(self.qMin, self.qMax)
@@ -156,13 +159,14 @@ class VisitAnalysisConfig(CoaddAnalysisConfig):
         CoaddAnalysisConfig.validate(self)
         if self.doApplyUberCal:
             try:
-                import lsst.meas.mosaic
+                import lsst.meas.mosaic  # noqa: F401 (we're testing that meas_mosaic exists at all)
             except ImportError:
                 raise ValueError("Cannot apply uber calibrations because meas_mosaic could not be imported."
                                  "\nEither setup meas_mosaic or run with --config doApplyUberCal=False")
 
 
 class VisitAnalysisRunner(TaskRunner):
+
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
         if len(parsedCmd.id.refList) < 1:
@@ -197,8 +201,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             tractList = [int(tractStr) for tractStr in tract.split('^')]
         dataRefListPerTract = [None]*len(tractList)
         for i, tract in enumerate(tractList):
-            dataRefListPerTract[i] = [dataRef for dataRef in dataRefList if dataRef.dataId["tract"] == tract
-                                      and dataRef.datasetExists("src")]
+            dataRefListPerTract[i] = [dataRef for dataRef in dataRefList
+                                      if dataRef.dataId["tract"] == tract and dataRef.datasetExists("src")]
         commonZpDone = False
         for i, dataRefListTract in enumerate(dataRefListPerTract):
             if len(dataRefListTract) == 0:
@@ -222,24 +226,25 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo.dataset))
             filenamer = utils.Filenamer(repoInfo.butler, "plotVisit", repoInfo.dataId)
             if any(doPlot for doPlot in [self.config.doPlotFootprintNpix, self.config.doPlotQuiver,
-                              self.config.doPlotMags, self.config.doPlotSizes, self.config.doPlotCentroids,
-                              self.config.doPlotStarGalaxy]):
+                                         self.config.doPlotMags, self.config.doPlotSizes,
+                                         self.config.doPlotCentroids, self.config.doPlotStarGalaxy]):
                 commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", repoInfo.ccdKey,
                                                          hscRun=repoInfo.hscRun)
 
             # Set boolean arrays indicating sources deemed unsuitable for qa analyses
             self.catLabel = "nChild = 0"
             bad = utils.makeBadArray(catalog, flagList=self.config.analysis.flags,
-                               onlyReadStars=self.config.onlyReadStars)
+                                     onlyReadStars=self.config.onlyReadStars)
             badCommonZp = utils.makeBadArray(commonZpCat, flagList=self.config.analysis.flags,
-                               onlyReadStars=self.config.onlyReadStars)
+                                             onlyReadStars=self.config.onlyReadStars)
 
             # Create and write parquet tables
             if self.config.doWriteParquetTables:
                 tableFilenamer = utils.Filenamer(repoInfo.butler, 'qaTableVisit', repoInfo.dataId)
-                utils.writeParquet(catalog, tableFilenamer(repoInfo.dataId, description='catalog'), badArray=bad)
-                utils.writeParquet(commonZpCat,tableFilenamer(repoInfo.dataId, description='commonZp'),
-                             badArray=badCommonZp)
+                utils.writeParquet(catalog, tableFilenamer(
+                    repoInfo.dataId, description='catalog'), badArray=bad)
+                utils.writeParquet(commonZpCat, tableFilenamer(repoInfo.dataId, description='commonZp'),
+                                   badArray=badCommonZp)
                 if self.config.writeParquetOnly:
                     self.log.info("Exiting after writing Parquet tables.  No plots generated.")
                     return
@@ -250,7 +255,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
             try:
                 self.zpLabel = self.zpLabel + " " + self.catLabel
-            except:
+            except Exception:
                 pass
 
             if self.config.doPlotFootprintNpix:
@@ -264,16 +269,23 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                    highlightList=[("parent", 0, "yellow"), ])
 
             if self.config.doPlotQuiver:
-                self.plotQuiver(catalog, filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
-                                dataId=repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
-                                ccdList=ccdListPerTract, hscRun=repoInfo.hscRun, zpLabel=self.zpLabel, scale=2)
+                self.plotQuiver(catalog, filenamer(repoInfo.dataId,
+                                                   description="ellipResids",
+                                                   style="quiver"),
+                                dataId=repoInfo.dataId,
+                                butler=repoInfo.butler,
+                                camera=repoInfo.camera,
+                                ccdList=ccdListPerTract,
+                                hscRun=repoInfo.hscRun,
+                                zpLabel=self.zpLabel,
+                                scale=2)
 
             # Create mag comparison plots using common ZP
             if self.config.doPlotMags and not commonZpDone:
                 zpLabel = "common (" + str(self.config.analysis.commonZp) + ")"
                 try:
                     zpLabel = zpLabel + " " + self.catLabel
-                except:
+                except Exception:
                     pass
                 self.plotMags(commonZpCat, filenamer, repoInfo.dataId, butler=repoInfo.butler,
                               camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
@@ -504,7 +516,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         self.zp = 0.0
         try:
             self.zpLabel = self.zpLabel
-        except:
+        except Exception:
             self.zpLabel = None
         if self.config.doApplyUberCal:
             calibrated = utils.calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
@@ -516,11 +528,12 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             self.zp = 2.5*np.log10(metadata.get("FLUXMAG0"))
             if self.zpLabel is None:
                 self.log.info("Using 2.5*log10(FLUXMAG0) = {:.4f} from FITS header for zeropoint".format(
-                        self.zp))
+                    self.zp))
             self.zpLabel = "FLUXMAG0"
             calibrated = utils.calibrateSourceCatalog(catalog, self.zp)
 
         return calibrated
+
 
 class CompareVisitAnalysisConfig(VisitAnalysisConfig):
     doApplyUberCal1 = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input1?" +
@@ -539,7 +552,7 @@ class CompareVisitAnalysisConfig(VisitAnalysisConfig):
         super(CoaddAnalysisConfig, self).validate()
         if self.doApplyUberCal1 or self.doApplyUberCal2:
             try:
-                import lsst.meas.mosaic
+                import lsst.meas.mosaic  # noqa: F401 (we're testing that meas_mosaic exists at all)
             except ImportError:
                 raise ValueError("Cannot apply uber calibrations because meas_mosaic could not be imported."
                                  "\nEither setup meas_mosaic or run with --config doApplyUberCal1=False "
@@ -547,6 +560,7 @@ class CompareVisitAnalysisConfig(VisitAnalysisConfig):
 
 
 class CompareVisitAnalysisRunner(TaskRunner):
+
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
         parentDir = parsedCmd.input
@@ -664,13 +678,13 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             # Set boolean arrays indicating sources deemed unsuitable for qa analyses
             self.catLabel = "nChild = 0"
             bad1 = utils.makeBadArray(catalog1, flagList=self.config.analysis.flags,
-                                onlyReadStars=self.config.onlyReadStars)
+                                      onlyReadStars=self.config.onlyReadStars)
             bad2 = utils.makeBadArray(catalog2, flagList=self.config.analysis.flags,
-                                onlyReadStars=self.config.onlyReadStars)
+                                      onlyReadStars=self.config.onlyReadStars)
             badCommonZp1 = utils.makeBadArray(commonZpCat1, flagList=self.config.analysis.flags,
-                                        onlyReadStars=self.config.onlyReadStars)
+                                              onlyReadStars=self.config.onlyReadStars)
             badCommonZp2 = utils.makeBadArray(commonZpCat2, flagList=self.config.analysis.flags,
-                                        onlyReadStars=self.config.onlyReadStars)
+                                              onlyReadStars=self.config.onlyReadStars)
 
             # purge the catalogs of flagged sources
             catalog1 = catalog1[~bad1].copy(deep=True)
@@ -679,16 +693,16 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             commonZpCat2 = commonZpCat2[~badCommonZp2].copy(deep=True)
 
             self.log.info("\nNumber of sources in catalogs: first = {0:d} and second = {1:d}".format(
-                    len(catalog1), len(catalog2)))
+                len(catalog1), len(catalog2)))
             commonZpCat = self.matchCatalogs(commonZpCat1, commonZpCat2)
             catalog = self.matchCatalogs(catalog1, catalog2)
 
             self.log.info("Number of matches (maxDist = {0:.2f} arcsec) = {1:d}".format(
-                    self.config.matchRadius, len(catalog)))
+                self.config.matchRadius, len(catalog)))
 
             try:
                 self.zpLabel = self.zpLabel + " " + self.catLabel
-            except:
+            except Exception:
                 pass
 
             filenamer = utils.Filenamer(repoInfo1.butler, "plotCompareVisit", repoInfo1.dataId)
@@ -702,7 +716,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 zpLabel = "common (" + str(self.config.analysis.commonZp) + ")"
                 try:
                     zpLabel = zpLabel + " " + self.catLabel
-                except:
+                except Exception:
                     pass
 
                 self.plotMags(commonZpCat, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
@@ -720,7 +734,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                              ("second_calib_psfUsed", 0, "green")])
             if self.config.doPlotSizes:
                 if ("first_base_SdssShape_psf_xx" in catalog.schema and
-                    "second_base_SdssShape_psf_xx" in catalog.schema):
+                        "second_base_SdssShape_psf_xx" in catalog.schema):
                     self.plotSizes(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
                                    camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=repoInfo2.hscRun,
                                    matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
@@ -737,10 +751,9 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                    matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
             if self.config.doPlotStarGalaxy:
                 self.plotStarGal(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
-                                 camera=repoInfo1.camera,  ccdList=ccdListPerTract1,
+                                 camera=repoInfo1.camera, ccdList=ccdListPerTract1,
                                  hscRun1=repoInfo1.hscRun, hscRun2=repoInfo2.hscRun,
                                  matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
-
 
     def readCatalogs(self, dataRefList1, dataRefList2, dataset, hscRun1=None, hscRun2=None,
                      doReadFootprints=None):
@@ -784,7 +797,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         for dataRef1, dataRef2 in zip(dataRefList1, dataRefList2):
             if not dataRef1.datasetExists(dataset) or not dataRef2.datasetExists(dataset):
                 continue
-            if doReadFootprints == None:
+            if doReadFootprints is None:
                 srcCat1 = dataRef1.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
                 srcCat2 = dataRef2.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
             elif doReadFootprints == "light":
@@ -880,7 +893,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         self.zp = 0.0
         try:
             self.zpLabel = self.zpLabel
-        except:
+        except Exception:
             self.zpLabel = None
         if doApplyUberCal:
             calibrated = utils.calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
@@ -903,7 +916,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         return calibrated
 
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, hscRun=None,
-                 matchRadius=None, zpLabel=None):
+                  matchRadius=None, zpLabel=None):
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in ["base_PsfFlux"]:
             if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
@@ -961,8 +974,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 shortName = "hsmPsfTrace"
                 compareCol = "ext_shapeHSM_HsmPsfMoments"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, utils.traceSizeCompare(compareCol), "HSM PSF Trace Radius Diff (%)", shortName,
-                         self.config.analysis, flags=[col + "_flag"], prefix="first_",
+                Analysis(catalog, utils.traceSizeCompare(compareCol), "HSM PSF Trace Radius Diff (%)",
+                         shortName, self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          goodKeys=["calib_psfUsed"], qMin=-1.1, qMax=1.1,
                          labeller=plotUtils.OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
@@ -982,7 +995,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                          "  Run Comparison: %s apCorr diff" % utils.fluxToPlotString(col),
                          shortName, self.config.analysis,
                          prefix="first_", qMin=-0.025, qMax=0.025, flags=[col + "_flag_apCorr"],
-                         errFunc=utils.ApCorrDiffErr(col + "_apCorr"), labeller=plotUtils.OverlapsStarGalaxyLabeller(),
+                         errFunc=utils.ApCorrDiffErr(col + "_apCorr"),
+                         labeller=plotUtils.OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
                                    zpLabel=None)
