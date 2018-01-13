@@ -169,7 +169,7 @@ class Analysis(object):
             plotText(zpLabel, plt, axes, 0.13, -0.09, prefix="zp: ", color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="zp: ", color="green")
-        fig.savefig(filename)
+        fig.savefig(filename, dpi=120)
         plt.close(fig)
 
     def plotAgainstMagAndHist(self, log, filename, stats=None, camera=None, ccdList=None, tractInfo=None,
@@ -380,7 +380,7 @@ class Analysis(object):
             plotText(zpLabel, plt, axScatter, 0.09, -0.11, prefix="zp: ", color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axScatter, 0.87, -0.11, prefix="cat: ", color="green")
-        plt.savefig(filename)
+        plt.savefig(filename, dpi=120)
         plt.close()
 
     def plotHistogram(self, filename, numBins=51, stats=None, hscRun=None, matchRadius=None, zpLabel=None,
@@ -422,7 +422,7 @@ class Analysis(object):
             plotText(zpLabel, plt, axes, 0.13, -0.09, prefix="zp: ", color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
-        fig.savefig(filename)
+        fig.savefig(filename, dpi=120)
         plt.close(fig)
 
     def plotSkyPosition(self, filename, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
@@ -580,7 +580,7 @@ class Analysis(object):
                       xy=(x0 + lenStr + 0.012, 1.035),
                       xycoords="axes fraction", ha="left", va="center", fontsize=8)
 
-        fig.savefig(filename)
+        fig.savefig(filename, dpi=150)
         plt.close(fig)
 
     def plotRaDec(self, filename, stats=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None):
@@ -622,7 +622,7 @@ class Analysis(object):
             plotText(zpLabel, plt, axes[0], 0.13, -0.09, prefix="zp: ", color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes[0], 0.85, -0.09, prefix="cat: ", color="green")
-        fig.savefig(filename)
+        fig.savefig(filename, dpi=120)
         plt.close(fig)
 
     def plotQuiver(self, catalog, filename, log, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
@@ -743,7 +743,7 @@ class Analysis(object):
             plotText(forcedStr, plt, axes, 0.99, -0.1, prefix="cat: ", fontSize=8, color="green")
         axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
 
-        fig.savefig(filename)
+        fig.savefig(filename, dpi=150)
         plt.close(fig)
 
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
