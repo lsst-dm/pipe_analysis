@@ -134,6 +134,7 @@ class ColorAnalysisConfig(Config):
     srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
                              doc="Mapping between different stack (e.g. HSC vs. LSST) schema names")
     toMilli = Field(dtype=bool, default=True, doc="Print stats in milli units (i.e. mas, mmag)?")
+    doPlotPcaColors = Field(dtype=bool, default=True, doc="Create the Ivezic PCA color offset plots?")
     writeParquetOnly = Field(dtype=bool, default=False,
                              doc="Only write out Parquet tables (i.e. do not produce any plots)?")
     doWriteParquetTables = Field(dtype=bool, default=True,
@@ -226,22 +227,32 @@ class ColorAnalysisTask(CmdLineTask):
                         repoInfo = getRepoInfo(dataRef, coaddName=self.config.coaddName,
                                                coaddDataset="Coadd_forced_src")
 
+        # Only adjust the schema names necessary here (rather than attaching the full alias schema map)
+        self.fluxColumn = self.config.analysis.fluxColumn
+        self.classificationColumn = "base_ClassificationExtendedness_value"
+        self.flags = self.config.flags
+        if repoInfo.hscRun is not None:
+            self.fluxColumn = self.config.srcSchemaMap[self.config.analysis.fluxColumn] + "_flux"
+            self.classificationColumn = self.config.srcSchemaMap[self.classificationColumn]
+            self.flags = [self.config.srcSchemaMap[flag] for flag in self.flags]
+
         filenamer = Filenamer(repoInfo.butler, "plotColor", repoInfo.dataId)
         unforcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList,
                                                           self.config.coaddName + "Coadd_meas") for
                                     ff, patchRefList in patchRefsByFilter.items()}
         for cat in unforcedCatalogsByFilter.values():
             calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
-        unforced = self.transformCatalogs(unforcedCatalogsByFilter, self.config.transforms,
-                                          hscRun=repoInfo.hscRun)
         forcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList,
                                                         self.config.coaddName + "Coadd_forced_src") for
                                   ff, patchRefList in patchRefsByFilter.items()}
         for cat in forcedCatalogsByFilter.values():
             calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
         # self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
-        forced = self.transformCatalogs(forcedCatalogsByFilter, self.config.transforms,
-                                        flagsCats=unforcedCatalogsByFilter, hscRun=repoInfo.hscRun)
+        if self.config.doPlotPcaColors or self.config.doWriteParquetTables:
+            unforced = self.transformCatalogs(unforcedCatalogsByFilter, self.config.transforms,
+                                              hscRun=repoInfo.hscRun)
+            forced = self.transformCatalogs(forcedCatalogsByFilter, self.config.transforms,
+                                            flagsCats=unforcedCatalogsByFilter, hscRun=repoInfo.hscRun)
 
         # Create and write parquet tables
         if self.config.doWriteParquetTables:
@@ -251,9 +262,10 @@ class ColorAnalysisTask(CmdLineTask):
                 self.log.info("Exiting after writing Parquet tables.  No plots generated.")
                 return
 
-        self.plotStarColors(forced, filenamer, NumStarLabeller(len(forcedCatalogsByFilter)), repoInfo.dataId,
-                            camera=repoInfo.camera, tractInfo=repoInfo.tractInfo, patchList=patchList,
-                            hscRun=repoInfo.hscRun)
+        if self.config.doPlotPcaColors:
+            self.plotStarColors(forced, filenamer, NumStarLabeller(len(forcedCatalogsByFilter)),
+                                repoInfo.dataId, camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
+                                patchList=patchList, hscRun=repoInfo.hscRun)
         self.plotStarColorColor(forcedCatalogsByFilter, filenamer, repoInfo.dataId, camera=repoInfo.camera,
                                 tractInfo=repoInfo.tractInfo, patchList=patchList, hscRun=repoInfo.hscRun)
 
@@ -307,15 +319,6 @@ class ColorAnalysisTask(CmdLineTask):
         mapper = afwTable.SchemaMapper(template.schema)
         mapper.addMinimalSchema(afwTable.SourceTable.makeMinimalSchema())
         schema = mapper.getOutputSchema()
-
-        # Only adjust the schema names necessary here (rather than attaching the full alias schema map)
-        self.fluxColumn = self.config.analysis.fluxColumn
-        self.classificationColumn = "base_ClassificationExtendedness_value"
-        self.flags = self.config.flags
-        if hscRun is not None:
-            self.fluxColumn = self.config.srcSchemaMap[self.config.analysis.fluxColumn] + "_flux"
-            self.classificationColumn = self.config.srcSchemaMap[self.classificationColumn]
-            self.flags = [self.config.srcSchemaMap[flag] for flag in self.flags]
 
         for col in transforms:
             doAdd = True
