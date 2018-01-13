@@ -790,13 +790,17 @@ class CoaddAnalysisTask(CmdLineTask):
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = None # Enforcer(requireLess={"star": {"stdev": 0.030*self.unitScale}}),
 
+        # NOTE: This is a hack to get around lack of `dataset_name` in a.net catalogs.
+        # NOTE: The assumption here is that all a.net catalog as sdss-dr9...
+        ref_dataset_name = getattr(self.config.refObjLoader, "ref_dataset_name", "sdss-dr9")
+
         try:
-            ct = self.config.colorterms.getColorterm(filterName, self.config.refObjLoader.ref_dataset_name)
+            ct = self.config.colorterms.getColorterm(filterName, ref_dataset_name)
         except:
             # Pass in a null colorterm.  Note the filterName must match for the source and reference catalogs
             ct = Colorterm(primary=filterName, secondary=filterName)
             self.log.warn("Note: no colorterms loaded for {:s}, thus no colorterms will be applied to "
-                          "the reference catalog".format(self.config.refObjLoader.ref_dataset_name))
+                          "the reference catalog".format(ref_dataset_name))
         if "src_calib_psfUsed" in matches.schema:
             shortName = description + "_mag_calib_psfUsed"
             self.log.info("shortName = {:s}".format(shortName))
