@@ -812,22 +812,38 @@ def addPatchColumn(catalog, patch):
     return newCatalog
 
 def calibrateSourceCatalogMosaic(dataRef, catalog, fluxKeys=None, errKeys=None, zp=27.0):
-    """Calibrate catalog with meas_mosaic results
+    """Calibrate catalog with jointcal/meas_mosaic results
 
     Requires a SourceCatalog input.
     """
-    result = applyMosaicResultsCatalog(dataRef, catalog, True)
-    catalog = result.catalog
-    ffp = result.ffp
-    # Convert to constant zero point, as for the coadds
-    factor = ffp.calib.getFluxMag0()[0]/10.0**(0.4*zp)
 
+    photoCalib = dataRef.get("photoCalib")
     if fluxKeys is None:
         fluxKeys, errKeys = getFluxKeys(catalog.schema)
-    for key in list(fluxKeys.values()) + list(errKeys.values()):
+    for key in fluxKeys:
         if len(catalog[key].shape) > 1:
             continue
-        catalog[key] /= factor
+        try:
+            catalog.get(key+'Sigma')
+        except KeyError:
+            # if the error field doesn't exist, just skip this key.
+            continue
+        tempKey = key.split('_flux')[0]
+        photoCalib.instFluxToMaggies(catalog, tempKey, tempKey)
+    wcs = dataRef.get("wcs")  # NOTE: the output here is not a WCS, but an Exposure with the new WCS.
+    for record in catalog:
+        record.updateCoord(wcs.getWcs())
+
+    # result = applyMosaicResultsCatalog(dataRef, catalog, True)
+    # catalog = result.catalog
+    # ffp = result.ffp
+    # Convert to constant zero point, as for the coadds
+    # factor = ffp.calib.getFluxMag0()[0]/10.0**(0.4*zp)
+
+    # for key in list(fluxKeys.values()) + list(errKeys.values()):
+    #     if len(catalog[key].shape) > 1:
+    #         continue
+    #     catalog[key] /= factor
     return catalog
 
 def calibrateSourceCatalog(catalog, zp):
@@ -951,7 +967,7 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
     hscRun = checkHscStack(metadata)
     dataset = "src"
     if doApplyUberCal:
-        dataset = "wcs_hsc" if hscRun is not None else "jointcal_wcs"
+        dataset = "jointcal_wcs"
     skymap =  butler.get(coaddName + "Coadd_skyMap") if coaddName is not None else None
     wcs = None
     tractInfo = None
