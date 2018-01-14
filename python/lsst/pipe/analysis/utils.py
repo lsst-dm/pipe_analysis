@@ -828,7 +828,7 @@ def calibrateSourceCatalogMosaic(dataRef, catalog, fluxKeys=None, errKeys=None, 
         except KeyError:
             # if the error field doesn't exist, just skip this key.
             continue
-        tempKey = key.split('_flux')[0]
+        tempKey = key[:key.rfind("_flux")]
         photoCalib.instFluxToMaggies(catalog, tempKey, tempKey)
     wcs = dataRef.get("wcs")  # NOTE: the output here is not a WCS, but an Exposure with the new WCS.
     for record in catalog:
