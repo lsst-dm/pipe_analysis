@@ -590,24 +590,31 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=
     distance *= unitScale
     q1, median, q3 = np.percentile(distance, [25, 50, 75])
     good = np.logical_not(np.abs(distance - median) > 3.0*0.74*(q3 - q1))
+    mean = distance[good].mean()
+    stdDev = distance[good].std()
+    rms = np.sqrt(np.mean(distance[good]**2))
     log.info(("Statistics from {0:} of Distance to polynomial ({9:s}): {7:s}\'star\': " +
               "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; " +
               "median={5:.4f}; clip={6:.4f}; forcedMean=None){8:s}").format(
-            dataId, distance[good].mean(), distance[good].std(), len(xx[keep]), len(xx),
-            np.median(distance[good]), 3.0*0.74*(q3 - q1), "{", "}", unitStr))
+             dataId, mean, stdDev, len(xx[keep]), len(xx), np.median(distance[good]),
+             3.0*0.74*(q3 - q1), "{", "}", unitStr))
     # Get rid of LaTeX-specific characters for log message printing
     log.info("Polynomial fit: {:2}".format("".join(x for x in polyStr if x not in "{}$")))
-    meanStr = "mean = {0:5.2f} ({1:s})".format(distance[good].mean(), unitStr)
-    stdStr = "  std = {0:5.2f} ({1:s})".format(distance[good].std(), unitStr)
+    meanStr = "mean = {0:5.2f} ({1:s})".format(mean, unitStr)
+    stdStr = "  std = {0:5.2f}".format(stdDev)
+    rmsStr = "  rms = {0:5.2f}".format(rms)
     tractStr = "tract: {:d}".format(dataId["tract"])
     axes[1].set_xlabel("Distance to polynomial fit ({:s})".format(unitStr))
     axes[1].set_ylabel("Number")
     axes[1].set_yscale("log", nonposy="clip")
-    axes[1].hist(distance[good], numBins, range=(-0.05*unitScale, 0.05*unitScale), normed=False)
-    axes[1].annotate(meanStr, xy=(0.6, 0.96), xycoords="axes fraction", ha="right", va="center",
-                     fontsize=8, color="black")
-    axes[1].annotate(stdStr, xy=(0.6, 0.92), xycoords="axes fraction", ha="right", va="center",
-                     fontsize=8, color="black")
+    axes[1].axvline(x=mean, color="black", linestyle="--")
+    count, bins, ignored = axes[1].hist(distance[good], bins="auto", range=(-4.0*stdDev, 4.0*stdDev),
+                                        normed=True, color="green", alpha=0.8)
+    axes[1].plot(bins, 1/(stdDev*np.sqrt(2*np.pi))*np.exp(-(bins-mean)**2/(2*stdDev**2)), color="red")
+    kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=8, color="black")
+    axes[1].annotate(meanStr, xy=(0.6, 0.96), **kwargs)
+    axes[1].annotate(stdStr, xy=(0.4, 0.92), **kwargs)
+    axes[1].annotate(rmsStr, xy=(0.4, 0.88), **kwargs)
     axes[1].annotate(tractStr, xy=(0.5, 1.04), xycoords="axes fraction", ha="center", va="center",
                      fontsize=10, color="green")
 
