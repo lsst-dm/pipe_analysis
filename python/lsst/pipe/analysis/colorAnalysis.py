@@ -15,7 +15,7 @@ from lsst.coadd.utils import TractDataIdContainer
 from .analysis import Analysis, AnalysisConfig
 from .coaddAnalysis import CoaddAnalysisTask
 from .utils import (Filenamer, Enforcer, concatenateCatalogs, checkIdLists, addPatchColumn,
-                    calibrateCoaddSourceCatalog, writeParquet, getRepoInfo)
+                    calibrateCoaddSourceCatalog, fluxToPlotString, writeParquet, getRepoInfo)
 from .plotUtils import OverlapsStarGalaxyLabeller, labelCamera
 
 import lsst.afw.table as afwTable
@@ -266,8 +266,10 @@ class ColorAnalysisTask(CmdLineTask):
             self.plotStarColors(forced, filenamer, NumStarLabeller(len(forcedCatalogsByFilter)),
                                 repoInfo.dataId, camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
                                 patchList=patchList, hscRun=repoInfo.hscRun)
-        self.plotStarColorColor(forcedCatalogsByFilter, filenamer, repoInfo.dataId, camera=repoInfo.camera,
-                                tractInfo=repoInfo.tractInfo, patchList=patchList, hscRun=repoInfo.hscRun)
+        for fluxColumn in ["base_PsfFlux_flux", "modelfit_CModel_flux"]:
+            self.plotStarColorColor(forcedCatalogsByFilter, filenamer, repoInfo.dataId, fluxColumn,
+                                    camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
+                                    patchList=patchList, hscRun=repoInfo.hscRun)
 
     def readCatalogs(self, patchRefList, dataset):
         """Read in and concatenate catalogs of type dataset in lists of data references
@@ -413,11 +415,11 @@ class ColorAnalysisTask(CmdLineTask):
                                ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
 
-    def plotStarColorColor(self, catalogs, filenamer, dataId, butler=None, camera=None, tractInfo=None,
-                           patchList=None, hscRun=None):
+    def plotStarColorColor(self, catalogs, filenamer, dataId, fluxColumn, butler=None, camera=None,
+                           tractInfo=None, patchList=None, hscRun=None):
         num = len(list(catalogs.values())[0])
         zp = 0.0
-        mags = {ff: zp - 2.5*np.log10(catalogs[ff][self.fluxColumn]) for ff in catalogs}
+        mags = {ff: zp - 2.5*np.log10(catalogs[ff][fluxColumn]) for ff in catalogs}
 
         bad = np.zeros(num, dtype=bool)
         for cat in catalogs.values():
@@ -439,12 +441,14 @@ class ColorAnalysisTask(CmdLineTask):
         filters = set(catalogs.keys())
         color = lambda c1, c2: (mags[c1] - mags[c2])[good]
         unitStr = "mmag" if self.config.toMilli else "mag"
+        fluxColStr = fluxToPlotString(fluxColumn)
         if filters.issuperset(set(("HSC-G", "HSC-R", "HSC-I"))):
             # Do a linear fit to regions defined in Ivezic transforms
             transform = self.config.transforms["wPerp"]
             xFitRange1 = transform.requireGreater["wPara"]
             xFitRange2 = transform.requireLess["wPara"]
-            wPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description="gri-wFit", style="fit"),
+            nameStr = "gri" + fluxColStr + "-wFit"
+            wPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                              self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
                                              "g - r", "r - i", xRange=(-0.5, 2.0), yRange=(-0.5, 2.0),
                                              order=1, xFitRange=(xFitRange1, xFitRange2), camera=camera,
@@ -452,17 +456,19 @@ class ColorAnalysisTask(CmdLineTask):
             transform = self.config.transforms["xPerp"]
             xFitRange1 = transform.requireGreater["xPara"]
             xFitRange2 = transform.requireLess["xPara"]
-            xPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description="gri-xFit", style="fit"),
+            nameStr = "gri" + fluxColStr + "-xFit"
+            xPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                              self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
                                              "g - r", "r - i", xRange=(-0.5, 2.0), yRange=(-0.5, 2.0),
                                              order=1, xFitRange=(xFitRange1, xFitRange2), camera=camera,
                                              hscRun=hscRun, unitScale=self.unitScale)
             # Lower branch only; upper branch is noisy due to astrophysics
-            poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description="gri", style="fit"), self.log,
+            nameStr = "gri" + fluxColStr
+            poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"), self.log,
                                   color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"), "g - r", "r - i",
                                   xRange=(-0.5, 2.0), yRange=(-0.5, 2.0), order=3, xFitRange=(0.3, 1.1),
                                   camera=camera, hscRun=hscRun, unitScale=self.unitScale)
-            shortName = "griDistance"
+            shortName = "griDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, 0.3, 1.1),
                                "griDistance (%s)" % unitStr, shortName, self.config.analysis,
@@ -476,16 +482,18 @@ class ColorAnalysisTask(CmdLineTask):
             transform = self.config.transforms["yPerp"]
             xFitRange1 = transform.requireGreater["yPara"]
             xFitRange2 = transform.requireLess["yPara"]
-            yPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description="riz-yFit", style="fit"),
+            nameStr = "riz" + fluxColStr + "-yFit"
+            yPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                              self.log, color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"),
                                              "r - i", "i - z", xRange=(-0.5, 2.0), yRange=(-0.4, 0.8),
                                              order=1, xFitRange=(xFitRange1, xFitRange2), camera=camera,
                                              hscRun=hscRun, unitScale=self.unitScale)
-            poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description="riz", style="fit"), self.log,
+            nameStr = "riz" + fluxColStr
+            poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"), self.log,
                                          color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"), "r - i", "i - z",
                                          xRange=(-0.5, 2.0), yRange=(-0.4, 0.8), order=3, camera=camera,
                                          hscRun=hscRun, unitScale=self.unitScale)
-            shortName = "rizDistance"
+            shortName = "rizDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly),
                                "rizDistance (%s)" % unitStr, shortName, self.config.analysis,
@@ -495,11 +503,12 @@ class ColorAnalysisTask(CmdLineTask):
                                          Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
         if filters.issuperset(set(("HSC-I", "HSC-Z", "HSC-Y"))):
-            poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description="izy", style="fit"), self.log,
+            nameStr = "izy" + fluxColStr
+            poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"), self.log,
                                          color("HSC-I", "HSC-Z"), color("HSC-Z", "HSC-Y"), "i - z", "z - y",
                                          xRange=(-0.4, 0.8), yRange=(-0.3, 0.5), order=3, camera=camera,
                                          hscRun=hscRun, unitScale=self.unitScale)
-            shortName = "izyDistance"
+            shortName = "izyDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly),
                                "izyDistance (%s)" % unitStr, shortName, self.config.analysis,
@@ -510,12 +519,13 @@ class ColorAnalysisTask(CmdLineTask):
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
 
         if filters.issuperset(set(("HSC-Z", "NB0921", "HSC-Y"))):
-            poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description="z9y", style="fit"), self.log,
-                                         color("HSC-Z", "NB0921"), color("NB0921", "HSC-Y"),
+            nameStr = "z9y" + fluxColStr
+            poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
+                                         self.log, color("HSC-Z", "NB0921"), color("NB0921", "HSC-Y"),
                                          "z-n921", "n921-y", xRange=(-0.2, 0.2), yRange=(-0.1, 0.2),
                                          order=2, xFitRange=(-0.05, 0.15), camera=camera, hscRun=hscRun,
                                          unitScale=self.unitScale)
-            shortName = "z9yDistance"
+            shortName = "z9yDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly),
                                "z9yDistance (%s)" % unitStr, shortName, self.config.analysis,

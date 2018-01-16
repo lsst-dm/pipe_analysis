@@ -944,6 +944,7 @@ def fluxToPlotString(fluxToPlot):
                   "base_GaussianFlux": "Gaussian",
                   "ext_photometryKron_KronFlux": "Kron",
                   "modelfit_CModel": "CModel",
+                  "modelfit_CModel_flux": "CModel",
                   "base_CircularApertureFlux_12_0": "CircAper 12pix"}
     if fluxToPlot in fluxStrMap:
         return fluxStrMap[fluxToPlot]
