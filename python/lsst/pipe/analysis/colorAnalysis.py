@@ -50,10 +50,12 @@ class ColorTransform(Config):
 ivezicTransforms = {
     "wPerp": ColorTransform.fromValues("Ivezic w perpendicular", " (griBlue)", True,
                                        {"HSC-G": -0.227, "HSC-R": 0.792, "HSC-I": -0.567, "": 0.050},
-                                       {"wPara": -0.2}, {"wPara": 0.6}),
+                                       {"wPara": -0.2}, {"wPara": 0.6},
+                                       fitLineUpper=[0.66, -0.46], fitLineLower=[0.15, -0.46]),
     "xPerp": ColorTransform.fromValues("Ivezic x perpendicular", " (griRed)", True,
                                        {"HSC-G": 0.707, "HSC-R": -0.707, "": -0.988},
-                                       {"xPara": 0.8}, {"xPara": 1.6}),
+                                       {"xPara": 0.8}, {"xPara": 1.6},
+                                       fitLineUpper = [0.82, -0.4], fitLineLower=[0.51, -0.4]),
     "yPerp": ColorTransform.fromValues("Ivezic y perpendicular", " (rizRed)", True,
                                        {"HSC-R": -0.270, "HSC-I": 0.800, "HSC-Z": -0.534, "": 0.054},
                                        {"yPara": 0.1}, {"yPara": 1.2}),
@@ -465,7 +467,7 @@ class ColorAnalysisTask(CmdLineTask):
                                              self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
                                              "g - r  [{0:s}]".format(fluxColStr),
                                              "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter,
-                                             xRange=(-0.5, 2.0), yRange=(-0.5, 2.0),
+                                             xRange=(-0.5, 1.8), yRange=(-0.5, 1.9),
                                              order=1, xFitRange=(xFitRange1, xFitRange2),
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, unitScale=self.unitScale)
@@ -477,7 +479,7 @@ class ColorAnalysisTask(CmdLineTask):
                                              self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
                                              "g - r  [{0:s}]".format(fluxColStr),
                                              "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter,
-                                             xRange=(-0.5, 2.0), yRange=(-0.5, 2.0),
+                                             xRange=(-0.5, 1.8), yRange=(-0.5, 1.9),
                                              order=1, xFitRange=(xFitRange1, xFitRange2),
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, unitScale=self.unitScale)
@@ -487,7 +489,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
                                          "g - r  [{0:s}]".format(fluxColStr),
                                          "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter,
-                                         xRange=(-0.5, 2.0), yRange=(-0.5, 2.0), order=3, xFitRange=(0.3, 1.1),
+                                         xRange=(-0.5, 1.8), yRange=(-0.5, 2.0), order=3, xFitRange=(0.2, 1.2),
                                          magThreshold=self.config.analysis.magThreshold, camera=camera,
                                          hscRun=hscRun, unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
@@ -503,7 +505,7 @@ class ColorAnalysisTask(CmdLineTask):
                                unitScale=self.unitScale)
             shortName = "griDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, 0.3, 1.1),
+            self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, xMin=0.2, xMax=1.2),
                                "griDistance (%s)" % unitStr, shortName, self.config.analysis,
                                flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
@@ -520,7 +522,7 @@ class ColorAnalysisTask(CmdLineTask):
                                              self.log, color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"),
                                              "r - i  [{0:s}]".format(fluxColStr),
                                              "i - z  [{0:s}]".format(fluxColStr), self.fluxFilter,
-                                             xRange=(-0.5, 2.0), yRange=(-0.4, 0.8),
+                                             xRange=(-0.6, 1.8), yRange=(-0.35, 0.85),
                                              order=1, xFitRange=(xFitRange1, xFitRange2),
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, unitScale=self.unitScale)
@@ -529,7 +531,8 @@ class ColorAnalysisTask(CmdLineTask):
                                          self.log, color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"),
                                          "r - i  [{0:s}]".format(fluxColStr),
                                          "i - z  [{0:s}]".format(fluxColStr), self.fluxFilter,
-                                         xRange=(-0.5, 2.0), yRange=(-0.4, 0.8), order=3,
+                                         xRange=(-0.6, 1.7), yRange=(-0.35, 0.8), order=2,
+                                         xFitRange=(0.0, 0.7),
                                          magThreshold=self.config.analysis.magThreshold, camera=camera,
                                          hscRun=hscRun, unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
@@ -545,7 +548,7 @@ class ColorAnalysisTask(CmdLineTask):
                                unitScale=self.unitScale)
             shortName = "rizDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly),
+            self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly, xMin=0.0, xMax=0.7),
                                "rizDistance (%s)" % unitStr, shortName, self.config.analysis,
                                flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
@@ -558,7 +561,8 @@ class ColorAnalysisTask(CmdLineTask):
                                          self.log, color("HSC-I", "HSC-Z"), color("HSC-Z", "HSC-Y"),
                                          "i - z  [{0:s}]".format(fluxColStr),
                                          "z - y  [{0:s}]".format(fluxColStr), self.fluxFilter,
-                                         xRange=(-0.4, 0.8), yRange=(-0.3, 0.5), order=3,
+                                         xRange=(-0.4, 0.8), yRange=(-0.2, 0.4), order=2,
+                                         xFitRange=(0.0, 0.3),
                                          magThreshold=self.config.analysis.magThreshold, camera=camera,
                                          hscRun=hscRun, unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
@@ -574,7 +578,7 @@ class ColorAnalysisTask(CmdLineTask):
                                unitScale=self.unitScale)
             shortName = "izyDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly),
+            self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly, xMin=0.0, xMax=0.3),
                                "izyDistance (%s)" % unitStr, shortName, self.config.analysis,
                                flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
@@ -589,7 +593,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          "z-n921  [{0:s}]".format(fluxColStr),
                                          "n921-y  [{0:s}]".format(fluxColStr), self.fluxFilter,
                                          xRange=(-0.2, 0.2), yRange=(-0.1, 0.2),
-                                         order=2, xFitRange=(-0.05, 0.15),
+                                         order=2, xFitRange=(-0.0, 0.13),
                                          magThreshold=self.config.analysis.magThreshold, camera=camera,
                                          hscRun=hscRun, unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
@@ -605,7 +609,7 @@ class ColorAnalysisTask(CmdLineTask):
                                unitScale=self.unitScale)
             shortName = "z9yDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly),
+            self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly, xMin=-0.0, xMax=0.13),
                                "z9yDistance (%s)" % unitStr, shortName, self.config.analysis,
                                flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                labeller=NumStarLabeller(len(catalogs)),
