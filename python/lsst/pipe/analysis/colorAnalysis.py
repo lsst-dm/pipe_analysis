@@ -16,7 +16,7 @@ from .analysis import Analysis, AnalysisConfig
 from .coaddAnalysis import CoaddAnalysisTask
 from .utils import (Filenamer, Enforcer, concatenateCatalogs, checkIdLists, addPatchColumn,
                     calibrateCoaddSourceCatalog, fluxToPlotString, writeParquet, getRepoInfo)
-from .plotUtils import OverlapsStarGalaxyLabeller, labelCamera
+from .plotUtils import OverlapsStarGalaxyLabeller, labelCamera, setPtSize
 
 import lsst.afw.table as afwTable
 
@@ -428,18 +428,31 @@ class ColorAnalysisTask(CmdLineTask):
                     bad |= cat[flag]
 
         bright = np.ones(num, dtype=bool)
+        prettyBright = np.ones(num, dtype=bool)
+        prettyBrightThreshold = self.config.analysis.magThreshold + 0.5
         for mm in mags.values():
             bright &= mm < self.config.analysis.magThreshold
+            prettyBright &= mm < prettyBrightThreshold
 
+        # Determine number of filters object is classified as a star
         numStarFlags = np.zeros(num)
         for cat in catalogs.values():
             numStarFlags += np.where(cat[self.classificationColumn] < 0.5, 1, 0)
 
-        good = (numStarFlags == len(catalogs)) & np.logical_not(bad) & bright
+        # Select as a star if classified as such in self.config.fluxFilter
+        isStarFlag = catalogs[self.fluxFilter][self.classificationColumn] < 0.5
+        # Require stellar classification in self.fluxFilter and at least one other filter for fits
+        good = isStarFlag & (numStarFlags >= 2) & ~bad & bright
+        decentStars = isStarFlag & ~bad & prettyBright
+        decentGalaxies = ~isStarFlag & ~bad & prettyBright
 
         combined = self.transformCatalogs(catalogs, straightTransforms, hscRun=hscRun)[good].copy(True)
         filters = set(catalogs.keys())
         color = lambda c1, c2: (mags[c1] - mags[c2])[good]
+        decentColorStars = lambda c1, c2: (mags[c1] - mags[c2])[decentStars]
+        decentStarsMag = mags[self.fluxFilter][decentStars]
+        decentColorGalaxies = lambda c1, c2: (mags[c1] - mags[c2])[decentGalaxies]
+        decentGalaxiesMag = mags[self.fluxFilter][decentGalaxies]
         unitStr = "mmag" if self.config.toMilli else "mag"
         fluxColStr = fluxToPlotString(fluxColumn)
         if filters.issuperset(set(("HSC-G", "HSC-R", "HSC-I"))):
@@ -450,8 +463,11 @@ class ColorAnalysisTask(CmdLineTask):
             nameStr = "gri" + fluxColStr + "-wFit"
             wPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                              self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
-                                             "g - r", "r - i", xRange=(-0.5, 2.0), yRange=(-0.5, 2.0),
-                                             order=1, xFitRange=(xFitRange1, xFitRange2), camera=camera,
+                                             "g - r  [{0:s}]".format(fluxColStr),
+                                             "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter,
+                                             xRange=(-0.5, 2.0), yRange=(-0.5, 2.0),
+                                             order=1, xFitRange=(xFitRange1, xFitRange2),
+                                             magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, unitScale=self.unitScale)
             transform = self.config.transforms["xPerp"]
             xFitRange1 = transform.requireGreater["xPara"]
@@ -459,15 +475,32 @@ class ColorAnalysisTask(CmdLineTask):
             nameStr = "gri" + fluxColStr + "-xFit"
             xPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                              self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
-                                             "g - r", "r - i", xRange=(-0.5, 2.0), yRange=(-0.5, 2.0),
-                                             order=1, xFitRange=(xFitRange1, xFitRange2), camera=camera,
+                                             "g - r  [{0:s}]".format(fluxColStr),
+                                             "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter,
+                                             xRange=(-0.5, 2.0), yRange=(-0.5, 2.0),
+                                             order=1, xFitRange=(xFitRange1, xFitRange2),
+                                             magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, unitScale=self.unitScale)
             # Lower branch only; upper branch is noisy due to astrophysics
             nameStr = "gri" + fluxColStr
-            poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"), self.log,
-                                  color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"), "g - r", "r - i",
-                                  xRange=(-0.5, 2.0), yRange=(-0.5, 2.0), order=3, xFitRange=(0.3, 1.1),
-                                  camera=camera, hscRun=hscRun, unitScale=self.unitScale)
+            poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
+                                         self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
+                                         "g - r  [{0:s}]".format(fluxColStr),
+                                         "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter,
+                                         xRange=(-0.5, 2.0), yRange=(-0.5, 2.0), order=3, xFitRange=(0.3, 1.1),
+                                         magThreshold=self.config.analysis.magThreshold, camera=camera,
+                                         hscRun=hscRun, unitScale=self.unitScale)
+            # Make a color-color plot with both stars and galaxies, less pruning, and no fit
+            if fluxColumn is not "base_PsfFlux_flux":
+                colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
+                               decentColorStars("HSC-G", "HSC-R"), decentColorStars("HSC-R", "HSC-I"),
+                               decentColorGalaxies("HSC-G", "HSC-R"), decentColorGalaxies("HSC-R", "HSC-I"),
+                               decentStarsMag, decentGalaxiesMag,
+                               "g - r  [{0:s}]".format(fluxColStr),
+                               "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
+                               xRange=(-0.5, 2.0), yRange=(-0.5, 2.0),
+                               magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
+                               unitScale=self.unitScale)
             shortName = "griDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, 0.3, 1.1),
@@ -485,14 +518,31 @@ class ColorAnalysisTask(CmdLineTask):
             nameStr = "riz" + fluxColStr + "-yFit"
             yPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                              self.log, color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"),
-                                             "r - i", "i - z", xRange=(-0.5, 2.0), yRange=(-0.4, 0.8),
-                                             order=1, xFitRange=(xFitRange1, xFitRange2), camera=camera,
+                                             "r - i  [{0:s}]".format(fluxColStr),
+                                             "i - z  [{0:s}]".format(fluxColStr), self.fluxFilter,
+                                             xRange=(-0.5, 2.0), yRange=(-0.4, 0.8),
+                                             order=1, xFitRange=(xFitRange1, xFitRange2),
+                                             magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, unitScale=self.unitScale)
             nameStr = "riz" + fluxColStr
-            poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"), self.log,
-                                         color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"), "r - i", "i - z",
-                                         xRange=(-0.5, 2.0), yRange=(-0.4, 0.8), order=3, camera=camera,
+            poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
+                                         self.log, color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"),
+                                         "r - i  [{0:s}]".format(fluxColStr),
+                                         "i - z  [{0:s}]".format(fluxColStr), self.fluxFilter,
+                                         xRange=(-0.5, 2.0), yRange=(-0.4, 0.8), order=3,
+                                         magThreshold=self.config.analysis.magThreshold, camera=camera,
                                          hscRun=hscRun, unitScale=self.unitScale)
+            # Make a color-color plot with both stars and galaxies, less pruning, and no fit
+            if fluxColumn is not "base_PsfFlux_flux":
+                colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
+                               decentColorStars("HSC-R", "HSC-I"), decentColorStars("HSC-I", "HSC-Z"),
+                               decentColorGalaxies("HSC-R", "HSC-I"), decentColorGalaxies("HSC-I", "HSC-Z"),
+                               decentStarsMag, decentGalaxiesMag,
+                               "r - i  [{0:s}]".format(fluxColStr),
+                               "i - z  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
+                               xRange=(-0.6, 2.0), yRange=(-0.35, 0.9),
+                               magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
+                               unitScale=self.unitScale)
             shortName = "rizDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly),
@@ -504,10 +554,24 @@ class ColorAnalysisTask(CmdLineTask):
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
         if filters.issuperset(set(("HSC-I", "HSC-Z", "HSC-Y"))):
             nameStr = "izy" + fluxColStr
-            poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"), self.log,
-                                         color("HSC-I", "HSC-Z"), color("HSC-Z", "HSC-Y"), "i - z", "z - y",
-                                         xRange=(-0.4, 0.8), yRange=(-0.3, 0.5), order=3, camera=camera,
+            poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
+                                         self.log, color("HSC-I", "HSC-Z"), color("HSC-Z", "HSC-Y"),
+                                         "i - z  [{0:s}]".format(fluxColStr),
+                                         "z - y  [{0:s}]".format(fluxColStr), self.fluxFilter,
+                                         xRange=(-0.4, 0.8), yRange=(-0.3, 0.5), order=3,
+                                         magThreshold=self.config.analysis.magThreshold, camera=camera,
                                          hscRun=hscRun, unitScale=self.unitScale)
+            # Make a color-color plot with both stars and galaxies, less pruning, and no fit
+            if fluxColumn is not "base_PsfFlux_flux":
+                colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
+                               decentColorStars("HSC-I", "HSC-Z"), decentColorStars("HSC-Z", "HSC-Y"),
+                               decentColorGalaxies("HSC-I", "HSC-Z"), decentColorGalaxies("HSC-Z", "HSC-Y"),
+                               decentStarsMag, decentGalaxiesMag,
+                               "i - z  [{0:s}]".format(fluxColStr),
+                               "z - y  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
+                               xRange=(-0.5, 1.0), yRange=(-0.4, 0.85),
+                               magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
+                               unitScale=self.unitScale)
             shortName = "izyDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly),
@@ -522,9 +586,23 @@ class ColorAnalysisTask(CmdLineTask):
             nameStr = "z9y" + fluxColStr
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                          self.log, color("HSC-Z", "NB0921"), color("NB0921", "HSC-Y"),
-                                         "z-n921", "n921-y", xRange=(-0.2, 0.2), yRange=(-0.1, 0.2),
-                                         order=2, xFitRange=(-0.05, 0.15), camera=camera, hscRun=hscRun,
-                                         unitScale=self.unitScale)
+                                         "z-n921  [{0:s}]".format(fluxColStr),
+                                         "n921-y  [{0:s}]".format(fluxColStr), self.fluxFilter,
+                                         xRange=(-0.2, 0.2), yRange=(-0.1, 0.2),
+                                         order=2, xFitRange=(-0.05, 0.15),
+                                         magThreshold=self.config.analysis.magThreshold, camera=camera,
+                                         hscRun=hscRun, unitScale=self.unitScale)
+            # Make a color-color plot with both stars and galaxies, less pruning, and no fit
+            if fluxColumn is not "base_PsfFlux_flux":
+                colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
+                               decentColorStars("HSC-Z", "NB0921"), decentColorStars("NB0921", "HSC-Y"),
+                               decentColorGalaxies("HSC-Z", "NB0921"), decentColorGalaxies("NB0921", "HSC-Y"),
+                               decentStarsMag, decentGalaxiesMag,
+                               "z-n921  [{0:s}]".format(fluxColStr),
+                               "n921-y  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
+                               xRange=(-0.35, 0.35), yRange=(-0.2, 0.45),
+                               magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
+                               unitScale=self.unitScale)
             shortName = "z9yDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly),
@@ -545,9 +623,9 @@ class ColorAnalysisTask(CmdLineTask):
         return None
 
 
-def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=None, yRange=None, order=1,
-                          iterations=1, rej=3.0, xFitRange=None, numBins=51, hscRun=None, logger=None,
-                          camera=None, unitScale=1.0):
+def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterStr, xRange=None, yRange=None,
+                          order=1, iterations=1, rej=3.0, xFitRange=None, numBins="auto", hscRun=None,
+                          logger=None, magThreshold=99.9, camera=None, unitScale=1.0):
     fig, axes = plt.subplots(1, 2)
     axes[0].tick_params(which="both", direction="in", labelsize=9)
     axes[1].tick_params(which="both", direction="in", labelsize=9)
@@ -584,16 +662,20 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=
     axes[0].scatter(xx[~keep], yy[~keep], c="black", label="other", **kwargs)
     axes[0].set_xlabel(xLabel)
     axes[0].set_ylabel(yLabel, labelpad=-1)
-    axes[0].legend(loc="upper left", fontsize=7)
     axes[0].plot(xLine, yLine, "r-")
 
     # Label total number of objects of each data type
-    xLoc, yLoc = xRange[0] + 0.34*(xRange[1] - xRange[0]), yRange[1] - 0.036*(yRange[1] - yRange[0])
-    axes[0].text(xLoc, yLoc, "Nused  = " + str(len(xx[keep])), ha="left", va="center", fontsize=8,
-                 color="blue")
+    kwargs = dict(va="center", fontsize=7)
+    lenNumObj = max(len(str(len(xx[keep]))), len(str(len(xx[~keep]))))
+    fdx = max((min(0.08*lenNumObj, 0.6), 0.33))
+    xLoc, yLoc = xRange[0] + 0.05*deltaX, yRange[1] - 0.036*deltaY
+    axes[0].text(xLoc, yLoc, "Nused  =", ha="left", color="blue", **kwargs)
+    axes[0].text(xLoc + fdx*deltaX, yLoc, str(len(xx[keep])), ha="right", color="blue", **kwargs)
+    axes[0].text(xRange[1] - 0.03*deltaX, yLoc, " [" + filterStr + " < " + str(magThreshold) + "]",
+                 ha="right", color="blue", **kwargs)
     yLoc -= 0.044*(yRange[1] - yRange[0])
-    axes[0].text(xLoc, yLoc, "Nother = " + str(len(xx[~keep])), ha="left", va="center", fontsize=8,
-                 color="black")
+    axes[0].text(xLoc, yLoc, "Nother =", ha="left", color="black", **kwargs)
+    axes[0].text(xLoc + fdx*deltaX,  yLoc, str(len(xx[~keep])), ha="right", color="black", **kwargs)
 
     # Label polynomial fit parameters to 2 decimal places
     polyStr = "y = {:.2f}".format(poly[len(poly) - 1])
@@ -602,8 +684,8 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=
         plusMinus = " - " if poly[index] < 0.0 else " + "
         exponent = "$^{" + str(i) + "}$" if i > 1 else ""
         polyStr += plusMinus + "{:.2f}".format(abs(poly[index])) + "x" + exponent
-    xLoc = xRange[0] + 0.05*(xRange[1] - xRange[0])
-    yLoc -= 0.055*(yRange[1] - yRange[0])
+    xLoc = xRange[0] + 0.05*deltaX
+    yLoc -= 0.055*deltaY
     axes[0].text(xLoc, yLoc, polyStr, ha="left", va="center", fontsize=8, color="green")
 
     # Determine quality of locus
@@ -638,7 +720,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=
     axes[1].set_ylabel("Number")
     axes[1].set_yscale("log", nonposy="clip")
     axes[1].axvline(x=mean, color="black", linestyle="--")
-    count, bins, ignored = axes[1].hist(distance[good], bins="auto", range=(-4.0*stdDev, 4.0*stdDev),
+    count, bins, ignored = axes[1].hist(distance[good], bins=numBins, range=(-4.0*stdDev, 4.0*stdDev),
                                         normed=True, color="green", alpha=0.8)
     axes[1].plot(bins, 1/(stdDev*np.sqrt(2*np.pi))*np.exp(-(bins-mean)**2/(2*stdDev**2)), color="red")
     kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=8, color="black")
@@ -658,6 +740,70 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, xRange=
     plt.close(fig)
 
     return poly
+
+def colorColorPlot(dataId, filename, log, xStars, yStars, xGalaxies, yGalaxies, magStars, magGalaxies,
+                   xLabel, yLabel, filterStr, fluxColStr, xRange=None, yRange=None, hscRun=None,
+                   logger=None, magThreshold=99.9, camera=None, unitScale=1.0):
+    fig, axes = plt.subplots(1, 1)
+    axes.tick_params(which="both", direction="in", labelsize=9)
+
+    if xRange:
+        axes.set_xlim(*xRange)
+    else:
+        xRange = (0.9*xStars.min(), 1.1*xStars.max())
+    if yRange:
+        axes.set_ylim(*yRange)
+
+    vMin = min(magStars.min(), magGalaxies.min())
+    vMax = min(magStars.max(), magGalaxies.max())
+
+    ptSizeStar = setPtSize(len(xGalaxies))
+    ptSizeGalaxy = setPtSize(len(xGalaxies))
+
+    kwargs = dict(marker="o", lw=0, vmin=vMin, vmax=vMax)
+    axes.scatter(xGalaxies, yGalaxies, c=magGalaxies, cmap="autumn", label="galaxies", s=ptSizeGalaxy,
+                 **kwargs)
+    axes.scatter(xStars, yStars, c=magStars, cmap="winter", label="stars", s=ptSizeStar, **kwargs)
+    axes.set_xlabel(xLabel)
+    axes.set_ylabel(yLabel, labelpad=-1)
+
+    # Label total number of objects of each data type
+    deltaX = abs(xRange[1] - xRange[0])
+    deltaY = abs(yRange[1] - yRange[0])
+    lenNumObj = max(len(str(len(xStars))), len(str(len(xGalaxies))))
+    fdx = max((min(0.095*lenNumObj, 0.9), 0.42))
+    xLoc, yLoc = xRange[0] + 0.03*deltaX, yRange[1] - 0.038*deltaY
+    kwargs = dict(va="center", fontsize=8)
+    axes.text(xLoc, yLoc, "Ngals  =", ha="left", color="red", **kwargs)
+    axes.text(xLoc + fdx*deltaX, yLoc, str(len(xGalaxies)) +
+              " [" + filterStr + " < " + str(magThreshold) + "]", ha="right", color="red", **kwargs)
+    axes.text(xLoc, 0.94*yLoc, "Nstars =", ha="left", color="blue", **kwargs)
+    axes.text(xLoc + fdx*deltaX, 0.94*yLoc, str(len(xStars)) +
+              " [" + filterStr + " < " + str(magThreshold) + "]", ha="right", color="blue", **kwargs)
+    if camera is not None:
+        labelCamera(camera, plt, axes, 0.5, 1.09)
+    if hscRun is not None:
+        axes.set_title("HSC stack run: " + hscRun, color="#800080")
+
+    tractStr = "tract: {:d}".format(dataId["tract"])
+    axes.annotate(tractStr, xy=(0.5, 1.04), xycoords="axes fraction", ha="center", va="center",
+                  fontsize=10, color="green")
+
+    mappableStars = plt.cm.ScalarMappable(cmap="winter_r", norm=plt.Normalize(vmin=vMin, vmax=vMax))
+    mappableStars._A = []        # fake up the array of the scalar mappable. Urgh...
+    cbStars = plt.colorbar(mappableStars, aspect=14, pad=-0.09)
+    cbStars.ax.tick_params(labelsize=8)
+    cbStars.set_label(filterStr + " [" + fluxColStr + "]: stars", rotation=270, labelpad=-24, fontsize=9)
+    mappableGalaxies = plt.cm.ScalarMappable(cmap="autumn_r", norm=plt.Normalize(vmin=vMin, vmax=vMax))
+    mappableGalaxies._A = []      # fake up the array of the scalar mappable. Urgh...
+    cbGalaxies = plt.colorbar(mappableGalaxies, aspect=14)
+    cbGalaxies.set_ticks([])
+    cbGalaxies.set_label(filterStr + " [" + fluxColStr + "]: galaxies", rotation=270, labelpad=-6, fontsize=9)
+
+    fig.savefig(filename)
+    plt.close(fig)
+
+    return None
 
 
 class ColorColorDistance(object):
