@@ -18,6 +18,7 @@ from .utils import (Filenamer, Enforcer, concatenateCatalogs, checkIdLists, addP
                     calibrateCoaddSourceCatalog, fluxToPlotString, writeParquet, getRepoInfo)
 from .plotUtils import OverlapsStarGalaxyLabeller, labelCamera, setPtSize
 
+import lsst.afw.geom as afwGeom
 import lsst.afw.table as afwTable
 
 __all__ = ["ColorTransform", "ivezicTransforms", "straightTransforms", "NumStarLabeller",
@@ -244,11 +245,15 @@ class ColorAnalysisTask(CmdLineTask):
                                     ff, patchRefList in patchRefsByFilter.items()}
         for cat in unforcedCatalogsByFilter.values():
             calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
+        unforcedCatalogsByFilter = self.correctForGalacticExtinction(unforcedCatalogsByFilter,
+                                                                     repoInfo.tractInfo)
         forcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList,
                                                         self.config.coaddName + "Coadd_forced_src") for
                                   ff, patchRefList in patchRefsByFilter.items()}
+
         for cat in forcedCatalogsByFilter.values():
             calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
+        forcedCatalogsByFilter = self.correctForGalacticExtinction(forcedCatalogsByFilter, repoInfo.tractInfo)
         # self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
         if self.config.doPlotPcaColors or self.config.doWriteParquetTables:
             unforced = self.transformCatalogs(unforcedCatalogsByFilter, self.config.transforms,
@@ -305,6 +310,65 @@ class ColorAnalysisTask(CmdLineTask):
         if not catList:
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
         return concatenateCatalogs(catList)
+
+    def correctForGalacticExtinction(self, catalog, tractInfo):
+        """Apply a per-field correction for Galactic Extinction using hard-wired values
+
+        These numbers come from:
+        http://irsa.ipac.caltech.edu/applications/DUST/
+        Filt LamEff A/E(B-V) A(mag)
+               (um) S&F2011
+        UD_COSMOS_9813: 150.25, 2.23  WIDE_VVDS_9796: 337.78, 0.74  WIDE_GAMMA15H_9615: 216.30, 0.74
+        SDSS g 0.4717 3.303 0.054     SDSS g 0.4717 3.303 0.247     SDSS g 0.4717 3.303 0.093
+        SDSS r 0.6165 2.285 0.038     SDSS r 0.6165 2.285 0.171     SDSS r 0.6165 2.285 0.064
+        SDSS i 0.7476 1.698 0.028     SDSS i 0.7476 1.698 0.127     SDSS i 0.7476 1.698 0.048
+        SDSS z 0.8923 1.263 0.021     SDSS z 0.8923 1.263 0.094     SDSS z 0.8923 1.263 0.035
+        WIDE_8766: 35.70, -3.72       WIDE_8767: 37.19, -3.72
+        SDSS g 0.4717 3.303 0.079     SDSS g 0.4717 3.303 0.095
+        SDSS r 0.6165 2.285 0.055     SDSS r 0.6165 2.285 0.066
+        SDSS i 0.7476 1.698 0.041     SDSS i 0.7476 1.698 0.049
+        SDSS z 0.8923 1.263 0.030     SDSS z 0.8923 1.263 0.036
+
+        Note that they are derived for SDSS filters, so are not quite right for HSC filters
+        and do not include values for bands redder than z.
+
+        Also note that the only fields included are the 5 tracts in the RC + RC2 datasets.
+        This is just a placeholder until a per-object implementation is added in DM-13519.
+        """
+        galacticExtinction = {
+            "UD_COSMOS_9813": {"centerCoord": afwGeom.SpherePoint(150.25, 2.23, afwGeom.degrees),
+                               "HSC-G": 0.054, "HSC-R": 0.038, "HSC-I": 0.028, "HSC-Z": 0.021},
+            "WIDE_VVDS_9796": {"centerCoord": afwGeom.SpherePoint(337.78, 0.74, afwGeom.degrees),
+                               "HSC-G": 0.247, "HSC-R": 0.171, "HSC-I": 0.127, "HSC-Z": 0.094},
+            "WIDE_GAMMA15H_9615": {"centerCoord": afwGeom.SpherePoint(216.3, 0.74, afwGeom.degrees),
+                                   "HSC-G": 0.093, "HSC-R": 0.064, "HSC-I": 0.048, "HSC-Z": 0.035},
+            "WIDE_8766": {"centerCoord": afwGeom.SpherePoint(35.70, -3.72, afwGeom.degrees),
+                          "HSC-G": 0.079, "HSC-R": 0.055, "HSC-I": 0.041, "HSC-Z": 0.030},
+            "WIDE_8767": {"centerCoord": afwGeom.SpherePoint(37.19, -3.72, afwGeom.degrees),
+                          "HSC-G": 0.095, "HSC-R": 0.066, "HSC-I": 0.049, "HSC-Z": 0.036}}
+
+        geFound = False
+        for fieldName, geEntry in galacticExtinction.items():
+            if tractInfo.contains(geEntry["centerCoord"]):
+                geFound = True
+                break
+        if geFound:
+            for ff in catalog.keys():
+                if ff in galacticExtinction[fieldName]:
+                    fluxKeys, errKeys = getFluxKeys(catalog[ff].schema)
+                    factor = 10.0**(0.4*galacticExtinction[fieldName][ff])
+                    for name, key in list(fluxKeys.items()) + list(errKeys.items()):
+                        catalog[ff][key] *= factor
+                    self.log.info("Applying Galactic Extinction correction A_{0:s} = {1:.3f}".
+                                  format(ff, galacticExtinction[fieldName][ff]))
+                else:
+                    self.log.warn("Do not have A_X for filter {0:s}.  "
+                                  "No Galactic Extinction correction applied for that filter".format(ff))
+        else:
+            self.log.warn("Do not have Galactic Extinction for tract {0:d} at {1:s}.  "
+                          "No Galactic Extinction correction applied".
+                          format(tractInfo.getId(), str(tractInfo.getCtrCoord())))
+        return catalog
 
     def transformCatalogs(self, catalogs, transforms, flagsCats=None, hscRun=None):
         """
