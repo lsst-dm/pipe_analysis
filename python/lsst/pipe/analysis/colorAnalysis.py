@@ -35,9 +35,12 @@ class ColorTransform(Config):
                                doc="Minimum values for colors so that this is useful")
     requireLess = DictField(keytype=str, itemtype=float, default={},
                             doc="Maximum values for colors so that this is useful")
+    fitLineUpper = ListField(dtype=float, doc="List of [intercept, slope] for upper fit line limits")
+    fitLineLower = ListField(dtype=float, doc="List of [intercept, slope] for lower fit line limits")
 
     @classmethod
-    def fromValues(cls, description, subDescription, plot, coeffs, requireGreater={}, requireLess={}):
+    def fromValues(cls, description, subDescription, plot, coeffs, requireGreater={}, requireLess={},
+                   fitLineUpper=[], fitLineLower=[]):
         self = cls()
         self.description = description
         self.subDescription = subDescription
@@ -45,6 +48,8 @@ class ColorTransform(Config):
         self.coeffs = coeffs
         self.requireGreater = requireGreater
         self.requireLess = requireLess
+        self.fitLineUpper = fitLineUpper
+        self.fitLineLower = fitLineLower
         return self
 
 
@@ -59,7 +64,8 @@ ivezicTransforms = {
                                        fitLineUpper = [0.82, -0.4], fitLineLower=[0.51, -0.4]),
     "yPerp": ColorTransform.fromValues("Ivezic y perpendicular", " (rizRed)", True,
                                        {"HSC-R": -0.270, "HSC-I": 0.800, "HSC-Z": -0.534, "": 0.054},
-                                       {"yPara": 0.1}, {"yPara": 1.2}),
+                                       {"yPara": 0.1}, {"yPara": 1.2},
+                                       fitLineUpper=[1.08, -0.435], fitLineLower=[0.06, -0.435]),
     "wPara": ColorTransform.fromValues("Ivezic w parallel", " (griBlue)", False,
                                        {"HSC-G": 0.928, "HSC-R": -0.556, "HSC-I": -0.372, "": -0.425}),
     "xPara": ColorTransform.fromValues("Ivezic x parallel", " (griRed)", False,
@@ -530,37 +536,47 @@ class ColorAnalysisTask(CmdLineTask):
             transform = self.config.transforms["wPerp"]
             xFitRange1 = transform.requireGreater["wPara"]
             xFitRange2 = transform.requireLess["wPara"]
+            fitLineUpper = transform.fitLineUpper
+            fitLineLower = transform.fitLineLower
             nameStr = "gri" + fluxColStr + "-wFit"
             self.log.info("nameStr = {:s}".format(nameStr))
             wPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                              self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
                                              "g - r  [{0:s}]".format(fluxColStr),
                                              "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter,
-                                             xRange=(-0.5, 1.8), yRange=(-0.5, 1.9),
-                                             order=1, xFitRange=(xFitRange1, xFitRange2),
+                                             xRange=(-0.5, 1.8), yRange=(-0.5, 1.9), order=1,
+                                             xFitRange=(xFitRange1, xFitRange2), yFitRange=(0.05, 0.35),
+                                             fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, unitScale=self.unitScale)
             transform = self.config.transforms["xPerp"]
             xFitRange1 = transform.requireGreater["xPara"]
             xFitRange2 = transform.requireLess["xPara"]
+            fitLineUpper = transform.fitLineUpper
+            fitLineLower = transform.fitLineLower
             nameStr = "gri" + fluxColStr + "-xFit"
             self.log.info("nameStr = {:s}".format(nameStr))
             xPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                              self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
                                              "g - r  [{0:s}]".format(fluxColStr),
                                              "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter,
-                                             xRange=(-0.5, 1.8), yRange=(-0.5, 1.9),
-                                             order=1, xFitRange=(xFitRange1, xFitRange2),
+                                             xRange=(-0.5, 1.8), yRange=(-0.5, 1.9), order=1,
+                                             xFitRange=(xFitRange1, xFitRange2), yFitRange=(0.2, 0.5),
+                                             fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, unitScale=self.unitScale)
             # Lower branch only; upper branch is noisy due to astrophysics
             nameStr = "gri" + fluxColStr
             self.log.info("nameStr = {:s}".format(nameStr))
+            fitLineUpper = [1.32, -0.65]
+            fitLineLower = [0.24, -0.49]
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                          self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
                                          "g - r  [{0:s}]".format(fluxColStr),
                                          "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter,
-                                         xRange=(-0.5, 1.8), yRange=(-0.5, 2.0), order=3, xFitRange=(0.2, 1.2),
+                                         xRange=xRange, yRange=yRange, order=3,
+                                         xFitRange=(0.23, 1.2), yFitRange=(0.05, 0.6),
+                                         fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                          magThreshold=self.config.analysis.magThreshold, camera=camera,
                                          hscRun=hscRun, unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
@@ -589,24 +605,30 @@ class ColorAnalysisTask(CmdLineTask):
             transform = self.config.transforms["yPerp"]
             xFitRange1 = transform.requireGreater["yPara"]
             xFitRange2 = transform.requireLess["yPara"]
+            fitLineUpper = transform.fitLineUpper
+            fitLineLower = transform.fitLineLower
             nameStr = "riz" + fluxColStr + "-yFit"
             self.log.info("nameStr = {:s}".format(nameStr))
             yPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                              self.log, color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"),
                                              "r - i  [{0:s}]".format(fluxColStr),
                                              "i - z  [{0:s}]".format(fluxColStr), self.fluxFilter,
-                                             xRange=(-0.6, 1.8), yRange=(-0.35, 0.85),
-                                             order=1, xFitRange=(xFitRange1, xFitRange2),
+                                             xRange=xRange, yRange=yRange, order=1,
+                                             xFitRange=(0.4, 1.7), yFitRange=(0.17, 0.63),
+                                             fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, unitScale=self.unitScale)
             nameStr = "riz" + fluxColStr
+            fitLineUpper = [0.92, -0.275]
+            fitLineLower = [0.048, -0.55]
             self.log.info("nameStr = {:s}".format(nameStr))
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                          self.log, color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"),
                                          "r - i  [{0:s}]".format(fluxColStr),
                                          "i - z  [{0:s}]".format(fluxColStr), self.fluxFilter,
                                          xRange=(-0.6, 1.7), yRange=(-0.35, 0.8), order=2,
-                                         xFitRange=(0.0, 0.7),
+                                         xFitRange=(0.0, 1.45), yFitRange=(-0.03, 0.58),
+                                         fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                          magThreshold=self.config.analysis.magThreshold, camera=camera,
                                          hscRun=hscRun, unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
@@ -633,12 +655,17 @@ class ColorAnalysisTask(CmdLineTask):
         if filters.issuperset(set(("HSC-I", "HSC-Z", "HSC-Y"))):
             nameStr = "izy" + fluxColStr
             self.log.info("nameStr = {:s}".format(nameStr))
+            fitLineUpper = [0.42, -0.15]
+            fitLineLower = [-0.012, -0.53]
+            xRange = (-0.5, 1.25)
+            yRange = (-0.4, 0.95)
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                          self.log, color("HSC-I", "HSC-Z"), color("HSC-Z", "HSC-Y"),
                                          "i - z  [{0:s}]".format(fluxColStr),
                                          "z - y  [{0:s}]".format(fluxColStr), self.fluxFilter,
                                          xRange=(-0.4, 0.8), yRange=(-0.2, 0.4), order=2,
-                                         xFitRange=(0.0, 0.3),
+                                         xFitRange=(-0.05, 0.65), yFitRange=(-0.06, 0.22),
+                                         fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                          magThreshold=self.config.analysis.magThreshold, camera=camera,
                                          hscRun=hscRun, unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
@@ -666,12 +693,15 @@ class ColorAnalysisTask(CmdLineTask):
         if filters.issuperset(set(("HSC-Z", "NB0921", "HSC-Y"))):
             nameStr = "z9y" + fluxColStr
             self.log.info("nameStr = {:s}".format(nameStr))
+            fitLineUpper = [0.195, -0.4]
+            fitLineLower = [-0.018, -0.86]
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                          self.log, color("HSC-Z", "NB0921"), color("NB0921", "HSC-Y"),
                                          "z-n921  [{0:s}]".format(fluxColStr),
                                          "n921-y  [{0:s}]".format(fluxColStr), self.fluxFilter,
-                                         xRange=(-0.2, 0.2), yRange=(-0.1, 0.2),
-                                         order=2, xFitRange=(-0.0, 0.13),
+                                         xRange=(-0.2, 0.2), yRange=(-0.1, 0.24),
+                                         order=2, xFitRange=(-0.07, 0.125), yFitRange=(-0.002, 0.135),
+                                         fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                          magThreshold=self.config.analysis.magThreshold, camera=camera,
                                          hscRun=hscRun, unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
@@ -707,8 +737,9 @@ class ColorAnalysisTask(CmdLineTask):
 
 
 def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterStr, xRange=None, yRange=None,
-                          order=1, iterations=1, rej=3.0, xFitRange=None, numBins="auto", hscRun=None,
-                          logger=None, magThreshold=99.9, camera=None, unitScale=1.0):
+                          order=1, iterations=3, rej=3.0, xFitRange=None, yFitRange=None, fitLineUpper=None,
+                          fitLineLower=None, numBins="auto", hscRun=None, logger=None, magThreshold=99.9,
+                          camera=None, unitScale=1.0):
     fig, axes = plt.subplots(1, 2)
     axes[0].tick_params(which="both", direction="in", labelsize=9)
     axes[1].tick_params(which="both", direction="in", labelsize=9)
@@ -719,8 +750,30 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         xRange = (0.9*xx.min(), 1.1*xx.max())
     if yRange:
         axes[0].set_ylim(*yRange)
+    else:
+        yRange = (0.9*yy.min(), 1.1*yy.max())
 
-    select = np.ones_like(xx, dtype=bool) if not xFitRange else ((xx > xFitRange[0]) & (xx < xFitRange[1]))
+    xLine = np.linspace(xRange[0], xRange[1], 1000)
+    if fitLineUpper:
+        yLineUpper = fitLineUpper[0] + fitLineUpper[1]*xLine
+    if fitLineLower:
+        yLineLower = fitLineLower[0] + fitLineLower[1]*xLine
+
+    # Include vertical xFitRange for clipping points in the first iteration
+    selectXRange = np.ones_like(xx, dtype=bool) if not xFitRange else ((xx > xFitRange[0]) &
+                                                                       (xx < xFitRange[1]))
+    # Include horizontal yFitRange for clipping points in the first iteration
+    selectYRange = np.ones_like(xx, dtype=bool) if not yFitRange else ((yy > yFitRange[0]) &
+                                                                       (yy < yFitRange[1]))
+    selectUpper = np.ones_like(xx, dtype=bool) if not fitLineUpper else (yy <
+                                                                         fitLineUpper[0] + fitLineUpper[1]*xx)
+    selectLower = np.ones_like(xx, dtype=bool) if not fitLineLower else (yy >
+                                                                         fitLineLower[0] + fitLineLower[1]*xx)
+
+    select = np.ones_like(xx, dtype=bool)
+    for sel in [selectXRange, selectYRange, selectUpper, selectLower]:
+        select &= sel
+
     keep = np.ones_like(xx, dtype=bool)
     for ii in range(iterations):
         keep &= select
@@ -729,7 +782,18 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         q1, q3 = np.percentile(dy[keep], [25, 75])
         clip = rej*0.74*(q3 - q1)
         keep = np.logical_not(np.abs(dy) > clip)
-
+        # After the first iteration, reset the vertical and horizontal clipping to be less restrictive
+        if ii == 0:
+            if xFitRange:
+                xMin = xFitRange[0] - 0.06*(xFitRange[1] - xFitRange[0])
+                xMax = xFitRange[1] + 0.06*(xFitRange[1] - xFitRange[0])
+            if yFitRange:
+                yMin = yFitRange[0] - 0.06*(yFitRange[1] - yFitRange[0])
+                yMax = yFitRange[1] + 0.06*(yFitRange[1] - yFitRange[0])
+            selectXRange = np.ones_like(xx, dtype=bool) if not xFitRange else ((xx > xMin) & (xx < xMax))
+            selectYRange = np.ones_like(xx, dtype=bool) if not yFitRange else ((yy > yMin) & (yy < yMax))
+            for sel in [selectXRange, selectYRange, selectUpper, selectLower]:
+                select &= sel
 
     log.info("Number of iterations in polynomial fit: {:d}".format(ii + 1))
     keep &= select
@@ -739,7 +803,6 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
             "Not enough good data points ({0:d}) for polynomial fit of order {1:d}".format(nKeep, order))
 
     poly = np.polyfit(xx[keep], yy[keep], order)
-    xLine = np.linspace(xRange[0], xRange[1], 1000)
     yLine = np.polyval(poly, xLine)
 
     kwargs = dict(s=3, marker="o", lw=0, alpha=0.4)
@@ -748,6 +811,69 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     axes[0].set_xlabel(xLabel)
     axes[0].set_ylabel(yLabel, labelpad=-1)
     axes[0].plot(xLine, yLine, "r-")
+
+    # Find index where poly and fit range intersect -- to calculate the local slopes of the fit to make
+    # sure it is close to the fitLines (log a warning if they are not within 5%)
+    message = ("{0:s} branch of the hard-coded lines for object selection does not cross the "
+               "current polynomial fit.\nUsing the xFitRange {1:} to compute the local slope")
+    try:
+        crossIdxUpper = (np.argwhere(np.diff(np.sign(yOrthLine - yLineUpper)) != 0).reshape(-1) + 0)[0]
+    except Exception:
+        log.warnf(message, "Upper", xFitRange[1])
+        crossIdxUpper = (np.abs(xLine - xFitRange[1])).argmin()
+    try:
+        crossIdxLower = (np.argwhere(np.diff(np.sign(yOrthLine - yLineLower)) != 0).reshape(-1) + 0)[0]
+    except Exception:
+        log.warnf(message, "Lower", xFitRange[0])
+        crossIdxLower = (np.abs(xLine - xFitRange[0])).argmin()
+
+    # Compute the slope of the two pixels +/-1% of line length from crossing point
+    yOffset = int(0.01*len(yOrthLine))
+    mUpper = ((yOrthLine[crossIdxUpper + yOffset] - yOrthLine[crossIdxUpper - yOffset])/
+              (xLine[crossIdxUpper + yOffset] - xLine[crossIdxUpper - yOffset]))
+    mLower = ((yOrthLine[crossIdxLower + yOffset] - yOrthLine[crossIdxLower - yOffset])/
+              (xLine[crossIdxLower + yOffset] - xLine[crossIdxLower - yOffset]))
+    bUpper = -yOrthLine[crossIdxUpper] - mUpper*xLine[crossIdxUpper]
+    bLower = -yOrthLine[crossIdxLower] - mLower*xLine[crossIdxLower]
+    # Rotate slope by 90 degrees for source selection lines
+    mUpper = -1.0/mUpper
+    mLower = -1.0/mLower
+    bUpper = yOrthLine[crossIdxUpper] - mUpper*xLine[crossIdxUpper]
+    bLower = yOrthLine[crossIdxLower] - mLower*xLine[crossIdxLower]
+    message = ("{0:s} branch of the hard-coded lines for object selection does not match the local\nslope of "
+               "the current polynomial fit.\n  --> Consider replacing {1:} with [{2:.3f}, {3:.3f}] "
+               "(Line crosses fit at x = {4:.2f})")
+    if (abs(200*(fitLineUpper[0] - bUpper)/(fitLineUpper[0] + bUpper)) > 5.0 or
+            abs(200*(fitLineUpper[1] - mUpper)/(fitLineUpper[1] + mUpper)) > 5.0):
+        log.warn(message.format("Upper", fitLineUpper, bUpper, mUpper, xLine[crossIdxUpper]))
+    if (abs(200*(fitLineLower[0] - bLower)/(fitLineLower[0] + bLower)) > 5.0 or
+            abs(200*(fitLineLower[1] - mLower)/(fitLineLower[1] + mLower)) > 5.0):
+        log.warn(message.format("Lower", fitLineLower, bLower, mLower, xLine[crossIdxLower]))
+    deltaX = abs(xRange[1] - xRange[0])
+    deltaY = abs(yRange[1] - yRange[0])
+
+    if xFitRange:
+        # Shade region outside xFitRange
+        kwargs = dict(facecolor="k", edgecolor="none", alpha=0.1)
+        axes[0].axvspan(axes[0].get_xlim()[0], xFitRange[0], **kwargs)
+        axes[0].axvspan(xFitRange[1], axes[0].get_xlim()[1], **kwargs)
+    if yFitRange:
+        # Shade region outside yFitRange
+        xMin = abs(xFitRange[0] - xRange[0])/deltaX if xFitRange else 1
+        xMax = abs(xFitRange[1] - xRange[0])/deltaX if xFitRange else 1
+        kwargs = dict(xmin=xMin, xmax=xMax, facecolor="k", edgecolor="none", alpha=0.1)
+        axes[0].axhspan(axes[0].get_ylim()[0], yFitRange[0], **kwargs)
+        axes[0].axhspan(yFitRange[1], axes[0].get_ylim()[1], **kwargs)
+    if fitLineUpper:
+        scaleLine = 0.05*deltaX*max(1.0, min(3.0, abs(1.0/fitLineUpper[1])))
+        xLineUpper = np.linspace(xLine[crossIdxUpper] - scaleLine, xLine[crossIdxUpper] + scaleLine, 100)
+        yLineUpper = fitLineUpper[0] + fitLineUpper[1]*xLineUpper
+        axes[0].plot(xLineUpper, yLineUpper, "g--")
+    if fitLineLower:
+        scaleLine = 0.05*deltaX*max(1.0, min(3.0, abs(1.0/fitLineLower[1])))
+        xLineLower = np.linspace(xLine[crossIdxLower] - scaleLine, xLine[crossIdxLower] + scaleLine, 100)
+        yLineLower = fitLineLower[0] + fitLineLower[1]*xLineLower
+        axes[0].plot(xLineLower, yLineLower, "g--")
 
     # Label total number of objects of each data type
     kwargs = dict(va="center", fontsize=7)
@@ -821,7 +947,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         axes[0].set_title("HSC stack run: " + hscRun, color="#800080")
 
     plt.tight_layout(pad=2.5, w_pad=0.5, h_pad=1.0)
-    fig.savefig(filename)
+    fig.savefig(filename, dpi=120)
     plt.close(fig)
 
     return poly
@@ -842,13 +968,11 @@ def colorColorPlot(dataId, filename, log, xStars, yStars, xGalaxies, yGalaxies, 
     vMin = min(magStars.min(), magGalaxies.min())
     vMax = min(magStars.max(), magGalaxies.max())
 
-    ptSizeStar = setPtSize(len(xGalaxies))
-    ptSizeGalaxy = setPtSize(len(xGalaxies))
+    ptSize = max(1, setPtSize(len(xGalaxies)) - 1)
 
-    kwargs = dict(marker="o", lw=0, vmin=vMin, vmax=vMax)
-    axes.scatter(xGalaxies, yGalaxies, c=magGalaxies, cmap="autumn", label="galaxies", s=ptSizeGalaxy,
-                 **kwargs)
-    axes.scatter(xStars, yStars, c=magStars, cmap="winter", label="stars", s=ptSizeStar, **kwargs)
+    kwargs = dict(s=ptSize, marker="o", lw=0, vmin=vMin, vmax=vMax)
+    axes.scatter(xGalaxies, yGalaxies, c=magGalaxies, cmap="autumn", label="galaxies", **kwargs)
+    axes.scatter(xStars, yStars, c=magStars, cmap="winter", label="stars", **kwargs)
     axes.set_xlabel(xLabel)
     axes.set_ylabel(yLabel, labelpad=-1)
 
@@ -885,7 +1009,7 @@ def colorColorPlot(dataId, filename, log, xStars, yStars, xGalaxies, yGalaxies, 
     cbGalaxies.set_ticks([])
     cbGalaxies.set_label(filterStr + " [" + fluxColStr + "]: galaxies", rotation=270, labelpad=-6, fontsize=9)
 
-    fig.savefig(filename)
+    fig.savefig(filename, dpi=120)
     plt.close(fig)
 
     return None
