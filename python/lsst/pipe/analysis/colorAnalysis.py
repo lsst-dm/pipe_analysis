@@ -229,6 +229,7 @@ class ColorAnalysisTask(CmdLineTask):
                     if repoInfo is None:
                         repoInfo = getRepoInfo(dataRef, coaddName=self.config.coaddName,
                                                coaddDataset="Coadd_forced_src")
+        self.log.info("Size of patchList with full color coverage: {:d}".format(len(patchList)))
 
         # Only adjust the schema names necessary here (rather than attaching the full alias schema map)
         self.fluxColumn = self.config.analysis.fluxColumn
@@ -530,6 +531,7 @@ class ColorAnalysisTask(CmdLineTask):
             xFitRange1 = transform.requireGreater["wPara"]
             xFitRange2 = transform.requireLess["wPara"]
             nameStr = "gri" + fluxColStr + "-wFit"
+            self.log.info("nameStr = {:s}".format(nameStr))
             wPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                              self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
                                              "g - r  [{0:s}]".format(fluxColStr),
@@ -542,6 +544,7 @@ class ColorAnalysisTask(CmdLineTask):
             xFitRange1 = transform.requireGreater["xPara"]
             xFitRange2 = transform.requireLess["xPara"]
             nameStr = "gri" + fluxColStr + "-xFit"
+            self.log.info("nameStr = {:s}".format(nameStr))
             xPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                              self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
                                              "g - r  [{0:s}]".format(fluxColStr),
@@ -552,6 +555,7 @@ class ColorAnalysisTask(CmdLineTask):
                                              hscRun=hscRun, unitScale=self.unitScale)
             # Lower branch only; upper branch is noisy due to astrophysics
             nameStr = "gri" + fluxColStr
+            self.log.info("nameStr = {:s}".format(nameStr))
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                          self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
                                          "g - r  [{0:s}]".format(fluxColStr),
@@ -561,6 +565,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          hscRun=hscRun, unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
             if fluxColumn is not "base_PsfFlux_flux":
+                self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
                                decentColorStars("HSC-G", "HSC-R"), decentColorStars("HSC-R", "HSC-I"),
                                decentColorGalaxies("HSC-G", "HSC-R"), decentColorGalaxies("HSC-R", "HSC-I"),
@@ -585,6 +590,7 @@ class ColorAnalysisTask(CmdLineTask):
             xFitRange1 = transform.requireGreater["yPara"]
             xFitRange2 = transform.requireLess["yPara"]
             nameStr = "riz" + fluxColStr + "-yFit"
+            self.log.info("nameStr = {:s}".format(nameStr))
             yPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                              self.log, color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"),
                                              "r - i  [{0:s}]".format(fluxColStr),
@@ -594,6 +600,7 @@ class ColorAnalysisTask(CmdLineTask):
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, unitScale=self.unitScale)
             nameStr = "riz" + fluxColStr
+            self.log.info("nameStr = {:s}".format(nameStr))
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                          self.log, color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"),
                                          "r - i  [{0:s}]".format(fluxColStr),
@@ -604,6 +611,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          hscRun=hscRun, unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
             if fluxColumn is not "base_PsfFlux_flux":
+                self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
                                decentColorStars("HSC-R", "HSC-I"), decentColorStars("HSC-I", "HSC-Z"),
                                decentColorGalaxies("HSC-R", "HSC-I"), decentColorGalaxies("HSC-I", "HSC-Z"),
@@ -624,6 +632,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
         if filters.issuperset(set(("HSC-I", "HSC-Z", "HSC-Y"))):
             nameStr = "izy" + fluxColStr
+            self.log.info("nameStr = {:s}".format(nameStr))
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                          self.log, color("HSC-I", "HSC-Z"), color("HSC-Z", "HSC-Y"),
                                          "i - z  [{0:s}]".format(fluxColStr),
@@ -634,6 +643,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          hscRun=hscRun, unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
             if fluxColumn is not "base_PsfFlux_flux":
+                self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
                                decentColorStars("HSC-I", "HSC-Z"), decentColorStars("HSC-Z", "HSC-Y"),
                                decentColorGalaxies("HSC-I", "HSC-Z"), decentColorGalaxies("HSC-Z", "HSC-Y"),
@@ -655,6 +665,7 @@ class ColorAnalysisTask(CmdLineTask):
 
         if filters.issuperset(set(("HSC-Z", "NB0921", "HSC-Y"))):
             nameStr = "z9y" + fluxColStr
+            self.log.info("nameStr = {:s}".format(nameStr))
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                          self.log, color("HSC-Z", "NB0921"), color("NB0921", "HSC-Y"),
                                          "z-n921  [{0:s}]".format(fluxColStr),
@@ -665,6 +676,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          hscRun=hscRun, unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
             if fluxColumn is not "base_PsfFlux_flux":
+                self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
                                decentColorStars("HSC-Z", "NB0921"), decentColorStars("NB0921", "HSC-Y"),
                                decentColorGalaxies("HSC-Z", "NB0921"), decentColorGalaxies("NB0921", "HSC-Y"),
@@ -718,6 +730,8 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         clip = rej*0.74*(q3 - q1)
         keep = np.logical_not(np.abs(dy) > clip)
 
+
+    log.info("Number of iterations in polynomial fit: {:d}".format(ii + 1))
     keep &= select
     nKeep = np.sum(keep)
     if nKeep < order:
