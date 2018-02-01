@@ -123,9 +123,9 @@ class GalaxyColor(object):
 class ColorAnalysisConfig(Config):
     coaddName = Field(dtype=str, default="deep", doc="Name for coadd")
     flags = ListField(dtype=str, doc="Flags of objects to ignore",
-                      default=["base_SdssCentroid_flag", "slot_Centroid_flag", "base_PsfFlux_flag",
-                               "base_PixelFlags_flag_saturatedCenter",
-                               "base_PixelFlags_flag_interpolatedCenter",
+                      default=["slot_Centroid_flag", "slot_Shape_flag",
+                               "base_PsfFlux_flag", "modelfit_CModel_flag",
+                               "base_PixelFlags_flag_saturated", "base_PixelFlags_flag_interpolated",
                                "base_ClassificationExtendedness_flag"])
     analysis = ConfigField(dtype=AnalysisConfig, doc="Analysis plotting options")
     transforms = ConfigDictField(keytype=str, itemtype=ColorTransform, default={},
@@ -240,13 +240,6 @@ class ColorAnalysisTask(CmdLineTask):
             self.flags = [self.config.srcSchemaMap[flag] for flag in self.flags]
 
         filenamer = Filenamer(repoInfo.butler, "plotColor", repoInfo.dataId)
-        unforcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList,
-                                                          self.config.coaddName + "Coadd_meas") for
-                                    ff, patchRefList in patchRefsByFilter.items()}
-        for cat in unforcedCatalogsByFilter.values():
-            calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
-        unforcedCatalogsByFilter = self.correctForGalacticExtinction(unforcedCatalogsByFilter,
-                                                                     repoInfo.tractInfo)
         forcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList,
                                                         self.config.coaddName + "Coadd_forced_src") for
                                   ff, patchRefList in patchRefsByFilter.items()}
@@ -256,10 +249,8 @@ class ColorAnalysisTask(CmdLineTask):
         forcedCatalogsByFilter = self.correctForGalacticExtinction(forcedCatalogsByFilter, repoInfo.tractInfo)
         # self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
         if self.config.doPlotPcaColors or self.config.doWriteParquetTables:
-            unforced = self.transformCatalogs(unforcedCatalogsByFilter, self.config.transforms,
-                                              hscRun=repoInfo.hscRun)
             forced = self.transformCatalogs(forcedCatalogsByFilter, self.config.transforms,
-                                            flagsCats=unforcedCatalogsByFilter, hscRun=repoInfo.hscRun)
+                                            hscRun=repoInfo.hscRun)
 
         # Create and write parquet tables
         if self.config.doWriteParquetTables:
@@ -372,10 +363,22 @@ class ColorAnalysisTask(CmdLineTask):
 
     def transformCatalogs(self, catalogs, transforms, flagsCats=None, hscRun=None):
         """
-        flagsCats: The forced catalogs do not contain the flags for selecting against objects,
-                   so add this optional argument to provide a catalog list that does have these
-                   flags.  The indentity of the object lists of flagsCat vs. the catalogs will
-                   be checked.
+        Transform catalog entries according to the color transform given
+
+        Parameters
+        ----------
+        catalogs : `dict` of `lsst.afw.table.source.source.SourceCatalog`s
+           One dict entry per filter
+        transforms : `dict` of `lsst.pipe.analysis.colorAnalysis.ColorTransform`s
+           One dict entry per filter-dependent transform definition
+        flagsCats : `dict` of `lsst.afw.table.source.source.SourceCatalog`s
+           One dict entry per filter.  Source lists must be identical to those in catalogs.
+           This is to provide a way to use a different catalog containing the flags of interest
+           for source filtering (e.g. forced catalogs do not have all the flags defined in unforced
+           catalogs, but the source lists are identical)
+        hscRun : `str` or `NoneType`
+           A string representing "HSCPIPE_VERSION" fits header if the data were processed with
+           the (now obsolete, but old reruns still exist) "HSC stack", None otherwise
         """
         if flagsCats is None:
             flagsCats = catalogs
