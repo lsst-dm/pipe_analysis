@@ -131,8 +131,7 @@ class ColorAnalysisConfig(Config):
     flags = ListField(dtype=str, doc="Flags of objects to ignore",
                       default=["slot_Centroid_flag", "slot_Shape_flag",
                                "base_PsfFlux_flag", "modelfit_CModel_flag",
-                               "base_PixelFlags_flag_saturated", "base_PixelFlags_flag_interpolated",
-                               "base_ClassificationExtendedness_flag"])
+                               "base_PixelFlags_flag_saturated", "base_ClassificationExtendedness_flag"])
     analysis = ConfigField(dtype=AnalysisConfig, doc="Analysis plotting options")
     transforms = ConfigDictField(keytype=str, itemtype=ColorTransform, default={},
                                  doc="Color transformations to analyse")

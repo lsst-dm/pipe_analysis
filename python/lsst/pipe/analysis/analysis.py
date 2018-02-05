@@ -23,7 +23,6 @@ class AnalysisConfig(Config):
     flags = ListField(dtype=str, doc="Flags of objects to ignore",
                       default=["base_SdssCentroid_flag", "slot_Centroid_flag", "base_PsfFlux_flag",
                                "base_PixelFlags_flag_saturatedCenter",
-                               "base_PixelFlags_flag_interpolatedCenter",
                                "base_ClassificationExtendedness_flag"])
     clip = Field(dtype=float, default=4.0, doc="Rejection threshold (stdev)")
     magThreshold = Field(dtype=float, default=21.0, doc="Magnitude threshold to apply")
