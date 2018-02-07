@@ -306,8 +306,8 @@ class Analysis(object):
                     numHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins))
                     # Only plot running stats if there are a significant number of data points per bin.
                     # Computed here as the mean number in the brightest 20% of the bins which we require
-                    # to be greater than 5.
-                    if numHist[0:max(1, int(0.2*len(xSyBins)))].mean() > 5:
+                    # to be greater than 12.
+                    if numHist[0:max(1, int(0.2*len(xSyBins)))].mean() > 12:
                         syHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
                                                         weights=data.quantity[belowThresh])
                         syHist2, datahist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
