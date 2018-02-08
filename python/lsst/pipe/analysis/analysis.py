@@ -247,8 +247,6 @@ class Analysis(object):
         if self.calibUsedOnly > 0 or "color" in filename:
             if filterStr in self.config.magPlotStarMax.keys():
                 magMax = self.config.magPlotStarMax[filterStr]
-                if "color" in filename:
-                    magMax -= 1.5
         axScatter.set_xlim(magMin, magMax)
         yDelta = 0.01*(self.qMax - (self.qMin - deltaMin))
         axScatter.set_ylim((self.qMin - deltaMin) + yDelta, self.qMax - yDelta)

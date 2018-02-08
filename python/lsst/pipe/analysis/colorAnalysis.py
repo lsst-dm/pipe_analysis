@@ -92,7 +92,7 @@ class NumStarLabeller(object):
         self.numBands = numBands
 
     def __call__(self, catalog):
-        return np.array([0 if nn == self.numBands else 2 if nn == 0 else 1 for nn in catalog["numStarFlags"]])
+        return np.array([0 if nn >= self.numBands else 2 if nn == 0 else 1 for nn in catalog["numStarFlags"]])
 
 
 class ColorValueInRange(object):
@@ -515,10 +515,13 @@ class ColorAnalysisTask(CmdLineTask):
         isStarFlag = catalogs[self.fluxFilter][self.classificationColumn] < 0.5
         # Require stellar classification in self.fluxFilter and at least one other filter for fits
         good = isStarFlag & (numStarFlags >= 2) & ~bad & bright
+        goodCombined = isStarFlag & (numStarFlags >= 2) & ~bad
         decentStars = isStarFlag & ~bad & prettyBright
         decentGalaxies = ~isStarFlag & ~bad & prettyBright
 
-        combined = self.transformCatalogs(catalogs, straightTransforms, hscRun=hscRun)[good].copy(True)
+        # The combined catalog is only used in the Distance (from the poly fit) AnalysisClass plots
+        combined = (self.transformCatalogs(catalogs, straightTransforms, hscRun=hscRun)[goodCombined].
+                    copy(True))
         filters = set(catalogs.keys())
         color = lambda c1, c2: (mags[c1] - mags[c2])[good]
         decentColorStars = lambda c1, c2: (mags[c1] - mags[c2])[decentStars]
@@ -603,10 +606,11 @@ class ColorAnalysisTask(CmdLineTask):
 
             shortName = "griDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, xMin=0.2, xMax=1.2),
-                               "griDistance (%s)" % unitStr, shortName, self.config.analysis,
-                               flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
-                               labeller=NumStarLabeller(len(catalogs)),
+            self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, fitLineUpper=fitLineUpper,
+                                                            fitLineLower=fitLineLower),
+                               "griDistance [%s] (%s)" % (fluxColStr, unitStr), shortName,
+                               self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
+                               magThreshold=prettyBrightThreshold, labeller=NumStarLabeller(2),
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.05}}), camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
@@ -668,10 +672,11 @@ class ColorAnalysisTask(CmdLineTask):
                                     unitScale=self.unitScale)
             shortName = "rizDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly, xMin=0.0, xMax=0.7),
-                               "rizDistance (%s)" % unitStr, shortName, self.config.analysis,
-                               flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
-                               labeller=NumStarLabeller(len(catalogs)),
+            self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly, fitLineUpper=fitLineUpper,
+                                                            fitLineLower=fitLineLower),
+                               "rizDistance [%s] (%s)" % (fluxColStr, unitStr), shortName,
+                               self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
+                               magThreshold=prettyBrightThreshold, labeller=NumStarLabeller(2),
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
@@ -716,10 +721,11 @@ class ColorAnalysisTask(CmdLineTask):
                                     unitScale=self.unitScale)
             shortName = "izyDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly, xMin=0.0, xMax=0.3),
-                               "izyDistance (%s)" % unitStr, shortName, self.config.analysis,
-                               flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
-                               labeller=NumStarLabeller(len(catalogs)),
+            self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly, fitLineUpper=fitLineUpper,
+                                                            fitLineLower=fitLineLower),
+                               "izyDistance [%s] (%s)" % (fluxColStr, unitStr), shortName,
+                               self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
+                               magThreshold=prettyBrightThreshold, labeller=NumStarLabeller(2),
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
@@ -765,10 +771,11 @@ class ColorAnalysisTask(CmdLineTask):
                                     unitScale=self.unitScale)
             shortName = "z9yDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly, xMin=-0.0, xMax=0.13),
-                               "z9yDistance (%s)" % unitStr, shortName, self.config.analysis,
-                               flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
-                               labeller=NumStarLabeller(len(catalogs)),
+            self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly, fitLineUpper=fitLineUpper,
+                                                            fitLineLower=fitLineLower),
+                               "z9yDistance [%s] (%s)" % (fluxColStr, unitStr), shortName,
+                               self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
+                               magThreshold=prettyBrightThreshold, labeller=NumStarLabeller(2),
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
@@ -832,13 +839,13 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         # After the first iteration, reset the vertical and horizontal clipping to be less restrictive
         if ii == 0:
             if xFitRange:
-                xMin = xFitRange[0] - 0.06*(xFitRange[1] - xFitRange[0])
-                xMax = xFitRange[1] + 0.06*(xFitRange[1] - xFitRange[0])
+                xMinNew = xFitRange[0] - 0.08*(xFitRange[1] - xFitRange[0])
+                xMaxNew = xFitRange[1] + 0.08*(xFitRange[1] - xFitRange[0])
             if yFitRange:
-                yMin = yFitRange[0] - 0.06*(yFitRange[1] - yFitRange[0])
-                yMax = yFitRange[1] + 0.06*(yFitRange[1] - yFitRange[0])
-            selectXRange = np.ones_like(xx, dtype=bool) if not xFitRange else ((xx > xMin) & (xx < xMax))
-            selectYRange = np.ones_like(xx, dtype=bool) if not yFitRange else ((yy > yMin) & (yy < yMax))
+                yMinNew = yFitRange[0] - 0.06*(yFitRange[1] - yFitRange[0])
+                yMaxNew = yFitRange[1] + 0.06*(yFitRange[1] - yFitRange[0])
+            selectXRange = selectXRange if not xFitRange else ((xx > xMinNew) & (xx < xMaxNew))
+            selectYRange = selectYRange if not yFitRange else ((yy > yMinNew) & (yy < yMaxNew))
             for sel in [selectXRange, selectYRange, selectUpper, selectLower]:
                 select &= sel
 
@@ -901,16 +908,25 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
 
     if xFitRange:
         # Shade region outside xFitRange
-        kwargs = dict(facecolor="k", edgecolor="none", alpha=0.1)
+        kwargs = dict(facecolor="k", edgecolor="none", alpha=0.05)
         axes[0].axvspan(axes[0].get_xlim()[0], xFitRange[0], **kwargs)
         axes[0].axvspan(xFitRange[1], axes[0].get_xlim()[1], **kwargs)
+        # Looser range after fisrt iteration
+        axes[0].axvspan(axes[0].get_xlim()[0], xMinNew, **kwargs)
+        axes[0].axvspan(xMaxNew, axes[0].get_xlim()[1], **kwargs)
     if yFitRange:
         # Shade region outside yFitRange
         xMin = abs(xFitRange[0] - xRange[0])/deltaX if xFitRange else 1
         xMax = abs(xFitRange[1] - xRange[0])/deltaX if xFitRange else 1
-        kwargs = dict(xmin=xMin, xmax=xMax, facecolor="k", edgecolor="none", alpha=0.1)
+        kwargs = dict(xmin=xMin, xmax=xMax, facecolor="k", edgecolor="none", alpha=0.05)
         axes[0].axhspan(axes[0].get_ylim()[0], yFitRange[0], **kwargs)
         axes[0].axhspan(yFitRange[1], axes[0].get_ylim()[1], **kwargs)
+        # Looser range after fisrt iteration
+        xMin = abs(xMinNew - xRange[0])/deltaX if xFitRange else 1
+        xMax = abs(xMaxNew - xRange[0])/deltaX if xFitRange else 1
+        kwargs = dict(xmin=xMin, xmax=xMax, facecolor="k", edgecolor="none", alpha=0.05)
+        axes[0].axhspan(axes[0].get_ylim()[0], yMinNew, **kwargs)
+        axes[0].axhspan(yMaxNew, axes[0].get_ylim()[1], **kwargs)
     if fitLineUpper:
         scaleLine = 0.05*deltaX*max(1.0, min(3.0, abs(1.0/fitLineUpper[1])))
         xLineUpper = np.linspace(xLine[crossIdxUpper] - scaleLine, xLine[crossIdxUpper] + scaleLine, 100)
@@ -1146,13 +1162,15 @@ def colorColor4MagPlots(dataId, filename, log, xStars, yStars, xGalaxies, yGalax
 
 class ColorColorDistance(object):
     """Functor to calculate distance from stellar locus in color-color plot"""
-    def __init__(self, band1, band2, band3, poly, xMin=None, xMax=None):
+    def __init__(self, band1, band2, band3, poly, xMin=None, xMax=None, fitLineUpper=None, fitLineLower=None):
         self.band1 = band1
         self.band2 = band2
         self.band3 = band3
         self.poly = poly
         self.xMin = xMin
         self.xMax = xMax
+        self.fitLineUpper = fitLineUpper
+        self.fitLineLower = fitLineLower
 
     def __call__(self, catalog):
         xx = catalog[self.band1] - catalog[self.band2]
@@ -1162,7 +1180,9 @@ class ColorColorDistance(object):
         distance2 = np.ones_like(xx)*np.nan
         for i, (x, y) in enumerate(zip(xx, yy)):
             if (not np.isfinite(x) or not np.isfinite(y) or (self.xMin is not None and x < self.xMin) or
-                (self.xMax is not None and x > self.xMax)):
+                (self.xMax is not None and x > self.xMax) or
+                (self.fitLineUpper is not None and y > self.fitLineUpper[0] + self.fitLineUpper[1]*x) or
+                    (self.fitLineLower is not None and y < self.fitLineLower[0] + self.fitLineLower[1]*x)):
                 distance2[i] = np.nan
                 continue
             roots = np.roots(np.poly1d((1, -x)) + (self.poly - y)*polyDeriv)
