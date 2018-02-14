@@ -606,7 +606,8 @@ class ColorAnalysisTask(CmdLineTask):
 
             shortName = "griDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, fitLineUpper=fitLineUpper,
+            self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, unitScale=self.unitScale,
+                                                            fitLineUpper=fitLineUpper,
                                                             fitLineLower=fitLineLower),
                                "griDistance [%s] (%s)" % (fluxColStr, unitStr), shortName,
                                self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
@@ -672,7 +673,8 @@ class ColorAnalysisTask(CmdLineTask):
                                     unitScale=self.unitScale)
             shortName = "rizDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly, fitLineUpper=fitLineUpper,
+            self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly, unitScale=self.unitScale,
+                                                            fitLineUpper=fitLineUpper,
                                                             fitLineLower=fitLineLower),
                                "rizDistance [%s] (%s)" % (fluxColStr, unitStr), shortName,
                                self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
@@ -721,7 +723,8 @@ class ColorAnalysisTask(CmdLineTask):
                                     unitScale=self.unitScale)
             shortName = "izyDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly, fitLineUpper=fitLineUpper,
+            self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly, unitScale=self.unitScale,
+                                                            fitLineUpper=fitLineUpper,
                                                             fitLineLower=fitLineLower),
                                "izyDistance [%s] (%s)" % (fluxColStr, unitStr), shortName,
                                self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
@@ -771,7 +774,8 @@ class ColorAnalysisTask(CmdLineTask):
                                     unitScale=self.unitScale)
             shortName = "z9yDistance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly, fitLineUpper=fitLineUpper,
+            self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly, unitScale=self.unitScale,
+                                                            fitLineUpper=fitLineUpper,
                                                             fitLineLower=fitLineLower),
                                "z9yDistance [%s] (%s)" % (fluxColStr, unitStr), shortName,
                                self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
@@ -1162,11 +1166,13 @@ def colorColor4MagPlots(dataId, filename, log, xStars, yStars, xGalaxies, yGalax
 
 class ColorColorDistance(object):
     """Functor to calculate distance from stellar locus in color-color plot"""
-    def __init__(self, band1, band2, band3, poly, xMin=None, xMax=None, fitLineUpper=None, fitLineLower=None):
+    def __init__(self, band1, band2, band3, poly, unitScale=1.0, xMin=None, xMax=None,
+                 fitLineUpper=None, fitLineLower=None):
         self.band1 = band1
         self.band2 = band2
         self.band3 = band3
         self.poly = poly
+        self.unitScale = unitScale
         self.xMin = xMin
         self.xMax = xMax
         self.fitLineUpper = fitLineUpper
@@ -1188,7 +1194,7 @@ class ColorColorDistance(object):
             roots = np.roots(np.poly1d((1, -x)) + (self.poly - y)*polyDeriv)
             distance2[i] = min(calculateDistance2(x, y, np.real(rr)) for
                                rr in roots if np.real(rr) == rr)
-        return np.sqrt(distance2)*np.where(yy >= self.poly(xx), 1.0, -1.0)
+        return np.sqrt(distance2)*np.where(yy >= self.poly(xx), 1.0, -1.0)*self.unitScale
 
 
 class SkyAnalysisRunner(TaskRunner):
