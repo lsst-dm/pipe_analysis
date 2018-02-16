@@ -805,10 +805,16 @@ def addPatchColumn(catalog, patch):
     newCatalog = afwTable.SourceCatalog(schema)
     newCatalog.reserve(len(catalog))
 
-    for src in catalog:
-        row = newCatalog.addNew()
-        row.assign(src, mapper)
-        row.set(patchKey, patch)
+    if False:
+        for src in catalog:
+            row = newCatalog.addNew()
+            row.assign(src, mapper)
+            row.set(patchKey, patch)
+    else:
+        newCatalog.extend(catalog, mapper)
+        for row in newCatalog:
+            row.set(patchKey, patch)
+
     return newCatalog
 
 def calibrateSourceCatalogMosaic(dataRef, catalog, fluxKeys=None, errKeys=None, zp=27.0):
