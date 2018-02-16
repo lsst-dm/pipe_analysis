@@ -389,10 +389,10 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             commonZpCatList.append(commonZpCat)
             if self.config.doApplyUberCal:
                 if hscRun is not None:
-                    if not dataRef.datasetExists("wcs_hsc_md") or not dataRef.datasetExists("fcr_hsc_md"):
+                    if not dataRef.datasetExists("wcs_hsc") or not dataRef.datasetExists("fcr_hsc_md"):
                         continue
                 else:
-                    if not dataRef.datasetExists("wcs_md") or not dataRef.datasetExists("fcr_md"):
+                    if not dataRef.datasetExists("wcs") or not dataRef.datasetExists("fcr_md"):
                         continue
             catalog = self.calibrateCatalogs(dataRef, catalog, metadata)
             catList.append(catalog)
@@ -413,10 +413,10 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             hscRun = checkHscStack(metadata)
             if self.config.doApplyUberCal:
                 if hscRun is not None:
-                    if not dataRef.datasetExists("wcs_hsc_md") or not dataRef.datasetExists("fcr_hsc_md"):
+                    if not dataRef.datasetExists("wcs_hsc") or not dataRef.datasetExists("fcr_hsc_md"):
                         continue
                 else:
-                    if not dataRef.datasetExists("wcs_md") or not dataRef.datasetExists("fcr_md"):
+                    if not dataRef.datasetExists("wcs") or not dataRef.datasetExists("fcr_md"):
                         continue
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
@@ -815,15 +815,15 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             commonZpCatList2.append(commonZpCat2)
             if self.config.doApplyUberCal1:
                 if hscRun1 is not None:
-                    if not dataRef1.datasetExists("wcs_hsc_md") or not dataRef1.datasetExists("fcr_hsc_md"):
+                    if not dataRef1.datasetExists("wcs_hsc") or not dataRef1.datasetExists("fcr_hsc_md"):
                         continue
-                elif not dataRef1.datasetExists("wcs_md") or not dataRef1.datasetExists("fcr_md"):
+                elif not dataRef1.datasetExists("wcs") or not dataRef1.datasetExists("fcr_md"):
                     continue
             if self.config.doApplyUberCal2:
                 if hscRun2 is not None:
-                    if not dataRef2.datasetExists("wcs_hsc_md") or not dataRef2.datasetExists("fcr_hsc_md"):
+                    if not dataRef2.datasetExists("wcs_hsc") or not dataRef2.datasetExists("fcr_hsc_md"):
                         continue
-                elif not dataRef2.datasetExists("wcs_md") or not dataRef2.datasetExists("fcr_md"):
+                elif not dataRef2.datasetExists("wcs") or not dataRef2.datasetExists("fcr_md"):
                     continue
             srcCat1 = self.calibrateCatalogs(dataRef1, srcCat1, metadata1, self.config.doApplyUberCal1)
             catList1.append(srcCat1)
