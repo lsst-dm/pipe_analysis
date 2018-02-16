@@ -278,9 +278,9 @@ class ColorAnalysisTask(CmdLineTask):
     def readCatalogs(self, patchRefList, dataset):
         """Read in and concatenate catalogs of type dataset in lists of data references
 
-        Before appending each catalog to a single list, an extra column indicating the
-        patch is added to the catalog.  This is useful for the subsequent interactive
-        QA analysis.
+        If self.config.doWriteParquetTables is True, before appending each catalog to a single
+        list, an extra column indicating the patch is added to the catalog.  This is useful for
+        the subsequent interactive QA analysis.
 
         Parameters
         ----------
@@ -302,7 +302,8 @@ class ColorAnalysisTask(CmdLineTask):
         for patchRef in patchRefList:
             if patchRef.datasetExists(dataset):
                 cat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
-                cat = addPatchColumn(cat, patchRef.dataId["patch"])
+                if self.config.doWriteParquetTables:
+                    cat = addPatchColumn(cat, patchRef.dataId["patch"])
                 catList.append(cat)
         if not catList:
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))

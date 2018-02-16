@@ -807,9 +807,8 @@ def addCcdColumn(catalog, ccd):
     newCatalog = afwTable.SourceCatalog(schema)
     newCatalog.reserve(len(catalog))
 
-    for src in catalog:
-        row = newCatalog.addNew()
-        row.assign(src, mapper)
+    newCatalog.extend(catalog, mapper)
+    for row in newCatalog:
         row.set(ccdKey, ccd)
     return newCatalog
 
@@ -848,9 +847,8 @@ def addPatchColumn(catalog, patch):
     newCatalog = afwTable.SourceCatalog(schema)
     newCatalog.reserve(len(catalog))
 
-    for src in catalog:
-        row = newCatalog.addNew()
-        row.assign(src, mapper)
+    newCatalog.extend(catalog, mapper)
+    for row in newCatalog:
         row.set(patchKey, patch)
     return newCatalog
 
