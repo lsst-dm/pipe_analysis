@@ -614,8 +614,9 @@ class ColorAnalysisTask(CmdLineTask):
                                self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                magThreshold=prettyBrightThreshold, labeller=NumStarLabeller(2),
                                ).plotAll(dataId, filenamer, self.log,
-                                         Enforcer(requireLess={"star": {"stdev": 0.05}}), camera=camera,
-                                         tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
+                                         Enforcer(requireLess={"star": {"stdev": 0.03*self.unitScale}}),
+                                         camera=camera, tractInfo=tractInfo, patchList=patchList,
+                                         hscRun=hscRun)
         if filters.issuperset(set(("HSC-R", "HSC-I", "HSC-Z"))):
             # Do a linear fit to regions defined in Ivezic transforms
             transform = self.config.transforms["yPerp"]
@@ -681,8 +682,9 @@ class ColorAnalysisTask(CmdLineTask):
                                self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                magThreshold=prettyBrightThreshold, labeller=NumStarLabeller(2),
                                ).plotAll(dataId, filenamer, self.log,
-                                         Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
-                                         tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
+                                         Enforcer(requireLess={"star": {"stdev": 0.03*self.unitScale}}),
+                                         camera=camera, tractInfo=tractInfo, patchList=patchList,
+                                         hscRun=hscRun)
         if filters.issuperset(set(("HSC-I", "HSC-Z", "HSC-Y"))):
             nameStr = "izy" + fluxColStr
             self.log.info("nameStr = {:s}".format(nameStr))
@@ -731,8 +733,9 @@ class ColorAnalysisTask(CmdLineTask):
                                self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                magThreshold=prettyBrightThreshold, labeller=NumStarLabeller(2),
                                ).plotAll(dataId, filenamer, self.log,
-                                         Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
-                                         tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
+                                         Enforcer(requireLess={"star": {"stdev": 0.03*self.unitScale}}),
+                                         camera=camera, tractInfo=tractInfo, patchList=patchList,
+                                         hscRun=hscRun)
 
         if filters.issuperset(set(("HSC-Z", "NB0921", "HSC-Y"))):
             nameStr = "z9y" + fluxColStr
@@ -782,8 +785,9 @@ class ColorAnalysisTask(CmdLineTask):
                                self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                magThreshold=prettyBrightThreshold, labeller=NumStarLabeller(2),
                                ).plotAll(dataId, filenamer, self.log,
-                                         Enforcer(requireLess={"star": {"stdev": 0.02}}), camera=camera,
-                                         tractInfo=tractInfo, patchList=patchList, hscRun=hscRun)
+                                         Enforcer(requireLess={"star": {"stdev": 0.03*self.unitScale}}),
+                                         camera=camera, tractInfo=tractInfo, patchList=patchList,
+                                         hscRun=hscRun)
 
     def _getConfigName(self):
         return None
