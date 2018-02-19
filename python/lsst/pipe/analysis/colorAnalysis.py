@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 np.seterr(all="ignore")  # noqa #402
 import functools
+import os
 
 from collections import defaultdict
 
@@ -168,7 +169,11 @@ class ColorAnalysisRunner(TaskRunner):
         FilterRefsDict = functools.partial(defaultdict, list)  # Dict for filter-->dataRefs
         tractFilterRefs = defaultdict(FilterRefsDict)  # tract-->filter-->dataRefs
         for patchRef in sum(parsedCmd.id.refList, []):
-            if patchRef.datasetExists("deepCoadd_forced_src"):
+            # Make sure the actual input file requested exists (i.e. do not follow the parent chain)
+            inputDataFile = patchRef.get("deepCoadd_forced_src_filename")[0]
+            if parsedCmd.input not in parsedCmd.output:
+                inputDataFile = inputDataFile.replace(parsedCmd.output, parsedCmd.input)
+            if os.path.exists(inputDataFile):
                 tract = patchRef.dataId["tract"]
                 filterName = patchRef.dataId["filter"]
                 tractFilterRefs[tract][filterName].append(patchRef)
@@ -188,6 +193,24 @@ class ColorAnalysisRunner(TaskRunner):
                                            patchRef.dataId["patch"] in keep] for ff in filterRefs}
         for tract in bad:
             del tractFilterRefs[tract]
+
+        # List of filters included on the command line
+        parsedFilterList = [dataId["filter"] for dataId in parsedCmd.id.idList]
+        for tract in tractFilterRefs:
+            numFilters = 0
+            for ff in parsedFilterList:
+                if ff in tractFilterRefs[tract].keys():
+                    numFilters += 1
+                else:
+                    parsedCmd.log.warn("No input data found for filter {0:s} of tract {1:d}".
+                                       format(ff, tract))
+            if numFilters < 3:
+                parsedCmd.log.warn("Must have at least 3 filters with data existing in the input repo. "
+                                   "Only {0:d} exist of those requested ({1:}) for tract {2:d}. "
+                                   "Skipping tract.".format(numFilters, parsedFilterList, tract))
+                del tractFilterRefs[tract]
+            if not tractFilterRefs[tract]:
+                raise RuntimeError("No suitable datasets found.")
 
         return [(filterRefs, kwargs) for filterRefs in tractFilterRefs.values()]
 

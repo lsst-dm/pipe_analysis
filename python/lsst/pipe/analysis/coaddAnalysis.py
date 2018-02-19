@@ -126,11 +126,24 @@ class CoaddAnalysisRunner(TaskRunner):
 
         # Partition all inputs by tract,filter
         FilterRefsDict = functools.partial(defaultdict, list)  # Dict for filter-->dataRefs
-        tractFilterRefs = defaultdict(FilterRefsDict)  # tract-->filter-->dataRefs
-        for patchRef in sum(parsedCmd.id.refList, []):
-            tract = patchRef.dataId["tract"]
-            filterName = patchRef.dataId["filter"]
-            tractFilterRefs[tract][filterName].append(patchRef)
+        # Make sure the actual input files requested exist (i.e. do not follow the parent chain)
+        # First check for forced catalogs.  Break out of datasets loop if forced catalogs were found,
+        # otherwise continue search for existence of unforced catalogs
+        for dataset in ["forced_src", "meas"]:
+            tractFilterRefs = defaultdict(FilterRefsDict)  # tract-->filter-->dataRefs
+            for patchRef in sum(parsedCmd.id.refList, []):
+                tract = patchRef.dataId["tract"]
+                filterName = patchRef.dataId["filter"]
+                inputDataFile = patchRef.get("deepCoadd_" + dataset + "_filename")[0]
+                if parsedCmd.input not in parsedCmd.output:
+                    inputDataFile = inputDataFile.replace(parsedCmd.output, parsedCmd.input)
+                if os.path.exists(inputDataFile):
+                    tractFilterRefs[tract][filterName].append(patchRef)
+            if tractFilterRefs:
+                break
+
+        if not tractFilterRefs:
+            raise RuntimeError("No suitable datasets found.")
 
         return [(tractFilterRefs[tract][filterName], kwargs) for tract in tractFilterRefs for
                 filterName in tractFilterRefs[tract]]
@@ -157,31 +170,31 @@ class CoaddAnalysisTask(CmdLineTask):
         self.unitScale = 1000.0 if self.config.toMilli else 1.0
 
     def run(self, patchRefList, cosmos=None):
-        haveForced = True  # do forced datasets exits (may not for single band datasets)
+        haveForced = False  # do forced datasets exits (may not for single band datasets)
         dataset = "Coadd_forced_src"
-        patchRefExistsList = [patchRef for patchRef in patchRefList if
-                              patchRef.datasetExists(self.config.coaddName + dataset)]
-        if len(patchRefExistsList) == 0:
-            haveForced = False
+        # Explicit input file was checked in CoaddAnalysisRunner, so a check on datasetExists
+        # is sufficient here (modulo the case where a forced dataset exists higher up the parent
+        # tree than the specified input, but does not exist in the input directory as the former
+        # will be found)
+        if patchRefList[0].datasetExists(self.config.coaddName + dataset):
+            haveForced = True
         if not haveForced:
             self.log.warn("No forced dataset exists for, e.g.,: {:} (only showing first dataId in "
                           "patchRefList).\nPlotting unforced results only.".format(patchRefList[0].dataId))
             dataset = "Coadd_meas"
-            patchRefExistsList = [patchRef for patchRef in patchRefList if
-                                  patchRef.datasetExists(self.config.coaddName + dataset)]
-        if len(patchRefExistsList) == 0:
-            raise TaskError("No data exists in patRefList: %s" %
-                            ([patchRef.dataId for patchRef in patchRefList]))
-        patchList = [patchRef.dataId["patch"] for patchRef in patchRefExistsList]
+            if not patchRefList[0].datasetExists(self.config.coaddName + dataset):
+                raise TaskError("No data exists in patRefList: %s" %
+                                ([patchRef.dataId for patchRef in patchRefList]))
+        patchList = [patchRef.dataId["patch"] for patchRef in patchRefList]
         self.log.info("patchList size: {:d}".format(len(patchList)))
-        repoInfo = getRepoInfo(patchRefExistsList[0], coaddName=self.config.coaddName, coaddDataset=dataset)
+        repoInfo = getRepoInfo(patchRefList[0], coaddName=self.config.coaddName, coaddDataset=dataset)
         filenamer = Filenamer(repoInfo.butler, self.outputDataset, repoInfo.dataId)
         if (self.config.doPlotMags or self.config.doPlotStarGalaxy or self.config.doPlotOverlaps or
                 self.config.doPlotCompareUnforced or cosmos or self.config.externalCatalogs):
             if haveForced:
-                forced = self.readCatalogs(patchRefExistsList, self.config.coaddName + "Coadd_forced_src")
+                forced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_forced_src")
                 forced = self.calibrateCatalogs(forced, wcs=repoInfo.wcs)
-            unforced = self.readCatalogs(patchRefExistsList, self.config.coaddName + "Coadd_meas")
+            unforced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_meas")
             unforced = self.calibrateCatalogs(unforced, wcs=repoInfo.wcs)
 
         # Set an alias map for differing src naming conventions of different stacks (if any)
@@ -201,7 +214,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                          col not in forced.schema and col in unforced.schema and
                                          not (repoInfo.hscRun and col == "slot_Centroid_flag")])
             # Add the reference band flags for forced photometry to forced catalog
-            refBandCat = self.readCatalogs(patchRefExistsList, self.config.coaddName + "Coadd_ref")
+            refBandCat = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_ref")
             if len(forced) != len(refBandCat):
                 raise RuntimeError(("Lengths of forced (N = {0:d}) and ref (N = {0:d}) cats don't match").
                                    format(len(forced), len(refBandCat)))
@@ -320,10 +333,10 @@ class CoaddAnalysisTask(CmdLineTask):
 
         if self.config.doPlotMatches:
             if haveForced:
-                matches = self.readSrcMatches(patchRefExistsList, self.config.coaddName + "Coadd_forced_src",
+                matches = self.readSrcMatches(patchRefList, self.config.coaddName + "Coadd_forced_src",
                                               hscRun=repoInfo.hscRun, wcs=repoInfo.wcs)
             else:
-                matches = self.readSrcMatches(patchRefExistsList, self.config.coaddName + "Coadd_meas",
+                matches = self.readSrcMatches(patchRefList, self.config.coaddName + "Coadd_meas",
                                               hscRun=repoInfo.hscRun, wcs=repoInfo.wcs)
             self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId, butler=repoInfo.butler,
                              camera=repoInfo.camera, tractInfo=repoInfo.tractInfo, patchList=patchList,
