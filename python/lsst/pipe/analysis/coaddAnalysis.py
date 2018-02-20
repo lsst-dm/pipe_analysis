@@ -154,8 +154,8 @@ class CoaddAnalysisTask(CmdLineTask):
         if len(patchRefExistsList) == 0:
             haveForced = False
         if not haveForced:
-            self.log.warn("No forced dataset exist for patRefList: %s.\nPlotting unforced results only." %
-                          ([patchRef.dataId for patchRef in patchRefList]))
+            self.log.warn("No forced dataset exists for, e.g.,: {:} (only showing first dataId in "
+                          "patchRefList).\nPlotting unforced results only.".format(patchRefList[0].dataId))
             dataset = "Coadd_meas"
             patchRefExistsList = [patchRef for patchRef in patchRefList if
                                   patchRef.datasetExists(self.config.coaddName + dataset)]
@@ -297,7 +297,9 @@ class CoaddAnalysisTask(CmdLineTask):
                 self.log.info("No overlapping patches...skipping overlap plots")
             else:
                 if haveForced:
-                    overlaps = self.overlaps(forced, unforced)
+                    overlaps = self.overlaps(forced, flagsCat)
+                else:
+                    overlaps = self.overlaps(unforced, flagsCat)
                 self.log.info("Number of overlap objects matched = {:d}".format(len(overlaps)))
                 if len(overlaps) > 0:
                     self.plotOverlaps(overlaps, filenamer, repoInfo.dataId, butler=repoInfo.butler,
