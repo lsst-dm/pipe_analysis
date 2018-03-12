@@ -4,6 +4,8 @@ import os
 import re
 
 import numpy as np
+import scipy.odr as scipyOdr
+import scipy.stats as scipyStats
 try:
     import fastparquet
 except ImportError:
@@ -36,7 +38,7 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "addPatchColumn", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
            "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
            "fluxToPlotString", "andCatalog", "writeParquet", "getRepoInfo", "findCcdKey",
-           "getCcdNameRefList", "getDataExistsRefList"]
+           "getCcdNameRefList", "getDataExistsRefList", "orthogonalRegression"]
 
 
 def writeParquet(table, path, badArray=None):
@@ -1088,3 +1090,53 @@ def getDataExistsRefList(dataRefList, dataset):
     if dataExistsRefList is None:
         raise RuntimeError("dataExistsRef list is empty")
     return dataExistsRefList
+
+
+def fLinear(p, x):
+    return p[0] + p[1]*x
+
+
+def fQuadratic(p, x):
+    return p[0] + p[1]*x + p[2]*x**2
+
+
+def fCubic(p, x):
+    return p[0] + p[1]*x + p[2]*x**2 + p[3]*x**3
+
+
+def orthogonalRegression(x, y, order, initialGuess=None):
+    """Perform an Orthogonal Distance Regression on the given data
+
+    Parameters:
+    ----------
+    x, y : `array`
+       Arrays of x and y data to fit
+    order : `int`, optional
+       Order of the polynomial to fit
+    initialGuess : `list` of `float`, optional
+       List of the polynomial coefficients (highest power first) of an initial guess to feed to the ODR fit.
+       If no initialGuess is provided, a simple linear fit is performed and used as the guess.
+
+    Returns:
+    -------
+    `list` of fit coefficients (highest power first to mimic np.polyfit return)
+    """
+    if initialGuess is None:
+        linReg = scipyStats.linregress(x, y)
+        initialGuess = [linReg[0], linReg[1]]
+        for i in range(order - 1):  # initialGuess here is linear, so need to pad array to match order
+            initialGuess.insert(0, 0.0)
+    if order == 1:
+        odrModel = scipyOdr.Model(fLinear)
+    elif order == 2:
+        odrModel = scipyOdr.Model(fQuadratic)
+    elif order == 3:
+        odrModel = scipyOdr.Model(fCubic)
+    else:
+        raise RuntimeError("Order must be between 1 and 3 (value requested, {:}, not accommodated)".
+                           format(order))
+    odrData = scipyOdr.Data(x, y)
+    orthDist = scipyOdr.ODR(odrData, odrModel, beta0=initialGuess)
+    orthRegFit = orthDist.run()
+
+    return list(reversed(orthRegFit.beta))
