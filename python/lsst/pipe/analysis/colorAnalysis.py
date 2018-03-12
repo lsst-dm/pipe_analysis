@@ -7,6 +7,7 @@ import numpy as np
 np.seterr(all="ignore")  # noqa #402
 import functools
 import os
+import scipy.stats as scipyStats
 
 from collections import defaultdict
 
@@ -15,8 +16,9 @@ from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError
 from lsst.coadd.utils import TractDataIdContainer
 from .analysis import Analysis, AnalysisConfig
 from .coaddAnalysis import CoaddAnalysisTask
-from .utils import (Filenamer, Enforcer, concatenateCatalogs, checkIdLists, addPatchColumn,
-                    calibrateCoaddSourceCatalog, fluxToPlotString, writeParquet, getRepoInfo)
+from .utils import (Filenamer, Enforcer, concatenateCatalogs, checkIdLists, getFluxKeys, addPatchColumn,
+                    calibrateCoaddSourceCatalog, fluxToPlotString, writeParquet, getRepoInfo,
+                    orthogonalRegression)
 from .plotUtils import OverlapsStarGalaxyLabeller, labelCamera, setPtSize
 
 import lsst.afw.geom as afwGeom
@@ -586,10 +588,10 @@ class ColorAnalysisTask(CmdLineTask):
                                              "g - r  [{0:s}]".format(fluxColStr),
                                              "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter,
                                              xRange=xRange, yRange=yRange, order=1,
-                                             xFitRange=(xFitRange1, xFitRange2), yFitRange=(0.2, 0.5),
+                                             xFitRange=(1.05, 1.45), yFitRange=(0.7, 1.55),
                                              fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
-                                             hscRun=hscRun, unitScale=self.unitScale)
+                                             hscRun=hscRun, unitScale=self.unitScale, closeToVertical=True)
             # Lower branch only; upper branch is noisy due to astrophysics
             nameStr = "gri" + fluxColStr
             self.log.info("nameStr = {:s}".format(nameStr))
@@ -825,10 +827,14 @@ class ColorAnalysisTask(CmdLineTask):
 def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterStr, xRange=None, yRange=None,
                           order=1, iterations=3, rej=3.0, xFitRange=None, yFitRange=None, fitLineUpper=None,
                           fitLineLower=None, numBins="auto", hscRun=None, logger=None, magThreshold=99.9,
-                          camera=None, unitScale=1.0):
-    fig, axes = plt.subplots(1, 2)
+                          camera=None, unitScale=1.0, closeToVertical=False):
+    fig, axes = plt.subplots(nrows=1, ncols=2, sharex=False, sharey=False)
+    fig.subplots_adjust(wspace=0.46, bottom=0.15, left=0.11, right=0.96, top=0.9)
     axes[0].tick_params(which="both", direction="in", labelsize=9)
     axes[1].tick_params(which="both", direction="in", labelsize=9)
+
+    good = np.logical_and(np.isfinite(xx), np.isfinite(yy))
+    xx, yy = xx[good], yy[good]
 
     if xRange:
         axes[0].set_xlim(*xRange)
@@ -856,47 +862,95 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     selectLower = np.ones_like(xx, dtype=bool) if not fitLineLower else (yy >
                                                                          fitLineLower[0] + fitLineLower[1]*xx)
 
+    # Pad vertical and horizontal fit ranges for use after the first fit iteration
+    if xFitRange:
+        xMinPad = xFitRange[0] - 0.07*(xFitRange[1] - xFitRange[0])
+        xMaxPad = xFitRange[1] + 0.07*(xFitRange[1] - xFitRange[0])
+    if yFitRange:
+        yMinPad = yFitRange[0] - 0.07*(yFitRange[1] - yFitRange[0])
+        yMaxPad = yFitRange[1] + 0.07*(yFitRange[1] - yFitRange[0])
+
     select = np.ones_like(xx, dtype=bool)
     for sel in [selectXRange, selectYRange, selectUpper, selectLower]:
         select &= sel
 
     keep = np.ones_like(xx, dtype=bool)
-    for ii in range(iterations):
+    # Perform a polynomial fit using np.polyfit to use as an initial guess for the Orthoganl Regression
+    if closeToVertical:
+        # Force the initial guess for near-vertical distributions (np.polyfit cannot handle vertical fits)
         keep &= select
+        poly = [10.0, -10.0*(xFitRange[0] + (xFitRange[1]-xFitRange[0])/3.0)]
+    else:
+        for ii in range(iterations):
+            keep &= select
+            poly = np.polyfit(xx[keep], yy[keep], order)
+            dy = yy - np.polyval(poly, xx)
+            q1, q3 = np.percentile(dy[keep], [25, 75])
+            clip = rej*0.74*(q3 - q1)
+            keep = np.logical_not(np.abs(dy) > clip)
+            # After the first iteration, reset the vertical and horizontal clipping to be less restrictive
+            if ii == 0:
+                selectXRange = selectXRange if not xFitRange else ((xx > xMinPad) & (xx < xMaxPad))
+                selectYRange = selectYRange if not yFitRange else ((yy > yMinPad) & (yy < yMaxPad))
+                for sel in [selectXRange, selectYRange, selectUpper, selectLower]:
+                    select &= sel
+
+        log.info("Number of iterations in polynomial fit: {:d}".format(ii + 1))
+        keep &= select
+        nKeep = np.sum(keep)
+        if nKeep < order:
+            raise RuntimeError(
+                "Not enough good data points ({0:d}) for polynomial fit of order {1:d}".format(nKeep, order))
+
         poly = np.polyfit(xx[keep], yy[keep], order)
-        dy = yy - np.polyval(poly, xx)
-        q1, q3 = np.percentile(dy[keep], [25, 75])
+
+    # Calculate the point density
+    xyKeep = np.vstack([xx[keep], yy[keep]])
+    zKeep = scipyStats.gaussian_kde(xyKeep)(xyKeep)
+    xyOther = np.vstack([xx[~keep], yy[~keep]])
+    zOther = scipyStats.gaussian_kde(xyOther)(xyOther)
+    idxHighDensity = np.argmax(zKeep)
+    xHighDensity = xx[keep][idxHighDensity]
+    yHighDensity = yy[keep][idxHighDensity]
+    log.info("Highest Density point x, y: ", xHighDensity, yHighDensity)
+
+    initialGuess = list(reversed(poly))
+    keepOdr = keep.copy()
+    orthRegCoeffs = orthogonalRegression(xx[keepOdr], yy[keepOdr], order, initialGuess)
+    for ii in range(iterations - 1):
+        initialGuess = list(reversed(orthRegCoeffs))
+        dy = yy - np.polyval(orthRegCoeffs, xx)
+        q1, q3 = np.percentile(dy[keepOdr], [25, 75])
         clip = rej*0.74*(q3 - q1)
-        keep = np.logical_not(np.abs(dy) > clip)
+        keepOdr = np.logical_not(np.abs(dy) > clip) & np.isfinite(xx) & np.isfinite(yy)
         # After the first iteration, reset the vertical and horizontal clipping to be less restrictive
         if ii == 0:
-            if xFitRange:
-                xMinNew = xFitRange[0] - 0.08*(xFitRange[1] - xFitRange[0])
-                xMaxNew = xFitRange[1] + 0.08*(xFitRange[1] - xFitRange[0])
-            if yFitRange:
-                yMinNew = yFitRange[0] - 0.06*(yFitRange[1] - yFitRange[0])
-                yMaxNew = yFitRange[1] + 0.06*(yFitRange[1] - yFitRange[0])
-            selectXRange = selectXRange if not xFitRange else ((xx > xMinNew) & (xx < xMaxNew))
-            selectYRange = selectYRange if not yFitRange else ((yy > yMinNew) & (yy < yMaxNew))
+            selectXRange = selectXRange if not xFitRange else ((xx > xMinPad) & (xx < xMaxPad))
+            selectYRange = selectYRange if not yFitRange else ((yy > yMinPad) & (yy < yMaxPad))
             for sel in [selectXRange, selectYRange, selectUpper, selectLower]:
-                select &= sel
-
-    log.info("Number of iterations in polynomial fit: {:d}".format(ii + 1))
-    keep &= select
-    nKeep = np.sum(keep)
-    if nKeep < order:
-        raise RuntimeError(
-            "Not enough good data points ({0:d}) for polynomial fit of order {1:d}".format(nKeep, order))
-
-    poly = np.polyfit(xx[keep], yy[keep], order)
-    yLine = np.polyval(poly, xLine)
+                keepOdr &= sel
+        nKeepOdr = np.sum(keepOdr)
+        if nKeepOdr < order:
+            raise RuntimeError(
+                "Not enough good data points ({0:d}) for polynomial fit of order {1:d}".
+                format(nKeepOdr, order))
+        orthRegCoeffs = orthogonalRegression(xx[keepOdr], yy[keepOdr], order, initialGuess)
+    yOrthLine = np.polyval(orthRegCoeffs, xLine)
+    axes[0].plot(xLine, yOrthLine, "g--")
 
     kwargs = dict(s=3, marker="o", lw=0, alpha=0.4)
-    axes[0].scatter(xx[keep], yy[keep], c="blue", label="used", **kwargs)
-    axes[0].scatter(xx[~keep], yy[~keep], c="black", label="other", **kwargs)
+    axes[0].scatter(xx[~keep], yy[~keep], c=zOther, cmap="gray", label="other", **kwargs)
+    axes[0].scatter(xx[keep], yy[keep], c=zKeep, cmap="jet", label="used", **kwargs)
     axes[0].set_xlabel(xLabel)
     axes[0].set_ylabel(yLabel, labelpad=-1)
-    axes[0].plot(xLine, yLine, "r-")
+
+    mappableKeep = plt.cm.ScalarMappable(cmap="jet", norm=plt.Normalize(vmin=zKeep.min(), vmax=zKeep.max()))
+    mappableKeep._A = []        # fake up the array of the scalar mappable. Urgh...
+    caxKeep = plt.axes([0.46, 0.15, 0.022, 0.75])
+    cbKeep = plt.colorbar(mappableKeep, cax=caxKeep)
+    cbKeep.ax.tick_params(labelsize=6)
+    labelPadShift = len(str(zKeep.max()//10)) if zKeep.max()//10 > 0 else 0
+    cbKeep.set_label("Number Density", rotation=270, labelpad=-15 - labelPadShift, fontsize=7)
 
     # Find index where poly and fit range intersect -- to calculate the local slopes of the fit to make
     # sure it is close to the fitLines (log a warning if they are not within 5%)
@@ -944,67 +998,134 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         axes[0].axvspan(axes[0].get_xlim()[0], xFitRange[0], **kwargs)
         axes[0].axvspan(xFitRange[1], axes[0].get_xlim()[1], **kwargs)
         # Looser range after fisrt iteration
-        axes[0].axvspan(axes[0].get_xlim()[0], xMinNew, **kwargs)
-        axes[0].axvspan(xMaxNew, axes[0].get_xlim()[1], **kwargs)
+        axes[0].axvspan(axes[0].get_xlim()[0], xMinPad, **kwargs)
+        axes[0].axvspan(xMaxPad, axes[0].get_xlim()[1], **kwargs)
     if yFitRange:
         # Shade region outside yFitRange
         xMin = abs(xFitRange[0] - xRange[0])/deltaX if xFitRange else 1
         xMax = abs(xFitRange[1] - xRange[0])/deltaX if xFitRange else 1
-        kwargs = dict(xmin=xMin, xmax=xMax, facecolor="k", edgecolor="none", alpha=0.05)
-        axes[0].axhspan(axes[0].get_ylim()[0], yFitRange[0], **kwargs)
-        axes[0].axhspan(yFitRange[1], axes[0].get_ylim()[1], **kwargs)
+        axes[0].axhspan(axes[0].get_ylim()[0], yFitRange[0], xmin=xMin, xmax=xMax, **kwargs)
+        axes[0].axhspan(yFitRange[1], axes[0].get_ylim()[1], xmin=xMin, xmax=xMax, **kwargs)
         # Looser range after fisrt iteration
-        xMin = abs(xMinNew - xRange[0])/deltaX if xFitRange else 1
-        xMax = abs(xMaxNew - xRange[0])/deltaX if xFitRange else 1
-        kwargs = dict(xmin=xMin, xmax=xMax, facecolor="k", edgecolor="none", alpha=0.05)
-        axes[0].axhspan(axes[0].get_ylim()[0], yMinNew, **kwargs)
-        axes[0].axhspan(yMaxNew, axes[0].get_ylim()[1], **kwargs)
+        xMin = abs(xMinPad - xRange[0])/deltaX if xFitRange else 1
+        xMax = abs(xMaxPad - xRange[0])/deltaX if xFitRange else 1
+        axes[0].axhspan(axes[0].get_ylim()[0], yMinPad, xmin=xMin, xmax=xMax, **kwargs)
+        axes[0].axhspan(yMaxPad, axes[0].get_ylim()[1], xmin=xMin, xmax=xMax, **kwargs)
     if fitLineUpper:
         scaleLine = 0.05*deltaX*max(1.0, min(3.0, abs(1.0/fitLineUpper[1])))
         xLineUpper = np.linspace(xLine[crossIdxUpper] - scaleLine, xLine[crossIdxUpper] + scaleLine, 100)
         yLineUpper = fitLineUpper[0] + fitLineUpper[1]*xLineUpper
-        axes[0].plot(xLineUpper, yLineUpper, "g--")
+        axes[0].plot(xLineUpper, yLineUpper, "r--")
     if fitLineLower:
         scaleLine = 0.05*deltaX*max(1.0, min(3.0, abs(1.0/fitLineLower[1])))
         xLineLower = np.linspace(xLine[crossIdxLower] - scaleLine, xLine[crossIdxLower] + scaleLine, 100)
         yLineLower = fitLineLower[0] + fitLineLower[1]*xLineLower
-        axes[0].plot(xLineLower, yLineLower, "g--")
+        axes[0].plot(xLineLower, yLineLower, "r--")
 
     # Label total number of objects of each data type
     kwargs = dict(va="center", fontsize=7)
-    lenNumObj = max(len(str(len(xx[keep]))), len(str(len(xx[~keep]))))
-    fdx = max((min(0.08*lenNumObj, 0.6), 0.33))
+    lenNumObj = max(len(str(len(xx[keepOdr]))), len(str(len(xx))))
+    fdx = max((min(0.08*lenNumObj, 0.6), 0.32))
     xLoc, yLoc = xRange[0] + 0.05*deltaX, yRange[1] - 0.036*deltaY
-    axes[0].text(xLoc, yLoc, "Nused  =", ha="left", color="blue", **kwargs)
-    axes[0].text(xLoc + fdx*deltaX, yLoc, str(len(xx[keep])), ha="right", color="blue", **kwargs)
+    axes[0].text(xLoc, yLoc, "N$_{used }$ =", ha="left", color="blue", **kwargs)
+    axes[0].text(xLoc + fdx*deltaX, yLoc, str(len(xx[keepOdr])), ha="right", color="blue", **kwargs)
     axes[0].text(xRange[1] - 0.03*deltaX, yLoc, " [" + filterStr + " < " + str(magThreshold) + "]",
                  ha="right", color="blue", **kwargs)
     yLoc -= 0.044*(yRange[1] - yRange[0])
-    axes[0].text(xLoc, yLoc, "Nother =", ha="left", color="black", **kwargs)
-    axes[0].text(xLoc + fdx*deltaX,  yLoc, str(len(xx[~keep])), ha="right", color="black", **kwargs)
+    axes[0].text(xLoc, yLoc, "N$_{total}$ =", ha="left", color="black", **kwargs)
+    axes[0].text(xLoc + fdx*deltaX, yLoc, str(len(xx)), ha="right", color="black", **kwargs)
 
-    # Label polynomial fit parameters to 2 decimal places
-    polyStr = "y = {:.2f}".format(poly[len(poly) - 1])
-    for i in range(1, len(poly)):
-        index = len(poly) - 1 - i
-        plusMinus = " - " if poly[index] < 0.0 else " + "
+    unitStr = "mmag" if unitScale == 1000 else "mag"
+    axes[1].set_xlabel("Distance to polynomial fit ({:s})".format(unitStr))
+    axes[1].set_ylabel("Number")
+    axes[1].set_yscale("log", nonposy="clip")
+
+    # Label orthogonal polynomial fit parameters to 2 decimal places
+    xLoc = xRange[0] + 0.045*deltaX
+    polyColor = "green"
+    polyFit = orthRegCoeffs
+    polyStr = "odr"
+    kept = keepOdr
+
+    polyStr = "y$_{" + polyStr + "}$" + " = {:.2f}".format(polyFit[len(polyFit) - 1])
+    for i in range(1, len(polyFit)):
+        index = len(polyFit) - 1 - i
         exponent = "$^{" + str(i) + "}$" if i > 1 else ""
-        polyStr += plusMinus + "{:.2f}".format(abs(poly[index])) + "x" + exponent
-    xLoc = xRange[0] + 0.05*deltaX
-    yLoc -= 0.055*deltaY
-    axes[0].text(xLoc, yLoc, polyStr, ha="left", va="center", fontsize=8, color="green")
+        coeffStr = "{:.2f}".format(abs(polyFit[index])) + "x" + exponent
+        plusMinus = " $-$ " if polyFit[index] < 0.0 else " + "
+        if i == 0:
+            polyStr += plusMinus.strip(" ") + coeffStr
+        else:
+            polyStr += plusMinus + coeffStr
+    yLoc -= 0.05*deltaY
+    kwargs = dict(ha="left", va="center", color=polyColor)
+    axes[0].text(xLoc, yLoc, polyStr, fontsize=8, **kwargs)
+
+    # Derive Ivezic P2 and P1 equations based on linear fit and highest density position (where P1 = 0)
+    # For y = m*x + b fit, where x = c1 - c2 and y = c2 - c3,
+    # P2 = (-m*c1 + (m + 1)*c2 - c3 - b)/sqrt(m**2 + 1)
+    # P2norm = P2/sqrt[(m**2 + (m + 1)**2 + 1**2)]
+    #
+    # P1 = cos(theta)*x + sin(theta)*y + deltaP1, theta = arctan(m)
+    # P1 = cos(theta)*(c1 - c2) + sin(theta)*(c2 - c3) + deltaP1
+    # P1 = cos(theta)*c1 + ((sin(theta) - cos(theta))*c2 - sin(theta)*c3 + deltaP1
+    # P1 = 0 at x, y = xHighDensity, yHighDensity
+    if "odr" in polyStr and order == 1:
+        m, b = polyFit[0], polyFit[1]
+        scaleFact = np.sqrt(m**2 + 1.0)
+        perpIndex = filename.find("Fit-fit")
+        if filename[perpIndex - 1:perpIndex] == "w" or filename[perpIndex - 1:perpIndex] == "x":
+            wPerpFilters = ["g", "r", "i", ""]
+        elif filename[perpIndex - 1:perpIndex] == "y":
+            wPerpFilters = ["r", "i", "z", ""]
+        else:
+            raise RuntimeError("Unknown Principle Color: {0:s}Perp".format(filename[perpIndex - 1:perpIndex]))
+        wPerpCoeffs = [-m/scaleFact, (m + 1.0)/scaleFact, -1.0/scaleFact, -b/scaleFact]
+        if perpIndex > -1:
+            # Compute Ivezic P1 equation using the linear fit slope and highest density point as the origin
+            c1P1 = np.cos(np.arctan(m))
+            c2P1 = np.sin(np.arctan(m))
+            deltaP1 = -c1P1*xHighDensity - c2P1*yHighDensity
+            wParaStr = filename[perpIndex - 1:perpIndex] + "Para = "
+            wParaCoeffs = [c1P1, c2P1-c1P1, -c2P1, deltaP1]
+            for i, (coeff, band) in enumerate(zip(wParaCoeffs, wPerpFilters)):
+                coeffStr = "{:.3f}".format(abs(coeff)) + band
+                plusMinus = " $-$ " if coeff < 0.0 else " + "
+                if i == 0:
+                    wParaStr += plusMinus.strip(" ") + coeffStr
+                else:
+                    wParaStr += plusMinus + coeffStr
+            # Compute Ivezic P2
+            wPerpNorm = 0.0
+            for coeff, band in zip(wPerpCoeffs, wPerpFilters):
+                if band != "":
+                    wPerpNorm += coeff**2
+            wPerpNorm = np.sqrt(wPerpNorm)
+            wPerpStr = filename[perpIndex - 1:perpIndex] + "Perp = "
+            for i, (coeff, band) in enumerate(zip(wPerpCoeffs, wPerpFilters)):
+                coeffStr = "{:.3f}".format(abs(coeff/wPerpNorm)) + band
+                plusMinus = " $-$ " if coeff < 0.0 else " + "
+                if i == 0:
+                    wPerpStr += plusMinus.strip(" ") + coeffStr
+                else:
+                    wPerpStr += plusMinus + coeffStr
+            yLoc -= 0.05*deltaY
+            axes[0].text(xLoc - 0.05, yLoc, wPerpStr, fontsize=7, ha="left", va="center", color="black")
+            yLoc -= 0.052*deltaY
+            axes[0].text(xLoc - 0.05, yLoc, wParaStr, fontsize=7, ha="left", va="center", color="black")
+            log.info("{0:s}".format(wPerpStr))
+            log.info("{0:s}".format(wParaStr))
 
     # Determine quality of locus
     distance2 = []
-    poly = np.poly1d(poly)
-    polyDeriv = np.polyder(poly)
-    calculateDistance2 = lambda x1, y1, x2: (x2 - x1)**2 + (poly(x2) - y1)**2
-    for x, y in zip(xx[select], yy[select]):
-        roots = np.roots(np.poly1d((1, -x)) + (poly - y)*polyDeriv)
+    polyFit = np.poly1d(polyFit)
+    polyDeriv = np.polyder(polyFit)
+    calculateDistance2 = lambda x1, y1, x2: (x2 - x1)**2 + (polyFit(x2) - y1)**2
+    for x, y in zip(xx[kept], yy[kept]):
+        roots = np.roots(np.poly1d((1, -x)) + (polyFit - y)*polyDeriv)
         distance2.append(min(calculateDistance2(x, y, np.real(rr)) for rr in roots if np.real(rr) == rr))
     distance = np.sqrt(distance2)
-    distance *= np.where(yy[select] >= poly(xx[select]), 1.0, -1.0)
-    unitStr = "mmag" if unitScale == 1000 else "mag"
+    distance *= np.where(yy[kept] >= polyFit(xx[kept]), 1.0, -1.0)
     distance *= unitScale
     q1, median, q3 = np.percentile(distance, [25, 50, 75])
     good = np.logical_not(np.abs(distance - median) > 3.0*0.74*(q3 - q1))
@@ -1018,21 +1139,22 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
              3.0*0.74*(q3 - q1), "{", "}", unitStr))
     # Get rid of LaTeX-specific characters for log message printing
     log.info("Polynomial fit: {:2}".format("".join(x for x in polyStr if x not in "{}$")))
-    meanStr = "mean = {0:5.2f} ({1:s})".format(mean, unitStr)
+    meanStr = "mean = {0:5.2f}".format(mean)
     stdStr = "  std = {0:5.2f}".format(stdDev)
     rmsStr = "  rms = {0:5.2f}".format(rms)
-    tractStr = "tract: {:d}".format(dataId["tract"])
-    axes[1].set_xlabel("Distance to polynomial fit ({:s})".format(unitStr))
-    axes[1].set_ylabel("Number")
-    axes[1].set_yscale("log", nonposy="clip")
-    axes[1].axvline(x=mean, color="black", linestyle="--")
+
     count, bins, ignored = axes[1].hist(distance[good], bins=numBins, range=(-4.0*stdDev, 4.0*stdDev),
-                                        normed=True, color="green", alpha=0.8)
-    axes[1].plot(bins, 1/(stdDev*np.sqrt(2*np.pi))*np.exp(-(bins-mean)**2/(2*stdDev**2)), color="red")
-    kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=8, color="black")
-    axes[1].annotate(meanStr, xy=(0.6, 0.96), **kwargs)
+                                        normed=True, color=polyColor, alpha=0.5)
+    axes[1].plot(bins, 1/(stdDev*np.sqrt(2*np.pi))*np.exp(-(bins-mean)**2/(2*stdDev**2)),
+                 color=polyColor)
+    axes[1].axvline(x=mean, color=polyColor, linestyle=":")
+    kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=8, color=polyColor)
+    axes[1].annotate(meanStr, xy=(0.4, 0.96), **kwargs)
     axes[1].annotate(stdStr, xy=(0.4, 0.92), **kwargs)
     axes[1].annotate(rmsStr, xy=(0.4, 0.88), **kwargs)
+
+    axes[1].axvline(x=0.0, color="black", linestyle="--")
+    tractStr = "tract: {:d}".format(dataId["tract"])
     axes[1].annotate(tractStr, xy=(0.5, 1.04), xycoords="axes fraction", ha="center", va="center",
                      fontsize=10, color="green")
 
@@ -1041,11 +1163,11 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     if hscRun is not None:
         axes[0].set_title("HSC stack run: " + hscRun, color="#800080")
 
-    plt.tight_layout(pad=2.5, w_pad=0.5, h_pad=1.0)
     fig.savefig(filename, dpi=120)
     plt.close(fig)
 
-    return poly
+    return orthRegCoeffs
+
 
 def colorColorPlot(dataId, filename, log, xStars, yStars, xGalaxies, yGalaxies, magStars, magGalaxies,
                    xLabel, yLabel, filterStr, fluxColStr, xRange=None, yRange=None, hscRun=None,
@@ -1199,7 +1321,10 @@ class ColorColorDistance(object):
         self.band1 = band1
         self.band2 = band2
         self.band3 = band3
-        self.poly = poly
+        if isinstance(poly, np.lib.polynomial.poly1d):
+            self.poly = poly
+        else:
+            self.poly = np.poly1d(poly)
         self.unitScale = unitScale
         self.xMin = xMin
         self.xMax = xMax
