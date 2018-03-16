@@ -575,8 +575,8 @@ def addFpPoint(det, catalog, prefix=""):
         row.assign(source, mapper)
         try:
             center = afwGeom.Point2D(source[xCentroidKey], source[yCentroidKey])
-            posInPix = det.makeCameraPoint(center, cameraGeom.PIXELS)
-            fpPoint = det.transform(posInPix, cameraGeom.FOCAL_PLANE).getPoint()
+            pixelsToFocalPlane = det.getTransform(cameraGeom.PIXELS, cameraGeom.FOCAL_PLANE)
+            fpPoint = pixelsToFocalPlane.applyForward(center)
         except:
             fpPoint = afwGeom.Point2D(np.nan, np.nan)
             row.set(fpFlag, True)

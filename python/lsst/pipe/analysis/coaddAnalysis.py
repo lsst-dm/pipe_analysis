@@ -25,7 +25,6 @@ from .analysis import AnalysisConfig, Analysis
 from .utils import *
 from .plotUtils import *
 
-import lsst.afw.coord as afwCoord
 import lsst.afw.geom as afwGeom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
@@ -954,10 +953,8 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def matchCatalog(self, catalog, filterName, astrometryConfig):
         refObjLoader = LoadAstrometryNetObjectsTask(self.config.refObjLoaderConfig)
-        average = sum((afwGeom.Extent3D(src.getCoord().getVector()) for src in catalog),
-                      afwGeom.Extent3D(0, 0, 0))/len(catalog)
-        center = afwCoord.IcrsCoord(afwGeom.Point3D(average))
-        radius = max(center.angularSeparation(src.getCoord()) for src in catalog)
+        center = afwGeom.averageSpherePoint([src.getCoord() for src in catalog])
+        radius = max(center.separation(src.getCoord()) for src in catalog)
         filterName = afwImage.Filter(afwImage.Filter(filterName).getId()).getName()  # Get primary name
         refs = refObjLoader.loadSkyCircle(center, radius, filterName).refCat
         matches = afwTable.matchRaDec(refs, catalog, self.config.matchRadius*afwGeom.arcseconds)
