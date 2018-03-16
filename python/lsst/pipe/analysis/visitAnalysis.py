@@ -2,10 +2,10 @@
 
 import os
 import matplotlib
-matplotlib.use("Agg")
+matplotlib.use("Agg")  # noqa 402
 import matplotlib.pyplot as plt
 import numpy as np
-np.seterr(all="ignore")
+np.seterr(all="ignore")  # noqa 402
 
 from collections import defaultdict
 
@@ -16,8 +16,14 @@ from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
 from .analysis import Analysis
 from .coaddAnalysis import CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisTask
-from .utils import *
-from .plotUtils import *
+from .utils import Filenamer, MagDiffCompare, traceSizeCompare, percentDiff, \
+    ApCorrDiffErr, concatenateCatalogs, addApertureFluxesHSC, addFpPoint, \
+    addFootprintNPix, addRotPoint, makeBadArray, addCcdColumn, \
+    calibrateSourceCatalogMosaic, calibrateSourceCatalog, \
+    backoutApCorr, matchJanskyToDn, checkHscStack, \
+    fluxToPlotString, andCatalog, writeParquet, getRepoInfo, getDataExistsRefList
+from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText, \
+    OverlapsStarGalaxyLabeller
 
 import lsst.afw.table as afwTable
 
@@ -55,7 +61,7 @@ class CcdAnalysis(Analysis):
         if vMin == vMax:
             vMin, vMax = vMin - 2, vMax + 2
             self.log.info("Only one CCD ({0:d}) to analyze: setting vMin ({1:d}), vMax ({2:d})".format(
-                    ccd.min(), vMin, vMax))
+                          ccd.min(), vMin, vMax))
         good = (self.mag < self.config.magThreshold if self.config.magThreshold > 0 else
                 np.ones(len(self.mag), dtype=bool))
         fig, axes = plt.subplots(2, 1)
@@ -155,7 +161,7 @@ class VisitAnalysisConfig(CoaddAnalysisConfig):
         CoaddAnalysisConfig.validate(self)
         if self.doApplyUberCal:
             try:
-                import lsst.meas.mosaic
+                import lsst.meas.mosaic  # noqa F401
             except ImportError:
                 raise ValueError("Cannot apply uber calibrations because meas_mosaic could not be imported."
                                  "\nEither setup meas_mosaic or run with --config doApplyUberCal=False")
@@ -196,8 +202,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             tractList = [int(tractStr) for tractStr in tract.split('^')]
         dataRefListPerTract = [None]*len(tractList)
         for i, tract in enumerate(tractList):
-            dataRefListPerTract[i] = [dataRef for dataRef in dataRefList if dataRef.dataId["tract"] == tract
-                                      and dataRef.datasetExists("src")]
+            dataRefListPerTract[i] = [dataRef for dataRef in dataRefList
+                                      if dataRef.dataId["tract"] == tract and dataRef.datasetExists("src")]
         commonZpDone = False
         for i, dataRefListTract in enumerate(dataRefListPerTract):
             if len(dataRefListTract) == 0:
@@ -221,8 +227,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo.dataset))
             filenamer = Filenamer(repoInfo.butler, "plotVisit", repoInfo.dataId)
             if any(doPlot for doPlot in [self.config.doPlotFootprintNpix, self.config.doPlotQuiver,
-                              self.config.doPlotMags, self.config.doPlotSizes, self.config.doPlotCentroids,
-                              self.config.doPlotStarGalaxy]):
+                                         self.config.doPlotMags, self.config.doPlotSizes,
+                                         self.config.doPlotCentroids, self.config.doPlotStarGalaxy]):
                 commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", repoInfo.ccdKey,
                                                          hscRun=repoInfo.hscRun)
 
@@ -231,13 +237,13 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             bad = makeBadArray(catalog, flagList=self.config.analysis.flags,
                                onlyReadStars=self.config.onlyReadStars)
             badCommonZp = makeBadArray(commonZpCat, flagList=self.config.analysis.flags,
-                               onlyReadStars=self.config.onlyReadStars)
+                                       onlyReadStars=self.config.onlyReadStars)
 
             # Create and write parquet tables
             if self.config.doWriteParquetTables:
                 tableFilenamer = Filenamer(repoInfo.butler, 'qaTableVisit', repoInfo.dataId)
                 writeParquet(catalog, tableFilenamer(repoInfo.dataId, description='catalog'), badArray=bad)
-                writeParquet(commonZpCat,tableFilenamer(repoInfo.dataId, description='commonZp'),
+                writeParquet(commonZpCat, tableFilenamer(repoInfo.dataId, description='commonZp'),
                              badArray=badCommonZp)
                 if self.config.writeParquetOnly:
                     self.log.info("Exiting after writing Parquet tables.  No plots generated.")
@@ -249,7 +255,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
             try:
                 self.zpLabel = self.zpLabel + " " + self.catLabel
-            except:
+            except Exception:
                 pass
 
             if self.config.doPlotFootprintNpix:
@@ -263,16 +269,18 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                    highlightList=[("parent", 0, "yellow"), ])
 
             if self.config.doPlotQuiver:
-                self.plotQuiver(catalog, filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
+                self.plotQuiver(catalog, filenamer(repoInfo.dataId, description="ellipResids",
+                                                   style="quiver"),
                                 dataId=repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
-                                ccdList=ccdListPerTract, hscRun=repoInfo.hscRun, zpLabel=self.zpLabel, scale=2)
+                                ccdList=ccdListPerTract, hscRun=repoInfo.hscRun, zpLabel=self.zpLabel,
+                                scale=2)
 
             # Create mag comparison plots using common ZP
             if self.config.doPlotMags and not commonZpDone:
                 zpLabel = "common (" + str(self.config.analysis.commonZp) + ")"
                 try:
                     zpLabel = zpLabel + " " + self.catLabel
-                except:
+                except Exception:
                     pass
                 self.plotMags(commonZpCat, filenamer, repoInfo.dataId, butler=repoInfo.butler,
                               camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
@@ -503,7 +511,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         self.zp = 0.0
         try:
             self.zpLabel = self.zpLabel
-        except:
+        except Exception:
             self.zpLabel = None
         if self.config.doApplyUberCal:
             calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
@@ -515,11 +523,12 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             self.zp = 2.5*np.log10(metadata.get("FLUXMAG0"))
             if self.zpLabel is None:
                 self.log.info("Using 2.5*log10(FLUXMAG0) = {:.4f} from FITS header for zeropoint".format(
-                        self.zp))
+                              self.zp))
             self.zpLabel = "FLUXMAG0"
             calibrated = calibrateSourceCatalog(catalog, self.zp)
 
         return calibrated
+
 
 class CompareVisitAnalysisConfig(VisitAnalysisConfig):
     doApplyUberCal1 = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input1?" +
@@ -538,7 +547,7 @@ class CompareVisitAnalysisConfig(VisitAnalysisConfig):
         super(CoaddAnalysisConfig, self).validate()
         if self.doApplyUberCal1 or self.doApplyUberCal2:
             try:
-                import lsst.meas.mosaic
+                import lsst.meas.mosaic  # noqa F401
             except ImportError:
                 raise ValueError("Cannot apply uber calibrations because meas_mosaic could not be imported."
                                  "\nEither setup meas_mosaic or run with --config doApplyUberCal1=False "
@@ -678,16 +687,16 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             commonZpCat2 = commonZpCat2[~badCommonZp2].copy(deep=True)
 
             self.log.info("\nNumber of sources in catalogs: first = {0:d} and second = {1:d}".format(
-                    len(catalog1), len(catalog2)))
+                          len(catalog1), len(catalog2)))
             commonZpCat = self.matchCatalogs(commonZpCat1, commonZpCat2)
             catalog = self.matchCatalogs(catalog1, catalog2)
 
             self.log.info("Number of matches (maxDist = {0:.2f} arcsec) = {1:d}".format(
-                    self.config.matchRadius, len(catalog)))
+                          self.config.matchRadius, len(catalog)))
 
             try:
                 self.zpLabel = self.zpLabel + " " + self.catLabel
-            except:
+            except Exception:
                 pass
 
             filenamer = Filenamer(repoInfo1.butler, "plotCompareVisit", repoInfo1.dataId)
@@ -701,7 +710,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 zpLabel = "common (" + str(self.config.analysis.commonZp) + ")"
                 try:
                     zpLabel = zpLabel + " " + self.catLabel
-                except:
+                except Exception:
                     pass
 
                 self.plotMags(commonZpCat, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
@@ -719,7 +728,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                              ("second_calib_psfUsed", 0, "green")])
             if self.config.doPlotSizes:
                 if ("first_base_SdssShape_psf_xx" in catalog.schema and
-                    "second_base_SdssShape_psf_xx" in catalog.schema):
+                        "second_base_SdssShape_psf_xx" in catalog.schema):
                     self.plotSizes(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
                                    camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=repoInfo2.hscRun,
                                    matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
@@ -736,10 +745,9 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                    matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
             if self.config.doPlotStarGalaxy:
                 self.plotStarGal(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
-                                 camera=repoInfo1.camera,  ccdList=ccdListPerTract1,
+                                 camera=repoInfo1.camera, ccdList=ccdListPerTract1,
                                  hscRun1=repoInfo1.hscRun, hscRun2=repoInfo2.hscRun,
                                  matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
-
 
     def readCatalogs(self, dataRefList1, dataRefList2, dataset, hscRun1=None, hscRun2=None,
                      doReadFootprints=None):
@@ -783,7 +791,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         for dataRef1, dataRef2 in zip(dataRefList1, dataRefList2):
             if not dataRef1.datasetExists(dataset) or not dataRef2.datasetExists(dataset):
                 continue
-            if doReadFootprints == None:
+            if doReadFootprints is None:
                 srcCat1 = dataRef1.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
                 srcCat2 = dataRef2.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
             elif doReadFootprints == "light":
@@ -879,7 +887,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         self.zp = 0.0
         try:
             self.zpLabel = self.zpLabel
-        except:
+        except Exception:
             self.zpLabel = None
         if doApplyUberCal:
             calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
@@ -902,7 +910,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         return calibrated
 
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, hscRun=None,
-                 matchRadius=None, zpLabel=None):
+                  matchRadius=None, zpLabel=None):
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in ["base_PsfFlux"]:
             if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:

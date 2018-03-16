@@ -19,31 +19,40 @@ __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "M
            "plotCcdOutline", "rotatePixelCoords", "bboxToRaDec", "getRaDecMinMaxPatchList", "percent",
            "setPtSize", "getQuiver"]
 
+
 class AllLabeller(object):
     labels = {"all": 0}
     plot = ["all"]
+
     def __call__(self, catalog):
         return np.zeros(len(catalog))
+
 
 class StarGalaxyLabeller(object):
     labels = {"star": 0, "galaxy": 1}
     plot = ["star"]
     _column = "base_ClassificationExtendedness_value"
+
     def __call__(self, catalog):
         return np.where(catalog[self._column] < 0.5, 0, 1)
 
+
 class OverlapsStarGalaxyLabeller(StarGalaxyLabeller):
     labels = {"star": 0, "galaxy": 1, "split": 2}
+
     def __init__(self, first="first_", second="second_"):
         self._first = first
         self._second = second
+
     def __call__(self, catalog):
         first = np.where(catalog[self._first + self._column] < 0.5, 0, 1)
         second = np.where(catalog[self._second + self._column] < 0.5, 0, 1)
         return np.where(first == second, first, 2)
 
+
 class MatchesStarGalaxyLabeller(StarGalaxyLabeller):
     _column = "src_base_ClassificationExtendedness_value"
+
 
 class CosmosLabeller(StarGalaxyLabeller):
     """Do star/galaxy classification using Alexie Leauthaud's Cosmos catalog"""
@@ -67,10 +76,12 @@ class CosmosLabeller(StarGalaxyLabeller):
         good = set(mm.second.getId() for mm in matches)
         return np.array([0 if ii in good else 1 for ii in catalog["id"]])
 
+
 def plotText(zpLabel, plt, axis, xLoc, yLoc, prefix="", rotation=0, fontSize=9, color="k"):
     fontSize = int(fontSize - min(3, len(zpLabel)/10))
     plt.text(xLoc, yLoc, prefix + zpLabel, ha="center", va="center", fontsize=fontSize, rotation=rotation,
              transform=axis.transAxes, color=color)
+
 
 def annotateAxes(filename, plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff=0.05,
                  fontSize=8, ha="left", va="top", color="blue", isHist=False, hscRun=None, matchRadius=None,
@@ -87,20 +98,20 @@ def annotateAxes(filename, plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=
         meanStr = "{0.mean:.2f}".format(stats[dataSet])
         stdevStr = "{0.stdev:.2f}".format(stats[dataSet])
         statsUnitStr = " (milli)"
-        if any (ss in filename for ss in ["_ra", "_dec", "distance"]):
+        if any(ss in filename for ss in ["_ra", "_dec", "distance"]):
             statsUnitStr = " (mas)"
-        if any (ss in filename for ss in ["Flux", "_photometry", "matches_mag"]):
+        if any(ss in filename for ss in ["Flux", "_photometry", "matches_mag"]):
             statsUnitStr = " (mmag)"
     lenStr = 0.12 + 0.017*(max(len(meanStr), len(stdevStr)))
 
-    axes.annotate("mean = ", xy=(x0 + 0.12, y0 -yOff),
+    axes.annotate("mean = ", xy=(x0 + 0.12, y0 - yOff),
                   xycoords="axes fraction", ha="right", va=va, fontsize=fontSize, color="k")
     axes.annotate(meanStr, xy=(x0 + lenStr, y0 - yOff),
                   xycoords="axes fraction", ha="right", va=va, fontsize=fontSize, color="k")
     if statsUnitStr is not None:
         axes.annotate(statsUnitStr, xy=(x0 + lenStr + 0.006, y0 - yOff),
                       xycoords="axes fraction", ha="left", va=va, fontsize=fontSize, color="k")
-    axes.annotate("stdev = ", xy=(x0 + 0.12, y0- 2*yOff),
+    axes.annotate("stdev = ", xy=(x0 + 0.12, y0 - 2*yOff),
                   xycoords="axes fraction", ha="right", va=va, fontsize=fontSize, color="k")
     axes.annotate(stdevStr, xy=(x0 + lenStr, y0 - 2*yOff),
                   xycoords="axes fraction", ha="right", va=va, fontsize=fontSize, color="k")
@@ -119,13 +130,12 @@ def annotateAxes(filename, plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=
     if isHist:
         l1 = axes.axvline(stats[dataSet].median, linestyle="dotted", color="0.7")
         l2 = axes.axvline(stats[dataSet].median+stats[dataSet].clip, linestyle="dashdot", color="0.7")
-        l3 = axes.axvline(stats[dataSet].median-stats[dataSet].clip, linestyle="dashdot", color="0.7")
     else:
         l1 = axes.axhline(stats[dataSet].median, linestyle="dotted", color="0.7", label="median")
         l2 = axes.axhline(stats[dataSet].median+stats[dataSet].clip, linestyle="dashdot", color="0.7",
                           label="clip")
-        l3 = axes.axhline(stats[dataSet].median-stats[dataSet].clip, linestyle="dashdot", color="0.7")
     return l1, l2
+
 
 def labelVisit(filename, plt, axis, xLoc, yLoc, color="k", fontSize=9):
     labelStr = None
@@ -143,10 +153,12 @@ def labelVisit(filename, plt, axis, xLoc, yLoc, color="k", fontSize=9):
         plt.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=fontSize,
                  transform=axis.transAxes, color=color)
 
+
 def labelCamera(camera, plt, axis, xLoc, yLoc, color="k", fontSize=10):
     labelStr = "camera: " + str(camera.getName())
     plt.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=fontSize,
              transform=axis.transAxes, color=color)
+
 
 def filterStrFromFilename(filename):
     """!Determine filter string from filename
@@ -157,6 +169,7 @@ def filterStrFromFilename(filename):
     filterStr = filename[f1:f2]
 
     return filterStr
+
 
 def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
     axes.tick_params(which="both", direction="in", labelleft="off", labelbottom="off")
@@ -176,9 +189,11 @@ def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
     axes.add_patch(patches.Circle((0, 0), radius=camRadius, color="k", alpha=0.2))
     if camera.getName() == "HSC":
         for x, y, t in ([-1, 0, "N"], [0, 1, "W"], [1, 0, "S"], [0, -1, "E"]):
-            axes.text(1.085*camRadius*x, 1.085*camRadius*y, t, ha="center", va="center", fontsize=fontSize - 1)
+            axes.text(1.085*camRadius*x, 1.085*camRadius*y, t, ha="center", va="center",
+                      fontsize=fontSize - 1)
     axes.text(-0.82*camRadius, 0.95*camRadius, "%s" % camera.getName(), ha="center", fontsize=fontSize,
-               color=color)
+              color=color)
+
 
 def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1.5):
     """Plot the the outline of the tract and patches highlighting those with data
@@ -229,7 +244,7 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
         centerRa = min(ra) + 0.5*deltaRa
         centerDec = min(dec) + 0.5*deltaDec
         if (centerRa < xMin + pBuff and centerRa > xMax - pBuff and
-            centerDec > yMin - pBuff and centerDec < yMax + pBuff):
+                centerDec > yMin - pBuff and centerDec < yMax + pBuff):
             axes.fill(ra, dec, fill=True, color=color, lw=1, linestyle="solid", alpha=alpha)
             if patchIndexStr in patchList or (centerRa < xMin - 0.2*pBuff and
                                               centerRa > xMax + 0.2*pBuff and
@@ -245,6 +260,7 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
     axes.set_xlim(xlim)
     axes.set_ylim(ylim)
 
+
 def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
     """!Plot outlines of CCDs in ccdList
     """
@@ -253,8 +269,8 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
         ccdKey = findCcdKey(dataId)
         ccdLabelStr = str(ccd)
         if "raft" in dataId:
-            if len(ccd) != 4 :
-                if len(ccd) > 4 :
+            if len(ccd) != 4:
+                if len(ccd) > 4:
                     errorStr = "Only raft/sensor combos with x,y coords 0 through 9 have been accommodated"
                 else:
                     errorStr = "Only 2 by 2 = 4 integer raft/sensor combo names have been accommodated"
@@ -271,7 +287,7 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
         hscRun = checkHscStack(metadata)
         if zpLabel is not None:
             if zpLabel == "MEAS_MOSAIC" or "MEAS_MOSAIC_1" in zpLabel:
-                result = applyMosaicResultsExposure(dataRef, calexp=calexp)
+                applyMosaicResultsExposure(dataRef, calexp=calexp)
 
         wcs = calexp.getWcs()
         w = calexp.getWidth()
@@ -297,6 +313,7 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
         centerY = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
         axes.text(centerX, centerY, "%s" % str(ccdLabelStr), ha="center", va= "center", fontsize=fontSize)
 
+
 def plotPatchOutline(axes, tractInfo, patchList):
     """!Plot outlines of patches in patchList
     """
@@ -314,6 +331,7 @@ def plotPatchOutline(axes, tractInfo, patchList):
             axes.plot(ras, decs, color="black", lw=1, linestyle="dashed")
             axes.text(percent(ras), percent(decs, 0.5), str(patch.getIndex()),
                       fontsize=idFontSize, horizontalalignment="center", verticalalignment="center")
+
 
 def rotatePixelCoords(sources, width, height, nQuarter):
     """Rotate catalog (x, y) pixel coordinates such that LLC of detector in FP is (0, 0)
@@ -334,6 +352,7 @@ def rotatePixelCoords(sources, width, height, nQuarter):
             s.set(yKey, width - x0 - 1.0)
     return sources
 
+
 def bboxToRaDec(bbox, wcs):
     """Get the corners of a BBox and convert them to lists of RA and Dec."""
     corners = []
@@ -343,6 +362,7 @@ def bboxToRaDec(bbox, wcs):
         corners.append([coord.getRa().asDegrees(), coord.getDec().asDegrees()])
     ra, dec = zip(*corners)
     return ra, dec
+
 
 def getRaDecMinMaxPatchList(patchList, tractInfo, pad=0.0, nDecimals=4, raMin=360.0, raMax=0.0,
                             decMin=90.0, decMax=-90.0):
@@ -382,11 +402,13 @@ def getRaDecMinMaxPatchList(patchList, tractInfo, pad=0.0, nDecimals=4, raMin=36
         decMax = decMax,
     )
 
+
 def percent(values, p=0.5):
     """Return a value a faction of the way between the min and max values in a list."""
     m = min(values)
     interval = max(values) - m
     return m + p*interval
+
 
 def setPtSize(num, ptSize=12):
     """Set the point size according to the size of the catalog"""
@@ -394,10 +416,11 @@ def setPtSize(num, ptSize=12):
         ptSize = min(12, max(4, int(20/np.log10(num))))
     return ptSize
 
+
 def getQuiver(x, y, e1, e2, ax, color=None, scale=3, width=0.005, label=''):
     """Return the quiver object for the given input parameters"""
     theta = [np.math.atan2(a, b)/2.0 for a, b in zip(e1, e2)]
-    e = np.sqrt(e1**2 +e2**2)
+    e = np.sqrt(e1**2 + e2**2)
     c1 = e*np.cos(theta)
     c2 = e*np.sin(theta)
     if color is None:
