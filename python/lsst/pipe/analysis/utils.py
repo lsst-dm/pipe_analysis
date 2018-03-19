@@ -951,7 +951,7 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
     hscRun = checkHscStack(metadata)
     dataset = "src"
     if doApplyUberCal:
-        dataset = "wcs_hsc" if hscRun is not None else "wcs"
+        dataset = "wcs_hsc" if hscRun is not None else "jointcal_wcs"
     skymap =  butler.get(coaddName + "Coadd_skyMap") if coaddName is not None else None
     wcs = None
     tractInfo = None

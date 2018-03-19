@@ -206,6 +206,12 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             repoInfo = getRepoInfo(dataRefListTract[0], doApplyUberCal=self.config.doApplyUberCal)
             self.log.info("dataId: {!s:s}".format(repoInfo.dataId))
             ccdListPerTract = getDataExistsRefList(dataRefListTract, repoInfo.dataset)
+            if len(ccdListPerTract) == 0 and self.config.doApplyUberCal:
+                # Check for wcs for compatibility with old dataset naming
+                ccdListPerTract = getDataExistsRefList(dataRefListTract, "wcs")
+                if len(ccdListPerTract) > 0:
+                    self.log.info("Old meas_mosaic dataset naming: wcs (new name is jointcal_wcs)")
+                    repoInfo.dataset = "wcs"
             self.log.info("Exising data for tract {:d}: ccdListPerTract = {}".
                           format(tractList[i], ccdListPerTract))
             if len(ccdListPerTract) == 0:
@@ -392,7 +398,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     if not dataRef.datasetExists("wcs_hsc") or not dataRef.datasetExists("fcr_hsc_md"):
                         continue
                 else:
-                    if not dataRef.datasetExists("wcs") or not dataRef.datasetExists("fcr_md"):
+                    # Check for both jointcal_wcs and wcs for compatibility with old datasets
+                    if (not (dataRef.datasetExists("jointcal_wcs") or dataRef.datasetExists("wcs"))
+                        or not dataRef.datasetExists("fcr_md")):
                         continue
             catalog = self.calibrateCatalogs(dataRef, catalog, metadata)
             catList.append(catalog)
@@ -416,7 +424,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     if not dataRef.datasetExists("wcs_hsc") or not dataRef.datasetExists("fcr_hsc_md"):
                         continue
                 else:
-                    if not dataRef.datasetExists("wcs") or not dataRef.datasetExists("fcr_md"):
+                   # Check for both jointcal_wcs and wcs for compatibility with old datasets
+                    if (not (dataRef.datasetExists("jointcal_wcs") or dataRef.datasetExists("wcs"))
+                        or not dataRef.datasetExists("fcr_md")):
                         continue
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
@@ -622,12 +632,22 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             ccdListPerTract1 = getDataExistsRefList(dataRefListTract1, repoInfo1.dataset)
             ccdListPerTract2 = getDataExistsRefList(dataRefListTract2, repoInfo2.dataset)
             if len(ccdListPerTract1) == 0:
+                ccdListPerTract1 = getDataExistsRefList(dataRefListTract1, "wcs")
+                if len(ccdListPerTract1) > 0:
+                    self.log.info("Old meas_mosaic dataset naming for rerun1: wcs (new name is jointcal_wcs)")
+                    repoInfo1.dataset = "wcs"
+            if len(ccdListPerTract2) == 0:
+                ccdListPerTract2 = getDataExistsRefList(dataRefListTract2, "wcs")
+                if len(ccdListPerTract2) > 0:
+                    self.log.info("Old meas_mosaic dataset naming for rerun2: wcs (new name is jointcal_wcs)")
+                    repoInfo2.dataset = "wcs"
+            if len(ccdListPerTract1) == 0:
                 if self.config.doApplyUberCal1 and "wcs" in repoInfo1.dataset:
                     self.log.fatal("No data found for {:s} dataset...are you sure you ran meas_mosaic? If "
                                    "not, run with --config doApplyUberCal1=False".format(repoInfo1.dataset))
                 raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo1.dataset))
             if len(ccdListPerTract2) == 0:
-                if self.config.doApplyUberCal2 and "wcs" in repoInfo2.dataset2:
+                if self.config.doApplyUberCal2 and "wcs" in repoInfo2.dataset:
                     self.log.fatal("No data found for {:s} dataset...are you sure you ran meas_mosaic? If "
                                    "not, run with --config doApplyUberCal2=False".format(repoInfo2.dataset))
                 raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo2.dataset))
@@ -817,13 +837,16 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 if hscRun1 is not None:
                     if not dataRef1.datasetExists("wcs_hsc") or not dataRef1.datasetExists("fcr_hsc_md"):
                         continue
-                elif not dataRef1.datasetExists("wcs") or not dataRef1.datasetExists("fcr_md"):
+                # Check for both jointcal_wcs and wcs for compatibility with old datasets
+                elif (not (dataRef1.datasetExists("jointcal_wcs") or dataRef1.datasetExists("wcs"))
+                      or not dataRef1.datasetExists("fcr_md")):
                     continue
             if self.config.doApplyUberCal2:
                 if hscRun2 is not None:
                     if not dataRef2.datasetExists("wcs_hsc") or not dataRef2.datasetExists("fcr_hsc_md"):
                         continue
-                elif not dataRef2.datasetExists("wcs") or not dataRef2.datasetExists("fcr_md"):
+                elif (not (dataRef2.datasetExists("jointcal_wcs") or dataRef2.datasetExists("wcs"))
+                      or not dataRef2.datasetExists("fcr_md")):
                     continue
             srcCat1 = self.calibrateCatalogs(dataRef1, srcCat1, metadata1, self.config.doApplyUberCal1)
             catList1.append(srcCat1)
