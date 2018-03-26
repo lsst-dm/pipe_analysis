@@ -1000,7 +1000,7 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
     isCoadd = True if "patch" in dataId else False
     ccdKey = None if isCoadd else findCcdKey(dataId)
     # Check metadata to see if stack used was HSC
-    metaStr = coaddName + coaddDataset if coaddName is not None else "calexp_md"
+    metaStr = coaddName + coaddDataset + "_md" if coaddName is not None else "calexp_md"
     metadata = butler.get(metaStr, dataId)
     hscRun = checkHscStack(metadata)
     dataset = "src"
