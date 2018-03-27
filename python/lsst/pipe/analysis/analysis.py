@@ -1,16 +1,18 @@
 from __future__ import print_function
 
 import matplotlib
-matplotlib.use("Agg")
+matplotlib.use("Agg")  # noqa E402
 import matplotlib.pyplot as plt
 from matplotlib.ticker import NullFormatter, AutoMinorLocator
 import numpy as np
-np.seterr(all="ignore")
+np.seterr(all="ignore")  # noqa E402
 
 from lsst.pex.config import Config, Field, ListField, DictField
 
-from .utils import *
-from .plotUtils import *
+from .utils import Data, Stats, e1Resids, e2Resids, checkIdLists, fluxToPlotString
+from .plotUtils import annotateAxes, AllLabeller, setPtSize, labelVisit, plotText, \
+    plotCameraOutline, plotTractOutline, plotPatchOutline, plotCcdOutline, labelCamera, \
+    getQuiver, getRaDecMinMaxPatchList, bboxToRaDec
 
 __all__ = ["AnalysisConfig", "Analysis"]
 
@@ -80,7 +82,7 @@ class Analysis(object):
         self.goodKeys = goodKeys  # include if goodKey = True
         self.calibUsedOnly = len([key for key in self.goodKeys if "Used" in key])
         if self.calibUsedOnly > 0:
-            self.magThreshold = 99 # Want to plot all calibUsed
+            self.magThreshold = 99  # Want to plot all calibUsed
 
         self.prefix = prefix
         self.errFunc = errFunc
@@ -109,7 +111,7 @@ class Analysis(object):
                 "Catalog being used for flags does not have the same object list as the data catalog")
         # Don't have flags in match and overlap catalogs (already removed in the latter)
         if ("matches" not in self.shortName and "overlap" not in self.shortName and
-            "quiver" not in self.shortName):
+                "quiver" not in self.shortName):
             for ff in set(list(self.config.flags) + flags):
                 if prefix + ff in flagsCat.schema:
                     self.good &= ~flagsCat[prefix + ff]
@@ -218,7 +220,8 @@ class Analysis(object):
         if len(self.data["star"].quantity) > 0:
             if len(self.data["star"].quantity[inLimits]) < max(1.0, 0.35*len(self.data["star"].quantity)):
                 log.info("No data within limits...decreasing/increasing qMin/qMax")
-            while (len(self.data["star"].quantity[inLimits]) < max(1.0, 0.35*len(self.data["star"].quantity))):
+            while (len(self.data["star"].quantity[inLimits]) <
+                   max(1.0, 0.35*len(self.data["star"].quantity))):
                 self.qMin -= 0.1*np.abs(self.qMin)
                 self.qMax += 0.1*self.qMax
                 inLimits = self.data["star"].quantity < self.qMax
@@ -252,7 +255,7 @@ class Analysis(object):
         nxDecimal = int(-1.0*np.around(np.log10(0.05*abs(magMax - magMin)) - 0.5))
         xBinwidth = min(0.1, np.around(0.05*abs(magMax - magMin), nxDecimal))
         xBins = np.arange(magMin + 0.5*xBinwidth, magMax + 0.5*xBinwidth, xBinwidth)
-        nyDecimal = int(-1.0*np.around(np.log10(0.05*abs(self.qMax - (self.qMin- deltaMin))) - 0.5))
+        nyDecimal = int(-1.0*np.around(np.log10(0.05*abs(self.qMax - (self.qMin - deltaMin))) - 0.5))
         yBinwidth = max(0.5/10**nyDecimal, np.around(0.02*abs(self.qMax - (self.qMin - deltaMin)), nyDecimal))
         yBins = np.arange((self.qMin - deltaMin) - 0.5*yBinwidth, self.qMax + 0.55*yBinwidth, yBinwidth)
         axHistx.set_xlim(axScatter.get_xlim())
@@ -315,9 +318,11 @@ class Analysis(object):
                     label = flag.replace("merge_measurement", "ref")
                     highlightSelection = data.catalog[flag] > threshValue
                     if name == "star":
-                        dataPoints.append(axScatter.scatter(
-                                data.mag[highlightSelection], data.quantity[highlightSelection],
-                                s=1.3*ptSize, marker="o", facecolors="none", edgecolors=color, label=label))
+                        dataPoints.append(
+                            axScatter.scatter(data.mag[highlightSelection],
+                                              data.quantity[highlightSelection],
+                                              s=1.3*ptSize, marker="o", facecolors="none",
+                                              edgecolors=color, label=label))
                     else:
                         axScatter.scatter(data.mag[highlightSelection], data.quantity[highlightSelection],
                                           s=1.3*ptSize, marker="o", facecolors="none", edgecolors=color)
@@ -424,7 +429,7 @@ class Analysis(object):
                         camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
                         matchRadius=None, zpLabel=None, highlightList=None, forcedStr=None, dataName="star"):
         """Plot quantity as a function of position"""
-        pad = 0.02 # Number of degrees to pad the axis ranges
+        pad = 0.02  # Number of degrees to pad the axis ranges
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
         dec = np.rad2deg(self.catalog[self.prefix + "coord_dec"])
         raMin, raMax = np.round(ra.min() - pad, 2), np.round(ra.max() + pad, 2)
@@ -444,7 +449,7 @@ class Analysis(object):
         good = (self.mag < magThreshold if magThreshold > 0 else np.ones(len(self.mag), dtype=bool))
 
         if ((dataName == "star" or "matches" in filename or "compare" in filename) and
-            "pStar" not in filename and "race-" not in filename and "resolution" not in filename):
+                "pStar" not in filename and "race-" not in filename and "resolution" not in filename):
             vMin, vMax = 0.4*self.qMin, 0.4*self.qMax
             if "-mag_" in filename or any(ss in filename for ss in ["compareUnforced", "overlap"]):
                 vMin, vMax = 0.6*vMin, 0.6*vMax
@@ -475,7 +480,7 @@ class Analysis(object):
             if "GaussianFlux" in filename:
                 vMin, vMax = 5.0*self.qMin, 0.0
         if (dataName == "galaxy" and ("CircularApertureFlux" in filename or "KronFlux" in filename) and
-            "compare" not in filename and "overlap" not in filename):
+                "compare" not in filename and "overlap" not in filename):
             vMin, vMax = 4.0*self.qMin, 1.0*self.qMax
 
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.35"))
@@ -539,9 +544,11 @@ class Analysis(object):
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
         if highlightList is not None:
-            axes.legend(loc='upper left', bbox_to_anchor=(-0.05, 1.15), fancybox=True, shadow=True, fontsize=7)
+            axes.legend(loc='upper left', bbox_to_anchor=(-0.05, 1.15), fancybox=True, shadow=True,
+                        fontsize=7)
         else:
-            axes.legend(loc='upper left', bbox_to_anchor=(-0.02, 1.08), fancybox=True, shadow=True, fontsize=9)
+            axes.legend(loc='upper left', bbox_to_anchor=(-0.02, 1.08), fancybox=True, shadow=True,
+                        fontsize=9)
 
         meanStr = "{0.mean:.4f}".format(stats0)
         stdevStr = "{0.stdev:.4f}".format(stats0)
@@ -567,7 +574,7 @@ class Analysis(object):
                           xycoords="axes fraction", ha="left", va="center", fontsize=8)
         axes.annotate("stdev = ", xy=(x0, 1.035),
                       xycoords="axes fraction", ha="right", va="center", fontsize=8)
-        axes.annotate(stdevStr,  xy=(x0 + lenStr, 1.035),
+        axes.annotate(stdevStr, xy=(x0 + lenStr, 1.035),
                       xycoords="axes fraction", ha="right", va="center", fontsize=8)
         axes.annotate(r"N = {0} [mag<{1:.1f}]".format(stats0.num, magThreshold),
                       xy=(x0 + lenStr + 0.012, 1.035),
@@ -650,10 +657,11 @@ class Analysis(object):
             catStr = "ClassExtendedness"
         else:
             raise RuntimeError(
-                "Neither calib_psfUsed nor base_ClassificationExtendedness_value in schema. Skip quiver plot.")
+                "Neither calib_psfUsed nor base_ClassificationExtendedness_value in schema. "
+                "Skip quiver plot.")
         catalog = catalog[~bad].copy(deep=True)
 
-        pad = 0.02 # Number of degrees to pad the axis ranges
+        pad = 0.02  # Number of degrees to pad the axis ranges
         ra = np.rad2deg(catalog["coord_ra"])
         dec = np.rad2deg(catalog["coord_dec"])
         raMin, raMax = np.round(ra.min() - pad, 2), np.round(ra.max() + pad, 2)
@@ -687,7 +695,7 @@ class Analysis(object):
         e1 = e1(catalog)
         e2 = e2Resids(compareCol, psfCompareCol)
         e2 = e2(catalog)
-        e = np.sqrt(e1**2 +e2**2)
+        e = np.sqrt(e1**2 + e2**2)
 
         nz = matplotlib.colors.Normalize()
         nz.autoscale(e)
@@ -719,7 +727,7 @@ class Analysis(object):
                       ha="right", va="center", fontsize=8)
         axes.annotate("stdev = ", xy=(x0, 1.035), xycoords="axes fraction",
                       ha="right", va="center", fontsize=8)
-        axes.annotate(stdevStr,  xy=(x0 + lenStr, 1.035), xycoords="axes fraction",
+        axes.annotate(stdevStr, xy=(x0 + lenStr, 1.035), xycoords="axes fraction",
                       ha="right", va="center", fontsize=8)
         axes.annotate(r"N = {0}".format(stats0.num), xy=(x0 + lenStr + 0.02, 1.035), xycoords="axes fraction",
                       ha="left", va="center", fontsize=8)
