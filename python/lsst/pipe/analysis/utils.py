@@ -38,7 +38,7 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "addPatchColumn", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
            "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
            "fluxToPlotString", "andCatalog", "writeParquet", "getRepoInfo", "findCcdKey",
-           "getCcdNameRefList", "getDataExistsRefList", "orthogonalRegression"]
+           "getCcdNameRefList", "getDataExistsRefList", "orthogonalRegression", "distanceSquaredToPoly"]
 
 
 def writeParquet(table, path, badArray=None):
@@ -1140,3 +1140,23 @@ def orthogonalRegression(x, y, order, initialGuess=None):
     orthRegFit = orthDist.run()
 
     return list(reversed(orthRegFit.beta))
+
+
+def distanceSquaredToPoly(x1, y1, x2, poly):
+    """Calculate the square of the distance between point (x1, y1) and poly at x2
+
+    Parameters:
+    ----------
+    x1, y1 : `float`
+       Point from which to calculate the square of the distance to the the polynomial
+    x2 : `float`
+       Position on x axis from which to calculate the square of the distace between (x1, y1) and
+       poly (the position of the tangent of the polynomial curve closest to point (x1, y1))
+    poly : `numpy.lib.polynomial.poly1d`
+       Numpy polynomial fit from which to calculate the square of the distance to (x1, y1) at x2
+
+    Returns:
+    -------
+    `float` square of the distance between (x1, y1) and poly at x2
+    """
+    return (x2 - x1)**2 + (poly(x2) - y1)**2

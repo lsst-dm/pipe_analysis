@@ -18,7 +18,7 @@ from .analysis import Analysis, AnalysisConfig
 from .coaddAnalysis import CoaddAnalysisTask
 from .utils import (Filenamer, Enforcer, concatenateCatalogs, checkIdLists, getFluxKeys, addPatchColumn,
                     calibrateCoaddSourceCatalog, fluxToPlotString, writeParquet, getRepoInfo,
-                    orthogonalRegression)
+                    orthogonalRegression, distanceSquaredToPoly)
 from .plotUtils import OverlapsStarGalaxyLabeller, labelCamera, setPtSize
 
 import lsst.afw.geom as afwGeom
@@ -1195,10 +1195,10 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     distance2 = []
     polyFit = np.poly1d(polyFit)
     polyDeriv = np.polyder(polyFit)
-    calculateDistance2 = lambda x1, y1, x2: (x2 - x1)**2 + (polyFit(x2) - y1)**2
     for x, y in zip(xx[kept], yy[kept]):
         roots = np.roots(np.poly1d((1, -x)) + (polyFit - y)*polyDeriv)
-        distance2.append(min(calculateDistance2(x, y, np.real(rr)) for rr in roots if np.real(rr) == rr))
+        distance2.append(min(
+            distanceSquaredToPoly(x, y, np.real(rr), polyFit) for rr in roots if np.real(rr) == rr))
     distance = np.sqrt(distance2)
     distance *= np.where(yy[kept] >= polyFit(xx[kept]), 1.0, -1.0)
     distance *= unitScale
@@ -1410,7 +1410,6 @@ class ColorColorDistance(object):
         xx = catalog[self.band1] - catalog[self.band2]
         yy = catalog[self.band2] - catalog[self.band3]
         polyDeriv = np.polyder(self.poly)
-        calculateDistance2 = lambda x1, y1, x2: (x2 - x1)**2 + (self.poly(x2) - y1)**2
         distance2 = np.ones_like(xx)*np.nan
         for i, (x, y) in enumerate(zip(xx, yy)):
             if (not np.isfinite(x) or not np.isfinite(y) or (self.xMin is not None and x < self.xMin) or
@@ -1420,7 +1419,7 @@ class ColorColorDistance(object):
                 distance2[i] = np.nan
                 continue
             roots = np.roots(np.poly1d((1, -x)) + (self.poly - y)*polyDeriv)
-            distance2[i] = min(calculateDistance2(x, y, np.real(rr)) for
+            distance2[i] = min(distanceSquaredToPoly(x, y, np.real(rr), self.poly) for
                                rr in roots if np.real(rr) == rr)
         return np.sqrt(distance2)*np.where(yy >= self.poly(xx), 1.0, -1.0)*self.unitScale
 
