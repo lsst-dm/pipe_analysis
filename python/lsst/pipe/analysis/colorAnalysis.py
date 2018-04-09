@@ -89,17 +89,17 @@ ivezicTransformsHSC = {
                                        requireGreater={"xPara": 0.8}, requireLess={"xPara": 1.6},
                                        fitLineSlope=-1/11.4, fitLineUpperIncpt=1.73, fitLineLowerIncpt=0.87),
     "yPerp": ColorTransform.fromValues("Ivezic y perpendicular", " (rizRed)", True,
-                                       {"HSC-R": -0.270, "HSC-I": 0.800, "HSC-Z": -0.534, "": 0.054},
+                                       {"HSC-R": -0.227, "HSC-I": 0.793, "HSC-Z": -0.566, "": -0.012},
                                        requireGreater={"yPara": 0.1}, requireLess={"yPara": 1.2},
                                        fitLineSlope=-1/0.40, fitLineUpperIncpt=5.5, fitLineLowerIncpt=2.7),
     # The following still default to the SDSS values.  HSC coeffs will be derived on a subsequent
     # commit
     "wPara": ColorTransform.fromValues("Ivezic w parallel", " (griBlue)", False,
-                                       {"HSC-G": 0.928, "HSC-R": -0.556, "HSC-I": -0.372, "": -0.425}),
+                                       {"HSC-G": 0.89, "HSC-R": -0.43, "HSC-I": -0.46, "": -0.52}),
     "xPara": ColorTransform.fromValues("Ivezic x parallel", " (griRed)", False,
                                        {"HSC-R": 1.0, "HSC-I": -1.0}),
     "yPara": ColorTransform.fromValues("Ivezic y parallel", " (rizRed)", False,
-                                       {"HSC-R": 0.895, "HSC-I": -0.448, "HSC-Z": -0.447, "": -0.600}),
+                                       {"HSC-R": 0.928, "HSC-I": -0.555, "HSC-Z": -0.373, "": -1.400}),
     # The following three entries were derived in the process of calibrating the above coeffs (all three
     # RC2 tracts gave effectively the same fits).  May remove later if deemed no longer useful.
     "wFit": ColorTransform.fromValues("Straight line fit for wPerp range", " (griBlue)", False,
