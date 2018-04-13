@@ -17,9 +17,9 @@ from lsst.coadd.utils import TractDataIdContainer
 from .analysis import Analysis, AnalysisConfig
 from .coaddAnalysis import CoaddAnalysisTask
 from .utils import (Filenamer, Enforcer, concatenateCatalogs, getFluxKeys, addColumnsToSchema,
-                    makeBadArray, addPatchColumn, calibrateCoaddSourceCatalog, fluxToPlotString,
-                    writeParquet, getRepoInfo, orthogonalRegression, distanceSquaredToPoly,
-                    p2p1CoeffsFromLinearFit, makeEqnStr, catColors)
+                    makeBadArray, addIntFloatOrStrColumn, calibrateCoaddSourceCatalog,
+                    fluxToPlotString, writeParquet, getRepoInfo, orthogonalRegression,
+                    distanceSquaredToPoly, p2p1CoeffsFromLinearFit, makeEqnStr, catColors)
 from .plotUtils import OverlapsStarGalaxyLabeller, labelCamera, setPtSize, plotText
 
 import lsst.afw.geom as afwGeom
@@ -403,7 +403,8 @@ class ColorAnalysisTask(CmdLineTask):
                     cat = addColumnsToSchema(unforcedCat, cat, ["detect_isPatchInner", "detect_isTractInner",
                                                                 "merge_peak_sky"])
                 if self.config.doWriteParquetTables:
-                    cat = addPatchColumn(cat, patchRef.dataId["patch"])
+                    cat = addIntFloatOrStrColumn(cat, patchRef.dataId["patch"], "patchId",
+                                                 "Patch on which source was detected")
                 catList.append(cat)
         if not catList:
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
