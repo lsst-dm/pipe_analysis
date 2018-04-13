@@ -34,8 +34,8 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "MagDiffErr", "ApCorrDiffErr", "CentroidDiff", "CentroidDiffErr", "deconvMom",
            "deconvMomStarGal", "concatenateCatalogs", "joinMatches", "checkIdLists", "checkPatchOverlap",
            "joinCatalogs", "getFluxKeys", "addColumnsToSchema", "addApertureFluxesHSC", "addFpPoint",
-           "addFootprintNPix", "addRotPoint", "makeBadArray", "addFlag", "addCcdColumn",
-           "addPatchColumn", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
+           "addFootprintNPix", "addRotPoint", "makeBadArray", "addFlag", "addIntOrFloatColumn",
+           "addCcdColumn", "addPatchColumn", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
            "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
            "fluxToPlotString", "andCatalog", "writeParquet", "getRepoInfo", "findCcdKey",
            "getCcdNameRefList", "getDataExistsRefList", "orthogonalRegression", "distanceSquaredToPoly",
@@ -770,6 +770,66 @@ def addFlag(catalog, badArray, flagName, doc="General failure flag"):
         row = newCatalog.addNew()
         row.assign(src, mapper)
         row.set(badFlag, bool(badArray[i]))
+    return newCatalog
+
+
+def addIntOrFloatColumn(catalog, values, fieldName, fieldDoc):
+    """Add a column of values with name fieldName and doc fieldDoc to the catalog schema
+
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.source.source.SourceCatalog`
+       Source catalog to which column will be added.
+    values : `list` of `int` or `float`
+       The list of values to be added.  This list must have the same length as catalog or
+       length 1 (to add a column with the same value for all objects).
+    fieldName : `str`
+       Name of the field to be added to the schema.
+    fieldDoc : `str`
+       Documentation string for the field to be added to the schema.
+
+    Raises
+    ------
+    `RuntimeError`
+       If value type is not one of int or float.
+    `RuntimeError`
+       If length of values list is neither 1 nor equal to the catalog length.
+
+    Returns
+    -------
+    newCatalog : `lsst.afw.table.source.source.SourceCatalog`
+       Source catalog with fieldName column added.
+    """
+    if len(values) != len(catalog) and len(values) != 1:
+        raise RuntimeError(("Length of values list must be either 1 or equal to the catalog length "
+                            "({0:d}).  Length of values list provided was: {1:d}").
+                           format(len(catalog), len(values)))
+
+    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
+    mapper.addMinimalSchema(catalog[0].schema)
+    schema = mapper.getOutputSchema()
+
+    if all(isinstance(value, int) for value in values):
+        fieldType = "I"
+    elif all(isinstance(value, float) for value in values):
+        fieldType = "D"
+    else:
+        raise RuntimeError(("Have only accommodated int or float types.  Type provided for the first "
+                            "element was: {} (but note that all values in the list must have the same "
+                            "type").format(type(values[0])))
+
+    fieldKey = schema.addField(fieldName, type=fieldType, doc=fieldDoc)
+
+    newCatalog = afwTable.SourceCatalog(schema)
+    newCatalog.reserve(len(catalog))
+
+    newCatalog.extend(catalog, mapper)
+    if len(values) == 1:
+        for row in newCatalog:
+            row.set(fieldKey, values[0])
+    else:
+        for i, row in enumerate(newCatalog):
+            row.set(fieldKey, values[i])
     return newCatalog
 
 
