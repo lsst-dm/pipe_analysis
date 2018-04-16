@@ -173,7 +173,7 @@ class Analysis(object):
 
     def plotAgainstMagAndHist(self, log, filename, stats=None, camera=None, ccdList=None, tractInfo=None,
                               patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
-                              plotRunStats=True, highlightList=None, filterStr=None):
+                              plotRunStats=True, highlightList=None, filterStr=None, extraLabels=None):
         """Plot quantity against magnitude with side histogram"""
         if filterStr is None:
             filterStr = ''
@@ -384,6 +384,9 @@ class Analysis(object):
             plotText(zpLabel, plt, axScatter, 0.09, -0.11, prefix="zp: ", color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axScatter, 0.87, -0.11, prefix="cat: ", color="green")
+        if extraLabels is not None:
+            for i, extraLabel in enumerate(extraLabels):
+                plotText(extraLabel, plt, axScatter, 0.29, 0.06 + i*0.05, fontSize=10, color="black")
         plt.savefig(filename, dpi=120)
         plt.close()
 
@@ -752,7 +755,7 @@ class Analysis(object):
 
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
                 tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
-                postFix="", plotRunStats=True, highlightList=None):
+                postFix="", plotRunStats=True, highlightList=None, extraLabels=None):
         """Make all plots"""
         stats = self.stats
         self.plotAgainstMagAndHist(log, filenamer(dataId, description=self.shortName,
@@ -760,7 +763,8 @@ class Analysis(object):
                                    stats=stats, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                    patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                    zpLabel=zpLabel, forcedStr=forcedStr, plotRunStats=plotRunStats,
-                                   highlightList=highlightList, filterStr=dataId['filter'])
+                                   highlightList=highlightList, filterStr=dataId['filter'],
+                                   extraLabels=extraLabels)
 
         if self.config.doPlotOldMagsHist:
             self.plotAgainstMag(filenamer(dataId, description=self.shortName, style="psfMag" + postFix),

@@ -97,7 +97,7 @@ ivezicTransformsHSC = {
     "wPara": ColorTransform.fromValues("Ivezic w parallel", " (griBlue)", False,
                                        {"HSC-G": 0.89, "HSC-R": -0.43, "HSC-I": -0.46, "": -0.52}),
     "xPara": ColorTransform.fromValues("Ivezic x parallel", " (griRed)", False,
-                                       {"HSC-R": 1.0, "HSC-I": -1.0}),
+                                       {"HSC-G": 0.0, "HSC-R": 1.0, "HSC-I": -1.0, "": 0.0}),
     "yPara": ColorTransform.fromValues("Ivezic y parallel", " (rizRed)", False,
                                        {"HSC-R": 0.928, "HSC-I": -0.555, "HSC-Z": -0.373, "": -1.400}),
     # The following three entries were derived in the process of calibrating the above coeffs (all three
@@ -573,12 +573,27 @@ class ColorAnalysisTask(CmdLineTask):
             if self.config.transforms == ivezicTransformsHSC:
                 if col == "wPerp" or col == "xPerp":
                     colStr1, colStr2, colStr3 = "HSC-G", "HSC-R", "HSC-I"
+                    filterStrList = ["g", "r", "i", ""]
                 elif col == "yPerp":
                     colStr1, colStr2, colStr3 = "HSC-R", "HSC-I", "HSC-Z"
+                    filterStrList = ["r", "i", "z", ""]
                 else:
                     raise RuntimeError("Unknown transformation name: {:s}.  Either set transform.plot "
                                        "to False for that transform or provide accommodations for "
                                        "plotting it in the plotStarColors function".format(col))
+                paraCol = col[0] + "Para"
+                principalColorStrs = []
+                for pCol in [paraCol, col]:
+                    principalColorStr = pCol + " = "
+                    transformForStr = self.config.transforms[pCol]
+                    for i, (coeff, band) in enumerate(zip(transformForStr.coeffs.values(), filterStrList)):
+                        coeffStr = "{:.3f}".format(abs(coeff)) + band
+                        plusMinus = " $-$ " if coeff < 0.0 else " + "
+                        if i == 0:
+                            principalColorStr += plusMinus.strip(" ") + coeffStr
+                        else:
+                            principalColorStr += plusMinus + coeffStr
+                    principalColorStrs.append(principalColorStr)
                 colorsInRange = ColorValueInFitRange(col, color(colStr1, colStr2), color(colStr2, colStr3),
                                                      transform.fitLineSlope, transform.fitLineUpperIncpt,
                                                      transform.fitLineLowerIncpt, unitScale=self.unitScale)
@@ -595,7 +610,7 @@ class ColorAnalysisTask(CmdLineTask):
                                qMin=-0.2, qMax=0.2, magThreshold=self.config.analysis.magThreshold,
                                ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
-                                         plotRunStats=False)
+                                         plotRunStats=False, extraLabels=principalColorStrs)
 
     def plotStarColorColor(self, catalogs, filenamer, dataId, fluxColumn, butler=None, camera=None,
                            tractInfo=None, patchList=None, hscRun=None):
