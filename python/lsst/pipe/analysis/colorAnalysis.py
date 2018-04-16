@@ -507,61 +507,49 @@ class ColorAnalysisTask(CmdLineTask):
     def correctFieldForGalacticExtinction(self, catalog, tractInfo):
         """Apply a per-field correction for Galactic Extinction using hard-wired values
 
-        These numbers come from:
+        These numbers for E(B-V) are based on the Schlegel et al. 1998 (ApJ 500, 525, SFD98)
+        dust maps and were obtained from:
         http://irsa.ipac.caltech.edu/applications/DUST/
-        Filt LamEff A/E(B-V) A(mag)
-               (um) S&F2011
-        UD_COSMOS_9813: 150.25, 2.23  WIDE_VVDS_9796: 337.78, 0.74  WIDE_GAMMA15H_9615: 216.30, 0.74
-        SDSS g 0.4717 3.303 0.054     SDSS g 0.4717 3.303 0.247     SDSS g 0.4717 3.303 0.093
-        SDSS r 0.6165 2.285 0.038     SDSS r 0.6165 2.285 0.171     SDSS r 0.6165 2.285 0.064
-        SDSS i 0.7476 1.698 0.028     SDSS i 0.7476 1.698 0.127     SDSS i 0.7476 1.698 0.048
-        SDSS z 0.8923 1.263 0.021     SDSS z 0.8923 1.263 0.094     SDSS z 0.8923 1.263 0.035
-        WIDE_8766: 35.70, -3.72       WIDE_8767: 37.19, -3.72
-        SDSS g 0.4717 3.303 0.079     SDSS g 0.4717 3.303 0.095
-        SDSS r 0.6165 2.285 0.055     SDSS r 0.6165 2.285 0.066
-        SDSS i 0.7476 1.698 0.041     SDSS i 0.7476 1.698 0.049
-        SDSS z 0.8923 1.263 0.030     SDSS z 0.8923 1.263 0.036
 
-        Note that they are derived for SDSS filters, so are not quite right for HSC filters
-        and do not include values for bands redder than z.
-
-        Also note that the only fields included are the 5 tracts in the RC + RC2 datasets.
-        This is just a placeholder until a per-object implementation is added in DM-13519.
+        Note that the only fields included are the 5 tracts in the RC + RC2 datasets.
+        This is just a placeholder until a per-object implementation is added in DM-13519
         """
-        galacticExtinction = {
-            "UD_COSMOS_9813": {"centerCoord": afwGeom.SpherePoint(150.25, 2.23, afwGeom.degrees),
-                               "HSC-G": 0.054, "HSC-R": 0.038, "HSC-I": 0.028, "HSC-Z": 0.021},
-            "WIDE_VVDS_9796": {"centerCoord": afwGeom.SpherePoint(337.78, 0.74, afwGeom.degrees),
-                               "HSC-G": 0.247, "HSC-R": 0.171, "HSC-I": 0.127, "HSC-Z": 0.094},
-            "WIDE_GAMMA15H_9615": {"centerCoord": afwGeom.SpherePoint(216.3, 0.74, afwGeom.degrees),
-                                   "HSC-G": 0.093, "HSC-R": 0.064, "HSC-I": 0.048, "HSC-Z": 0.035},
-            "WIDE_8766": {"centerCoord": afwGeom.SpherePoint(35.70, -3.72, afwGeom.degrees),
-                          "HSC-G": 0.079, "HSC-R": 0.055, "HSC-I": 0.041, "HSC-Z": 0.030},
-            "WIDE_8767": {"centerCoord": afwGeom.SpherePoint(37.19, -3.72, afwGeom.degrees),
-                          "HSC-G": 0.095, "HSC-R": 0.066, "HSC-I": 0.049, "HSC-Z": 0.036}}
+        ebvValues = {"UD_COSMOS_9813": {"centerCoord": afwGeom.SpherePoint(150.25, 2.23, afwGeom.degrees),
+                                        "EBmV": 0.0165},
+                     "WIDE_VVDS_9796": {"centerCoord": afwGeom.SpherePoint(337.78, 0.74, afwGeom.degrees),
+                                        "EBmV": 0.0748},
+                     "WIDE_GAMMA15H_9615": {"centerCoord": afwGeom.SpherePoint(216.3, 0.74, afwGeom.degrees),
+                                            "EBmV": 0.0281},
+                     "WIDE_8766": {"centerCoord": afwGeom.SpherePoint(35.70, -3.72, afwGeom.degrees),
+                                   "EBmV": 0.0246},
+                     "WIDE_8767": {"centerCoord": afwGeom.SpherePoint(37.19, -3.72, afwGeom.degrees),
+                                   "EBmV": 0.0268}}
 
         geFound = False
-        for fieldName, geEntry in galacticExtinction.items():
+        for fieldName, geEntry in ebvValues.items():
             if tractInfo.contains(geEntry["centerCoord"]):
+                ebvValue = ebvValues[fieldName]["EBmV"]
                 geFound = True
                 break
         if geFound:
             for ff in catalog.keys():
-                if ff in galacticExtinction[fieldName]:
+                if ff in self.config.extinctionCoeffs:
                     fluxKeys, errKeys = getFluxKeys(catalog[ff].schema)
-                    factor = 10.0**(0.4*galacticExtinction[fieldName][ff])
+                    galacticExtinction = ebvValue*self.config.extinctionCoeffs[ff]
                     self.log.info("Applying Per-Field Galactic Extinction correction A_{0:s} = {1:.3f}".
-                                  format(ff, galacticExtinction[fieldName][ff]))
+                                  format(ff, galacticExtinction))
+                    factor = 10.0**(0.4*galacticExtinction)
                     for name, key in list(fluxKeys.items()) + list(errKeys.items()):
                         catalog[ff][key] *= factor
                     # Add column of Galactic Extinction value applied to the catalog
                     catalog[ff] = addIntFloatOrStrColumn(catalog[ff], galacticExtinction,
-                                                         "A_" + str(ff), "Galactic Extinction applied")
+                                                         "A_" + str(ff), "Galactic Extinction applied "
+                                                         "(based on SFD 1998 maps)")
                     bad = np.zeros(len(catalog[list(catalog.keys())[0]]), dtype=bool)
                     catalog[ff] = addFlag(catalog[ff], bad, "galacticExtinction_flag",
                                           "True if Galactic Extinction not found (so not applied)")
                 else:
-                    self.log.warn("Do not have A_X for filter {0:s}.  "
+                    self.log.warn("Do not have A_X/E(B-V) for filter {0:s}.  "
                                   "No Galactic Extinction correction applied for that filter".format(ff))
                     bad = np.ones(len(catalog[list(catalog.keys())[0]]), dtype=bool)
                     catalog[ff] = addFlag(catalog[ff], bad, "galacticExtinction_flag",
