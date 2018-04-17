@@ -30,7 +30,7 @@ class AllLabeller(object):
 
 class StarGalaxyLabeller(object):
     labels = {"star": 0, "galaxy": 1}
-    plot = ["star"]
+    plot = ["star", "galaxy"]
     _column = "base_ClassificationExtendedness_value"
 
     def __call__(self, catalog):

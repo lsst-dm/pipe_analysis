@@ -123,10 +123,12 @@ class Analysis(object):
                                     colorList[value], self.quantityError, name in labeller.plot) for
                          name, value in labeller.labels.items()}
             self.stats = self.statistics(forcedMean=forcedMean)
-            # Make sure you have some good data to plot
-            for name in labeller.plot:
-                if (self.stats[name].num) == 0:
-                    raise RuntimeError("No good data points to plot for sample labelled: {:}".format(name))
+            # Make sure you have some good data to plot: only check first dataset in labeller.plot
+            # list as it is the most important one (and the only available in many cases where
+            # StarGalaxyLabeller is used.
+            if (self.stats[labeller.plot[0]].num) == 0:
+                raise RuntimeError("No good data points to plot for sample labelled: {:}".
+                                   format(labeller.plot[0]))
             # Ensure plot limits always encompass at least mean +/- 6.0*stdev, at most mean +/- 20.0*stddev,
             # and clipped stats range + 25%
             if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar", "resolution"]):
@@ -283,6 +285,9 @@ class Analysis(object):
         runStats = []
         ptSize = None
         for name, data in self.data.items():
+            if not data.plot:
+                log.info("Not plotting data for dataset: {0:s} (N = {1:d})".format(name, len(data.mag)))
+                continue
             if not data.mag.any():
                 log.info("No data for dataset: {:s}".format(name))
                 continue
@@ -373,7 +378,7 @@ class Analysis(object):
         xLoc += 0.02*lenNameMax
 
         for name, data in self.data.items():
-            if not data.mag.any():
+            if not (data.mag.any() and data.plot):
                 continue
             yLoc -= 0.05
             plt.text(xLoc, yLoc, "Ntotal = " + str(len(data.mag)), ha="left", va="center",

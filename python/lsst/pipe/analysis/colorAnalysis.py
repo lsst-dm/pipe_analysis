@@ -122,7 +122,7 @@ straightTransforms = {
 
 class NumStarLabeller(object):
     labels = {"star": 0, "maybe": 1, "notStar": 2}
-    plot = ["star"]
+    plot = ["star", "maybe"]
 
     def __init__(self, numBands):
         self.numBands = numBands
@@ -353,8 +353,7 @@ class ColorAnalysisTask(CmdLineTask):
                 return
 
         if self.config.doPlotPcaColors:
-            self.plotStarColors(forced, forcedCatalogsByFilter, filenamer,
-                                NumStarLabeller(len(forcedCatalogsByFilter)),
+            self.plotStarColors(forced, forcedCatalogsByFilter, filenamer, NumStarLabeller(3),
                                 repoInfo.dataId, camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
                                 patchList=patchList, hscRun=repoInfo.hscRun)
         for fluxColumn in ["base_PsfFlux_flux", "modelfit_CModel_flux"]:
