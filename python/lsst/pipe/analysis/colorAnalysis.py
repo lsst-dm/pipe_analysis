@@ -586,6 +586,11 @@ class ColorAnalysisTask(CmdLineTask):
                     raise RuntimeError("Unknown transformation name: {:s}.  Either set transform.plot "
                                        "to False for that transform or provide accommodations for "
                                        "plotting it in the plotStarColors function".format(col))
+                filtersStr = filterStrList[0] + filterStrList[1] + filterStrList[2]
+                xRange = (self.config.plotRanges[filtersStr + "X0"],
+                          self.config.plotRanges[filtersStr + "X1"])
+                yRange = (self.config.plotRanges[filtersStr + "Y0"],
+                          self.config.plotRanges[filtersStr + "Y1"])
                 paraCol = col[0] + "Para"
                 principalColorStrs = []
                 for pCol in [paraCol, col]:
@@ -599,9 +604,12 @@ class ColorAnalysisTask(CmdLineTask):
                         else:
                             principalColorStr += plusMinus + coeffStr
                     principalColorStrs.append(principalColorStr)
-                colorsInRange = ColorValueInFitRange(col, color(colStr1, colStr2), color(colStr2, colStr3),
-                                                     transform.fitLineSlope, transform.fitLineUpperIncpt,
-                                                     transform.fitLineLowerIncpt, unitScale=self.unitScale)
+                colorsInFitRange = ColorValueInFitRange(col, color(colStr1, colStr2), color(colStr2, colStr3),
+                                                        transform.fitLineSlope, transform.fitLineUpperIncpt,
+                                                        transform.fitLineLowerIncpt, unitScale=self.unitScale)
+                colorsInPerpRange = ColorValueInPerpRange(col, transform.requireGreater,
+                                                          transform.requireLess, unitScale=self.unitScale)
+                colorsInRange = colorsInFitRange
             elif self.config.transforms == ivezicTransformsSDSS:
                 colorsInRange = ColorValueInPerpRange(col, transform.requireGreater, transform.requireLess,
                                                       unitScale=self.unitScale)
@@ -616,6 +624,83 @@ class ColorAnalysisTask(CmdLineTask):
                                ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
                                          plotRunStats=False, extraLabels=principalColorStrs)
+
+            # Plot selections of stars for different criteria
+            if self.config.transforms == ivezicTransformsHSC:
+                filename = filenamer(dataId, description=filtersStr + fluxToPlotString("base_PsfFlux_flux"),
+                                     style=col+"Selections")
+                qaGood = np.logical_and(~catalog["qaBad_flag"], catalog["numStarFlags"] >= 3)
+                qaGood = np.logical_and(qaGood, mags[self.fluxFilter] < self.config.analysis.magThreshold)
+                inFitGood = np.logical_and(np.isfinite(colorsInFitRange(catalog)), qaGood)
+                inPerpGood = np.logical_and(np.isfinite(colorsInPerpRange(catalog)), qaGood)
+                xColor = color(colStr1, colStr2)
+                yColor = color(colStr2, colStr3)
+                fig, axes = plt.subplots(1, 1)
+                axes.tick_params(which="both", direction="in", labelsize=9)
+                axes.set_xlim(*xRange)
+                axes.set_ylim(*yRange)
+
+                deltaX = abs(xRange[1] - xRange[0])
+                deltaY = abs(yRange[1] - yRange[0])
+                lineOffset = [0.15, 0.15]
+                if col == "wPerp":
+                    lineOffset = [0.30, 0.30]
+                if col == "xPerp":
+                    lineOffset = [0.60, 0.15]
+                if col == "yPerp":
+                    lineOffset = [0.30, 0.30]
+                lineFitSlope = self.config.transforms[col[0] + "Fit"].coeffs[colStr1]
+                lineFitIncpt = self.config.transforms[col[0] + "Fit"].coeffs[""]
+                xLine = np.linspace(xRange[0] + lineOffset[0]*deltaX, xRange[1]-lineOffset[1]*deltaX, 100)
+                yLineUpper = transform.fitLineUpperIncpt + transform.fitLineSlope*xLine
+                yLineLower = transform.fitLineLowerIncpt + transform.fitLineSlope*xLine
+                yLineFit = lineFitSlope*xLine + lineFitIncpt
+                axes.plot(xLine, yLineUpper, "g--", alpha=0.5)
+                axes.plot(xLine, yLineLower, "g--", alpha=0.5)
+                axes.plot(xLine, yLineFit, "m--", alpha=0.5)
+
+                ptSize = max(1, setPtSize(len(xColor)) - 2)
+
+                axes.scatter(xColor[qaGood], yColor[qaGood], label="all", color="black", alpha=0.4,
+                             marker="o", s=ptSize + 2)
+                axes.scatter(xColor[inFitGood], yColor[inFitGood], label="inFit", color="blue",
+                             marker="o", s=ptSize + 1)
+                axes.scatter(xColor[inPerpGood], yColor[inPerpGood], label="inPerp", color="red",
+                             marker="x", s=ptSize, lw=0.5)
+                axes.set_xlabel(colStr1 + " $-$ " + colStr2)
+                axes.set_ylabel(colStr2 + " $-$ " + colStr3, labelpad=-1)
+
+                # Label total number of objects of each data type
+                lenNumObj = max(len(str(len(xColor[qaGood]))), len(str(len(xColor[inFitGood]))),
+                                len(str(len(xColor[inPerpGood]))))
+                fdx = max((min(0.09*lenNumObj, 0.9), 0.42))
+                xLoc, yLoc = xRange[0] + 0.03*deltaX, yRange[1] - 0.038*deltaY
+                kwargs = dict(va="center", fontsize=8)
+                axes.text(xLoc, yLoc, "NqaGood  =", ha="left", color="black", **kwargs)
+                axes.text(xLoc + fdx*deltaX, yLoc, str(len(xColor[qaGood])) + " [" + self.fluxFilter +
+                          " < " + str(self.config.analysis.magThreshold) + "]", ha="right", color="black",
+                          **kwargs)
+                yLoc -= 0.05*deltaY
+                axes.text(xLoc, yLoc, "NinFitGood =", ha="left", color="blue", **kwargs)
+                axes.text(xLoc + fdx*deltaX, yLoc, str(len(xColor[inFitGood])) + " [" + self.fluxFilter +
+                          " < " + str(self.config.analysis.magThreshold) + "]", ha="right", color="blue",
+                          **kwargs)
+                yLoc -= 0.05*deltaY
+                axes.text(xLoc, yLoc, "NinPerpGood =", ha="left", color="red", **kwargs)
+                axes.text(xLoc + fdx*deltaX, yLoc, str(len(xColor[inPerpGood])) + " [" + self.fluxFilter +
+                          " < " + str(self.config.analysis.magThreshold) + "]", ha="right", color="red",
+                          **kwargs)
+                if camera is not None:
+                    labelCamera(camera, plt, axes, 0.5, 1.09)
+                if hscRun is not None:
+                    axes.set_title("HSC stack run: " + hscRun, color="#800080")
+
+                tractStr = "tract: {:d}".format(dataId["tract"])
+                axes.annotate(tractStr, xy=(0.5, 1.04), xycoords="axes fraction", ha="center", va="center",
+                              fontsize=10, color="green")
+
+                fig.savefig(filename, dpi=120)
+                plt.close(fig)
 
     def plotStarColorColor(self, catalogs, filenamer, dataId, fluxColumn, butler=None, camera=None,
                            tractInfo=None, patchList=None, hscRun=None):
