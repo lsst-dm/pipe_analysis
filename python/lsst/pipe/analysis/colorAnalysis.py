@@ -213,6 +213,12 @@ class ColorAnalysisConfig(Config):
                                  doc=("Write out Parquet tables (for subsequent interactive analysis)?"
                                       "\nNOTE: if True but fastparquet package is unavailable, a warning "
                                       "is issued and table writing is skipped."))
+    plotRanges = DictField(keytype=str, itemtype=float,
+                           default={"griX0": -0.6, "griX1": 2.0, "griY0": -0.6, "griY1": 3.0,
+                                    "rizX0": -0.4, "rizX1": 3.0, "rizY0": -0.2, "rizY1": 1.5,
+                                    "izyX0": -0.5, "izyX1": 1.3, "izyY0": -0.4, "izyY1": 0.8,
+                                    "z9yX0": -0.3, "z9yX1": 0.45, "z9yY0": -0.2, "z9yY1": 0.5},
+                           doc="Plot Ranges for various color-color combinations")
 
     def setDefaults(self):
         Config.setDefaults(self)
@@ -656,9 +662,12 @@ class ColorAnalysisTask(CmdLineTask):
             transform = self.config.transforms["wPerp"]
             fitLineUpper = [transform.fitLineUpperIncpt, transform.fitLineSlope]
             fitLineLower = [transform.fitLineLowerIncpt, transform.fitLineSlope]
-            xRange = (-0.6, 2.0)
-            yRange = (-0.6, 3.0)
-            nameStr = "gri" + fluxColStr + "-wFit"
+            filtersStr = "gri"
+            xRange = (self.config.plotRanges[filtersStr + "X0"],
+                      self.config.plotRanges[filtersStr + "X1"])
+            yRange = (self.config.plotRanges[filtersStr + "Y0"],
+                      self.config.plotRanges[filtersStr + "Y1"])
+            nameStr = filtersStr + fluxColStr + "-wFit"
             self.log.info("nameStr = {:s}".format(nameStr))
             wPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                              self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
@@ -672,7 +681,7 @@ class ColorAnalysisTask(CmdLineTask):
             transform = self.config.transforms["xPerp"]
             fitLineUpper = [transform.fitLineUpperIncpt, transform.fitLineSlope]
             fitLineLower = [transform.fitLineLowerIncpt, transform.fitLineSlope]
-            nameStr = "gri" + fluxColStr + "-xFit"
+            nameStr = filtersStr + fluxColStr + "-xFit"
             self.log.info("nameStr = {:s}".format(nameStr))
             xPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                              self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
@@ -684,7 +693,7 @@ class ColorAnalysisTask(CmdLineTask):
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, unitScale=self.unitScale, closeToVertical=True)
             # Lower branch only; upper branch is noisy due to astrophysics
-            nameStr = "gri" + fluxColStr
+            nameStr = filtersStr + fluxColStr
             self.log.info("nameStr = {:s}".format(nameStr))
             fitLineUpper = [1.21, -0.55]
             fitLineLower = [0.21, -0.36]
@@ -721,12 +730,12 @@ class ColorAnalysisTask(CmdLineTask):
                                     magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
                                     unitScale=self.unitScale)
 
-            shortName = "griDistance" + fluxColStr
+            shortName = filtersStr + "Distance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("g", "r", "i", poly, unitScale=self.unitScale,
                                                             fitLineUpper=fitLineUpper,
                                                             fitLineLower=fitLineLower),
-                               "griDistance [%s] (%s)" % (fluxColStr, unitStr), shortName,
+                               filtersStr + "Distance [%s] (%s)" % (fluxColStr, unitStr), shortName,
                                self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                magThreshold=prettyBrightThreshold, labeller=NumStarLabeller(2),
                                ).plotAll(dataId, filenamer, self.log,
@@ -738,9 +747,12 @@ class ColorAnalysisTask(CmdLineTask):
             transform = self.config.transforms["yPerp"]
             fitLineUpper = [transform.fitLineUpperIncpt, transform.fitLineSlope]
             fitLineLower = [transform.fitLineLowerIncpt, transform.fitLineSlope]
-            xRange = (-0.6, 2.7)
-            yRange = (-0.4, 1.2)
-            nameStr = "riz" + fluxColStr + "-yFit"
+            filtersStr = "riz"
+            xRange = (self.config.plotRanges[filtersStr + "X0"],
+                      self.config.plotRanges[filtersStr + "X1"])
+            yRange = (self.config.plotRanges[filtersStr + "Y0"],
+                      self.config.plotRanges[filtersStr + "Y1"])
+            nameStr = filtersStr + fluxColStr + "-yFit"
             self.log.info("nameStr = {:s}".format(nameStr))
             yPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                              self.log, color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"),
@@ -751,7 +763,7 @@ class ColorAnalysisTask(CmdLineTask):
                                              fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, unitScale=self.unitScale)
-            nameStr = "riz" + fluxColStr
+            nameStr = filtersStr + fluxColStr
             fitLineUpper = [0.94, -0.27]
             fitLineLower = [0.046, -0.55]
             self.log.info("nameStr = {:s}".format(nameStr))
@@ -787,12 +799,12 @@ class ColorAnalysisTask(CmdLineTask):
                                     xRange=xRange, yRange=(yRange[0], yRange[1] + 0.2),
                                     magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
                                     unitScale=self.unitScale)
-            shortName = "rizDistance" + fluxColStr
+            shortName = filtersStr + "Distance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly, unitScale=self.unitScale,
                                                             fitLineUpper=fitLineUpper,
                                                             fitLineLower=fitLineLower),
-                               "rizDistance [%s] (%s)" % (fluxColStr, unitStr), shortName,
+                               filtersStr + "Distance [%s] (%s)" % (fluxColStr, unitStr), shortName,
                                self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                magThreshold=prettyBrightThreshold, labeller=NumStarLabeller(2),
                                ).plotAll(dataId, filenamer, self.log,
@@ -800,12 +812,15 @@ class ColorAnalysisTask(CmdLineTask):
                                          camera=camera, tractInfo=tractInfo, patchList=patchList,
                                          hscRun=hscRun)
         if filters.issuperset(set(("HSC-I", "HSC-Z", "HSC-Y"))):
-            nameStr = "izy" + fluxColStr
+            filtersStr = "izy"
+            nameStr = filtersStr + fluxColStr
             self.log.info("nameStr = {:s}".format(nameStr))
             fitLineUpper = [0.56, -0.32]
             fitLineLower = [-0.014, -0.39]
-            xRange = (-0.5, 1.3)
-            yRange = (-0.4, 0.8)
+            xRange = (self.config.plotRanges[filtersStr + "X0"],
+                      self.config.plotRanges[filtersStr + "X1"])
+            yRange = (self.config.plotRanges[filtersStr + "Y0"],
+                      self.config.plotRanges[filtersStr + "Y1"])
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                          self.log, color("HSC-I", "HSC-Z"), color("HSC-Z", "HSC-Y"),
                                          "i - z  [{0:s}]".format(fluxColStr),
@@ -838,12 +853,12 @@ class ColorAnalysisTask(CmdLineTask):
                                     xRange=xRange, yRange=(yRange[0], yRange[1] + 0.2),
                                     magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
                                     unitScale=self.unitScale)
-            shortName = "izyDistance" + fluxColStr
+            shortName = filtersStr + "Distance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly, unitScale=self.unitScale,
                                                             fitLineUpper=fitLineUpper,
                                                             fitLineLower=fitLineLower),
-                               "izyDistance [%s] (%s)" % (fluxColStr, unitStr), shortName,
+                               filtersStr + "Distance [%s] (%s)" % (fluxColStr, unitStr), shortName,
                                self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                magThreshold=prettyBrightThreshold, labeller=NumStarLabeller(2),
                                ).plotAll(dataId, filenamer, self.log,
@@ -852,12 +867,15 @@ class ColorAnalysisTask(CmdLineTask):
                                          hscRun=hscRun)
 
         if filters.issuperset(set(("HSC-Z", "NB0921", "HSC-Y"))):
-            nameStr = "z9y" + fluxColStr
+            filtersStr = "z9y"
+            xRange = (self.config.plotRanges[filtersStr + "X0"],
+                      self.config.plotRanges[filtersStr + "X1"])
+            yRange = (self.config.plotRanges[filtersStr + "Y0"],
+                      self.config.plotRanges[filtersStr + "Y1"])
+            nameStr = filtersStr + fluxColStr
             self.log.info("nameStr = {:s}".format(nameStr))
             fitLineUpper = [0.20, -0.3]
             fitLineLower = [0.01, -0.29]
-            xRange = (-0.3, 0.45)
-            yRange = (-0.2, 0.5)
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                          self.log, color("HSC-Z", "NB0921"), color("NB0921", "HSC-Y"),
                                          "z-n921  [{0:s}]".format(fluxColStr),
@@ -890,12 +908,12 @@ class ColorAnalysisTask(CmdLineTask):
                                     xRange=xRange, yRange=(yRange[0] - 0.05, yRange[1] + 0.05),
                                     magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
                                     unitScale=self.unitScale)
-            shortName = "z9yDistance" + fluxColStr
+            shortName = filtersStr + "Distance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly, unitScale=self.unitScale,
                                                             fitLineUpper=fitLineUpper,
                                                             fitLineLower=fitLineLower),
-                               "z9yDistance [%s] (%s)" % (fluxColStr, unitStr), shortName,
+                               filtersStr + "Distance [%s] (%s)" % (fluxColStr, unitStr), shortName,
                                self.config.analysis, flags=["qaBad_flag"], qMin=-0.1, qMax=0.1,
                                magThreshold=prettyBrightThreshold, labeller=NumStarLabeller(2),
                                ).plotAll(dataId, filenamer, self.log,
