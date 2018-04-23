@@ -149,10 +149,10 @@ class ColorValueInFitRange(object):
         self.fitLineLowerIncpt = fitLineLowerIncpt
         self.unitScale = unitScale
 
-    def __call__(self, catalog):
+    def __call__(self, principalColCats):
         good = self.yColor > self.fitLineLowerIncpt + self.fitLineSlope*self.xColor
         good &= self.yColor < self.fitLineUpperIncpt + self.fitLineSlope*self.xColor
-        return np.where(good, catalog[self.column], np.nan)*self.unitScale
+        return np.where(good, principalColCats[self.column], np.nan)*self.unitScale
 
 
 class ColorValueInPerpRange(object):
@@ -167,13 +167,13 @@ class ColorValueInPerpRange(object):
         self.requireLess = requireLess
         self.unitScale = unitScale
 
-    def __call__(self, catalog):
-        good = np.ones(len(catalog), dtype=bool)
+    def __call__(self, principalColCats):
+        good = np.ones(len(principalColCats), dtype=bool)
         for col, value in self.requireGreater.items():
-            good &= catalog[col] > value
+            good &= principalColCats[col] > value
         for col, value in self.requireLess.items():
-            good &= catalog[col] < value
-        return np.where(good, catalog[self.column], np.nan)*self.unitScale
+            good &= principalColCats[col] < value
+        return np.where(good, principalColCats[self.column], np.nan)*self.unitScale
 
 
 class GalaxyColor(object):
@@ -206,7 +206,8 @@ class ColorAnalysisConfig(Config):
     srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
                              doc="Mapping between different stack (e.g. HSC vs. LSST) schema names")
     toMilli = Field(dtype=bool, default=True, doc="Print stats in milli units (i.e. mas, mmag)?")
-    doPlotPcaColors = Field(dtype=bool, default=True, doc="Create the Ivezic PCA color offset plots?")
+    doPlotPrincipalColors = Field(dtype=bool, default=True,
+                                  doc="Create the Ivezic Principal Color offset plots?")
     writeParquetOnly = Field(dtype=bool, default=False,
                              doc="Only write out Parquet tables (i.e. do not produce any plots)?")
     doWriteParquetTables = Field(dtype=bool, default=True,
@@ -338,33 +339,34 @@ class ColorAnalysisTask(CmdLineTask):
             self.flags = [self.config.srcSchemaMap[flag] for flag in self.flags]
 
         filenamer = Filenamer(repoInfo.butler, "plotColor", repoInfo.dataId)
-        forcedCatalogsByFilter = {ff: self.readCatalogs(patchRefList,
-                                                        self.config.coaddName + "Coadd_forced_src") for
-                                  ff, patchRefList in patchRefsByFilter.items()}
+        byFilterForcedCats = {ff: self.readCatalogs(patchRefList,
+                                                    self.config.coaddName + "Coadd_forced_src") for
+                              ff, patchRefList in patchRefsByFilter.items()}
 
-        for cat in forcedCatalogsByFilter.values():
+        for cat in byFilterForcedCats.values():
             calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
-        forcedCatalogsByFilter = self.correctForGalacticExtinction(forcedCatalogsByFilter, repoInfo.tractInfo)
+        byFilterForcedCats = self.correctForGalacticExtinction(byFilterForcedCats, repoInfo.tractInfo)
         # self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
-        if self.config.doPlotPcaColors or self.config.doWriteParquetTables:
-            forced = self.transformCatalogs(forcedCatalogsByFilter, self.config.transforms,
-                                            hscRun=repoInfo.hscRun)
+        if self.config.doPlotPrincipalColors or self.config.doWriteParquetTables:
+            principalColCats = self.transformCatalogs(byFilterForcedCats, self.config.transforms,
+                                                      hscRun=repoInfo.hscRun)
 
         # Create and write parquet tables
         if self.config.doWriteParquetTables:
             tableFilenamer = Filenamer(repoInfo.butler, 'qaTableColor', repoInfo.dataId)
-            writeParquet(forced, tableFilenamer(repoInfo.dataId, description='forced'))
+            writeParquet(principalColCats, tableFilenamer(repoInfo.dataId, description='forced'))
             if self.config.writeParquetOnly:
                 self.log.info("Exiting after writing Parquet tables.  No plots generated.")
                 return
 
-        if self.config.doPlotPcaColors:
-            self.plotStarColors(forced, forcedCatalogsByFilter, filenamer, NumStarLabeller(3),
-                                repoInfo.dataId, camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
-                                patchList=patchList, hscRun=repoInfo.hscRun)
+        if self.config.doPlotPrincipalColors:
+            self.plotStarPrincipalColors(principalColCats, byFilterForcedCats, filenamer,
+                                         NumStarLabeller(3), repoInfo.dataId, camera=repoInfo.camera,
+                                         tractInfo=repoInfo.tractInfo, patchList=patchList,
+                                         hscRun=repoInfo.hscRun)
         for fluxColumn in ["base_PsfFlux_flux", "modelfit_CModel_flux"]:
-            self.plotStarColorColor(forcedCatalogsByFilter, filenamer, repoInfo.dataId, fluxColumn,
-                                    camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
+            self.plotStarColorColor(byFilterForcedCats, filenamer, repoInfo.dataId,
+                                    fluxColumn, camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
                                     patchList=patchList, hscRun=repoInfo.hscRun)
 
     def readCatalogs(self, patchRefList, dataset):
@@ -567,13 +569,13 @@ class ColorAnalysisTask(CmdLineTask):
                                labeller=OverlapsStarGalaxyLabeller("g_", "i_"),
                                qMin=-0.5, qMax=0.5,).plotAll(dataId, filenamer, self.log)
 
-    def plotStarColors(self, catalog, catalogs, filenamer, labeller, dataId, butler=None, camera=None,
-                       tractInfo=None, patchList=None, hscRun=None):
-        mags = {ff: -2.5*np.log10(catalogs[ff]["base_PsfFlux_flux"]) for ff in catalogs}
+    def plotStarPrincipalColors(self, principalColCats, byFilterCats, filenamer, labeller, dataId,
+                                butler=None, camera=None, tractInfo=None, patchList=None, hscRun=None):
+        mags = {ff: -2.5*np.log10(byFilterCats[ff]["base_PsfFlux_flux"]) for ff in byFilterCats}
         color = lambda c1, c2: (mags[c1] - mags[c2])
         unitStr = "mmag" if self.config.toMilli else "mag"
         for col, transform in self.config.transforms.items():
-            if not transform.plot or col not in catalog.schema:
+            if not transform.plot or col not in principalColCats.schema:
                 continue
             if self.config.transforms == ivezicTransformsHSC:
                 if col == "wPerp" or col == "xPerp":
@@ -585,7 +587,9 @@ class ColorAnalysisTask(CmdLineTask):
                 else:
                     raise RuntimeError("Unknown transformation name: {:s}.  Either set transform.plot "
                                        "to False for that transform or provide accommodations for "
-                                       "plotting it in the plotStarColors function".format(col))
+                                       "plotting it in the plotStarPrincipalColors function".format(col))
+                xColor = catColors(colStr1, colStr2, mags)
+                yColor = catColors(colStr2, colStr3, mags)
                 filtersStr = filterStrList[0] + filterStrList[1] + filterStrList[2]
                 xRange = (self.config.plotRanges[filtersStr + "X0"],
                           self.config.plotRanges[filtersStr + "X1"])
@@ -618,7 +622,8 @@ class ColorAnalysisTask(CmdLineTask):
 
             shortName = "color_" + col
             self.log.info("shortName = {:s}".format(shortName + transform.subDescription))
-            self.AnalysisClass(catalog, colorsInRange, "%s (%s)" % (col + transform.subDescription, unitStr),
+            self.AnalysisClass(principalColCats, colorsInRange, "%s (%s)" % (col + transform.subDescription,
+                                                                             unitStr),
                                shortName, self.config.analysis, flags=["qaBad_flag"], labeller=labeller,
                                qMin=-0.2, qMax=0.2, magThreshold=self.config.analysis.magThreshold,
                                ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera,
@@ -629,10 +634,11 @@ class ColorAnalysisTask(CmdLineTask):
             if self.config.transforms == ivezicTransformsHSC:
                 filename = filenamer(dataId, description=filtersStr + fluxToPlotString("base_PsfFlux_flux"),
                                      style=col+"Selections")
-                qaGood = np.logical_and(~catalog["qaBad_flag"], catalog["numStarFlags"] >= 3)
+                qaGood = np.logical_and(np.logical_not(principalColCats["qaBad_flag"]),
+                                        principalColCats["numStarFlags"] >= 3)
                 qaGood = np.logical_and(qaGood, mags[self.fluxFilter] < self.config.analysis.magThreshold)
-                inFitGood = np.logical_and(np.isfinite(colorsInFitRange(catalog)), qaGood)
-                inPerpGood = np.logical_and(np.isfinite(colorsInPerpRange(catalog)), qaGood)
+                inFitGood = np.logical_and(np.isfinite(colorsInFitRange(principalColCats)), qaGood)
+                inPerpGood = np.logical_and(np.isfinite(colorsInPerpRange(principalColCats)), qaGood)
                 xColor = color(colStr1, colStr2)
                 yColor = color(colStr2, colStr3)
                 fig, axes = plt.subplots(1, 1)
@@ -702,14 +708,14 @@ class ColorAnalysisTask(CmdLineTask):
                 fig.savefig(filename, dpi=120)
                 plt.close(fig)
 
-    def plotStarColorColor(self, catalogs, filenamer, dataId, fluxColumn, butler=None, camera=None,
+    def plotStarColorColor(self, byFilterCats, filenamer, dataId, fluxColumn, butler=None, camera=None,
                            tractInfo=None, patchList=None, hscRun=None):
-        num = len(list(catalogs.values())[0])
+        num = len(list(byFilterCats.values())[0])
         zp = 0.0
-        mags = {ff: zp - 2.5*np.log10(catalogs[ff][fluxColumn]) for ff in catalogs}
+        mags = {ff: zp - 2.5*np.log10(byFilterCats[ff][fluxColumn]) for ff in byFilterCats}
 
         bad = np.zeros(num, dtype=bool)
-        for cat in catalogs.values():
+        for cat in byFilterCats.values():
             for flag in self.flags:
                 if flag in cat.schema:
                     bad |= cat[flag]
@@ -720,11 +726,11 @@ class ColorAnalysisTask(CmdLineTask):
 
         # Determine number of filters object is classified as a star
         numStarFlags = np.zeros(num)
-        for cat in catalogs.values():
+        for cat in byFilterCats.values():
             numStarFlags += np.where(cat[self.classificationColumn] < 0.5, 1, 0)
 
         # Select as a star if classified as such in self.config.fluxFilter
-        isStarFlag = catalogs[self.fluxFilter][self.classificationColumn] < 0.5
+        isStarFlag = byFilterCats[self.fluxFilter][self.classificationColumn] < 0.5
         # Require stellar classification in self.fluxFilter and at least one other filter for fits
         good = isStarFlag & (numStarFlags >= 2) & ~bad & bright
         goodCombined = isStarFlag & (numStarFlags >= 2) & ~bad
@@ -732,9 +738,9 @@ class ColorAnalysisTask(CmdLineTask):
         decentGalaxies = ~isStarFlag & ~bad & prettyBright
 
         # The combined catalog is only used in the Distance (from the poly fit) AnalysisClass plots
-        combined = (self.transformCatalogs(catalogs, straightTransforms, hscRun=hscRun)[goodCombined].
+        combined = (self.transformCatalogs(byFilterCats, straightTransforms, hscRun=hscRun)[goodCombined].
                     copy(True))
-        filters = set(catalogs.keys())
+        filters = set(byFilterCats.keys())
         color = lambda c1, c2: (mags[c1] - mags[c2])[good]
         decentColorStars = lambda c1, c2: (mags[c1] - mags[c2])[decentStars]
         decentStarsMag = mags[self.fluxFilter][decentStars]
