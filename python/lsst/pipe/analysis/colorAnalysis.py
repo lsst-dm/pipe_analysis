@@ -365,7 +365,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          tractInfo=repoInfo.tractInfo, patchList=patchList,
                                          hscRun=repoInfo.hscRun)
         for fluxColumn in ["base_PsfFlux_flux", "modelfit_CModel_flux"]:
-            self.plotStarColorColor(byFilterForcedCats, filenamer, repoInfo.dataId,
+            self.plotStarColorColor(principalColCats, byFilterForcedCats, filenamer, repoInfo.dataId,
                                     fluxColumn, camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
                                     patchList=patchList, hscRun=repoInfo.hscRun)
 
@@ -708,8 +708,8 @@ class ColorAnalysisTask(CmdLineTask):
                 fig.savefig(filename, dpi=120)
                 plt.close(fig)
 
-    def plotStarColorColor(self, byFilterCats, filenamer, dataId, fluxColumn, butler=None, camera=None,
-                           tractInfo=None, patchList=None, hscRun=None):
+    def plotStarColorColor(self, principalColCats, byFilterCats, filenamer, dataId, fluxColumn, butler=None,
+                           camera=None, tractInfo=None, patchList=None, hscRun=None):
         num = len(list(byFilterCats.values())[0])
         zp = 0.0
         mags = {ff: zp - 2.5*np.log10(byFilterCats[ff][fluxColumn]) for ff in byFilterCats}
@@ -742,6 +742,7 @@ class ColorAnalysisTask(CmdLineTask):
                     copy(True))
         filters = set(byFilterCats.keys())
         color = lambda c1, c2: (mags[c1] - mags[c2])[good]
+        goodMags = {ff: mags[ff][good] for ff in byFilterCats}
         decentColorStars = lambda c1, c2: (mags[c1] - mags[c2])[decentStars]
         decentStarsMag = mags[self.fluxFilter][decentStars]
         decentColorGalaxies = lambda c1, c2: (mags[c1] - mags[c2])[decentGalaxies]
@@ -750,9 +751,10 @@ class ColorAnalysisTask(CmdLineTask):
         fluxColStr = fluxToPlotString(fluxColumn)
         if filters.issuperset(set(("HSC-G", "HSC-R", "HSC-I"))):
             # Do a linear fit to regions defined in Ivezic transforms
-            transform = self.config.transforms["wPerp"]
-            fitLineUpper = [transform.fitLineUpperIncpt, transform.fitLineSlope]
-            fitLineLower = [transform.fitLineLowerIncpt, transform.fitLineSlope]
+            transformPerp = self.config.transforms["wPerp"]
+            transformPara = self.config.transforms["wPara"]
+            fitLineUpper = [transformPerp.fitLineUpperIncpt, transformPerp.fitLineSlope]
+            fitLineLower = [transformPerp.fitLineLowerIncpt, transformPerp.fitLineSlope]
             filtersStr = "gri"
             xRange = (self.config.plotRanges[filtersStr + "X0"],
                       self.config.plotRanges[filtersStr + "X1"])
@@ -764,20 +766,25 @@ class ColorAnalysisTask(CmdLineTask):
                                              self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
                                              "g - r  [{0:s}]".format(fluxColStr),
                                              "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter,
+                                             transformPerp=transformPerp, transformPara=transformPara,
+                                             mags=goodMags, principalCol=principalColCats["wPerp"][good],
                                              xRange=xRange, yRange=yRange, order=1,
                                              xFitRange=(0.3, 1.12), yFitRange=(0.04, 0.5),
                                              fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, unitScale=self.unitScale)
-            transform = self.config.transforms["xPerp"]
-            fitLineUpper = [transform.fitLineUpperIncpt, transform.fitLineSlope]
-            fitLineLower = [transform.fitLineLowerIncpt, transform.fitLineSlope]
+            transformPerp = self.config.transforms["xPerp"]
+            transformPara = self.config.transforms["xPara"]
+            fitLineUpper = [transformPerp.fitLineUpperIncpt, transformPerp.fitLineSlope]
+            fitLineLower = [transformPerp.fitLineLowerIncpt, transformPerp.fitLineSlope]
             nameStr = filtersStr + fluxColStr + "-xFit"
             self.log.info("nameStr = {:s}".format(nameStr))
             xPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                              self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
                                              "g - r  [{0:s}]".format(fluxColStr),
                                              "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter,
+                                             transformPerp=transformPerp, transformPara=transformPara,
+                                             mags=goodMags, principalCol=principalColCats["xPerp"][good],
                                              xRange=xRange, yRange=yRange, order=1,
                                              xFitRange=(1.05, 1.45), yFitRange=(0.78, 1.65),
                                              fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
@@ -835,9 +842,10 @@ class ColorAnalysisTask(CmdLineTask):
                                          hscRun=hscRun)
         if filters.issuperset(set(("HSC-R", "HSC-I", "HSC-Z"))):
             # Do a linear fit to regions defined in Ivezic transforms
-            transform = self.config.transforms["yPerp"]
-            fitLineUpper = [transform.fitLineUpperIncpt, transform.fitLineSlope]
-            fitLineLower = [transform.fitLineLowerIncpt, transform.fitLineSlope]
+            transformPerp = self.config.transforms["yPerp"]
+            transformPara = self.config.transforms["yPara"]
+            fitLineUpper = [transformPerp.fitLineUpperIncpt, transformPerp.fitLineSlope]
+            fitLineLower = [transformPerp.fitLineLowerIncpt, transformPerp.fitLineSlope]
             filtersStr = "riz"
             xRange = (self.config.plotRanges[filtersStr + "X0"],
                       self.config.plotRanges[filtersStr + "X1"])
@@ -849,8 +857,10 @@ class ColorAnalysisTask(CmdLineTask):
                                              self.log, color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"),
                                              "r - i  [{0:s}]".format(fluxColStr),
                                              "i - z  [{0:s}]".format(fluxColStr), self.fluxFilter,
+                                             transformPerp=transformPerp, transformPara=transformPara,
+                                             mags=goodMags, principalCol=principalColCats["yPerp"][good],
                                              xRange=xRange, yRange=yRange, order=1,
-                                             xFitRange=(0.95, 2.1), yFitRange=(0.4, 0.84),
+                                             xFitRange=(0.92, 2.02), yFitRange=(0.4, 0.83),
                                              fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, unitScale=self.unitScale)
@@ -1022,10 +1032,11 @@ class ColorAnalysisTask(CmdLineTask):
         return None
 
 
-def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterStr, xRange=None, yRange=None,
-                          order=1, iterations=3, rej=3.0, xFitRange=None, yFitRange=None, fitLineUpper=None,
-                          fitLineLower=None, numBins="auto", hscRun=None, logger=None, magThreshold=99.9,
-                          camera=None, unitScale=1.0, closeToVertical=False):
+def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterStr, transformPerp=None,
+                          transformPara=None, mags=None, principalCol=None, xRange=None, yRange=None,
+                          order=1, iterations=3, rej=3.0, xFitRange=None, yFitRange=None,
+                          fitLineUpper=None, fitLineLower=None, numBins="auto", hscRun=None, logger=None,
+                          magThreshold=99.9, camera=None, unitScale=1.0, closeToVertical=False):
     fig, axes = plt.subplots(nrows=1, ncols=2, sharex=False, sharey=False)
     fig.subplots_adjust(wspace=0.46, bottom=0.15, left=0.11, right=0.96, top=0.9)
     axes[0].tick_params(which="both", direction="in", labelsize=9)
@@ -1033,6 +1044,12 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
 
     good = np.logical_and(np.isfinite(xx), np.isfinite(yy))
     xx, yy = xx[good], yy[good]
+    numGood = len(xx)
+    fitP2 = None
+    if mags is not None:
+        mags = {ff: mags[ff][good] for ff in mags.keys()}
+    if principalCol is not None:
+        principalColor = principalCol[good].copy()*unitScale
 
     if xRange:
         axes[0].set_xlim(*xRange)
@@ -1277,14 +1294,14 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         elif filename[perpIndex - 1:perpIndex] == "y":
             wPerpFilters = ["r", "i", "z", ""]
         else:
-            raise RuntimeError("Unknown Principle Color: {0:s}Perp".format(filename[perpIndex - 1:perpIndex]))
+            raise RuntimeError("Unknown Principal Color: {0:s}Perp".format(filename[perpIndex - 1:perpIndex]))
         wPerpCoeffs = [-m/scaleFact, (m + 1.0)/scaleFact, -1.0/scaleFact, -b/scaleFact]
         if perpIndex > -1:
             # Compute Ivezic P1 equation using the linear fit slope and highest density point as the origin
             c1P1 = np.cos(np.arctan(m))
             c2P1 = np.sin(np.arctan(m))
             deltaP1 = -c1P1*xHighDensity - c2P1*yHighDensity
-            wParaStr = filename[perpIndex - 1:perpIndex] + "Para = "
+            wParaStr = "{0:s}Para{1:s} = ".format(filename[perpIndex - 1:perpIndex], "$_{fit}$")
             wParaCoeffs = [c1P1, c2P1-c1P1, -c2P1, deltaP1]
             for i, (coeff, band) in enumerate(zip(wParaCoeffs, wPerpFilters)):
                 coeffStr = "{:.3f}".format(abs(coeff)) + band
@@ -1299,7 +1316,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
                 if band != "":
                     wPerpNorm += coeff**2
             wPerpNorm = np.sqrt(wPerpNorm)
-            wPerpStr = filename[perpIndex - 1:perpIndex] + "Perp = "
+            wPerpStr = "{0:s}Perp{1:s} = ".format(filename[perpIndex - 1:perpIndex], "$_{fit}$")
             for i, (coeff, band) in enumerate(zip(wPerpCoeffs, wPerpFilters)):
                 coeffStr = "{:.3f}".format(abs(coeff/wPerpNorm)) + band
                 plusMinus = " $-$ " if coeff < 0.0 else " + "
@@ -1307,13 +1324,42 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
                     wPerpStr += plusMinus.strip(" ") + coeffStr
                 else:
                     wPerpStr += plusMinus + coeffStr
+
+            # Also label plot with hardwired numbers
+            principalColorStrs = []
+            for transform, pCol in zip([transformPerp, transformPara],
+                                 [wPerpStr[0:1] + "Perp", wPerpStr[0:1] + "Para"]):
+                principalColorStr = "{0:s}{1:s} = ".format(pCol, "$_{wired}$")
+                for i, (coeff, band) in enumerate(zip(transform.coeffs.values(), wPerpFilters)):
+                    coeffStr = "{:.3f}".format(abs(coeff)) + band
+                    plusMinus = " $-$ " if coeff < 0.0 else " + "
+                    if i == 0:
+                        principalColorStr += plusMinus.strip(" ") + coeffStr
+                    else:
+                        principalColorStr += plusMinus + coeffStr
+                principalColorStrs.append(principalColorStr)
+
+            xLoc = xRange[1] - 0.03*deltaX
             yLoc -= 0.05*deltaY
-            axes[0].text(xLoc - 0.05, yLoc, wPerpStr, fontsize=7, ha="left", va="center", color="black")
-            yLoc -= 0.052*deltaY
-            axes[0].text(xLoc - 0.05, yLoc, wParaStr, fontsize=7, ha="left", va="center", color="black")
+            axes[0].text(xLoc, yLoc, wPerpStr, fontsize=6, ha="right", va="center", color="magenta")
+            yLoc -= 0.04*deltaY
+            axes[0].text(xLoc, yLoc, principalColorStrs[0], fontsize=6, ha="right", va="center",
+                         color="blue", alpha=0.7)
+            yLoc -= 0.05*deltaY
+            axes[0].text(xLoc, yLoc, wParaStr, fontsize=6, ha="right", va="center", color="magenta")
+            yLoc -= 0.04*deltaY
+            axes[0].text(xLoc, yLoc, principalColorStrs[1], fontsize=6, ha="right", va="center",
+                         color="blue", alpha=0.7)
             log.info("{0:s}".format(wPerpStr))
             log.info("{0:s}".format(wParaStr))
 
+            # Compute fitted P2 for each object
+            if transform is not None:
+                fitP2 = np.ones(numGood)*wPerpCoeffs[3]/wPerpNorm
+                for i, ff in enumerate(transform.coeffs.keys()):
+                    if ff != "":
+                        fitP2 += mags[ff]*wPerpCoeffs[i]/wPerpNorm
+                fitP2 *= unitScale
     # Determine quality of locus
     distance2 = []
     polyFit = np.poly1d(polyFit)
@@ -1346,15 +1392,47 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     axes[1].plot(bins, 1/(stdDev*np.sqrt(2*np.pi))*np.exp(-(bins-mean)**2/(2*stdDev**2)),
                  color=polyColor)
     axes[1].axvline(x=mean, color=polyColor, linestyle=":")
-    kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=8, color=polyColor)
-    axes[1].annotate(meanStr, xy=(0.4, 0.96), **kwargs)
-    axes[1].annotate(stdStr, xy=(0.4, 0.92), **kwargs)
-    axes[1].annotate(rmsStr, xy=(0.4, 0.88), **kwargs)
+    kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=7, color=polyColor)
+    axes[1].annotate(meanStr, xy=(0.34, 0.965), **kwargs)
+    axes[1].annotate(stdStr, xy=(0.34, 0.93), **kwargs)
+    axes[1].annotate(rmsStr, xy=(0.34, 0.895), **kwargs)
 
     axes[1].axvline(x=0.0, color="black", linestyle="--")
     tractStr = "tract: {:d}".format(dataId["tract"])
     axes[1].annotate(tractStr, xy=(0.5, 1.04), xycoords="axes fraction", ha="center", va="center",
                      fontsize=10, color="green")
+
+    # Plot hardwired principal color distributions
+    if principalCol is not None:
+        pCmean = principalColor[kept].mean()
+        pCstdDev = principalColor[kept].std()
+        count, nBins, ignored = axes[1].hist(principalColor[kept], bins=bins, range=(-4.0*stdDev, 4.0*stdDev),
+                                             normed=True, color="blue", alpha=0.5)
+        axes[1].plot(bins, 1/(pCstdDev*np.sqrt(2*np.pi))*np.exp(-(bins-pCmean)**2/(2*pCstdDev**2)),
+                     color="blue")
+        axes[1].axvline(x=pCmean, color="blue", linestyle=":")
+        pCmeanStr = "{0:s}{1:s} = {2:5.2f}".format(wPerpStr[0:5], "$_{wired}$", pCmean)
+        pCstdStr = "  std = {0:5.2f}".format(pCstdDev)
+        kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=7, color="blue")
+        axes[1].annotate(pCmeanStr, xy=(0.97, 0.965), **kwargs)
+        axes[1].annotate(pCstdStr, xy=(0.97, 0.93), **kwargs)
+
+    # Plot fitted principal color distributions
+    if fitP2 is not None:
+        fitP2mean = fitP2[kept].mean()
+        fitP2stdDev = fitP2[kept].std()
+        count, nBins, ignored = axes[1].hist(fitP2[kept], bins=bins, range=(-4.0*stdDev, 4.0*stdDev),
+                                             normed=True, color="magenta", alpha=0.5)
+        axes[1].plot(bins, 1/(fitP2stdDev*np.sqrt(2*np.pi))*np.exp(-(bins-fitP2mean)**2/(2*fitP2stdDev**2)),
+                     color="magenta")
+        axes[1].axvline(x=fitP2mean, color="magenta", linestyle=":")
+        fitP2meanStr = "{0:s}{1:s} = {2:5.2f}".format(wPerpStr[0:5], "$_{fit}$", fitP2mean)
+        fitP2stdStr = "  std = {0:5.2f}".format(fitP2stdDev)
+        kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=7, color="magenta")
+        axes[1].annotate(fitP2meanStr, xy=(0.97, 0.895), **kwargs)
+        axes[1].annotate(fitP2stdStr, xy=(0.97, 0.86), **kwargs)
+
+    axes[1].set_ylim(axes[1].get_ylim()[0], axes[1].get_ylim()[1]*2.5)
 
     if camera is not None:
         labelCamera(camera, plt, axes[0], 0.5, 1.04)
