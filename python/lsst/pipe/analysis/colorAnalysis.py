@@ -18,7 +18,7 @@ from .analysis import Analysis, AnalysisConfig
 from .coaddAnalysis import CoaddAnalysisTask
 from .utils import (Filenamer, Enforcer, concatenateCatalogs, checkIdLists, getFluxKeys, addPatchColumn,
                     calibrateCoaddSourceCatalog, fluxToPlotString, writeParquet, getRepoInfo,
-                    orthogonalRegression, distanceSquaredToPoly)
+                    orthogonalRegression, distanceSquaredToPoly, p2p1CoeffsFromLinearFit, makeEqnStr)
 from .plotUtils import OverlapsStarGalaxyLabeller, labelCamera, setPtSize
 
 import lsst.afw.geom as afwGeom
@@ -597,17 +597,10 @@ class ColorAnalysisTask(CmdLineTask):
                           self.config.plotRanges[filtersStr + "Y1"])
                 paraCol = col[0] + "Para"
                 principalColorStrs = []
-                for pCol in [paraCol, col]:
-                    principalColorStr = pCol + " = "
-                    transformForStr = self.config.transforms[pCol]
-                    for i, (coeff, band) in enumerate(zip(transformForStr.coeffs.values(), filterStrList)):
-                        coeffStr = "{:.3f}".format(abs(coeff)) + band
-                        plusMinus = " $-$ " if coeff < 0.0 else " + "
-                        if i == 0:
-                            principalColorStr += plusMinus.strip(" ") + coeffStr
-                        else:
-                            principalColorStr += plusMinus + coeffStr
-                    principalColorStrs.append(principalColorStr)
+                for pColStr in [paraCol, col]:
+                    transformForStr = self.config.transforms[pColStr]
+                    pColStr = makeEqnStr(pColStr, transformForStr.coeffs.values(), filterStrList)
+                    principalColorStrs.append(pColStr)
                 colorsInFitRange = ColorValueInFitRange(col, color(colStr1, colStr2), color(colStr2, colStr3),
                                                         transform.fitLineSlope, transform.fitLineUpperIncpt,
                                                         transform.fitLineLowerIncpt, unitScale=self.unitScale)
@@ -1276,18 +1269,14 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     kwargs = dict(ha="left", va="center", color=polyColor)
     axes[0].text(xLoc, yLoc, polyStr, fontsize=8, **kwargs)
 
-    # Derive Ivezic P2 and P1 equations based on linear fit and highest density position (where P1 = 0)
-    # For y = m*x + b fit, where x = c1 - c2 and y = c2 - c3,
-    # P2 = (-m*c1 + (m + 1)*c2 - c3 - b)/sqrt(m**2 + 1)
-    # P2norm = P2/sqrt[(m**2 + (m + 1)**2 + 1**2)]
-    #
-    # P1 = cos(theta)*x + sin(theta)*y + deltaP1, theta = arctan(m)
-    # P1 = cos(theta)*(c1 - c2) + sin(theta)*(c2 - c3) + deltaP1
-    # P1 = cos(theta)*c1 + ((sin(theta) - cos(theta))*c2 - sin(theta)*c3 + deltaP1
-    # P1 = 0 at x, y = xHighDensity, yHighDensity
     if "odr" in polyStr and order == 1:
         m, b = polyFit[0], polyFit[1]
-        scaleFact = np.sqrt(m**2 + 1.0)
+        # Closest point on line to highest density point
+        xHighDensity0 = (xHighDensity + m*(yHighDensity - b))/(m**2.0 + 1.0)
+        yHighDensity0 = (m*(xHighDensity + m*yHighDensity) + b)/(m**2.0 + 1.0)
+        # Derive Ivezic P2 and P1 equations based on linear fit and highest density position (where P1 = 0)
+        pColCoeffs = p2p1CoeffsFromLinearFit(m, b, xHighDensity0, yHighDensity0)
+
         perpIndex = filename.find("Fit-fit")
         if filename[perpIndex - 1:perpIndex] == "w" or filename[perpIndex - 1:perpIndex] == "x":
             wPerpFilters = ["g", "r", "i", ""]
@@ -1295,71 +1284,42 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
             wPerpFilters = ["r", "i", "z", ""]
         else:
             raise RuntimeError("Unknown Principal Color: {0:s}Perp".format(filename[perpIndex - 1:perpIndex]))
-        wPerpCoeffs = [-m/scaleFact, (m + 1.0)/scaleFact, -1.0/scaleFact, -b/scaleFact]
-        if perpIndex > -1:
-            # Compute Ivezic P1 equation using the linear fit slope and highest density point as the origin
-            c1P1 = np.cos(np.arctan(m))
-            c2P1 = np.sin(np.arctan(m))
-            deltaP1 = -c1P1*xHighDensity - c2P1*yHighDensity
-            wParaStr = "{0:s}Para{1:s} = ".format(filename[perpIndex - 1:perpIndex], "$_{fit}$")
-            wParaCoeffs = [c1P1, c2P1-c1P1, -c2P1, deltaP1]
-            for i, (coeff, band) in enumerate(zip(wParaCoeffs, wPerpFilters)):
-                coeffStr = "{:.3f}".format(abs(coeff)) + band
-                plusMinus = " $-$ " if coeff < 0.0 else " + "
-                if i == 0:
-                    wParaStr += plusMinus.strip(" ") + coeffStr
-                else:
-                    wParaStr += plusMinus + coeffStr
-            # Compute Ivezic P2
-            wPerpNorm = 0.0
-            for coeff, band in zip(wPerpCoeffs, wPerpFilters):
-                if band != "":
-                    wPerpNorm += coeff**2
-            wPerpNorm = np.sqrt(wPerpNorm)
-            wPerpStr = "{0:s}Perp{1:s} = ".format(filename[perpIndex - 1:perpIndex], "$_{fit}$")
-            for i, (coeff, band) in enumerate(zip(wPerpCoeffs, wPerpFilters)):
-                coeffStr = "{:.3f}".format(abs(coeff/wPerpNorm)) + band
-                plusMinus = " $-$ " if coeff < 0.0 else " + "
-                if i == 0:
-                    wPerpStr += plusMinus.strip(" ") + coeffStr
-                else:
-                    wPerpStr += plusMinus + coeffStr
 
-            # Also label plot with hardwired numbers
-            principalColorStrs = []
-            for transform, pCol in zip([transformPerp, transformPara],
-                                 [wPerpStr[0:1] + "Perp", wPerpStr[0:1] + "Para"]):
-                principalColorStr = "{0:s}{1:s} = ".format(pCol, "$_{wired}$")
-                for i, (coeff, band) in enumerate(zip(transform.coeffs.values(), wPerpFilters)):
-                    coeffStr = "{:.3f}".format(abs(coeff)) + band
-                    plusMinus = " $-$ " if coeff < 0.0 else " + "
-                    if i == 0:
-                        principalColorStr += plusMinus.strip(" ") + coeffStr
-                    else:
-                        principalColorStr += plusMinus + coeffStr
-                principalColorStrs.append(principalColorStr)
+        wParaStr = "{0:s}Para{1:s}".format(filename[perpIndex - 1:perpIndex], "$_{fit}$")
+        wParaStr = makeEqnStr(wParaStr, pColCoeffs.p1Coeffs, wPerpFilters)
+        wPerpStr = "{0:s}Perp{1:s}".format(filename[perpIndex - 1:perpIndex], "$_{fit}$")
+        wPerpStr = makeEqnStr(wPerpStr, pColCoeffs.p2Coeffs, wPerpFilters)
 
-            xLoc = xRange[1] - 0.03*deltaX
-            yLoc -= 0.05*deltaY
-            axes[0].text(xLoc, yLoc, wPerpStr, fontsize=6, ha="right", va="center", color="magenta")
-            yLoc -= 0.04*deltaY
-            axes[0].text(xLoc, yLoc, principalColorStrs[0], fontsize=6, ha="right", va="center",
-                         color="blue", alpha=0.7)
-            yLoc -= 0.05*deltaY
-            axes[0].text(xLoc, yLoc, wParaStr, fontsize=6, ha="right", va="center", color="magenta")
-            yLoc -= 0.04*deltaY
-            axes[0].text(xLoc, yLoc, principalColorStrs[1], fontsize=6, ha="right", va="center",
-                         color="blue", alpha=0.7)
-            log.info("{0:s}".format(wPerpStr))
-            log.info("{0:s}".format(wParaStr))
+        # Also label plot with hardwired numbers
+        principalColorStrs = []
+        for transform, pCol in zip([transformPerp, transformPara],
+                                   [wPerpStr[0:1] + "Perp", wPerpStr[0:1] + "Para"]):
+            principalColorStr = "{0:s}{1:s}".format(pCol, "$_{wired}$")
+            principalColorStr = makeEqnStr(principalColorStr, transform.coeffs.values(), wPerpFilters)
+            principalColorStrs.append(principalColorStr)
 
-            # Compute fitted P2 for each object
-            if transform is not None:
-                fitP2 = np.ones(numGood)*wPerpCoeffs[3]/wPerpNorm
-                for i, ff in enumerate(transform.coeffs.keys()):
-                    if ff != "":
-                        fitP2 += mags[ff]*wPerpCoeffs[i]/wPerpNorm
-                fitP2 *= unitScale
+        xLoc = xRange[1] - 0.03*deltaX
+        yLoc -= 0.05*deltaY
+        axes[0].text(xLoc, yLoc, wPerpStr, fontsize=6, ha="right", va="center", color="magenta")
+        yLoc -= 0.04*deltaY
+        axes[0].text(xLoc, yLoc, principalColorStrs[0], fontsize=6, ha="right", va="center",
+                     color="blue", alpha=0.8)
+        yLoc -= 0.05*deltaY
+        axes[0].text(xLoc, yLoc, wParaStr, fontsize=6, ha="right", va="center", color="magenta")
+        yLoc -= 0.04*deltaY
+        axes[0].text(xLoc, yLoc, principalColorStrs[1], fontsize=6, ha="right", va="center",
+                     color="blue", alpha=0.8)
+        log.info("{0:s}".format(wPerpStr))
+        log.info("{0:s}".format(wParaStr))
+
+        # Compute fitted P2 for each object
+        if transform is not None:
+            fitP2 = np.ones(numGood)*pColCoeffs.p2Coeffs[3]
+            for i, ff in enumerate(transform.coeffs.keys()):
+                if ff != "":
+                    fitP2 += mags[ff]*pColCoeffs.p2Coeffs[i]
+            fitP2 *= unitScale
+
     # Determine quality of locus
     distance2 = []
     polyFit = np.poly1d(polyFit)

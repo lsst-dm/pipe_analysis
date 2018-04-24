@@ -38,7 +38,8 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "addPatchColumn", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
            "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
            "fluxToPlotString", "andCatalog", "writeParquet", "getRepoInfo", "findCcdKey",
-           "getCcdNameRefList", "getDataExistsRefList", "orthogonalRegression", "distanceSquaredToPoly"]
+           "getCcdNameRefList", "getDataExistsRefList", "orthogonalRegression", "distanceSquaredToPoly",
+           "p2p1CoeffsFromLinearFit", "makeEqnStr"]
 
 
 def writeParquet(table, path, badArray=None):
@@ -1160,3 +1161,91 @@ def distanceSquaredToPoly(x1, y1, x2, poly):
     `float` square of the distance between (x1, y1) and poly at x2
     """
     return (x2 - x1)**2 + (poly(x2) - y1)**2
+
+
+def p2p1CoeffsFromLinearFit(m, b, x0, y0):
+    """
+    Derive the Ivezic et al. 2004 (2004AN....325..583I) P2 and P1 equations based on linear fit
+
+    For y = m*x + b fit, where x = c1 - c2 and y = c2 - c3,
+    P2 = (-m*c1 + (m + 1)*c2 - c3 - b)/sqrt(m**2 + 1)
+    P2norm = P2/sqrt[(m**2 + (m + 1)**2 + 1**2)]
+
+    P1 = cos(theta)*x + sin(theta)*y + deltaP1, theta = arctan(m)
+    P1 = cos(theta)*(c1 - c2) + sin(theta)*(c2 - c3) + deltaP1
+    P1 = cos(theta)*c1 + ((sin(theta) - cos(theta))*c2 - sin(theta)*c3 + deltaP1
+    P1 = 0 at x0, y0 ==> deltaP1 = -cos(theta)*x0 - sin(theta)*y0
+
+    Parameters:
+    ----------
+    m : `float`
+       Slope of line to convert
+    b : `float`
+       Intercept of line to convert
+    x0, y0: `float`
+       Coordinates at which to set P1 = 0
+
+    Returns:
+    -------
+    `lsst.pipe.base.Struct` of p2Coeffs and p1Coeffs: `list`
+    """
+
+    # Compute Ivezic P2 coefficients using the linear fit slope and intercept
+    scaleFact = np.sqrt(m**2 + 1.0)
+    p2Coeffs = [-m/scaleFact, (m + 1.0)/scaleFact, -1.0/scaleFact, -b/scaleFact]
+    p2Norm = 0.0
+    for coeff in p2Coeffs[:-1]:
+        p2Norm += coeff**2
+    p2Norm = np.sqrt(p2Norm)
+    p2Coeffs /= p2Norm
+
+    # Compute Ivezic P1 coefficients equation using the linear fit slope and point (x0, y0) as the origin
+    cosTheta = np.cos(np.arctan(m))
+    sinTheta = np.sin(np.arctan(m))
+    deltaP1 = -cosTheta*x0 - sinTheta*y0
+    p1Coeffs = [cosTheta, sinTheta - cosTheta, -sinTheta, deltaP1]
+
+    return Struct(
+        p2Coeffs=p2Coeffs,
+        p1Coeffs=p1Coeffs,
+    )
+
+
+def makeEqnStr(varName, coeffList, exponentList):
+    """Make a string-formatted equation
+
+    Parameters:
+    ----------
+    varName : `str`
+       Name of the equation to be stringified
+    coeffList : `list` of `float`
+       List of equation coefficients (matched to exponenets in exponentList list)
+    exponentList : `list` of `str`
+       List of equation exponents (matched to coefficients in coeffList list)
+
+    Raises
+    ------
+    `RuntimeError`
+       If lengths of coeffList and exponentList are not equal.
+
+    Returns
+    -------
+    eqnStr : `str`
+       The stringified equation of the form:
+       varName = coeffList[0]exponent[0] + ... + coeffList[n-1]exponent[n-1].
+    """
+
+    if len(coeffList) != len(exponentList):
+        raise RuntimeError("Lengths of coeffList ({0:d}) and exponentList ({1:d}) are not equal".
+                           format(len(coeffList), len(exponentList)))
+
+    eqnStr = varName + " = "
+    for i, (coeff, band) in enumerate(zip(coeffList, exponentList)):
+        coeffStr = "{:.3f}".format(abs(coeff)) + band
+        plusMinus = " $-$ " if coeff < 0.0 else " + "
+        if i == 0:
+            eqnStr += plusMinus.strip(" ") + coeffStr
+        else:
+            eqnStr += plusMinus + coeffStr
+
+    return eqnStr
