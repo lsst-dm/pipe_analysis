@@ -34,7 +34,7 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "MagDiffErr", "ApCorrDiffErr", "CentroidDiff", "CentroidDiffErr", "deconvMom",
            "deconvMomStarGal", "concatenateCatalogs", "joinMatches", "checkIdLists", "checkPatchOverlap",
            "joinCatalogs", "getFluxKeys", "addColumnsToSchema", "addApertureFluxesHSC", "addFpPoint",
-           "addFootprintNPix", "addRotPoint", "makeBadArray", "addQaBadFlag", "addCcdColumn",
+           "addFootprintNPix", "addRotPoint", "makeBadArray", "addFlag", "addCcdColumn",
            "addPatchColumn", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
            "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
            "fluxToPlotString", "andCatalog", "writeParquet", "getRepoInfo", "findCcdKey",
@@ -73,7 +73,9 @@ def writeParquet(table, path, badArray=None):
         raise ValueError('Please provide a filename ending in .parq.')
 
     if badArray is not None:
-        table = addQaBadFlag(table, badArray)  # add flag indicating source "badness" for qa analyses
+        # Add flag indicating source "badness" for qa analyses for the benefit of the Parquet files
+        # being written to disk for subsequent interactive QA analysis.
+        table = addFlag(table, badArray, "qaBad_flag", "Set to True for any source deemed bad for qa")
     df = table.asAstropy().to_pandas()
     df = df.set_index('id', drop=True)
     fastparquet.write(path, df)
@@ -727,19 +729,20 @@ def makeBadArray(catalog, flagList=[], onlyReadStars=False):
     return bad
 
 
-def addQaBadFlag(catalog, badArray):
+def addFlag(catalog, badArray, flagName, doc="General failure flag"):
     """Add a flag for any sources deemed not appropriate for qa analyses
-
-    This flag is being added for the benefit of the Parquet files being written to disk
-    for subsequent interactive QA analysis.
 
     Parameters
     ----------
     catalog : `lsst.afw.table.source.source.SourceCatalog`
        Source catalog to which flag will be added.
     badArray : `numpy.ndarray`
-       Boolean array with same length as catalog whose values indicate wether the source was deemed
-       innapropriate for qa analyses.
+       Boolean array with same length as catalog whose values indicate wether the flag flagName
+       should be set for a given oject.
+    flagName : `str`
+       Name of flag to be set
+    doc : `str`, optional
+       Docstring for flagName
 
     Raises
     ------
@@ -749,7 +752,7 @@ def addQaBadFlag(catalog, badArray):
     Returns
     -------
     newCatalog : `lsst.afw.table.source.source.SourceCatalog`
-       Source catalog with badQaFlag column added.
+       Source catalog with flagName column added.
 
 
     """
@@ -759,14 +762,14 @@ def addQaBadFlag(catalog, badArray):
     mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
     schema = mapper.getOutputSchema()
-    qaBadFlag = schema.addField("qaBad_flag", type="Flag", doc="Set to True for any source deemed bad for qa")
+    badFlag = schema.addField(flagName, type="Flag", doc=doc)
     newCatalog = afwTable.SourceCatalog(schema)
     newCatalog.reserve(len(catalog))
 
     for i, src in enumerate(catalog):
         row = newCatalog.addNew()
         row.assign(src, mapper)
-        row.set(qaBadFlag, bool(badArray[i]))
+        row.set(badFlag, bool(badArray[i]))
     return newCatalog
 
 
