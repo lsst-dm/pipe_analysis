@@ -20,7 +20,7 @@ from .utils import (Filenamer, Enforcer, concatenateCatalogs, getFluxKeys, addCo
                     makeBadArray, addFlag, addIntFloatOrStrColumn, calibrateCoaddSourceCatalog,
                     fluxToPlotString, writeParquet, getRepoInfo, orthogonalRegression,
                     distanceSquaredToPoly, p2p1CoeffsFromLinearFit, makeEqnStr, catColors)
-from .plotUtils import OverlapsStarGalaxyLabeller, labelCamera, setPtSize, plotText
+from .plotUtils import AllLabeller, OverlapsStarGalaxyLabeller, labelCamera, setPtSize, plotText
 
 import lsst.afw.geom as afwGeom
 import lsst.afw.table as afwTable
@@ -215,6 +215,7 @@ class ColorAnalysisConfig(Config):
     toMilli = Field(dtype=bool, default=True, doc="Print stats in milli units (i.e. mas, mmag)?")
     doPlotPrincipalColors = Field(dtype=bool, default=True,
                                   doc="Create the Ivezic Principal Color offset plots?")
+    doPlotGalacticExtinction = Field(dtype=bool, default=True, doc="Create Galactic Extinction plots?")
     writeParquetOnly = Field(dtype=bool, default=False,
                              doc="Only write out Parquet tables (i.e. do not produce any plots)?")
     doWriteParquetTables = Field(dtype=bool, default=True,
@@ -365,9 +366,16 @@ class ColorAnalysisTask(CmdLineTask):
             # installation.
             try:
                 byFilterForcedCats = self.correctForGalacticExtinction(byFilterForcedCats, repoInfo.tractInfo)
+                doPlotGalacticExtinction = True
             except Exception:
                 byFilterForcedCats = self.correctFieldForGalacticExtinction(byFilterForcedCats,
                                                                             repoInfo.tractInfo)
+                doPlotGalacticExtinction = False
+
+            if self.config.doPlotGalacticExtinction and doPlotGalacticExtinction:
+                self.plotGalacticExtinction(byFilterForcedCats, filenamer, repoInfo.dataId,
+                                            camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
+                                            patchList=patchList, hscRun=repoInfo.hscRun)
 
         # self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
         if self.config.doPlotPrincipalColors or self.config.doWriteParquetTables:
@@ -641,6 +649,21 @@ class ColorAnalysisTask(CmdLineTask):
         new[self.fluxColumn][:] = catalogs[self.fluxFilter][self.fluxColumn]
 
         return new
+
+    def plotGalacticExtinction(self, byFilterCats, filenamer, dataId, butler=None,
+                               camera=None, tractInfo=None, patchList=None, hscRun=None):
+        for ff in byFilterCats:
+            qMin = np.nanmean(byFilterCats[ff]["A_" + ff]) - 6.0*np.nanstd(byFilterCats[ff]["A_" + ff])
+            qMax = np.nanmean(byFilterCats[ff]["A_" + ff]) + 6.0*np.nanstd(byFilterCats[ff]["A_" + ff])
+            shortName = "galacticExtinction_" + ff
+            self.log.info("shortName = {:s}".format(shortName))
+            self.AnalysisClass(byFilterCats[ff], byFilterCats[ff]["A_" + ff],
+                               "%s (%s)" % ("Galactic Extinction:  A_" + ff, "mag"),
+                               shortName, self.config.analysis, flags=["galacticExtinction_flag"],
+                               labeller=AllLabeller(), qMin=qMin, qMax=qMax, magThreshold=99.0,
+                               ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera,
+                                         tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
+                                         plotRunStats=False)
 
     def plotGalaxyColors(self, catalogs, filenamer, dataId):
         filters = set(catalogs.keys())
