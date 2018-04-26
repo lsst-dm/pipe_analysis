@@ -528,8 +528,9 @@ class ColorAnalysisTask(CmdLineTask):
             new[col][:] = value
 
         # Flag bad values
+        bad = np.zeros(num, dtype=bool)
         for dataCat in catalogs.values():
-            bad = makeBadArray(dataCat, flagList=self.flags)
+            bad |= makeBadArray(dataCat, flagList=self.flags)
         # Can't set column for flags; do row-by-row
         for row, badValue in zip(new, bad):
             row.setFlag(badKey, bool(badValue))
@@ -713,7 +714,7 @@ class ColorAnalysisTask(CmdLineTask):
 
         bad = np.zeros(num, dtype=bool)
         for cat in byFilterCats.values():
-            bad = makeBadArray(cat, flagList=self.flags)
+            bad |= makeBadArray(cat, flagList=self.flags)
         catLabel = "noDuplicates"
 
         bright = mags[self.fluxFilter] < self.config.analysis.magThreshold
