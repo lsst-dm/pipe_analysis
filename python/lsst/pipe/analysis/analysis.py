@@ -168,9 +168,10 @@ class Analysis(object):
         axes.legend(handles=dataPoints, loc=1, fontsize=8)
         labelVisit(filename, plt, axes, 0.5, 1.05)
         if zpLabel is not None:
-            plotText(zpLabel, plt, axes, 0.13, -0.09, prefix="zp: ", color="green")
+            prefix = "" if "GE applied" in zpLabel else "zp: "
+            plotText(zpLabel, plt, axes, 0.13, -0.09, prefix=prefix, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="zp: ", color="green")
+            plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
         fig.savefig(filename, dpi=120)
         plt.close(fig)
 
@@ -391,7 +392,8 @@ class Analysis(object):
 
         labelVisit(filename, plt, axScatter, 1.18, -0.11, color="green")
         if zpLabel is not None:
-            plotText(zpLabel, plt, axScatter, 0.09, -0.11, prefix="zp: ", color="green")
+            prefix = "" if "GE applied" in zpLabel else "zp: "
+            plotText(zpLabel, plt, axScatter, 0.09, -0.11, prefix=prefix, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axScatter, 0.87, -0.11, prefix="cat: ", color="green")
         if extraLabels is not None:
@@ -436,7 +438,8 @@ class Analysis(object):
             labelCamera(camera, plt, axes, 0.5, 1.09)
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
-            plotText(zpLabel, plt, axes, 0.13, -0.09, prefix="zp: ", color="green")
+            prefix = "" if "GE applied" in zpLabel else "zp: "
+            plotText(zpLabel, plt, axes, 0.13, -0.09, prefix=prefix, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
         fig.savefig(filename, dpi=120)
@@ -559,7 +562,8 @@ class Analysis(object):
             labelCamera(camera, plt, axes, 0.5, 1.09)
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
-            plotText(zpLabel, plt, axes, 0.13, -0.09, prefix="zp: ", color="green")
+            prefix = "" if "GE applied" in zpLabel else "zp: "
+            plotText(zpLabel, plt, axes, 0.13, -0.09, prefix=prefix, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
         if highlightList is not None:
@@ -638,7 +642,8 @@ class Analysis(object):
                          hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
         labelVisit(filename, plt, axes[0], 0.5, 1.1)
         if zpLabel is not None:
-            plotText(zpLabel, plt, axes[0], 0.13, -0.09, prefix="zp: ", color="green")
+            prefix = "" if "GE applied" in zpLabel else "zp: "
+            plotText(zpLabel, plt, axes[0], 0.13, -0.09, prefix=prefix, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes[0], 0.85, -0.09, prefix="cat: ", color="green")
         fig.savefig(filename, dpi=120)
