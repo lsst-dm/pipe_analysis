@@ -39,7 +39,7 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
            "fluxToPlotString", "andCatalog", "writeParquet", "getRepoInfo", "findCcdKey",
            "getCcdNameRefList", "getDataExistsRefList", "orthogonalRegression", "distanceSquaredToPoly",
-           "p2p1CoeffsFromLinearFit", "makeEqnStr"]
+           "p2p1CoeffsFromLinearFit", "makeEqnStr", "catColors"]
 
 
 def writeParquet(table, path, badArray=None):
@@ -1249,3 +1249,35 @@ def makeEqnStr(varName, coeffList, exponentList):
             eqnStr += plusMinus + coeffStr
 
     return eqnStr
+
+
+def catColors(c1, c2, magsCat, goodArray=None):
+    """Compute color for a set of filters given a catalog of magnitudes by filter
+
+    Parameters:
+    ----------
+    c1, c2 : `str`
+       String representation of the filters from which to compute the color
+    magsCat : `dict` of `numpy.ndarray`
+       Dict of arrays of magnitude values.  Dict keys are the string representation of the filters
+    goodArray: `numpy.ndarray`, optional
+       Boolean array with same length as the magsCat arrays whose values indicate wether the
+       source was deemed "good" for intended use.  If None, all entries are considered "good".
+
+    Raises
+    ------
+    `RuntimeError`
+       If lengths of goodArray and magsCat arrays are not equal.
+
+    Returns
+    -------
+    `numpy.ndarray` of "good" colors (magnitude differeces)
+    """
+    if goodArray is None:
+        goodArray = np.ones(len(magsCat[c1]), dtype=bool)
+
+    if len(goodArray) != len(magsCat[c1]):
+        raise RuntimeError("Lengths of goodArray ({0:d}) and magsCat ({1:d}) are not equal".
+                           format(len(goodArray), len(magsCat[c1])))
+
+    return (magsCat[c1] - magsCat[c2])[goodArray]

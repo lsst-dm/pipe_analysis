@@ -18,7 +18,8 @@ from .analysis import Analysis, AnalysisConfig
 from .coaddAnalysis import CoaddAnalysisTask
 from .utils import (Filenamer, Enforcer, concatenateCatalogs, checkIdLists, getFluxKeys, addPatchColumn,
                     calibrateCoaddSourceCatalog, fluxToPlotString, writeParquet, getRepoInfo,
-                    orthogonalRegression, distanceSquaredToPoly, p2p1CoeffsFromLinearFit, makeEqnStr)
+                    orthogonalRegression, distanceSquaredToPoly, p2p1CoeffsFromLinearFit, makeEqnStr,
+                    catColors)
 from .plotUtils import OverlapsStarGalaxyLabeller, labelCamera, setPtSize
 
 import lsst.afw.geom as afwGeom
@@ -572,7 +573,6 @@ class ColorAnalysisTask(CmdLineTask):
     def plotStarPrincipalColors(self, principalColCats, byFilterCats, filenamer, labeller, dataId,
                                 butler=None, camera=None, tractInfo=None, patchList=None, hscRun=None):
         mags = {ff: -2.5*np.log10(byFilterCats[ff]["base_PsfFlux_flux"]) for ff in byFilterCats}
-        color = lambda c1, c2: (mags[c1] - mags[c2])
         unitStr = "mmag" if self.config.toMilli else "mag"
         for col, transform in self.config.transforms.items():
             if not transform.plot or col not in principalColCats.schema:
@@ -601,7 +601,7 @@ class ColorAnalysisTask(CmdLineTask):
                     transformForStr = self.config.transforms[pColStr]
                     pColStr = makeEqnStr(pColStr, transformForStr.coeffs.values(), filterStrList)
                     principalColorStrs.append(pColStr)
-                colorsInFitRange = ColorValueInFitRange(col, color(colStr1, colStr2), color(colStr2, colStr3),
+                colorsInFitRange = ColorValueInFitRange(col, xColor, yColor,
                                                         transform.fitLineSlope, transform.fitLineUpperIncpt,
                                                         transform.fitLineLowerIncpt, unitScale=self.unitScale)
                 colorsInPerpRange = ColorValueInPerpRange(col, transform.requireGreater,
@@ -632,8 +632,8 @@ class ColorAnalysisTask(CmdLineTask):
                 qaGood = np.logical_and(qaGood, mags[self.fluxFilter] < self.config.analysis.magThreshold)
                 inFitGood = np.logical_and(np.isfinite(colorsInFitRange(principalColCats)), qaGood)
                 inPerpGood = np.logical_and(np.isfinite(colorsInPerpRange(principalColCats)), qaGood)
-                xColor = color(colStr1, colStr2)
-                yColor = color(colStr2, colStr3)
+                xColor = catColors(colStr1, colStr2, mags)
+                yColor = catColors(colStr2, colStr3, mags)
                 fig, axes = plt.subplots(1, 1)
                 axes.tick_params(which="both", direction="in", labelsize=9)
                 axes.set_xlim(*xRange)
@@ -734,11 +734,8 @@ class ColorAnalysisTask(CmdLineTask):
         combined = (self.transformCatalogs(byFilterCats, straightTransforms, hscRun=hscRun)[goodCombined].
                     copy(True))
         filters = set(byFilterCats.keys())
-        color = lambda c1, c2: (mags[c1] - mags[c2])[good]
         goodMags = {ff: mags[ff][good] for ff in byFilterCats}
-        decentColorStars = lambda c1, c2: (mags[c1] - mags[c2])[decentStars]
         decentStarsMag = mags[self.fluxFilter][decentStars]
-        decentColorGalaxies = lambda c1, c2: (mags[c1] - mags[c2])[decentGalaxies]
         decentGalaxiesMag = mags[self.fluxFilter][decentGalaxies]
         unitStr = "mmag" if self.config.toMilli else "mag"
         fluxColStr = fluxToPlotString(fluxColumn)
@@ -756,7 +753,8 @@ class ColorAnalysisTask(CmdLineTask):
             nameStr = filtersStr + fluxColStr + "-wFit"
             self.log.info("nameStr = {:s}".format(nameStr))
             wPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
-                                             self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
+                                             self.log, catColors("HSC-G", "HSC-R", mags, good),
+                                             catColors("HSC-R", "HSC-I", mags, good),
                                              "g - r  [{0:s}]".format(fluxColStr),
                                              "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter,
                                              transformPerp=transformPerp, transformPara=transformPara,
@@ -773,7 +771,8 @@ class ColorAnalysisTask(CmdLineTask):
             nameStr = filtersStr + fluxColStr + "-xFit"
             self.log.info("nameStr = {:s}".format(nameStr))
             xPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
-                                             self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
+                                             self.log, catColors("HSC-G", "HSC-R", mags, good),
+                                             catColors("HSC-R", "HSC-I", mags, good),
                                              "g - r  [{0:s}]".format(fluxColStr),
                                              "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter,
                                              transformPerp=transformPerp, transformPara=transformPara,
@@ -789,7 +788,8 @@ class ColorAnalysisTask(CmdLineTask):
             fitLineUpper = [1.21, -0.55]
             fitLineLower = [0.21, -0.36]
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
-                                         self.log, color("HSC-G", "HSC-R"), color("HSC-R", "HSC-I"),
+                                         self.log, catColors("HSC-G", "HSC-R", mags, good),
+                                         catColors("HSC-R", "HSC-I", mags, good),
                                          "g - r  [{0:s}]".format(fluxColStr),
                                          "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter,
                                          xRange=xRange, yRange=yRange, order=3,
@@ -801,8 +801,10 @@ class ColorAnalysisTask(CmdLineTask):
             if fluxColumn is not "base_PsfFlux_flux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
-                               decentColorStars("HSC-G", "HSC-R"), decentColorStars("HSC-R", "HSC-I"),
-                               decentColorGalaxies("HSC-G", "HSC-R"), decentColorGalaxies("HSC-R", "HSC-I"),
+                               catColors("HSC-G", "HSC-R", mags, decentStars),
+                               catColors("HSC-R", "HSC-I", mags, decentStars),
+                               catColors("HSC-G", "HSC-R", mags, decentGalaxies),
+                               catColors("HSC-R", "HSC-I", mags, decentGalaxies),
                                decentStarsMag, decentGalaxiesMag,
                                "g - r  [{0:s}]".format(fluxColStr),
                                "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
@@ -810,10 +812,10 @@ class ColorAnalysisTask(CmdLineTask):
                                magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
                                unitScale=self.unitScale)
                 colorColor4MagPlots(dataId, filenamer(dataId, description=nameStr, style="noFitMagBins"),
-                                    self.log,
-                                    decentColorStars("HSC-G", "HSC-R"), decentColorStars("HSC-R", "HSC-I"),
-                                    decentColorGalaxies("HSC-G", "HSC-R"),
-                                    decentColorGalaxies("HSC-R", "HSC-I"),
+                                    self.log, catColors("HSC-G", "HSC-R", mags, decentStars),
+                                    catColors("HSC-R", "HSC-I", mags, decentStars),
+                                    catColors("HSC-G", "HSC-R", mags, decentGalaxies),
+                                    catColors("HSC-R", "HSC-I", mags, decentGalaxies),
                                     decentStarsMag, decentGalaxiesMag,
                                     "g - r  [{0:s}]".format(fluxColStr),
                                     "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
@@ -847,7 +849,8 @@ class ColorAnalysisTask(CmdLineTask):
             nameStr = filtersStr + fluxColStr + "-yFit"
             self.log.info("nameStr = {:s}".format(nameStr))
             yPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
-                                             self.log, color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"),
+                                             self.log, catColors("HSC-R", "HSC-I", mags, good),
+                                             catColors("HSC-I", "HSC-Z", mags, good),
                                              "r - i  [{0:s}]".format(fluxColStr),
                                              "i - z  [{0:s}]".format(fluxColStr), self.fluxFilter,
                                              transformPerp=transformPerp, transformPara=transformPara,
@@ -862,7 +865,8 @@ class ColorAnalysisTask(CmdLineTask):
             fitLineLower = [0.046, -0.55]
             self.log.info("nameStr = {:s}".format(nameStr))
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
-                                         self.log, color("HSC-R", "HSC-I"), color("HSC-I", "HSC-Z"),
+                                         self.log, catColors("HSC-R", "HSC-I", mags, good),
+                                         catColors("HSC-I", "HSC-Z", mags, good),
                                          "r - i  [{0:s}]".format(fluxColStr),
                                          "i - z  [{0:s}]".format(fluxColStr), self.fluxFilter,
                                          xRange=xRange, yRange=yRange, order=2,
@@ -874,8 +878,10 @@ class ColorAnalysisTask(CmdLineTask):
             if fluxColumn is not "base_PsfFlux_flux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
-                               decentColorStars("HSC-R", "HSC-I"), decentColorStars("HSC-I", "HSC-Z"),
-                               decentColorGalaxies("HSC-R", "HSC-I"), decentColorGalaxies("HSC-I", "HSC-Z"),
+                               catColors("HSC-R", "HSC-I", mags, decentStars),
+                               catColors("HSC-I", "HSC-Z", mags, decentStars),
+                               catColors("HSC-R", "HSC-I", mags, decentGalaxies),
+                               catColors("HSC-I", "HSC-Z", mags, decentGalaxies),
                                decentStarsMag, decentGalaxiesMag,
                                "r - i  [{0:s}]".format(fluxColStr),
                                "i - z  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
@@ -883,10 +889,10 @@ class ColorAnalysisTask(CmdLineTask):
                                magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
                                unitScale=self.unitScale)
                 colorColor4MagPlots(dataId, filenamer(dataId, description=nameStr, style="noFitMagBins"),
-                                    self.log,
-                                    decentColorStars("HSC-R", "HSC-I"), decentColorStars("HSC-I", "HSC-Z"),
-                                    decentColorGalaxies("HSC-R", "HSC-I"),
-                                    decentColorGalaxies("HSC-I", "HSC-Z"),
+                                    self.log, catColors("HSC-R", "HSC-I", mags, decentStars),
+                                    catColors("HSC-I", "HSC-Z", mags, decentStars),
+                                    catColors("HSC-R", "HSC-I", mags, decentGalaxies),
+                                    catColors("HSC-I", "HSC-Z", mags, decentGalaxies),
                                     decentStarsMag, decentGalaxiesMag,
                                     "r - i  [{0:s}]".format(fluxColStr),
                                     "i - z  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
@@ -916,7 +922,8 @@ class ColorAnalysisTask(CmdLineTask):
             yRange = (self.config.plotRanges[filtersStr + "Y0"],
                       self.config.plotRanges[filtersStr + "Y1"])
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
-                                         self.log, color("HSC-I", "HSC-Z"), color("HSC-Z", "HSC-Y"),
+                                         self.log, catColors("HSC-I", "HSC-Z", mags, good),
+                                         catColors("HSC-Z", "HSC-Y", mags, good),
                                          "i - z  [{0:s}]".format(fluxColStr),
                                          "z - y  [{0:s}]".format(fluxColStr), self.fluxFilter,
                                          xRange=xRange, yRange=yRange, order=2,
@@ -928,8 +935,10 @@ class ColorAnalysisTask(CmdLineTask):
             if fluxColumn is not "base_PsfFlux_flux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
-                               decentColorStars("HSC-I", "HSC-Z"), decentColorStars("HSC-Z", "HSC-Y"),
-                               decentColorGalaxies("HSC-I", "HSC-Z"), decentColorGalaxies("HSC-Z", "HSC-Y"),
+                               catColors("HSC-I", "HSC-Z", mags, decentStars),
+                               catColors("HSC-Z", "HSC-Y", mags, decentStars),
+                               catColors("HSC-I", "HSC-Z", mags, decentGalaxies),
+                               catColors("HSC-Z", "HSC-Y", mags, decentGalaxies),
                                decentStarsMag, decentGalaxiesMag,
                                "i - z  [{0:s}]".format(fluxColStr),
                                "z - y  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
@@ -937,10 +946,10 @@ class ColorAnalysisTask(CmdLineTask):
                                magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
                                unitScale=self.unitScale)
                 colorColor4MagPlots(dataId, filenamer(dataId, description=nameStr, style="noFitMagBins"),
-                                    self.log,
-                                    decentColorStars("HSC-I", "HSC-Z"), decentColorStars("HSC-Z", "HSC-Y"),
-                                    decentColorGalaxies("HSC-I", "HSC-Z"),
-                                    decentColorGalaxies("HSC-Z", "HSC-Y"),
+                                    self.log, catColors("HSC-I", "HSC-Z", mags, decentStars),
+                                    catColors("HSC-Z", "HSC-Y", mags, decentStars),
+                                    catColors("HSC-I", "HSC-Z", mags, decentGalaxies),
+                                    catColors("HSC-Z", "HSC-Y", mags, decentGalaxies),
                                     decentStarsMag, decentGalaxiesMag,
                                     "i - z  [{0:s}]".format(fluxColStr),
                                     "z - y  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
@@ -971,7 +980,8 @@ class ColorAnalysisTask(CmdLineTask):
             fitLineUpper = [0.20, -0.3]
             fitLineLower = [0.01, -0.29]
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
-                                         self.log, color("HSC-Z", "NB0921"), color("NB0921", "HSC-Y"),
+                                         self.log, catColors("HSC-Z", "NB0921", mags, good),
+                                         catColors("NB0921", "HSC-Y", mags, good),
                                          "z-n921  [{0:s}]".format(fluxColStr),
                                          "n921-y  [{0:s}]".format(fluxColStr), self.fluxFilter,
                                          xRange=xRange, yRange=yRange,
@@ -983,8 +993,10 @@ class ColorAnalysisTask(CmdLineTask):
             if fluxColumn is not "base_PsfFlux_flux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
-                               decentColorStars("HSC-Z", "NB0921"), decentColorStars("NB0921", "HSC-Y"),
-                               decentColorGalaxies("HSC-Z", "NB0921"), decentColorGalaxies("NB0921", "HSC-Y"),
+                               catColors("HSC-Z", "NB0921", mags, decentStars),
+                               catColors("NB0921", "HSC-Y", mags, decentStars),
+                               catColors("HSC-Z", "NB0921", mags, decentGalaxies),
+                               catColors("NB0921", "HSC-Y", mags, decentGalaxies),
                                decentStarsMag, decentGalaxiesMag,
                                "z-n921  [{0:s}]".format(fluxColStr),
                                "n921-y  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
@@ -992,10 +1004,10 @@ class ColorAnalysisTask(CmdLineTask):
                                magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
                                unitScale=self.unitScale)
                 colorColor4MagPlots(dataId, filenamer(dataId, description=nameStr, style="noFitMagBins"),
-                                    self.log,
-                                    decentColorStars("HSC-Z", "NB0921"), decentColorStars("NB0921", "HSC-Y"),
-                                    decentColorGalaxies("HSC-Z", "NB0921"),
-                                    decentColorGalaxies("NB0921", "HSC-Y"),
+                                    self.log, catColors("HSC-Z", "NB0921", mags, decentStars),
+                                    catColors("NB0921", "HSC-Y", mags, decentStars),
+                                    catColors("HSC-Z", "NB0921", mags, decentGalaxies),
+                                    catColors("NB0921", "HSC-Y", mags, decentGalaxies),
                                     decentStarsMag, decentGalaxiesMag,
                                     "z-n921  [{0:s}]".format(fluxColStr),
                                     "n921-y  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
