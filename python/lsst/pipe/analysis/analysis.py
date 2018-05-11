@@ -1,16 +1,18 @@
 from __future__ import print_function
 
 import matplotlib
-matplotlib.use("Agg")
+matplotlib.use("Agg")  # noqa E402
 import matplotlib.pyplot as plt
 from matplotlib.ticker import NullFormatter, AutoMinorLocator
 import numpy as np
-np.seterr(all="ignore")
+np.seterr(all="ignore")  # noqa E402
 
 from lsst.pex.config import Config, Field, ListField, DictField
 
-from .utils import *
-from .plotUtils import *
+from .utils import Data, Stats, e1Resids, e2Resids, checkIdLists, fluxToPlotString
+from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotText, plotCameraOutline,
+                        plotTractOutline, plotPatchOutline, plotCcdOutline, labelCamera, getQuiver,
+                        getRaDecMinMaxPatchList, bboxToRaDec)
 
 __all__ = ["AnalysisConfig", "Analysis"]
 
@@ -21,11 +23,10 @@ class AnalysisConfig(Config):
     flags = ListField(dtype=str, doc="Flags of objects to ignore",
                       default=["base_SdssCentroid_flag", "slot_Centroid_flag", "base_PsfFlux_flag",
                                "base_PixelFlags_flag_saturatedCenter",
-                               "base_PixelFlags_flag_interpolatedCenter",
                                "base_ClassificationExtendedness_flag"])
     clip = Field(dtype=float, default=4.0, doc="Rejection threshold (stdev)")
     magThreshold = Field(dtype=float, default=21.0, doc="Magnitude threshold to apply")
-    magPlotMin = Field(dtype=float, default=14.0, doc="Minimum magnitude to plot")
+    magPlotMin = Field(dtype=float, default=14.5, doc="Minimum magnitude to plot")
     magPlotMax = Field(dtype=float, default=26.0, doc="Maximum magnitude to plot")
     magPlotStarMin = DictField(
         keytype=str,
@@ -80,7 +81,7 @@ class Analysis(object):
         self.goodKeys = goodKeys  # include if goodKey = True
         self.calibUsedOnly = len([key for key in self.goodKeys if "Used" in key])
         if self.calibUsedOnly > 0:
-            self.magThreshold = 99 # Want to plot all calibUsed
+            self.magThreshold = 99  # Want to plot all calibUsed
 
         self.prefix = prefix
         self.errFunc = errFunc
@@ -109,7 +110,7 @@ class Analysis(object):
                 "Catalog being used for flags does not have the same object list as the data catalog")
         # Don't have flags in match and overlap catalogs (already removed in the latter)
         if ("matches" not in self.shortName and "overlap" not in self.shortName and
-            "quiver" not in self.shortName):
+                "quiver" not in self.shortName):
             for ff in set(list(self.config.flags) + flags):
                 if prefix + ff in flagsCat.schema:
                     self.good &= ~flagsCat[prefix + ff]
@@ -122,21 +123,23 @@ class Analysis(object):
                                     colorList[value], self.quantityError, name in labeller.plot) for
                          name, value in labeller.labels.items()}
             self.stats = self.statistics(forcedMean=forcedMean)
-            # Make sure you have some good data to plot
-            for name in labeller.plot:
-                if (self.stats[name].num) == 0:
-                    raise RuntimeError("No good data points to plot for sample labelled: {:}".format(name))
-            # Ensure plot limits always encompass at least mean +/- 2.5*stdev, at most mean +/- 12.0*stddev,
-            # and clipped stats range + 15%
+            # Make sure you have some good data to plot: only check first dataset in labeller.plot
+            # list as it is the most important one (and the only available in many cases where
+            # StarGalaxyLabeller is used.
+            if (self.stats[labeller.plot[0]].num) == 0:
+                raise RuntimeError("No good data points to plot for sample labelled: {:}".
+                                   format(labeller.plot[0]))
+            # Ensure plot limits always encompass at least mean +/- 6.0*stdev, at most mean +/- 20.0*stddev,
+            # and clipped stats range + 25%
             if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar", "resolution"]):
-                self.qMin = max(min(self.qMin, self.stats["star"].mean - 2.5*self.stats["star"].stdev,
-                                self.stats["star"].median - 1.15*self.stats["star"].clip),
-                                min(self.stats["star"].mean - 12.0*self.stats["star"].stdev,
+                self.qMin = max(min(self.qMin, self.stats["star"].mean - 6.0*self.stats["star"].stdev,
+                                self.stats["star"].median - 1.25*self.stats["star"].clip),
+                                min(self.stats["star"].mean - 20.0*self.stats["star"].stdev,
                                     -0.005*self.unitScale))
             if not any(ss in self.shortName for ss in ["footNpix", "pStar", "resolution"]):
-                self.qMax = min(max(self.qMax, self.stats["star"].mean + 2.5*self.stats["star"].stdev,
-                                self.stats["star"].median + 1.15*self.stats["star"].clip),
-                                max(self.stats["star"].mean + 12.0*self.stats["star"].stdev,
+                self.qMax = min(max(self.qMax, self.stats["star"].mean + 6.0*self.stats["star"].stdev,
+                                self.stats["star"].median + 1.25*self.stats["star"].clip),
+                                max(self.stats["star"].mean + 20.0*self.stats["star"].stdev,
                                     0.005*self.unitScale))
 
     def plotAgainstMag(self, filename, stats=None, camera=None, ccdList=None, tractInfo=None, patchList=None,
@@ -148,7 +151,7 @@ class Analysis(object):
         dataPoints = []
         ptSize = None
         for name, data in self.data.items():
-            if len(data.mag) == 0:
+            if not data.mag.any():
                 continue
             if ptSize is None:
                 ptSize = setPtSize(len(data.mag))
@@ -167,12 +170,12 @@ class Analysis(object):
             plotText(zpLabel, plt, axes, 0.13, -0.09, prefix="zp: ", color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="zp: ", color="green")
-        fig.savefig(filename)
+        fig.savefig(filename, dpi=120)
         plt.close(fig)
 
     def plotAgainstMagAndHist(self, log, filename, stats=None, camera=None, ccdList=None, tractInfo=None,
                               patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
-                              plotRunStats=True, highlightList=None, filterStr=None):
+                              plotRunStats=True, highlightList=None, filterStr=None, extraLabels=None):
         """Plot quantity against magnitude with side histogram"""
         if filterStr is None:
             filterStr = ''
@@ -203,7 +206,7 @@ class Analysis(object):
         axScatter.tick_params(which="both", direction="in", labelsize=9)
 
         if camera is not None and ccdList is not None:
-            if len(ccdList) > 0:
+            if ccdList:
                 axTopRight = plt.axes(topRight)
                 axTopRight.set_aspect("equal")
                 plotCameraOutline(plt, axTopRight, camera, ccdList)
@@ -215,46 +218,52 @@ class Analysis(object):
 
         inLimits = self.data["star"].quantity < self.qMax
         inLimits &= self.data["star"].quantity > self.qMin
-        if len(self.data["star"].quantity) > 0:
+        if self.data["star"].quantity.any():
             if len(self.data["star"].quantity[inLimits]) < max(1.0, 0.35*len(self.data["star"].quantity)):
                 log.info("No data within limits...decreasing/increasing qMin/qMax")
-            while (len(self.data["star"].quantity[inLimits]) < max(1.0, 0.35*len(self.data["star"].quantity))):
+            while (len(self.data["star"].quantity[inLimits]) <
+                   max(1.0, 0.35*len(self.data["star"].quantity))):
                 self.qMin -= 0.1*np.abs(self.qMin)
                 self.qMax += 0.1*self.qMax
                 inLimits = self.data["star"].quantity < self.qMax
                 inLimits &= self.data["star"].quantity > self.qMin
 
-        # Make sure plot limit extends low enough to show star/galaxy separation line.
+        # Make sure plot limit extends low enough to show well below the star/galaxy separation line.
         # Add delta as opposed to directly changing self.qMin to not affect other plots
         deltaMin = 0.0
         if "galaxy" in self.data and len(self.data["galaxy"].quantity) > 0 and "-mag_" in filename:
             if "GaussianFlux" in filename:
-                galMin = np.round(2.5*np.log10(self.config.visitClassFluxRatio) - 0.015, 2)*self.unitScale
+                galMin = np.round(2.5*np.log10(self.config.visitClassFluxRatio) - 0.08, 2)*self.unitScale
                 deltaMin = max(0.0, self.qMin - galMin)
             if "CModel" in filename:
-                galMin = np.round(2.5*np.log10(self.config.coaddClassFluxRatio) - 0.015, 2)*self.unitScale
+                galMin = np.round(2.5*np.log10(self.config.coaddClassFluxRatio) - 0.08, 2)*self.unitScale
                 deltaMin = max(0.0, self.qMin - galMin)
 
         magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
         if "matches" in filename:  # narrow magnitude plotting limits for matches
             magMin += 1
             magMax -= 1
-        if self.calibUsedOnly > 0:
+        if self.calibUsedOnly > 0 or "color" in filename or "visit" not in filename:
             if filterStr in self.config.magPlotStarMin.keys():
                 magMin = self.config.magPlotStarMin[filterStr]
+        if self.calibUsedOnly > 0 or "color" in filename:
             if filterStr in self.config.magPlotStarMax.keys():
                 magMax = self.config.magPlotStarMax[filterStr]
-
         axScatter.set_xlim(magMin, magMax)
         yDelta = 0.01*(self.qMax - (self.qMin - deltaMin))
         axScatter.set_ylim((self.qMin - deltaMin) + yDelta, self.qMax - yDelta)
 
+        # Get current y limits for scatter plot to base histogram bin sizing on
+        axScatterY1 = axScatter.get_ylim()[0]
+        axScatterY2 = axScatter.get_ylim()[1]
+
         nxDecimal = int(-1.0*np.around(np.log10(0.05*abs(magMax - magMin)) - 0.5))
         xBinwidth = min(0.1, np.around(0.05*abs(magMax - magMin), nxDecimal))
         xBins = np.arange(magMin + 0.5*xBinwidth, magMax + 0.5*xBinwidth, xBinwidth)
-        nyDecimal = int(-1.0*np.around(np.log10(0.05*abs(self.qMax - (self.qMin- deltaMin))) - 0.5))
-        yBinwidth = max(0.5/10**nyDecimal, np.around(0.02*abs(self.qMax - (self.qMin - deltaMin)), nyDecimal))
-        yBins = np.arange((self.qMin - deltaMin) - 0.5*yBinwidth, self.qMax + 0.55*yBinwidth, yBinwidth)
+        nyDecimal = int(-1.0*np.around(np.log10(0.05*abs(axScatterY2 - (axScatterY1 - deltaMin))) - 0.5))
+        yBinwidth = max(0.5/10**nyDecimal, np.around(0.02*abs(axScatterY2 - (axScatterY1 - deltaMin)),
+                                                     nyDecimal))
+        yBins = np.arange((axScatterY1 - deltaMin) - 0.5*yBinwidth, axScatterY2 + 0.55*yBinwidth, yBinwidth)
         axHistx.set_xlim(axScatter.get_xlim())
         axHisty.set_ylim(axScatter.get_ylim())
         axHistx.set_yscale("log", nonposy="clip")
@@ -276,7 +285,10 @@ class Analysis(object):
         runStats = []
         ptSize = None
         for name, data in self.data.items():
-            if len(data.mag) == 0:
+            if not data.plot:
+                log.info("Not plotting data for dataset: {0:s} (N = {1:d})".format(name, len(data.mag)))
+                continue
+            if not data.mag.any():
                 log.info("No data for dataset: {:s}".format(name))
                 continue
             if ptSize is None:
@@ -297,8 +309,8 @@ class Analysis(object):
                     numHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins))
                     # Only plot running stats if there are a significant number of data points per bin.
                     # Computed here as the mean number in the brightest 20% of the bins which we require
-                    # to be greater than 5.
-                    if numHist[0:max(1, int(0.2*len(xSyBins)))].mean() > 5:
+                    # to be greater than 12.
+                    if numHist[0:max(1, int(0.2*len(xSyBins)))].mean() > 12:
                         syHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
                                                         weights=data.quantity[belowThresh])
                         syHist2, datahist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
@@ -315,9 +327,11 @@ class Analysis(object):
                     label = flag.replace("merge_measurement", "ref")
                     highlightSelection = data.catalog[flag] > threshValue
                     if name == "star":
-                        dataPoints.append(axScatter.scatter(
-                                data.mag[highlightSelection], data.quantity[highlightSelection],
-                                s=1.3*ptSize, marker="o", facecolors="none", edgecolors=color, label=label))
+                        dataPoints.append(
+                            axScatter.scatter(data.mag[highlightSelection],
+                                              data.quantity[highlightSelection],
+                                              s=1.3*ptSize, marker="o", facecolors="none",
+                                              edgecolors=color, label=label))
                     else:
                         axScatter.scatter(data.mag[highlightSelection], data.quantity[highlightSelection],
                                           s=1.3*ptSize, marker="o", facecolors="none", edgecolors=color)
@@ -359,12 +373,12 @@ class Analysis(object):
         xLoc, yLoc = 0.09, 1.405
         lenNameMax = 0
         for name, data in self.data.items():
-            if len(data.mag) > 0:
+            if data.mag.any():
                 lenNameMax = len(name) if len(name) > lenNameMax else lenNameMax
         xLoc += 0.02*lenNameMax
 
         for name, data in self.data.items():
-            if len(data.mag) == 0:
+            if not (data.mag.any() and data.plot):
                 continue
             yLoc -= 0.05
             plt.text(xLoc, yLoc, "Ntotal = " + str(len(data.mag)), ha="left", va="center",
@@ -375,7 +389,10 @@ class Analysis(object):
             plotText(zpLabel, plt, axScatter, 0.09, -0.11, prefix="zp: ", color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axScatter, 0.87, -0.11, prefix="cat: ", color="green")
-        plt.savefig(filename)
+        if extraLabels is not None:
+            for i, extraLabel in enumerate(extraLabels):
+                plotText(extraLabel, plt, axScatter, 0.29, 0.06 + i*0.05, fontSize=10, color="black")
+        plt.savefig(filename, dpi=120)
         plt.close()
 
     def plotHistogram(self, filename, numBins=51, stats=None, hscRun=None, matchRadius=None, zpLabel=None,
@@ -385,7 +402,7 @@ class Analysis(object):
         axes.axvline(0, linestyle="--", color="0.6")
         numMax = 0
         for name, data in self.data.items():
-            if len(data.mag) == 0:
+            if not data.mag.any():
                 continue
             good = np.isfinite(data.quantity)
             if self.magThreshold is not None:
@@ -417,14 +434,14 @@ class Analysis(object):
             plotText(zpLabel, plt, axes, 0.13, -0.09, prefix="zp: ", color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
-        fig.savefig(filename)
+        fig.savefig(filename, dpi=120)
         plt.close(fig)
 
     def plotSkyPosition(self, filename, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
                         camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
                         matchRadius=None, zpLabel=None, highlightList=None, forcedStr=None, dataName="star"):
         """Plot quantity as a function of position"""
-        pad = 0.02 # Number of degrees to pad the axis ranges
+        pad = 0.02  # Number of degrees to pad the axis ranges
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
         dec = np.rad2deg(self.catalog[self.prefix + "coord_dec"])
         raMin, raMax = np.round(ra.min() - pad, 2), np.round(ra.max() + pad, 2)
@@ -444,7 +461,7 @@ class Analysis(object):
         good = (self.mag < magThreshold if magThreshold > 0 else np.ones(len(self.mag), dtype=bool))
 
         if ((dataName == "star" or "matches" in filename or "compare" in filename) and
-            "pStar" not in filename and "race-" not in filename and "resolution" not in filename):
+                "pStar" not in filename and "race-" not in filename and "resolution" not in filename):
             vMin, vMax = 0.4*self.qMin, 0.4*self.qMax
             if "-mag_" in filename or any(ss in filename for ss in ["compareUnforced", "overlap"]):
                 vMin, vMax = 0.6*vMin, 0.6*vMax
@@ -475,7 +492,7 @@ class Analysis(object):
             if "GaussianFlux" in filename:
                 vMin, vMax = 5.0*self.qMin, 0.0
         if (dataName == "galaxy" and ("CircularApertureFlux" in filename or "KronFlux" in filename) and
-            "compare" not in filename and "overlap" not in filename):
+                "compare" not in filename and "overlap" not in filename):
             vMin, vMax = 4.0*self.qMin, 1.0*self.qMax
 
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.35"))
@@ -498,7 +515,7 @@ class Analysis(object):
         for name, data in self.data.items():
             if name is not dataName:
                 continue
-            if len(data.mag) == 0:
+            if not data.mag.any():
                 continue
             if ptSize is None:
                 ptSize = 0.7*setPtSize(len(data.mag))
@@ -539,9 +556,11 @@ class Analysis(object):
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
         if highlightList is not None:
-            axes.legend(loc='upper left', bbox_to_anchor=(-0.05, 1.15), fancybox=True, shadow=True, fontsize=7)
+            axes.legend(loc='upper left', bbox_to_anchor=(-0.05, 1.15), fancybox=True, shadow=True,
+                        fontsize=7)
         else:
-            axes.legend(loc='upper left', bbox_to_anchor=(-0.02, 1.08), fancybox=True, shadow=True, fontsize=9)
+            axes.legend(loc='upper left', bbox_to_anchor=(-0.02, 1.08), fancybox=True, shadow=True,
+                        fontsize=9)
 
         meanStr = "{0.mean:.4f}".format(stats0)
         stdevStr = "{0.stdev:.4f}".format(stats0)
@@ -567,13 +586,13 @@ class Analysis(object):
                           xycoords="axes fraction", ha="left", va="center", fontsize=8)
         axes.annotate("stdev = ", xy=(x0, 1.035),
                       xycoords="axes fraction", ha="right", va="center", fontsize=8)
-        axes.annotate(stdevStr,  xy=(x0 + lenStr, 1.035),
+        axes.annotate(stdevStr, xy=(x0 + lenStr, 1.035),
                       xycoords="axes fraction", ha="right", va="center", fontsize=8)
         axes.annotate(r"N = {0} [mag<{1:.1f}]".format(stats0.num, magThreshold),
                       xy=(x0 + lenStr + 0.012, 1.035),
                       xycoords="axes fraction", ha="left", va="center", fontsize=8)
 
-        fig.savefig(filename)
+        fig.savefig(filename, dpi=150)
         plt.close(fig)
 
     def plotRaDec(self, filename, stats=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None):
@@ -588,7 +607,7 @@ class Analysis(object):
         axes[1].axhline(0, linestyle="--", color="0.6")
         ptSize = None
         for name, data in self.data.items():
-            if len(data.mag) == 0:
+            if not data.mag.any():
                 continue
             if ptSize is None:
                 ptSize = setPtSize(len(data.mag))
@@ -615,7 +634,7 @@ class Analysis(object):
             plotText(zpLabel, plt, axes[0], 0.13, -0.09, prefix="zp: ", color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes[0], 0.85, -0.09, prefix="cat: ", color="green")
-        fig.savefig(filename)
+        fig.savefig(filename, dpi=120)
         plt.close(fig)
 
     def plotQuiver(self, catalog, filename, log, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
@@ -649,11 +668,11 @@ class Analysis(object):
             bad |= -2.5*np.log10(catalog[self.fluxColumn]) > self.magThreshold
             catStr = "ClassExtendedness"
         else:
-            raise RuntimeError(
-                "Neither calib_psfUsed nor base_ClassificationExtendedness_value in schema. Skip quiver plot.")
+            raise RuntimeError("Neither calib_psfUsed nor base_ClassificationExtendedness_value in schema. "
+                               "Skip quiver plot.")
         catalog = catalog[~bad].copy(deep=True)
 
-        pad = 0.02 # Number of degrees to pad the axis ranges
+        pad = 0.02  # Number of degrees to pad the axis ranges
         ra = np.rad2deg(catalog["coord_ra"])
         dec = np.rad2deg(catalog["coord_dec"])
         raMin, raMax = np.round(ra.min() - pad, 2), np.round(ra.max() + pad, 2)
@@ -687,7 +706,7 @@ class Analysis(object):
         e1 = e1(catalog)
         e2 = e2Resids(compareCol, psfCompareCol)
         e2 = e2(catalog)
-        e = np.sqrt(e1**2 +e2**2)
+        e = np.sqrt(e1**2 + e2**2)
 
         nz = matplotlib.colors.Normalize()
         nz.autoscale(e)
@@ -719,7 +738,7 @@ class Analysis(object):
                       ha="right", va="center", fontsize=8)
         axes.annotate("stdev = ", xy=(x0, 1.035), xycoords="axes fraction",
                       ha="right", va="center", fontsize=8)
-        axes.annotate(stdevStr,  xy=(x0 + lenStr, 1.035), xycoords="axes fraction",
+        axes.annotate(stdevStr, xy=(x0 + lenStr, 1.035), xycoords="axes fraction",
                       ha="right", va="center", fontsize=8)
         axes.annotate(r"N = {0}".format(stats0.num), xy=(x0 + lenStr + 0.02, 1.035), xycoords="axes fraction",
                       ha="left", va="center", fontsize=8)
@@ -736,12 +755,12 @@ class Analysis(object):
             plotText(forcedStr, plt, axes, 0.99, -0.1, prefix="cat: ", fontSize=8, color="green")
         axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
 
-        fig.savefig(filename)
+        fig.savefig(filename, dpi=150)
         plt.close(fig)
 
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
                 tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
-                postFix="", plotRunStats=True, highlightList=None):
+                postFix="", plotRunStats=True, highlightList=None, extraLabels=None):
         """Make all plots"""
         stats = self.stats
         self.plotAgainstMagAndHist(log, filenamer(dataId, description=self.shortName,
@@ -749,7 +768,8 @@ class Analysis(object):
                                    stats=stats, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                    patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                    zpLabel=zpLabel, forcedStr=forcedStr, plotRunStats=plotRunStats,
-                                   highlightList=highlightList, filterStr=dataId['filter'])
+                                   highlightList=highlightList, filterStr=dataId['filter'],
+                                   extraLabels=extraLabels)
 
         if self.config.doPlotOldMagsHist:
             self.plotAgainstMag(filenamer(dataId, description=self.shortName, style="psfMag" + postFix),
@@ -798,7 +818,7 @@ class Analysis(object):
             if self.quantityError is not None:
                 stats[name].sysErr = self.calculateSysError(data.quantity, data.error,
                                                             good, forcedMean=forcedMean)
-            if len(stats) == 0:
+            if not stats:
                 stats = None
         return stats
 

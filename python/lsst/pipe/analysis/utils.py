@@ -4,6 +4,8 @@ import os
 import re
 
 import numpy as np
+import scipy.odr as scipyOdr
+import scipy.stats as scipyStats
 try:
     import fastparquet
 except ImportError:
@@ -36,11 +38,12 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "addPatchColumn", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
            "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
            "fluxToPlotString", "andCatalog", "writeParquet", "getRepoInfo", "findCcdKey",
-           "getCcdNameRefList", "getDataExistsRefList"]
+           "getCcdNameRefList", "getDataExistsRefList", "orthogonalRegression", "distanceSquaredToPoly",
+           "p2p1CoeffsFromLinearFit", "makeEqnStr", "catColors"]
+
 
 def writeParquet(table, path, badArray=None):
-    """
-    Write an afwTable into Parquet format
+    """Write an afwTable into Parquet format
 
     Parameters
     ----------
@@ -62,7 +65,6 @@ def writeParquet(table, path, badArray=None):
     then to a pandas DataFrame, which is then written to parquet
     format using the fastparquet library.  If fastparquet is not
     available, then it will do nothing.
-
     """
     if fastparquet is None:
         return
@@ -83,6 +85,7 @@ class Filenamer(object):
         self.butler = butler
         self.dataset = dataset
         self.dataId = dataId
+
     def __call__(self, dataId, **kwargs):
         filename = self.butler.get(self.dataset + "_filename", self.dataId, **kwargs)[0]
         # When trying to write to a different rerun (or output), if the given dataset exists in the _parent
@@ -96,16 +99,19 @@ class Filenamer(object):
         safeMakeDir(os.path.dirname(filename))
         return filename
 
+
 class Data(Struct):
     def __init__(self, catalog, quantity, mag, selection, color, error=None, plot=True):
         Struct.__init__(self, catalog=catalog[selection].copy(deep=True), quantity=quantity[selection],
                         mag=mag[selection], selection=selection, color=color, plot=plot,
                         error=error[selection] if error is not None else None)
 
+
 class Stats(Struct):
     def __init__(self, dataUsed, num, total, mean, stdev, forcedMean, median, clip):
         Struct.__init__(self, dataUsed=dataUsed, num=num, total=total, mean=mean, stdev=stdev,
                         forcedMean=forcedMean, median=median, clip=clip)
+
     def __repr__(self):
         return "Stats(mean={0.mean:.4f}; stdev={0.stdev:.4f}; num={0.num:d}; total={0.total:d}; " \
             "median={0.median:.4f}; clip={0.clip:.4f}; forcedMean={0.forcedMean:})".format(self)
@@ -117,6 +123,7 @@ class Enforcer(object):
         self.requireGreater = requireGreater
         self.requireLess = requireLess
         self.doRaise = doRaise
+
     def __call__(self, stats, dataId, log, description):
         for label in self.requireGreater:
             for ss in self.requireGreater[label]:
@@ -137,14 +144,17 @@ class Enforcer(object):
                     if self.doRaise:
                         raise AssertionError(text)
 
+
 class MagDiff(object):
     """Functor to calculate magnitude difference"""
     def __init__(self, col1, col2, unitScale=1.0):
         self.col1 = col1
         self.col2 = col2
         self.unitScale = unitScale
+
     def __call__(self, catalog):
         return -2.5*np.log10(catalog[self.col1]/catalog[self.col2])*self.unitScale
+
 
 class MagDiffMatches(object):
     """Functor to calculate magnitude difference for match catalog"""
@@ -153,12 +163,14 @@ class MagDiffMatches(object):
         self.colorterm = colorterm
         self.zp = zp
         self.unitScale = unitScale
+
     def __call__(self, catalog):
         ref1 = -2.5*np.log10(catalog["ref_" + self.colorterm.primary + "_flux"])
         ref2 = -2.5*np.log10(catalog["ref_" + self.colorterm.secondary + "_flux"])
         ref = self.colorterm.transformMags(ref1, ref2)
         src = self.zp - 2.5*np.log10(catalog["src_" + self.column])
         return (src - ref)*self.unitScale
+
 
 class MagDiffCompare(object):
     """Functor to calculate magnitude difference between two entries in comparison catalogs
@@ -168,6 +180,7 @@ class MagDiffCompare(object):
     def __init__(self, column, unitScale=1.0):
         self.column = column
         self.unitScale = unitScale
+
     def __call__(self, catalog):
         src1 = -2.5*np.log10(catalog["first_" + self.column])
         src2 = -2.5*np.log10(catalog["second_" + self.column])
@@ -182,6 +195,7 @@ class AstrometryDiff(object):
         self.declination1 = declination1
         self.declination2 = declination2
         self.unitScale = unitScale
+
     def __call__(self, catalog):
         first = catalog[self.first]
         second = catalog[self.second]
@@ -194,6 +208,7 @@ class traceSize(object):
     """Functor to calculate trace radius size for sources"""
     def __init__(self, column):
         self.column = column
+
     def __call__(self, catalog):
         srcSize = np.sqrt(0.5*(catalog[self.column + "_xx"] + catalog[self.column + "_yy"]))
         return np.array(srcSize)
@@ -204,6 +219,7 @@ class psfTraceSizeDiff(object):
     def __init__(self, column, psfColumn):
         self.column = column
         self.psfColumn = psfColumn
+
     def __call__(self, catalog):
         srcSize = np.sqrt(0.5*(catalog[self.column + "_xx"] + catalog[self.column + "_yy"]))
         psfSize = np.sqrt(0.5*(catalog[self.psfColumn + "_xx"] + catalog[self.psfColumn + "_yy"]))
@@ -215,6 +231,7 @@ class traceSizeCompare(object):
     """Functor to calculate trace radius size difference (%) between objects in matched catalog"""
     def __init__(self, column):
         self.column = column
+
     def __call__(self, catalog):
         srcSize1 = np.sqrt(0.5*(catalog["first_" + self.column + "_xx"] +
                                 catalog["first_" + self.column + "_yy"]))
@@ -228,6 +245,7 @@ class percentDiff(object):
     """Functor to calculate the percent difference between a given column entry in matched catalog"""
     def __init__(self, column):
         self.column = column
+
     def __call__(self, catalog):
         value1 = catalog["first_" + self.column]
         value2 = catalog["second_" + self.column]
@@ -241,6 +259,7 @@ class e1Resids(object):
         self.column = column
         self.psfColumn = psfColumn
         self.unitScale = unitScale
+
     def __call__(self, catalog):
         srcE1 = ((catalog[self.column + "_xx"] - catalog[self.column + "_yy"])/
                  (catalog[self.column + "_xx"] + catalog[self.column + "_yy"]))
@@ -249,12 +268,14 @@ class e1Resids(object):
         e1Resids = srcE1 - psfE1
         return np.array(e1Resids)*self.unitScale
 
+
 class e2Resids(object):
     """Functor to calculate e2 ellipticity residuals for a given object and psf model"""
     def __init__(self, column, psfColumn, unitScale=1.0):
         self.column = column
         self.psfColumn = psfColumn
         self.unitScale = unitScale
+
     def __call__(self, catalog):
         srcE2 = (2.0*catalog[self.column + "_xy"]/
                  (catalog[self.column + "_xx"] + catalog[self.column + "_yy"]))
@@ -268,6 +289,7 @@ class e1ResidsHsmRegauss(object):
     """Functor to calculate HSM e1 ellipticity residuals for a given object and psf model"""
     def __init__(self, unitScale=1.0):
         self.unitScale = unitScale
+
     def __call__(self, catalog):
         srcE1 = catalog["ext_shapeHSM_HsmShapeRegauss_e1"]
         psfE1 = ((catalog["ext_shapeHSM_HsmPsfMoments_xx"] - catalog["ext_shapeHSM_HsmPsfMoments_yy"])/
@@ -280,6 +302,7 @@ class e2ResidsHsmRegauss(object):
     """Functor to calculate HSM e1 ellipticity residuals for a given object and psf model"""
     def __init__(self, unitScale=1.0):
         self.unitScale = unitScale
+
     def __call__(self, catalog):
         srcE2 = catalog["ext_shapeHSM_HsmShapeRegauss_e2"]
         psfE2 = (2.0*catalog["ext_shapeHSM_HsmPsfMoments_xy"]/
@@ -293,6 +316,7 @@ class FootNpixDiffCompare(object):
     """
     def __init__(self, column):
         self.column = column
+
     def __call__(self, catalog):
         nPix1 = catalog["first_" + self.column]
         nPix2 = catalog["second_" + self.column]
@@ -302,12 +326,13 @@ class FootNpixDiffCompare(object):
 class MagDiffErr(object):
     """Functor to calculate magnitude difference error"""
     def __init__(self, column, unitScale=1.0):
-        zp = 27.0 # Exact value is not important, since we're differencing the magnitudes
+        zp = 27.0  # Exact value is not important, since we're differencing the magnitudes
         self.column = column
         self.calib = afwImage.Calib()
         self.calib.setFluxMag0(10.0**(0.4*zp))
         self.calib.setThrowOnNegativeFlux(False)
         self.unitScale = unitScale
+
     def __call__(self, catalog):
         mag1, err1 = self.calib.getMagnitude(catalog["first_" + self.column],
                                              catalog["first_" + self.column + "Sigma"])
@@ -315,15 +340,18 @@ class MagDiffErr(object):
                                              catalog["second_" + self.column + "Sigma"])
         return np.sqrt(err1**2 + err2**2)*self.unitScale
 
+
 class ApCorrDiffErr(object):
     """Functor to calculate magnitude difference error"""
     def __init__(self, column, unitScale=1.0):
         self.column = column
         self.unitScale = unitScale
+
     def __call__(self, catalog):
         err1 = catalog["first_" + self.column + "Sigma"]
         err2 = catalog["second_" + self.column + "Sigma"]
         return np.sqrt(err1**2 + err2**2)*self.unitScale
+
 
 class CentroidDiff(object):
     """Functor to calculate difference in astrometry"""
@@ -340,6 +368,7 @@ class CentroidDiff(object):
         first = self.first + self.centroid1 + "_" + self.component
         second = self.second + self.centroid2 + "_" + self.component
         return (catalog[first] - catalog[second])*self.unitScale
+
 
 class CentroidDiffErr(CentroidDiff):
     """Functor to calculate difference error for astrometry"""
@@ -375,6 +404,7 @@ def deconvMom(catalog):
     psf = catalog[psfXxName] + catalog[psfYyName]
     return np.where(np.isfinite(hsm), hsm, sdss) - psf
 
+
 def deconvMomStarGal(catalog):
     """Calculate P(star) from deconvolved moments"""
     rTrace = deconvMom(catalog)
@@ -385,6 +415,7 @@ def deconvMomStarGal(catalog):
             1.83899834142e-20*rTrace*rTrace*rTrace)
     return 1.0/(1.0 + np.exp(-poly))
 
+
 def concatenateCatalogs(catalogList):
     assert len(catalogList) > 0, "No catalogs to concatenate"
     template = catalogList[0]
@@ -394,17 +425,18 @@ def concatenateCatalogs(catalogList):
         catalog.extend(cat, True)
     return catalog
 
+
 def joinMatches(matches, first="first_", second="second_"):
-    if len(matches)==0:
+    if not matches:
         return []
 
-    mapperList = afwTable.SchemaMapper.join([matches[0].first.schema,
-                                                matches[0].second.schema],
+    mapperList = afwTable.SchemaMapper.join([matches[0].first.schema, matches[0].second.schema],
                                             [first, second])
     firstAliases = matches[0].first.schema.getAliasMap()
     secondAliases = matches[0].second.schema.getAliasMap()
     schema = mapperList[0].getOutputSchema()
-    distanceKey = schema.addField("distance", type="Angle", doc="Distance between %s and %s" % (first, second))
+    distanceKey = schema.addField("distance", type="Angle",
+                                  doc="Distance between {0:s} and {1:s}".format(first, second))
     catalog = afwTable.BaseCatalog(schema)
     aliases = catalog.schema.getAliasMap()
     catalog.reserve(len(matches))
@@ -419,6 +451,7 @@ def joinMatches(matches, first="first_", second="second_"):
     for k, v in secondAliases.items():
         aliases.set(second + k, second + v)
     return catalog
+
 
 def checkIdLists(catalog1, catalog2, prefix=""):
     # Check to see if two catalogs have an identical list of objects by id
@@ -437,6 +470,7 @@ def checkIdLists(catalog1, catalog2, prefix=""):
                                prefix + "objectId)")
 
     return np.all(catalog1[idStrList[0]] == catalog2[idStrList[1]])
+
 
 def checkPatchOverlap(patchList, tractInfo):
     # Given a list of patch dataIds along with the associated tractInfo, check if any of the patches overlap
@@ -457,6 +491,7 @@ def checkPatchOverlap(patchList, tractInfo):
             break
     return overlappingPatches
 
+
 def joinCatalogs(catalog1, catalog2, prefix1="cat1_", prefix2="cat2_"):
     # Make sure catalogs entries are all associated with the same object
 
@@ -474,6 +509,7 @@ def joinCatalogs(catalog1, catalog2, prefix1="cat1_", prefix2="cat2_"):
         row.assign(s2, mapperList[1])
     return catalog
 
+
 def getFluxKeys(schema):
     """Retrieve the flux and flux error keys from a schema
     Both are returned as dicts indexed on the flux name (e.g. "flux.psf" or "cmodel.flux").
@@ -486,16 +522,17 @@ def getFluxKeys(schema):
     # Also check for any in HSC format
     fluxKeysHSC = dict((name, key) for name, key in schemaKeys.items() if
                        (re.search(r"^(flux\_\w+|\w+\_flux)$", name) or
-                        re.search(r"^(\w+flux\_\w+|\w+\_flux)$", name))
-                       and not re.search(r"^(\w+\_apcorr)$", name) and name + "_err" in schemaKeys)
+                        re.search(r"^(\w+flux\_\w+|\w+\_flux)$", name)) and not
+                       re.search(r"^(\w+\_apcorr)$", name) and name + "_err" in schemaKeys)
     errKeysHSC = dict((name + "_err", schemaKeys[name + "_err"]) for name in fluxKeysHSC.keys() if
-                       name + "_err" in schemaKeys)
-    if len(fluxKeysHSC) > 0:
+                      name + "_err" in schemaKeys)
+    if fluxKeysHSC:
         fluxKeys.update(fluxKeysHSC)
         errKeys.update(errKeysHSC)
-    if len(fluxKeys) == 0:
+    if not fluxKeys:
         raise RuntimeError("No flux keys found")
     return fluxKeys, errKeys
+
 
 def addColumnsToSchema(fromCat, toCat, colNameList, prefix=""):
     """Copy columns from fromCat to new version of toCat"""
@@ -525,6 +562,7 @@ def addColumnsToSchema(fromCat, toCat, colNameList, prefix=""):
 
     return newCatalog
 
+
 def addApertureFluxesHSC(catalog, prefix=""):
     mapper = afwTable.SchemaMapper(catalog[0].schema)
     mapper.addMinimalSchema(catalog[0].schema)
@@ -536,8 +574,8 @@ def addApertureFluxesHSC(catalog, prefix=""):
     # Just to 12 pixels for now...takes a long time...
     for ia in (4,):
         apFluxKey = schema.addField(apName + "_" + apRadii[ia] + "_flux", type="D",
-                                    doc="flux within " + apRadii[ia].replace("_", ".")
-                                    + "-pixel aperture", units="count")
+                                    doc="flux within " + apRadii[ia].replace("_", ".") + "-pixel aperture",
+                                    units="count")
         apFluxSigmaKey = schema.addField(apName + "_" + apRadii[ia] + "_fluxSigma", type="D",
                                          doc="1-sigma flux uncertainty")
     apFlagKey = schema.addField(apName + "_flag", type="Flag", doc="general failure flag")
@@ -555,6 +593,7 @@ def addApertureFluxesHSC(catalog, prefix=""):
         row.set(apFlagKey, source[prefix + "flux_aperture_flag"])
 
     return newCatalog
+
 
 def addFpPoint(det, catalog, prefix=""):
     # Compute Focal Plane coordinates for SdssCentroid of each source and add to schema
@@ -575,14 +614,15 @@ def addFpPoint(det, catalog, prefix=""):
         row.assign(source, mapper)
         try:
             center = afwGeom.Point2D(source[xCentroidKey], source[yCentroidKey])
-            posInPix = det.makeCameraPoint(center, cameraGeom.PIXELS)
-            fpPoint = det.transform(posInPix, cameraGeom.FOCAL_PLANE).getPoint()
-        except:
+            pixelsToFocalPlane = det.getTransform(cameraGeom.PIXELS, cameraGeom.FOCAL_PLANE)
+            fpPoint = pixelsToFocalPlane.applyForward(center)
+        except Exception:
             fpPoint = afwGeom.Point2D(np.nan, np.nan)
             row.set(fpFlag, True)
         row.set(fpxKey, fpPoint[0])
         row.set(fpyKey, fpPoint[1])
     return newCatalog
+
 
 def addFootprintNPix(catalog, fromCat=None, prefix=""):
     # Retrieve the number of pixels in an sources footprint and add to schema
@@ -604,12 +644,13 @@ def addFootprintNPix(catalog, fromCat=None, prefix=""):
         row.assign(srcTo, mapper)
         try:
             footNpix = srcFrom.getFootprint().getArea()
-        except:
+        except Exception:
             raise
-            footNpix = 0 # used to be np.nan, but didn't work.
+            footNpix = 0  # used to be np.nan, but didn't work.
             row.set(fpFlag, True)
         row.set(fpKey, footNpix)
     return newCatalog
+
 
 def rotatePixelCoord(s, width, height, nQuarter):
     """Rotate single (x, y) pixel coordinate such that LLC of detector in FP is (0, 0)
@@ -628,6 +669,7 @@ def rotatePixelCoord(s, width, height, nQuarter):
         s.set(xKey, y0)
         s.set(yKey, width - x0 - 1.0)
     return s
+
 
 def addRotPoint(catalog, width, height, nQuarter, prefix=""):
     # Compute rotated CCD pixel coords for comparing LSST vs HSC run centroids
@@ -653,6 +695,7 @@ def addRotPoint(catalog, width, height, nQuarter, prefix=""):
         row.set(rotyKey, rotPoint[1])
 
     return newCatalog
+
 
 def makeBadArray(catalog, flagList=[], onlyReadStars=False):
     """Create a boolean array indicating sources deemed unsuitable for qa analyses
@@ -682,6 +725,7 @@ def makeBadArray(catalog, flagList=[], onlyReadStars=False):
     if onlyReadStars and "base_ClassificationExtendedness_value" in catalog.schema:
         bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
     return bad
+
 
 def addQaBadFlag(catalog, badArray):
     """Add a flag for any sources deemed not appropriate for qa analyses
@@ -725,6 +769,7 @@ def addQaBadFlag(catalog, badArray):
         row.set(qaBadFlag, bool(badArray[i]))
     return newCatalog
 
+
 def addCcdColumn(catalog, ccd):
     """Add a column indicating the ccd number of the calexp on which the source was detected
 
@@ -765,11 +810,11 @@ def addCcdColumn(catalog, ccd):
     newCatalog = afwTable.SourceCatalog(schema)
     newCatalog.reserve(len(catalog))
 
-    for src in catalog:
-        row = newCatalog.addNew()
-        row.assign(src, mapper)
+    newCatalog.extend(catalog, mapper)
+    for row in newCatalog:
         row.set(ccdKey, ccd)
     return newCatalog
+
 
 def addPatchColumn(catalog, patch):
     """Add a column indicating the patch number of the coadd on which the source was detected
@@ -805,11 +850,11 @@ def addPatchColumn(catalog, patch):
     newCatalog = afwTable.SourceCatalog(schema)
     newCatalog.reserve(len(catalog))
 
-    for src in catalog:
-        row = newCatalog.addNew()
-        row.assign(src, mapper)
+    newCatalog.extend(catalog, mapper)
+    for row in newCatalog:
         row.set(patchKey, patch)
     return newCatalog
+
 
 def calibrateSourceCatalogMosaic(dataRef, catalog, fluxKeys=None, errKeys=None, zp=27.0):
     """Calibrate catalog with meas_mosaic results
@@ -830,6 +875,7 @@ def calibrateSourceCatalogMosaic(dataRef, catalog, fluxKeys=None, errKeys=None, 
         catalog[key] /= factor
     return catalog
 
+
 def calibrateSourceCatalog(catalog, zp):
     """Calibrate catalog in the case of no meas_mosaic results using FLUXMAG0 as zp
 
@@ -841,6 +887,7 @@ def calibrateSourceCatalog(catalog, zp):
     for name, key in list(fluxKeys.items()) + list(errKeys.items()):
         catalog[key] /= factor
     return catalog
+
 
 def calibrateCoaddSourceCatalog(catalog, zp):
     """Calibrate coadd catalog
@@ -854,6 +901,7 @@ def calibrateCoaddSourceCatalog(catalog, zp):
         catalog[key] /= factor
     return catalog
 
+
 def backoutApCorr(catalog):
     """Back out the aperture correction to all fluxes
     """
@@ -866,6 +914,7 @@ def backoutApCorr(catalog):
             catalog[k] /= catalog[k[:-5] + "_apCorr"]
     return catalog
 
+
 def matchJanskyToDn(matches):
     # LSST reads in a_net catalogs with flux in "janskys", so must convert back to DN
     JANSKYS_PER_AB_FLUX = 3631.0
@@ -877,6 +926,7 @@ def matchJanskyToDn(matches):
             m.first[k] /= JANSKYS_PER_AB_FLUX
     return matches
 
+
 def checkHscStack(metadata):
     """Check to see if data were processed with the HSC stack
     """
@@ -886,6 +936,7 @@ def checkHscStack(metadata):
         hscPipe = None
     return hscPipe
 
+
 def fluxToPlotString(fluxToPlot):
     """Return a more succint string for fluxes for label plotting
     """
@@ -894,6 +945,7 @@ def fluxToPlotString(fluxToPlot):
                   "base_GaussianFlux": "Gaussian",
                   "ext_photometryKron_KronFlux": "Kron",
                   "modelfit_CModel": "CModel",
+                  "modelfit_CModel_flux": "CModel",
                   "base_CircularApertureFlux_12_0": "CircAper 12pix"}
     if fluxToPlot in fluxStrMap:
         return fluxStrMap[fluxToPlot]
@@ -903,13 +955,15 @@ def fluxToPlotString(fluxToPlot):
 
 
 _eups = None
+
+
 def getEups():
     """Return a EUPS handle
 
     We instantiate this once only, because instantiation is expensive.
     """
     global _eups
-    from eups import Eups  #noqa Nothing else depends on eups, so prevent it from importing unless needed
+    from eups import Eups  # noqa Nothing else depends on eups, so prevent it from importing unless needed
     if not _eups:
         _eups = Eups()
     return _eups
@@ -924,6 +978,7 @@ def andCatalog(version):
         yield
     finally:
         eups.setup("astrometry_net_data", current, noRecursion=True)
+
 
 def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False):
     """Obtain the relevant repository information for the given dataRef
@@ -946,13 +1001,13 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
     isCoadd = True if "patch" in dataId else False
     ccdKey = None if isCoadd else findCcdKey(dataId)
     # Check metadata to see if stack used was HSC
-    metaStr = coaddName + coaddDataset if coaddName is not None else "calexp_md"
+    metaStr = coaddName + coaddDataset + "_md" if coaddName is not None else "calexp_md"
     metadata = butler.get(metaStr, dataId)
     hscRun = checkHscStack(metadata)
     dataset = "src"
     if doApplyUberCal:
         dataset = "wcs_hsc" if hscRun is not None else "jointcal_wcs"
-    skymap =  butler.get(coaddName + "Coadd_skyMap") if coaddName is not None else None
+    skymap = butler.get(coaddName + "Coadd_skyMap") if coaddName is not None else None
     wcs = None
     tractInfo = None
     if isCoadd:
@@ -974,6 +1029,7 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
         wcs = wcs,
         tractInfo = tractInfo,
     )
+
 
 def findCcdKey(dataId):
     """Determine the convention for identifying a "ccd" for the current camera
@@ -1003,6 +1059,7 @@ def findCcdKey(dataId):
                            (dataId, ccdKeyList))
     return ccdKey
 
+
 def getCcdNameRefList(dataRefList):
     ccdNameRefList = None
     ccdKey = findCcdKey(dataRefList[0].dataId)
@@ -1017,6 +1074,7 @@ def getCcdNameRefList(dataRefList):
     if ccdNameRefList is None:
         raise RuntimeError("Failed to create ccdNameRefList")
     return ccdNameRefList
+
 
 def getDataExistsRefList(dataRefList, dataset):
     dataExistsRefList = None
@@ -1033,3 +1091,193 @@ def getDataExistsRefList(dataRefList, dataset):
     if dataExistsRefList is None:
         raise RuntimeError("dataExistsRef list is empty")
     return dataExistsRefList
+
+
+def fLinear(p, x):
+    return p[0] + p[1]*x
+
+
+def fQuadratic(p, x):
+    return p[0] + p[1]*x + p[2]*x**2
+
+
+def fCubic(p, x):
+    return p[0] + p[1]*x + p[2]*x**2 + p[3]*x**3
+
+
+def orthogonalRegression(x, y, order, initialGuess=None):
+    """Perform an Orthogonal Distance Regression on the given data
+
+    Parameters:
+    ----------
+    x, y : `array`
+       Arrays of x and y data to fit
+    order : `int`, optional
+       Order of the polynomial to fit
+    initialGuess : `list` of `float`, optional
+       List of the polynomial coefficients (highest power first) of an initial guess to feed to the ODR fit.
+       If no initialGuess is provided, a simple linear fit is performed and used as the guess.
+
+    Returns:
+    -------
+    `list` of fit coefficients (highest power first to mimic np.polyfit return)
+    """
+    if initialGuess is None:
+        linReg = scipyStats.linregress(x, y)
+        initialGuess = [linReg[0], linReg[1]]
+        for i in range(order - 1):  # initialGuess here is linear, so need to pad array to match order
+            initialGuess.insert(0, 0.0)
+    if order == 1:
+        odrModel = scipyOdr.Model(fLinear)
+    elif order == 2:
+        odrModel = scipyOdr.Model(fQuadratic)
+    elif order == 3:
+        odrModel = scipyOdr.Model(fCubic)
+    else:
+        raise RuntimeError("Order must be between 1 and 3 (value requested, {:}, not accommodated)".
+                           format(order))
+    odrData = scipyOdr.Data(x, y)
+    orthDist = scipyOdr.ODR(odrData, odrModel, beta0=initialGuess)
+    orthRegFit = orthDist.run()
+
+    return list(reversed(orthRegFit.beta))
+
+
+def distanceSquaredToPoly(x1, y1, x2, poly):
+    """Calculate the square of the distance between point (x1, y1) and poly at x2
+
+    Parameters:
+    ----------
+    x1, y1 : `float`
+       Point from which to calculate the square of the distance to the the polynomial
+    x2 : `float`
+       Position on x axis from which to calculate the square of the distace between (x1, y1) and
+       poly (the position of the tangent of the polynomial curve closest to point (x1, y1))
+    poly : `numpy.lib.polynomial.poly1d`
+       Numpy polynomial fit from which to calculate the square of the distance to (x1, y1) at x2
+
+    Returns:
+    -------
+    `float` square of the distance between (x1, y1) and poly at x2
+    """
+    return (x2 - x1)**2 + (poly(x2) - y1)**2
+
+
+def p2p1CoeffsFromLinearFit(m, b, x0, y0):
+    """
+    Derive the Ivezic et al. 2004 (2004AN....325..583I) P2 and P1 equations based on linear fit
+
+    For y = m*x + b fit, where x = c1 - c2 and y = c2 - c3,
+    P2 = (-m*c1 + (m + 1)*c2 - c3 - b)/sqrt(m**2 + 1)
+    P2norm = P2/sqrt[(m**2 + (m + 1)**2 + 1**2)]
+
+    P1 = cos(theta)*x + sin(theta)*y + deltaP1, theta = arctan(m)
+    P1 = cos(theta)*(c1 - c2) + sin(theta)*(c2 - c3) + deltaP1
+    P1 = cos(theta)*c1 + ((sin(theta) - cos(theta))*c2 - sin(theta)*c3 + deltaP1
+    P1 = 0 at x0, y0 ==> deltaP1 = -cos(theta)*x0 - sin(theta)*y0
+
+    Parameters:
+    ----------
+    m : `float`
+       Slope of line to convert
+    b : `float`
+       Intercept of line to convert
+    x0, y0: `float`
+       Coordinates at which to set P1 = 0
+
+    Returns:
+    -------
+    `lsst.pipe.base.Struct` of p2Coeffs and p1Coeffs: `list`
+    """
+
+    # Compute Ivezic P2 coefficients using the linear fit slope and intercept
+    scaleFact = np.sqrt(m**2 + 1.0)
+    p2Coeffs = [-m/scaleFact, (m + 1.0)/scaleFact, -1.0/scaleFact, -b/scaleFact]
+    p2Norm = 0.0
+    for coeff in p2Coeffs[:-1]:
+        p2Norm += coeff**2
+    p2Norm = np.sqrt(p2Norm)
+    p2Coeffs /= p2Norm
+
+    # Compute Ivezic P1 coefficients equation using the linear fit slope and point (x0, y0) as the origin
+    cosTheta = np.cos(np.arctan(m))
+    sinTheta = np.sin(np.arctan(m))
+    deltaP1 = -cosTheta*x0 - sinTheta*y0
+    p1Coeffs = [cosTheta, sinTheta - cosTheta, -sinTheta, deltaP1]
+
+    return Struct(
+        p2Coeffs=p2Coeffs,
+        p1Coeffs=p1Coeffs,
+    )
+
+
+def makeEqnStr(varName, coeffList, exponentList):
+    """Make a string-formatted equation
+
+    Parameters:
+    ----------
+    varName : `str`
+       Name of the equation to be stringified
+    coeffList : `list` of `float`
+       List of equation coefficients (matched to exponenets in exponentList list)
+    exponentList : `list` of `str`
+       List of equation exponents (matched to coefficients in coeffList list)
+
+    Raises
+    ------
+    `RuntimeError`
+       If lengths of coeffList and exponentList are not equal.
+
+    Returns
+    -------
+    eqnStr : `str`
+       The stringified equation of the form:
+       varName = coeffList[0]exponent[0] + ... + coeffList[n-1]exponent[n-1].
+    """
+
+    if len(coeffList) != len(exponentList):
+        raise RuntimeError("Lengths of coeffList ({0:d}) and exponentList ({1:d}) are not equal".
+                           format(len(coeffList), len(exponentList)))
+
+    eqnStr = varName + " = "
+    for i, (coeff, band) in enumerate(zip(coeffList, exponentList)):
+        coeffStr = "{:.3f}".format(abs(coeff)) + band
+        plusMinus = " $-$ " if coeff < 0.0 else " + "
+        if i == 0:
+            eqnStr += plusMinus.strip(" ") + coeffStr
+        else:
+            eqnStr += plusMinus + coeffStr
+
+    return eqnStr
+
+
+def catColors(c1, c2, magsCat, goodArray=None):
+    """Compute color for a set of filters given a catalog of magnitudes by filter
+
+    Parameters:
+    ----------
+    c1, c2 : `str`
+       String representation of the filters from which to compute the color
+    magsCat : `dict` of `numpy.ndarray`
+       Dict of arrays of magnitude values.  Dict keys are the string representation of the filters
+    goodArray: `numpy.ndarray`, optional
+       Boolean array with same length as the magsCat arrays whose values indicate wether the
+       source was deemed "good" for intended use.  If None, all entries are considered "good".
+
+    Raises
+    ------
+    `RuntimeError`
+       If lengths of goodArray and magsCat arrays are not equal.
+
+    Returns
+    -------
+    `numpy.ndarray` of "good" colors (magnitude differeces)
+    """
+    if goodArray is None:
+        goodArray = np.ones(len(magsCat[c1]), dtype=bool)
+
+    if len(goodArray) != len(magsCat[c1]):
+        raise RuntimeError("Lengths of goodArray ({0:d}) and magsCat ({1:d}) are not equal".
+                           format(len(goodArray), len(magsCat[c1])))
+
+    return (magsCat[c1] - magsCat[c2])[goodArray]
