@@ -17,7 +17,7 @@ from lsst.coadd.utils import TractDataIdContainer
 from .analysis import Analysis, AnalysisConfig
 from .coaddAnalysis import CoaddAnalysisTask
 from .utils import (Filenamer, Enforcer, concatenateCatalogs, getFluxKeys, addColumnsToSchema,
-                    makeBadArray, addIntFloatOrStrColumn, calibrateCoaddSourceCatalog,
+                    makeBadArray, addFlag, addIntFloatOrStrColumn, calibrateCoaddSourceCatalog,
                     fluxToPlotString, writeParquet, getRepoInfo, orthogonalRegression,
                     distanceSquaredToPoly, p2p1CoeffsFromLinearFit, makeEqnStr, catColors)
 from .plotUtils import OverlapsStarGalaxyLabeller, labelCamera, setPtSize, plotText
@@ -206,6 +206,12 @@ class ColorAnalysisConfig(Config):
                                                            "and setting star/galaxy classification"))
     srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
                              doc="Mapping between different stack (e.g. HSC vs. LSST) schema names")
+    extinctionCoeffs = DictField(keytype=str, itemtype=float, default=None, optional=True,
+                                 doc="Dictionary of extinction coefficients for conversion from E(B-V) "
+                                 "to extinction, A_filter")
+    correctForGalacticExtinction = Field(dtype=bool, default=True,
+                                         doc="Correct flux fields for Galactic Extinction?  Must have "
+                                         "extinctionCoeffs config setup.")
     toMilli = Field(dtype=bool, default=True, doc="Print stats in milli units (i.e. mas, mmag)?")
     doPlotPrincipalColors = Field(dtype=bool, default=True,
                                   doc="Create the Ivezic Principal Color offset plots?")
@@ -227,11 +233,16 @@ class ColorAnalysisConfig(Config):
         self.transforms = ivezicTransformsHSC
         self.analysis.flags = []  # We remove bad source ourself
         self.analysis.magThreshold = 22.0  # RHL requested this limit
+        if self.correctForGalacticExtinction:
+            self.flags += ["galacticExtinction_flag"]
 
     def validate(self):
         Config.validate(self)
         if self.writeParquetOnly and not self.doWriteParquetTables:
             raise ValueError("Cannot writeParquetOnly if doWriteParquetTables is False")
+        if self.correctForGalacticExtinction and self.extinctionCoeffs is None:
+            raise ValueError("Must set appropriate extinctionCoeffs config.  See "
+                             "config/hsc/extinctionCoeffs.py in obs_subaru for an example.")
 
 
 class ColorAnalysisRunner(TaskRunner):
@@ -346,7 +357,18 @@ class ColorAnalysisTask(CmdLineTask):
         self.forcedStr = "forced"
         for cat in byFilterForcedCats.values():
             calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
-        byFilterForcedCats = self.correctForGalacticExtinction(byFilterForcedCats, repoInfo.tractInfo)
+
+        if self.correctForGalacticExtinction:
+            # The per-object Galactic Extinction correction currently requires sims_catUtils to be setup
+            # as it uses the EBVbase class to obtain E(B-V).  Putting this in a try/except to fall back
+            # to the per-field correction until we can access the EBVbase class from an lsst_distrib
+            # installation.
+            try:
+                byFilterForcedCats = self.correctForGalacticExtinction(byFilterForcedCats, repoInfo.tractInfo)
+            except Exception:
+                byFilterForcedCats = self.correctFieldForGalacticExtinction(byFilterForcedCats,
+                                                                            repoInfo.tractInfo)
+
         # self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
         if self.config.doPlotPrincipalColors or self.config.doWriteParquetTables:
             principalColCats = self.transformCatalogs(byFilterForcedCats, self.config.transforms,
@@ -411,6 +433,70 @@ class ColorAnalysisTask(CmdLineTask):
         return concatenateCatalogs(catList)
 
     def correctForGalacticExtinction(self, catalog, tractInfo):
+        """Correct all fluxes for each object for Galactic Extinction
+
+        This function uses the EBVbase class from lsst.sims.catUtils.dust.EBV, so lsst.sims.catUtils must
+        be setup and accessible for use.
+
+        Parameters
+        ----------
+        catalog : `lsst.afw.table.SourceCatalog`
+           The source catalog for which to apply the per-object Galactic Extinction correction to all fluxes.
+           Catalog is corrected in place and a Galactic Extinction applied and flag columns are added.
+        tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
+           TractInfo object associated with catalog
+
+        Raises
+        ------
+        `ImportError`
+           If lsst.sims.catUtils.dust.EBV could not be imported.
+
+        Returns
+        -------
+        Updated `lsst.afw.table.source.source.SourceCatalog` catalog with fluxes corrected for
+        Galactic Extinction with a column added indicating correction applied and a flag indicating
+        if the correction failed (in the context having a non-np.isfinite value).
+        """
+        try:
+            from lsst.sims.catUtils.dust.EBV import EBVbase as ebv
+        except ImportError:
+            raise ImportError("lsst.sims.catUtils.dust.EBV could not be imported.  Cannot use "
+                              "correctForGalacticExtinction function without it.")
+
+        for ff in catalog.keys():
+            if ff in self.config.extinctionCoeffs:
+                raList = catalog[ff]["coord_ra"]
+                decList = catalog[ff]["coord_dec"]
+                ebvObject = ebv()
+                ebvValues = ebvObject.calculateEbv(equatorialCoordinates=np.array([raList, decList]))
+                galacticExtinction = ebvValues*self.config.extinctionCoeffs[ff]
+                bad = ~np.isfinite(galacticExtinction)
+                if ~np.isfinite(galacticExtinction).all():
+                    self.log.warn("Could not compute {0:s} band Galactic Extinction for "
+                                  "{1:d} out of {2:d} sources.  Flag will be set.".
+                                  format(ff, len(raList[bad]), len(raList)))
+                factor = 10.0**(0.4*galacticExtinction)
+                fluxKeys, errKeys = getFluxKeys(catalog[ff].schema)
+                self.log.info("Applying per-object Galactic Extinction correction for filter {0:s}.  "
+                              "Catalog mean A_{0:s} = {1:.3f}".format(ff, galacticExtinction[~bad].mean()))
+                for name, key in list(fluxKeys.items()) + list(errKeys.items()):
+                    catalog[ff][key] *= factor
+            else:
+                self.log.warn("Do not have A_X/E(B-V) for filter {0:s}.  "
+                              "No Galactic Extinction correction applied for that filter.  "
+                              "Flag will be set".format(ff))
+                bad = np.ones(len(catalog[list(catalog.keys())[0]]), dtype=bool)
+            # Add column of Galactic Extinction value applied to the catalog and a flag for the sources
+            # for which it could not be computed
+            catalog[ff] = addIntFloatOrStrColumn(catalog[ff], galacticExtinction, "A_" + str(ff),
+                                                 "Galactic Extinction (in mags) applied "
+                                                 "(based on SFD 1998 maps)")
+            catalog[ff] = addFlag(catalog[ff], bad, "galacticExtinction_flag",
+                                  "True if Galactic Extinction failed")
+
+        return catalog
+
+    def correctFieldForGalacticExtinction(self, catalog, tractInfo):
         """Apply a per-field correction for Galactic Extinction using hard-wired values
 
         These numbers come from:
@@ -456,13 +542,23 @@ class ColorAnalysisTask(CmdLineTask):
                 if ff in galacticExtinction[fieldName]:
                     fluxKeys, errKeys = getFluxKeys(catalog[ff].schema)
                     factor = 10.0**(0.4*galacticExtinction[fieldName][ff])
+                    self.log.info("Applying Per-Field Galactic Extinction correction A_{0:s} = {1:.3f}".
+                                  format(ff, galacticExtinction[fieldName][ff]))
                     for name, key in list(fluxKeys.items()) + list(errKeys.items()):
                         catalog[ff][key] *= factor
-                    self.log.info("Applying Galactic Extinction correction A_{0:s} = {1:.3f}".
-                                  format(ff, galacticExtinction[fieldName][ff]))
+                    # Add column of Galactic Extinction value applied to the catalog
+                    catalog[ff] = addIntFloatOrStrColumn(catalog[ff], galacticExtinction,
+                                                         "A_" + str(ff), "Galactic Extinction applied")
+                    bad = np.zeros(len(catalog[list(catalog.keys())[0]]), dtype=bool)
+                    catalog[ff] = addFlag(catalog[ff], bad, "galacticExtinction_flag",
+                                          "True if Galactic Extinction not found (so not applied)")
                 else:
                     self.log.warn("Do not have A_X for filter {0:s}.  "
                                   "No Galactic Extinction correction applied for that filter".format(ff))
+                    bad = np.ones(len(catalog[list(catalog.keys())[0]]), dtype=bool)
+                    catalog[ff] = addFlag(catalog[ff], bad, "galacticExtinction_flag",
+                                          "True if Galactic Extinction not found (so not applied)")
+
         else:
             self.log.warn("Do not have Galactic Extinction for tract {0:d} at {1:s}.  "
                           "No Galactic Extinction correction applied".
