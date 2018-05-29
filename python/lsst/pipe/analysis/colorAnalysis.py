@@ -1429,8 +1429,8 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         yLoc -= 0.04*deltaY
         axes[0].text(xLoc, yLoc, principalColorStrs[1], fontsize=6, ha="right", va="center",
                      color="blue", alpha=0.8)
-        log.info("{0:s}".format(wPerpStr))
-        log.info("{0:s}".format(wParaStr))
+        log.info("{0:s}".format("".join(x for x in wPerpStr if x not in "{}$")))
+        log.info("{0:s}".format("".join(x for x in wParaStr if x not in "{}$")))
 
         # Compute fitted P2 for each object
         if transform is not None:
