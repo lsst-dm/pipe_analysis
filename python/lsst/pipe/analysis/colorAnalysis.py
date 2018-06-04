@@ -272,8 +272,9 @@ class ColorAnalysisRunner(TaskRunner):
                 bad.append(tract)
                 continue
             keep = set.intersection(*patchesForFilters)  # Patches with full colour coverage
-            tractFilterRefs[tract] = {ff: [patchRef for patchRef in filterRefs[ff] if
-                                           patchRef.dataId["patch"] in keep] for ff in filterRefs}
+            tractFilterRefs[tract] = {filterName:
+                                      [patchRef for patchRef in filterRefs[filterName] if
+                                       patchRef.dataId["patch"] in keep] for filterName in filterRefs}
         for tract in bad:
             del tractFilterRefs[tract]
 
@@ -281,12 +282,12 @@ class ColorAnalysisRunner(TaskRunner):
         parsedFilterList = [dataId["filter"] for dataId in parsedCmd.id.idList]
         for tract in tractFilterRefs:
             numFilters = 0
-            for ff in parsedFilterList:
-                if ff in tractFilterRefs[tract].keys():
+            for filterName in parsedFilterList:
+                if filterName in tractFilterRefs[tract].keys():
                     numFilters += 1
                 else:
                     parsedCmd.log.warn("No input data found for filter {0:s} of tract {1:d}".
-                                       format(ff, tract))
+                                       format(filterName, tract))
             if numFilters < 3:
                 parsedCmd.log.warn("Must have at least 3 filters with data existing in the input repo. "
                                    "Only {0:d} exist of those requested ({1:}) for tract {2:d}. "
@@ -352,9 +353,9 @@ class ColorAnalysisTask(CmdLineTask):
             self.flags = [self.config.srcSchemaMap[flag] for flag in self.flags]
 
         filenamer = Filenamer(repoInfo.butler, "plotColor", repoInfo.dataId)
-        byFilterForcedCats = {ff: self.readCatalogs(patchRefList,
-                                                    self.config.coaddName + "Coadd_forced_src") for
-                              ff, patchRefList in patchRefsByFilter.items()}
+        byFilterForcedCats = {filterName:
+                              self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_forced_src") for
+                              filterName, patchRefList in patchRefsByFilter.items()}
         self.forcedStr = "forced"
         for cat in byFilterForcedCats.values():
             calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
@@ -477,36 +478,38 @@ class ColorAnalysisTask(CmdLineTask):
             raise ImportError("lsst.sims.catUtils.dust.EBV could not be imported.  Cannot use "
                               "correctForGalacticExtinction function without it.")
 
-        for ff in catalog.keys():
-            if ff in self.config.extinctionCoeffs:
-                raList = catalog[ff]["coord_ra"]
-                decList = catalog[ff]["coord_dec"]
+        for filterName in catalog.keys():
+            if filterName in self.config.extinctionCoeffs:
+                raList = catalog[filterName]["coord_ra"]
+                decList = catalog[filterName]["coord_dec"]
                 ebvObject = ebv()
                 ebvValues = ebvObject.calculateEbv(equatorialCoordinates=np.array([raList, decList]))
-                galacticExtinction = ebvValues*self.config.extinctionCoeffs[ff]
+                galacticExtinction = ebvValues*self.config.extinctionCoeffs[filterName]
                 bad = ~np.isfinite(galacticExtinction)
                 if ~np.isfinite(galacticExtinction).all():
                     self.log.warn("Could not compute {0:s} band Galactic Extinction for "
                                   "{1:d} out of {2:d} sources.  Flag will be set.".
-                                  format(ff, len(raList[bad]), len(raList)))
+                                  format(filterName, len(raList[bad]), len(raList)))
                 factor = 10.0**(0.4*galacticExtinction)
-                fluxKeys, errKeys = getFluxKeys(catalog[ff].schema)
+                fluxKeys, errKeys = getFluxKeys(catalog[filterName].schema)
                 self.log.info("Applying per-object Galactic Extinction correction for filter {0:s}.  "
-                              "Catalog mean A_{0:s} = {1:.3f}".format(ff, galacticExtinction[~bad].mean()))
+                              "Catalog mean A_{0:s} = {1:.3f}".
+                              format(filterName, galacticExtinction[~bad].mean()))
                 for name, key in list(fluxKeys.items()) + list(errKeys.items()):
-                    catalog[ff][key] *= factor
+                    catalog[filterName][key] *= factor
             else:
                 self.log.warn("Do not have A_X/E(B-V) for filter {0:s}.  "
                               "No Galactic Extinction correction applied for that filter.  "
-                              "Flag will be set".format(ff))
+                              "Flag will be set".format(filterName))
                 bad = np.ones(len(catalog[list(catalog.keys())[0]]), dtype=bool)
             # Add column of Galactic Extinction value applied to the catalog and a flag for the sources
             # for which it could not be computed
-            catalog[ff] = addIntFloatOrStrColumn(catalog[ff], galacticExtinction, "A_" + str(ff),
-                                                 "Galactic Extinction (in mags) applied "
-                                                 "(based on SFD 1998 maps)")
-            catalog[ff] = addFlag(catalog[ff], bad, "galacticExtinction_flag",
-                                  "True if Galactic Extinction failed")
+            catalog[filterName] = addIntFloatOrStrColumn(catalog[filterName], galacticExtinction,
+                                                         "A_" + str(filterName),
+                                                         "Galactic Extinction (in mags) applied "
+                                                         "(based on SFD 1998 maps)")
+            catalog[filterName] = addFlag(catalog[filterName], bad, "galacticExtinction_flag",
+                                          "True if Galactic Extinction failed")
 
         return catalog
 
@@ -538,29 +541,30 @@ class ColorAnalysisTask(CmdLineTask):
                 geFound = True
                 break
         if geFound:
-            for ff in catalog.keys():
-                if ff in self.config.extinctionCoeffs:
-                    fluxKeys, errKeys = getFluxKeys(catalog[ff].schema)
-                    galacticExtinction = ebvValue*self.config.extinctionCoeffs[ff]
+            for filterName in catalog.keys():
+                if filterName in self.config.extinctionCoeffs:
+                    fluxKeys, errKeys = getFluxKeys(catalog[filterName].schema)
+                    galacticExtinction = ebvValue*self.config.extinctionCoeffs[filterName]
                     self.log.info("Applying Per-Field Galactic Extinction correction A_{0:s} = {1:.3f}".
-                                  format(ff, galacticExtinction))
+                                  format(filterName, galacticExtinction))
                     factor = 10.0**(0.4*galacticExtinction)
                     for name, key in list(fluxKeys.items()) + list(errKeys.items()):
-                        catalog[ff][key] *= factor
+                        catalog[filterName][key] *= factor
                     # Add column of Galactic Extinction value applied to the catalog
-                    catalog[ff] = addIntFloatOrStrColumn(catalog[ff], galacticExtinction,
-                                                         "A_" + str(ff), "Galactic Extinction applied "
-                                                         "(based on SFD 1998 maps)")
+                    catalog[filterName] = addIntFloatOrStrColumn(catalog[filterName], galacticExtinction,
+                                                                 "A_" + str(filterName),
+                                                                 "Galactic Extinction applied "
+                                                                 "(based on SFD 1998 maps)")
                     bad = np.zeros(len(catalog[list(catalog.keys())[0]]), dtype=bool)
-                    catalog[ff] = addFlag(catalog[ff], bad, "galacticExtinction_flag",
-                                          "True if Galactic Extinction not found (so not applied)")
+                    catalog[filterName] = addFlag(catalog[filterName], bad, "galacticExtinction_flag",
+                                                  "True if Galactic Extinction not found (so not applied)")
                 else:
                     self.log.warn("Do not have A_X/E(B-V) for filter {0:s}.  "
-                                  "No Galactic Extinction correction applied for that filter".format(ff))
+                                  "No Galactic Extinction correction applied for that filter".
+                                  format(filterName))
                     bad = np.ones(len(catalog[list(catalog.keys())[0]]), dtype=bool)
-                    catalog[ff] = addFlag(catalog[ff], bad, "galacticExtinction_flag",
-                                          "True if Galactic Extinction not found (so not applied)")
-
+                    catalog[filterName] = addFlag(catalog[filterName], bad, "galacticExtinction_flag",
+                                                  "True if Galactic Extinction not found (so not applied)")
         else:
             self.log.warn("Do not have Galactic Extinction for tract {0:d} at {1:s}.  "
                           "No Galactic Extinction correction applied".
@@ -599,8 +603,8 @@ class ColorAnalysisTask(CmdLineTask):
 
         for col in transforms:
             doAdd = True
-            for ff in transforms[col].coeffs:
-                if ff != "" and ff not in catalogs:
+            for filterName in transforms[col].coeffs:
+                if filterName != "" and filterName not in catalogs:
                     doAdd = False
             if doAdd:
                 schema.addField(col, float, transforms[col].description + transforms[col].subDescription)
@@ -618,10 +622,10 @@ class ColorAnalysisTask(CmdLineTask):
             if col not in schema:
                 continue
             value = np.ones(num)*transform.coeffs[""] if "" in transform.coeffs else np.zeros(num)
-            for ff, coeff in transform.coeffs.items():
-                if ff == "":  # Constant: already done
+            for filterName, coeff in transform.coeffs.items():
+                if filterName == "":  # Constant: already done
                     continue
-                cat = catalogs[ff]
+                cat = catalogs[filterName]
                 mag = -2.5*np.log10(cat[self.fluxColumn])
                 value += mag*coeff
             new[col][:] = value
@@ -646,13 +650,15 @@ class ColorAnalysisTask(CmdLineTask):
 
     def plotGalacticExtinction(self, byFilterCats, filenamer, dataId, butler=None,
                                camera=None, tractInfo=None, patchList=None, hscRun=None, geLabel=None):
-        for ff in byFilterCats:
-            qMin = np.nanmean(byFilterCats[ff]["A_" + ff]) - 6.0*np.nanstd(byFilterCats[ff]["A_" + ff])
-            qMax = np.nanmean(byFilterCats[ff]["A_" + ff]) + 6.0*np.nanstd(byFilterCats[ff]["A_" + ff])
-            shortName = "galacticExtinction_" + ff
+        for filterName in byFilterCats:
+            qMin = (np.nanmean(byFilterCats[filterName]["A_" + filterName]) -
+                    6.0*np.nanstd(byFilterCats[filterName]["A_" + filterName]))
+            qMax = (np.nanmean(byFilterCats[filterName]["A_" + filterName]) +
+                    6.0*np.nanstd(byFilterCats[filterName]["A_" + filterName]))
+            shortName = "galacticExtinction_" + filterName
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(byFilterCats[ff], byFilterCats[ff]["A_" + ff],
-                               "%s (%s)" % ("Galactic Extinction:  A_" + ff, "mag"),
+            self.AnalysisClass(byFilterCats[filterName], byFilterCats[filterName]["A_" + filterName],
+                               "%s (%s)" % ("Galactic Extinction:  A_" + filterName, "mag"),
                                shortName, self.config.analysis, flags=["galacticExtinction_flag"],
                                labeller=AllLabeller(), qMin=qMin, qMax=qMax, magThreshold=99.0,
                                ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera,
@@ -687,7 +693,8 @@ class ColorAnalysisTask(CmdLineTask):
     def plotStarPrincipalColors(self, principalColCats, byFilterCats, filenamer, labeller, dataId,
                                 butler=None, camera=None, tractInfo=None, patchList=None, hscRun=None,
                                 geLabel=None):
-        mags = {ff: -2.5*np.log10(byFilterCats[ff]["base_PsfFlux_flux"]) for ff in byFilterCats}
+        mags = {filterName: -2.5*np.log10(byFilterCats[filterName]["base_PsfFlux_flux"]) for
+                filterName in byFilterCats}
         unitStr = "mmag" if self.config.toMilli else "mag"
         for col, transform in self.config.transforms.items():
             if not transform.plot or col not in principalColCats.schema:
@@ -828,7 +835,8 @@ class ColorAnalysisTask(CmdLineTask):
                            geLabel=None):
         num = len(list(byFilterCats.values())[0])
         zp = 0.0
-        mags = {ff: zp - 2.5*np.log10(byFilterCats[ff][fluxColumn]) for ff in byFilterCats}
+        mags = {filterName: zp - 2.5*np.log10(byFilterCats[filterName][fluxColumn]) for
+                filterName in byFilterCats}
 
         bad = np.zeros(num, dtype=bool)
         for cat in byFilterCats.values():
@@ -856,7 +864,7 @@ class ColorAnalysisTask(CmdLineTask):
         combined = (self.transformCatalogs(byFilterCats, straightTransforms, hscRun=hscRun)[goodCombined].
                     copy(True))
         filters = set(byFilterCats.keys())
-        goodMags = {ff: mags[ff][good] for ff in byFilterCats}
+        goodMags = {filterName: mags[filterName][good] for filterName in byFilterCats}
         decentStarsMag = mags[self.fluxFilter][decentStars]
         decentGalaxiesMag = mags[self.fluxFilter][decentGalaxies]
         unitStr = "mmag" if self.config.toMilli else "mag"
@@ -1182,7 +1190,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     numGood = len(xx)
     fitP2 = None
     if mags is not None:
-        mags = {ff: mags[ff][good] for ff in mags.keys()}
+        mags = {filterName: mags[filterName][good] for filterName in mags.keys()}
     if principalCol is not None:
         principalColor = principalCol[good].copy()*unitScale
 
@@ -1420,46 +1428,50 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         pColCoeffs = p2p1CoeffsFromLinearFit(m, b, xHighDensity0, yHighDensity0)
 
         perpIndex = filename.find("Fit-fit")
-        if filename[perpIndex - 1:perpIndex] == "w" or filename[perpIndex - 1:perpIndex] == "x":
-            wPerpFilters = ["g", "r", "i", ""]
-        elif filename[perpIndex - 1:perpIndex] == "y":
-            wPerpFilters = ["r", "i", "z", ""]
+        perpIndexStr = filename[perpIndex - 1:perpIndex]
+        if perpIndexStr in ("w", "x"):
+            perpFilters = ["g", "r", "i", ""]
+        elif perpIndexStr == "y":
+            perpFilters = ["r", "i", "z", ""]
         else:
-            raise RuntimeError("Unknown Principal Color: {0:s}Perp".format(filename[perpIndex - 1:perpIndex]))
+            raise RuntimeError("Unknown Principal Color: {0:s}Perp".format(perpIndexStr))
 
-        wParaStr = "{0:s}Para{1:s}".format(filename[perpIndex - 1:perpIndex], "$_{fit}$")
-        wParaStr = makeEqnStr(wParaStr, pColCoeffs.p1Coeffs, wPerpFilters)
-        wPerpStr = "{0:s}Perp{1:s}".format(filename[perpIndex - 1:perpIndex], "$_{fit}$")
-        wPerpStr = makeEqnStr(wPerpStr, pColCoeffs.p2Coeffs, wPerpFilters)
+        log.info("{0:s}Perp: P1/P2 origin x, y: {1:.2f} {2:.2f}".format(perpIndexStr,
+                                                                        xHighDensity0, yHighDensity0))
+
+        paraStr = "{0:s}Para{1:s}".format(perpIndexStr, "$_{fit}$")
+        paraStr = makeEqnStr(paraStr, pColCoeffs.p1Coeffs, perpFilters)
+        perpStr = "{0:s}Perp{1:s}".format(perpIndexStr, "$_{fit}$")
+        perpStr = makeEqnStr(perpStr, pColCoeffs.p2Coeffs, perpFilters)
 
         # Also label plot with hardwired numbers
         principalColorStrs = []
         for transform, pCol in zip([transformPerp, transformPara],
-                                   [wPerpStr[0:1] + "Perp", wPerpStr[0:1] + "Para"]):
+                                   [perpIndexStr + "Perp", perpIndexStr[0:1] + "Para"]):
             principalColorStr = "{0:s}{1:s}".format(pCol, "$_{wired}$")
-            principalColorStr = makeEqnStr(principalColorStr, transform.coeffs.values(), wPerpFilters)
+            principalColorStr = makeEqnStr(principalColorStr, transform.coeffs.values(), perpFilters)
             principalColorStrs.append(principalColorStr)
 
         xLoc = xRange[1] - 0.03*deltaX
         yLoc -= 0.05*deltaY
-        axes[0].text(xLoc, yLoc, wPerpStr, fontsize=6, ha="right", va="center", color="magenta")
+        axes[0].text(xLoc, yLoc, perpStr, fontsize=6, ha="right", va="center", color="magenta")
         yLoc -= 0.04*deltaY
         axes[0].text(xLoc, yLoc, principalColorStrs[0], fontsize=6, ha="right", va="center",
                      color="blue", alpha=0.8)
         yLoc -= 0.05*deltaY
-        axes[0].text(xLoc, yLoc, wParaStr, fontsize=6, ha="right", va="center", color="magenta")
+        axes[0].text(xLoc, yLoc, paraStr, fontsize=6, ha="right", va="center", color="magenta")
         yLoc -= 0.04*deltaY
         axes[0].text(xLoc, yLoc, principalColorStrs[1], fontsize=6, ha="right", va="center",
                      color="blue", alpha=0.8)
-        log.info("{0:s}".format("".join(x for x in wPerpStr if x not in "{}$")))
-        log.info("{0:s}".format("".join(x for x in wParaStr if x not in "{}$")))
+        log.info("{0:s}".format("".join(x for x in perpStr if x not in "{}$")))
+        log.info("{0:s}".format("".join(x for x in paraStr if x not in "{}$")))
 
         # Compute fitted P2 for each object
         if transform is not None:
             fitP2 = np.ones(numGood)*pColCoeffs.p2Coeffs[3]
-            for i, ff in enumerate(transform.coeffs.keys()):
-                if ff != "":
-                    fitP2 += mags[ff]*pColCoeffs.p2Coeffs[i]
+            for i, filterName in enumerate(transform.coeffs.keys()):
+                if filterName != "":
+                    fitP2 += mags[filterName]*pColCoeffs.p2Coeffs[i]
             fitP2 *= unitScale
 
     # Determine quality of locus
@@ -1478,13 +1490,12 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     mean = distance[good].mean()
     stdDev = distance[good].std()
     rms = np.sqrt(np.mean(distance[good]**2))
-    log.info(("Statistics from {0:} of Distance to polynomial ({9:s}): {7:s}\'star\': " +
-              "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; " +
-              "median={5:.4f}; clip={6:.4f}; forcedMean=None){8:s}").format(
-             dataId, mean, stdDev, len(xx[keep]), len(xx), np.median(distance[good]),
-             3.0*0.74*(q3 - q1), "{", "}", unitStr))
     # Get rid of LaTeX-specific characters for log message printing
     log.info("Polynomial fit: {:2}".format("".join(x for x in polyStr if x not in "{}$")))
+    log.info(("Statistics from {0:} of Distance to polynomial ({9:s}): {7:s}\'star\': " +
+              "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; median={5:.4f}; clip={6:.4f})" +
+              "{8:s}").format(dataId, mean, stdDev, len(xx[keep]), len(xx), np.median(distance[good]),
+                              3.0*0.74*(q3 - q1), "{", "}", unitStr))
     meanStr = "mean = {0:5.2f}".format(mean)
     stdStr = "  std = {0:5.2f}".format(stdDev)
     rmsStr = "  rms = {0:5.2f}".format(rms)
@@ -1513,12 +1524,15 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         axes[1].plot(bins, 1/(pCstdDev*np.sqrt(2*np.pi))*np.exp(-(bins-pCmean)**2/(2*pCstdDev**2)),
                      color="blue")
         axes[1].axvline(x=pCmean, color="blue", linestyle=":")
-        pCmeanStr = "{0:s}{1:s} = {2:5.2f}".format(wPerpStr[0:5], "$_{wired}$", pCmean)
+        pCmeanStr = "{0:s}{1:s} = {2:5.2f}".format(perpStr[0:5], "$_{wired}$", pCmean)
         pCstdStr = "  std = {0:5.2f}".format(pCstdDev)
         kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=7, color="blue")
         axes[1].annotate(pCmeanStr, xy=(0.97, 0.965), **kwargs)
         axes[1].annotate(pCstdStr, xy=(0.97, 0.93), **kwargs)
-
+        log.info(("Statistics from {0:} of {9:s}Perp_wired ({8:s}): {6:s}\'star\': " +
+                  "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; median={5:.4f})" +
+                  "{7:s}").format(dataId, pCmean, pCstdDev, len(principalColor[kept]), len(principalColor),
+                                  np.median(principalColor[kept]), "{", "}", unitStr, perpIndexStr))
     # Plot fitted principal color distributions
     if fitP2 is not None:
         fitP2mean = fitP2[kept].mean()
@@ -1528,11 +1542,15 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         axes[1].plot(bins, 1/(fitP2stdDev*np.sqrt(2*np.pi))*np.exp(-(bins-fitP2mean)**2/(2*fitP2stdDev**2)),
                      color="magenta")
         axes[1].axvline(x=fitP2mean, color="magenta", linestyle=":")
-        fitP2meanStr = "{0:s}{1:s} = {2:5.2f}".format(wPerpStr[0:5], "$_{fit}$", fitP2mean)
+        fitP2meanStr = "{0:s}{1:s} = {2:5.2f}".format(perpStr[0:5], "$_{fit}$", fitP2mean)
         fitP2stdStr = "  std = {0:5.2f}".format(fitP2stdDev)
         kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=7, color="magenta")
         axes[1].annotate(fitP2meanStr, xy=(0.97, 0.895), **kwargs)
         axes[1].annotate(fitP2stdStr, xy=(0.97, 0.86), **kwargs)
+        log.info(("Statistics from {0:} of {9:s}Perp_fit ({8:s}): {6:s}\'star\': " +
+                  "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; median={5:.4f})" +
+                  "{7:s}").format(dataId, fitP2mean, fitP2stdDev, len(fitP2[kept]), len(fitP2),
+                                  np.median(fitP2[kept]), "{", "}", unitStr, perpIndexStr))
 
     axes[1].set_ylim(axes[1].get_ylim()[0], axes[1].get_ylim()[1]*2.5)
 
