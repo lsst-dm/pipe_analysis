@@ -1293,21 +1293,6 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
                 format(nKeepOdr, order))
         orthRegCoeffs = orthogonalRegression(xx[keepOdr], yy[keepOdr], order, initialGuess)
     yOrthLine = np.polyval(orthRegCoeffs, xLine)
-    axes[0].plot(xLine, yOrthLine, "g--")
-
-    kwargs = dict(s=3, marker="o", lw=0, alpha=0.4)
-    axes[0].scatter(xx[~keep], yy[~keep], c=zOther, cmap="gray", label="other", **kwargs)
-    axes[0].scatter(xx[keep], yy[keep], c=zKeep, cmap="jet", label="used", **kwargs)
-    axes[0].set_xlabel(xLabel)
-    axes[0].set_ylabel(yLabel, labelpad=-1)
-
-    mappableKeep = plt.cm.ScalarMappable(cmap="jet", norm=plt.Normalize(vmin=zKeep.min(), vmax=zKeep.max()))
-    mappableKeep._A = []        # fake up the array of the scalar mappable. Urgh...
-    caxKeep = plt.axes([0.46, 0.15, 0.022, 0.75])
-    cbKeep = plt.colorbar(mappableKeep, cax=caxKeep)
-    cbKeep.ax.tick_params(labelsize=6)
-    labelPadShift = len(str(zKeep.max()//10)) if zKeep.max()//10 > 0 else 0
-    cbKeep.set_label("Number Density", rotation=270, labelpad=-15 - labelPadShift, fontsize=7)
 
     # Find index where poly and fit range intersect -- to calculate the local slopes of the fit to make
     # sure it is close to the fitLines (log a warning if they are not within 5%)
@@ -1348,6 +1333,33 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         log.warn(message.format("Lower", fitLineLower, bLower, mLower, xLine[crossIdxLower]))
     deltaX = abs(xRange[1] - xRange[0])
     deltaY = abs(yRange[1] - yRange[0])
+
+    # Find some sensible plotting limits for the P1 line fit
+    frac = 0.26
+    crossIdxMid = crossIdxLower + int(0.5*(crossIdxUpper - crossIdxLower))
+    fracIdx = min(int(frac*len(xLine)), len(xLine) - 1 - crossIdxMid)
+    yAtCrossIdxMid = yOrthLine[crossIdxMid]
+    midCrossPlusFracIdx = np.abs(yOrthLine - (yAtCrossIdxMid + frac*deltaY)).argmin()
+    yAtFracIdx = yOrthLine[crossIdxMid + fracIdx]
+    idxP1 = (crossIdxMid + fracIdx) if yAtFracIdx < (yAtCrossIdxMid + frac*deltaY) else midCrossPlusFracIdx
+    deltaIdxP1 = idxP1 - crossIdxMid
+    xP1Line = xLine[crossIdxMid - deltaIdxP1:crossIdxMid + deltaIdxP1]
+    yP1Line = yOrthLine[crossIdxMid - deltaIdxP1:crossIdxMid + deltaIdxP1]
+    axes[0].plot(xP1Line, yP1Line, "g--", lw=0.75)
+
+    kwargs = dict(s=3, marker="o", lw=0, alpha=0.4)
+    axes[0].scatter(xx[~keep], yy[~keep], c=zOther, cmap="gray", label="other", **kwargs)
+    axes[0].scatter(xx[keep], yy[keep], c=zKeep, cmap="jet", label="used", **kwargs)
+    axes[0].set_xlabel(xLabel)
+    axes[0].set_ylabel(yLabel, labelpad=-1)
+
+    mappableKeep = plt.cm.ScalarMappable(cmap="jet", norm=plt.Normalize(vmin=zKeep.min(), vmax=zKeep.max()))
+    mappableKeep._A = []        # fake up the array of the scalar mappable. Urgh...
+    caxKeep = plt.axes([0.46, 0.15, 0.022, 0.75])
+    cbKeep = plt.colorbar(mappableKeep, cax=caxKeep)
+    cbKeep.ax.tick_params(labelsize=6)
+    labelPadShift = len(str(zKeep.max()//10)) if zKeep.max()//10 > 0 else 0
+    cbKeep.set_label("Number Density", rotation=270, labelpad=-15 - labelPadShift, fontsize=7)
 
     if xFitRange:
         # Shade region outside xFitRange
@@ -1445,6 +1457,26 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         # Closest point on line to highest density point
         xHighDensity0 = (xHighDensity + m*(yHighDensity - b))/(m**2.0 + 1.0)
         yHighDensity0 = (m*(xHighDensity + m*yHighDensity) + b)/(m**2.0 + 1.0)
+        bP2 = yHighDensity0 + (1.0/m)*xHighDensity0
+        yP2Line = (-1.0/m)*xLine + bP2
+        # Find some sensible plotting limits for the P2 line fit
+        frac = 0.15
+        idxHd = np.abs(yP2Line - yHighDensity0).argmin()
+        idxFrac = idxHd - int(frac*len(xLine))
+        fracIdx = max(idxHd - int(frac*len(xLine)), 0)
+        yAtIdxFrac = yP2Line[idxFrac]
+        idxHdPlusFrac = np.abs(yP2Line - (yHighDensity0 + frac*deltaY)).argmin()
+        yAtHdPlusFrac = yP2Line[idxHdPlusFrac]
+        idxP2 = idxFrac if yAtIdxFrac < yAtHdPlusFrac else idxHdPlusFrac
+        deltaIdxP2 = idxHd - idxP2
+        xP2Line = xLine[idxHd - deltaIdxP2:idxHd + deltaIdxP2]
+        yP2Line = yP2Line[idxHd - deltaIdxP2:idxHd + deltaIdxP2]
+        axes[0].plot(xP2Line, yP2Line, "g--", lw=0.75)
+        plotText("P2$_{fit}$", plt, axes[0], xP2Line[0] - 0.022*deltaX, yP2Line[0] + 0.02*deltaY,
+                 fontSize=8, color="green", coordSys="data")
+        plotText("P1$_{fit}$", plt, axes[0], xP1Line[0] - 0.07*deltaX, yP1Line[0] + 0.01*deltaY,
+                 fontSize=8, color="green", coordSys="data")
+
         # Derive Ivezic P2 and P1 equations based on linear fit and highest density position (where P1 = 0)
         pColCoeffs = p2p1CoeffsFromLinearFit(m, b, xHighDensity0, yHighDensity0)
 
