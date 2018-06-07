@@ -39,7 +39,7 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
            "fluxToPlotString", "andCatalog", "writeParquet", "getRepoInfo", "findCcdKey",
            "getCcdNameRefList", "getDataExistsRefList", "orthogonalRegression", "distanceSquaredToPoly",
-           "p2p1CoeffsFromLinearFit", "makeEqnStr", "catColors"]
+           "p2p1CoeffsFromLinearFit", "lineFitFromP2P1Coeffs", "makeEqnStr", "catColors"]
 
 
 def writeParquet(table, path, badArray=None):
@@ -1273,6 +1273,31 @@ def p2p1CoeffsFromLinearFit(m, b, x0, y0):
         p1Coeffs=p1Coeffs,
     )
 
+def lineFitFromP2P1Coeffs(p2Coeffs, p1Coeffs):
+    mP2 = p2Coeffs[0]/p2Coeffs[2]
+    bP2 = p2Coeffs[3]*np.sqrt((mP2**2 + (mP2 + 1)**2 +1)/(mP2**2 + 1.0))
+    print("yP2 = {}x + {}".format(mP2, bP2))
+
+    import scipy
+    import scipy.optimize
+    cosTheta = np.cos(np.arctan(mP2))
+    sinTheta = np.sin(np.arctan(mP2))
+    def func2(x):
+        y = [cosTheta*x[0] + sinTheta*x[1] + p1Coeffs[3], mP2*x[0] - x[1] + bP2]
+        return y
+
+    x0y0 = scipy.optimize.fsolve(func2, [1, 1])
+    print(x0y0)
+    mP1 = -1.0/mP2
+    bP1 = x0y0[1] - mP1*x0y0[0]
+    return Struct(
+        mP2=mP2,
+        bP2=bP2,
+        mP1=mP1,
+        bP1=bP1,
+        x0=x0y0[0],
+        y0=x0y0[1],
+    )
 
 def makeEqnStr(varName, coeffList, exponentList):
     """Make a string-formatted equation
