@@ -39,7 +39,8 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
            "fluxToPlotString", "andCatalog", "writeParquet", "getRepoInfo", "findCcdKey",
            "getCcdNameRefList", "getDataExistsRefList", "orthogonalRegression", "distanceSquaredToPoly",
-           "p2p1CoeffsFromLinearFit", "lineFitFromP2P1Coeffs", "makeEqnStr", "catColors"]
+           "p2p1CoeffsFromLinearFit", "p1CoeffsFromP2x0y0", "lineFromP2Coeffs", "linesFromP2P1Coeffs",
+           "makeEqnStr", "catColors"]
 
 
 def writeParquet(table, path, badArray=None):
@@ -1232,7 +1233,7 @@ def p2p1CoeffsFromLinearFit(m, b, x0, y0):
 
     For y = m*x + b fit, where x = c1 - c2 and y = c2 - c3,
     P2 = (-m*c1 + (m + 1)*c2 - c3 - b)/sqrt(m**2 + 1)
-    P2norm = P2/sqrt[(m**2 + (m + 1)**2 + 1**2)]
+    P2norm = P2/sqrt[((m**2 + (m + 1)**2 + 1**2)/(m**2 + 1)]
 
     P1 = cos(theta)*x + sin(theta)*y + deltaP1, theta = arctan(m)
     P1 = cos(theta)*(c1 - c2) + sin(theta)*(c2 - c3) + deltaP1
@@ -1263,33 +1264,78 @@ def p2p1CoeffsFromLinearFit(m, b, x0, y0):
     p2Coeffs /= p2Norm
 
     # Compute Ivezic P1 coefficients equation using the linear fit slope and point (x0, y0) as the origin
-    cosTheta = np.cos(np.arctan(m))
-    sinTheta = np.sin(np.arctan(m))
-    deltaP1 = -cosTheta*x0 - sinTheta*y0
-    p1Coeffs = [cosTheta, sinTheta - cosTheta, -sinTheta, deltaP1]
-
+    p1Coeffs = p1CoeffsFromP2x0y0(p2Coeffs, x0, y0)
     return Struct(
         p2Coeffs=p2Coeffs,
         p1Coeffs=p1Coeffs,
     )
 
-def lineFitFromP2P1Coeffs(p2Coeffs, p1Coeffs):
-    mP2 = p2Coeffs[0]/p2Coeffs[2]
-    bP2 = p2Coeffs[3]*np.sqrt((mP2**2 + (mP2 + 1)**2 +1)/(mP2**2 + 1.0))
-    print("yP2 = {}x + {}".format(mP2, bP2))
+
+def p1CoeffsFromP2x0y0(p2Coeffs, x0, y0):
+    """Compute Ivezic P1 coefficients equation using the P2 coefficients and point (x0, y0) as the origin
+
+    theta = arctan(mP2), where mP2 is the slope of the equivalent straight line from
+                         the P2 coeffs in the (x, y) coordinate system and x = c1 - c2, y = c2 - c3
+    P1 = cos(theta)*c1 + ((sin(theta) - cos(theta))*c2 - sin(theta)*c3 + deltaP1
+    P1 = 0 at x0, y0 ==> deltaP1 = -cos(theta)*x0 - sin(theta)*y0
+
+    Parameters:
+    ----------
+    p2Coeffs: `list`
+       List of the four P2 coeffecients from which, along with the origin point (x0, y0) to
+       compute/derive the associated P1 coefficients.
+    x0, y0: `float`
+       Coordinates at which to set P1 = 0 (i.e. the P1/P2 axis origin).
+
+    Returns:
+    -------
+    p1Coeffs: `list`
+    """
+    mP1 = p2Coeffs[0]/p2Coeffs[2]
+    cosTheta = np.cos(np.arctan(mP1))
+    sinTheta = np.sin(np.arctan(mP1))
+    deltaP1 = -cosTheta*x0 - sinTheta*y0
+    p1Coeffs = [cosTheta, sinTheta - cosTheta, -sinTheta, deltaP1]
+    return p1Coeffs
+
+
+def lineFromP2Coeffs(p2Coeffs):
+    """Compute slope and intercept for equivalent P2 line in color-color space
+
+    Parameters:
+    ----------
+    p2Coeffs: `list`
+       List of the four P2 coeffecients from which, along with the origin point (x0, y0) to
+       compute/derive the associated P1 coefficients.
+
+    Returns:
+    -------
+    `lsst.pipe.base.Struct` of slope mP2 and intercept bP2 of color-color plane line associated with p2Coeffs
+    """
+    mP1 = p2Coeffs[0]/p2Coeffs[2]
+    bP1 = -p2Coeffs[3]*np.sqrt(mP1**2 + (mP1 + 1.0)**2 + 1.0)
+    return Struct(
+        mP1=mP1,
+        bP1=bP1,
+    )
+
+
+def linesFromP2P1Coeffs(p2Coeffs, p1Coeffs):
+    p1Line = lineFromP2Coeffs(p2Coeffs)
+    mP1 = p1Line.mP1
+    bP1 = p1Line.bP1
 
     import scipy
     import scipy.optimize
-    cosTheta = np.cos(np.arctan(mP2))
-    sinTheta = np.sin(np.arctan(mP2))
+    cosTheta = np.cos(np.arctan(mP1))
+    sinTheta = np.sin(np.arctan(mP1))
     def func2(x):
-        y = [cosTheta*x[0] + sinTheta*x[1] + p1Coeffs[3], mP2*x[0] - x[1] + bP2]
+        y = [cosTheta*x[0] + sinTheta*x[1] + p1Coeffs[3], mP1*x[0] - x[1] + bP1]
         return y
 
     x0y0 = scipy.optimize.fsolve(func2, [1, 1])
-    print(x0y0)
-    mP1 = -1.0/mP2
-    bP1 = x0y0[1] - mP1*x0y0[0]
+    mP2 = -1.0/mP1
+    bP2 = x0y0[1] - mP2*x0y0[0]
     return Struct(
         mP2=mP2,
         bP2=bP2,
