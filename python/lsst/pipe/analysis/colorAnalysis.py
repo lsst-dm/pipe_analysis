@@ -1265,7 +1265,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     idxHighDensity = np.argmax(zKeep)
     xHighDensity = xx[keep][idxHighDensity]
     yHighDensity = yy[keep][idxHighDensity]
-    log.info("Highest Density point x, y: {0:.2f} {1:.2f}".format(xHighDensity, yHighDensity))
+    log.info("Highest Density point x, y: {0:.4f} {1:.4f}".format(xHighDensity, yHighDensity))
 
     initialGuess = list(reversed(poly))
     keepOdr = keep.copy()
@@ -1423,13 +1423,13 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     axes[0].text(xLoc + fdx*deltaX, yLoc, str(len(xx)), ha="right", color="black", **kwargs)
 
     unitStr = "mmag" if unitScale == 1000 else "mag"
-    axes[1].set_xlabel("Distance to polynomial fit ({:s})".format(unitStr))
+    axes[1].set_xlabel("Dist to poly fit or Pincp Color ({:s})".format(unitStr))
     axes[1].set_ylabel("Number")
     axes[1].set_yscale("log", nonposy="clip")
 
     # Label orthogonal polynomial fit parameters to 2 decimal places
     xLoc = xRange[0] + 0.045*deltaX
-    polyColor = "green"
+    polyColor = "magenta"
     polyFit = orthRegCoeffs
     polyStr = "odr"
     kept = keepOdr
@@ -1468,10 +1468,22 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         xP2Line = xLine[idxHd - deltaIdxP2:idxHd + deltaIdxP2]
         yP2Line = yP2Line[idxHd - deltaIdxP2:idxHd + deltaIdxP2]
         axes[0].plot(xP2Line, yP2Line, "g--", lw=0.75)
-        plotText("P2$_{fit}$", plt, axes[0], xP2Line[0] - 0.022*deltaX, yP2Line[0] + 0.02*deltaY,
+        plotText("P2$^{fit}$", plt, axes[0], xP2Line[0] - 0.022*deltaX, yP2Line[0] + 0.04*deltaY,
                  fontSize=8, color="green", coordSys="data")
-        plotText("P1$_{fit}$", plt, axes[0], xP1Line[0] - 0.07*deltaX, yP1Line[0] + 0.01*deltaY,
+        plotText("P1$^{fit}$", plt, axes[0], xP1Line[0] - 0.07*deltaX, yP1Line[0] + 0.03*deltaY,
                  fontSize=8, color="green", coordSys="data")
+        plotText("$ _{wired}$", plt, axes[0], xP2Line[0] + 0.022*deltaX, yP2Line[0] + 0.03*deltaY,
+                 fontSize=8, color="blue", alpha=0.6, coordSys="data")
+        plotText("$_{wired}$", plt, axes[0], xP1Line[0] - 0.03*deltaX, yP1Line[0] + 0.02*deltaY,
+                 fontSize=8, color="blue", alpha=0.6, coordSys="data")
+
+        # Also plot the effective hard wired lines
+        wiredLine = linesFromP2P1Coeffs(list(transformPerp.coeffs.values()),
+                                        list(transformPara.coeffs.values()))
+        yP2LineWired = wiredLine.mP2*xP2Line + wiredLine.bP2
+        yP1LineWired = wiredLine.mP1*xP1Line + wiredLine.bP1
+        axes[0].plot(xP2Line, yP2LineWired, "b--", alpha=0.6, lw=0.75)
+        axes[0].plot(xP1Line, yP1LineWired, "b--", alpha=0.6, lw=0.75)
 
         # Derive Ivezic P2 and P1 equations based on linear fit and highest density position (where P1 = 0)
         pColCoeffs = p2p1CoeffsFromLinearFit(m, b, xHighDensity0, yHighDensity0)
@@ -1485,7 +1497,9 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         else:
             raise RuntimeError("Unknown Principal Color: {0:s}Perp".format(perpIndexStr))
 
-        log.info("{0:s}Perp: P1/P2 origin x, y: {1:.2f} {2:.2f}".format(perpIndexStr,
+        log.info("  {0:s}Perp_wired: origin x, y: {1:.4f} {2:.4f}".format(perpIndexStr,
+                                                                        wiredLine.x0, wiredLine.y0))
+        log.info("  {0:s}Perp_fit  : origin x, y: {1:.4f} {2:.4f}".format(perpIndexStr,
                                                                         xHighDensity0, yHighDensity0))
 
         paraStr = "{0:s}Para{1:s}".format(perpIndexStr, "$_{fit}$")
@@ -1503,12 +1517,12 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
 
         xLoc = xRange[1] - 0.03*deltaX
         yLoc -= 0.05*deltaY
-        axes[0].text(xLoc, yLoc, perpStr, fontsize=6, ha="right", va="center", color="magenta")
+        axes[0].text(xLoc, yLoc, perpStr, fontsize=6, ha="right", va="center", color="green")
         yLoc -= 0.04*deltaY
         axes[0].text(xLoc, yLoc, principalColorStrs[0], fontsize=6, ha="right", va="center",
                      color="blue", alpha=0.8)
         yLoc -= 0.05*deltaY
-        axes[0].text(xLoc, yLoc, paraStr, fontsize=6, ha="right", va="center", color="magenta")
+        axes[0].text(xLoc, yLoc, paraStr, fontsize=6, ha="right", va="center", color="green")
         yLoc -= 0.04*deltaY
         axes[0].text(xLoc, yLoc, principalColorStrs[1], fontsize=6, ha="right", va="center",
                      color="blue", alpha=0.8)
@@ -1550,7 +1564,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     rmsStr = "  rms = {0:5.2f}".format(rms)
 
     count, bins, ignored = axes[1].hist(distance[good], bins=numBins, range=(-4.0*stdDev, 4.0*stdDev),
-                                        normed=True, color=polyColor, alpha=0.5)
+                                        normed=True, color=polyColor, alpha=0.6)
     axes[1].plot(bins, 1/(stdDev*np.sqrt(2*np.pi))*np.exp(-(bins-mean)**2/(2*stdDev**2)),
                  color=polyColor)
     axes[1].axvline(x=mean, color=polyColor, linestyle=":")
@@ -1569,7 +1583,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         pCmean = principalColor[kept].mean()
         pCstdDev = principalColor[kept].std()
         count, nBins, ignored = axes[1].hist(principalColor[kept], bins=bins, range=(-4.0*stdDev, 4.0*stdDev),
-                                             normed=True, color="blue", alpha=0.5)
+                                             normed=True, color="blue", alpha=0.6)
         axes[1].plot(bins, 1/(pCstdDev*np.sqrt(2*np.pi))*np.exp(-(bins-pCmean)**2/(2*pCstdDev**2)),
                      color="blue")
         axes[1].axvline(x=pCmean, color="blue", linestyle=":")
@@ -1587,13 +1601,13 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         fitP2mean = fitP2[kept].mean()
         fitP2stdDev = fitP2[kept].std()
         count, nBins, ignored = axes[1].hist(fitP2[kept], bins=bins, range=(-4.0*stdDev, 4.0*stdDev),
-                                             normed=True, color="magenta", alpha=0.5)
+                                             normed=True, color="green", alpha=0.6)
         axes[1].plot(bins, 1/(fitP2stdDev*np.sqrt(2*np.pi))*np.exp(-(bins-fitP2mean)**2/(2*fitP2stdDev**2)),
-                     color="magenta")
+                     color="green")
         axes[1].axvline(x=fitP2mean, color="magenta", linestyle=":")
         fitP2meanStr = "{0:s}{1:s} = {2:5.2f}".format(perpStr[0:5], "$_{fit}$", fitP2mean)
         fitP2stdStr = "  std = {0:5.2f}".format(fitP2stdDev)
-        kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=7, color="magenta")
+        kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=7, color="green")
         axes[1].annotate(fitP2meanStr, xy=(0.97, 0.895), **kwargs)
         axes[1].annotate(fitP2stdStr, xy=(0.97, 0.86), **kwargs)
         log.info(("Statistics from {0:} of {9:s}Perp_fit ({8:s}): {6:s}\'star\': " +
