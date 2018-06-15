@@ -82,33 +82,33 @@ ivezicTransformsSDSS = {
 
 ivezicTransformsHSC = {
     "wPerp": ColorTransform.fromValues("Ivezic w perpendicular", " (griBlue)", True,
-                                       {"HSC-G": -0.272, "HSC-R": 0.803, "HSC-I": -0.531, "": 0.036},
+                                       {"HSC-G": -0.274, "HSC-R": 0.803, "HSC-I": -0.529, "": 0.041},
                                        requireGreater={"wPara": -0.2}, requireLess={"wPara": 0.6},
-                                       fitLineSlope=-1/0.51, fitLineUpperIncpt=2.40, fitLineLowerIncpt=0.68),
+                                       fitLineSlope=-1/0.52, fitLineUpperIncpt=2.40, fitLineLowerIncpt=0.68),
     "xPerp": ColorTransform.fromValues("Ivezic x perpendicular", " (griRed)", True,
-                                       {"HSC-G": 0.678, "HSC-R": -0.733, "HSC-I": 0.055, "": -0.792},
+                                       {"HSC-G": -0.680, "HSC-R": 0.731, "HSC-I": -0.051, "": 0.792},
                                        requireGreater={"xPara": 0.8}, requireLess={"xPara": 1.6},
-                                       fitLineSlope=-1/11.4, fitLineUpperIncpt=1.73, fitLineLowerIncpt=0.87),
+                                       fitLineSlope=-1/13.35, fitLineUpperIncpt=1.73, fitLineLowerIncpt=0.87),
     "yPerp": ColorTransform.fromValues("Ivezic y perpendicular", " (rizRed)", True,
-                                       {"HSC-R": -0.227, "HSC-I": 0.793, "HSC-Z": -0.566, "": -0.012},
+                                       {"HSC-R": -0.227, "HSC-I": 0.793, "HSC-Z": -0.566, "": -0.017},
                                        requireGreater={"yPara": 0.1}, requireLess={"yPara": 1.2},
-                                       fitLineSlope=-1/0.40, fitLineUpperIncpt=5.5, fitLineLowerIncpt=2.7),
+                                       fitLineSlope=-1/0.40, fitLineUpperIncpt=5.5, fitLineLowerIncpt=2.6),
     # The following still default to the SDSS values.  HSC coeffs will be derived on a subsequent
     # commit
     "wPara": ColorTransform.fromValues("Ivezic w parallel", " (griBlue)", False,
-                                       {"HSC-G": 0.89, "HSC-R": -0.43, "HSC-I": -0.46, "": -0.52}),
+                                       {"HSC-G": 0.888, "HSC-R": -0.427, "HSC-I": -0.461, "": -0.478}),
     "xPara": ColorTransform.fromValues("Ivezic x parallel", " (griRed)", False,
-                                       {"HSC-G": 0.0, "HSC-R": 1.0, "HSC-I": -1.0, "": 0.0}),
+                                       {"HSC-G": 0.075, "HSC-R": 0.922, "HSC-I": -0.997, "": -1.442}),
     "yPara": ColorTransform.fromValues("Ivezic y parallel", " (rizRed)", False,
-                                       {"HSC-R": 0.928, "HSC-I": -0.555, "HSC-Z": -0.373, "": -1.400}),
+                                       {"HSC-R": 0.928, "HSC-I": -0.557, "HSC-Z": -0.372, "": -1.332}),
     # The following three entries were derived in the process of calibrating the above coeffs (all three
     # RC2 tracts gave effectively the same fits).  May remove later if deemed no longer useful.
     "wFit": ColorTransform.fromValues("Straight line fit for wPerp range", " (griBlue)", False,
-                                      {"HSC-G": 0.51, "HSC-R": -0.51, "": -0.07}),
+                                      {"HSC-G": 0.52, "HSC-R": -0.52, "": -0.08}),
     "xFit": ColorTransform.fromValues("Straight line fit for xperp range", " (griRed)", False,
-                                      {"HSC-G": 11.4, "HSC-R": -11.4, "": -13.3}),
+                                      {"HSC-G": 13.35, "HSC-R": -13.35, "": -15.54}),
     "yFit": ColorTransform.fromValues("Straight line fit for yPerp range", " (rizRed)", False,
-                                      {"HSC-R": 0.40, "HSC-I": -0.40, "": 0.02}),
+                                      {"HSC-R": 0.40, "HSC-I": -0.40, "": 0.03}),
 }
 
 straightTransforms = {
@@ -889,7 +889,7 @@ class ColorAnalysisTask(CmdLineTask):
                                              transformPerp=transformPerp, transformPara=transformPara,
                                              mags=goodMags, principalCol=principalColCats["wPerp"][good],
                                              xRange=xRange, yRange=yRange, order=1,
-                                             xFitRange=(0.3, 1.12), yFitRange=(0.04, 0.5),
+                                             xFitRange=(0.28, 1.0), yFitRange=(0.02, 0.48),
                                              fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
@@ -908,7 +908,7 @@ class ColorAnalysisTask(CmdLineTask):
                                              transformPerp=transformPerp, transformPara=transformPara,
                                              mags=goodMags, principalCol=principalColCats["xPerp"][good],
                                              xRange=xRange, yRange=yRange, order=1,
-                                             xFitRange=(1.05, 1.45), yFitRange=(0.78, 1.65),
+                                             xFitRange=(1.05, 1.45), yFitRange=(0.78, 1.62),
                                              fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
@@ -916,8 +916,8 @@ class ColorAnalysisTask(CmdLineTask):
             # Lower branch only; upper branch is noisy due to astrophysics
             nameStr = filtersStr + fluxColStr
             self.log.info("nameStr = {:s}".format(nameStr))
-            fitLineUpper = [1.21, -0.55]
-            fitLineLower = [0.21, -0.36]
+            fitLineUpper = [2.0, -1.31]
+            fitLineLower = [0.61, -1.78]
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                          self.log, catColors("HSC-G", "HSC-R", mags, good),
                                          catColors("HSC-R", "HSC-I", mags, good),
@@ -988,14 +988,14 @@ class ColorAnalysisTask(CmdLineTask):
                                              transformPerp=transformPerp, transformPara=transformPara,
                                              mags=goodMags, principalCol=principalColCats["yPerp"][good],
                                              xRange=xRange, yRange=yRange, order=1,
-                                             xFitRange=(0.92, 2.02), yFitRange=(0.4, 0.83),
+                                             xFitRange=(0.82, 2.01), yFitRange=(0.37, 0.81),
                                              fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
                                              unitScale=self.unitScale)
             nameStr = filtersStr + fluxColStr
-            fitLineUpper = [0.94, -0.27]
-            fitLineLower = [0.046, -0.55]
+            fitLineUpper = [5.9, -3.05]
+            fitLineLower = [0.11, -2.07]
             self.log.info("nameStr = {:s}".format(nameStr))
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                          self.log, catColors("HSC-R", "HSC-I", mags, good),
@@ -1003,7 +1003,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          "r - i  [{0:s}]".format(fluxColStr),
                                          "i - z  [{0:s}]".format(fluxColStr), self.fluxFilter,
                                          xRange=xRange, yRange=yRange, order=2,
-                                         xFitRange=(0.0, 1.6), yFitRange=(-0.03, 0.7),
+                                         xFitRange=(-0.01, 1.75), yFitRange=(-0.01, 0.72),
                                          fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                          magThreshold=self.config.analysis.magThreshold, camera=camera,
                                          hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
@@ -1049,8 +1049,8 @@ class ColorAnalysisTask(CmdLineTask):
             filtersStr = "izy"
             nameStr = filtersStr + fluxColStr
             self.log.info("nameStr = {:s}".format(nameStr))
-            fitLineUpper = [0.56, -0.32]
-            fitLineLower = [-0.014, -0.39]
+            fitLineUpper = [2.55, -3.0]
+            fitLineLower = [-0.062, -2.35]
             xRange = (self.config.plotRanges[filtersStr + "X0"],
                       self.config.plotRanges[filtersStr + "X1"])
             yRange = (self.config.plotRanges[filtersStr + "Y0"],
@@ -1061,7 +1061,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          "i - z  [{0:s}]".format(fluxColStr),
                                          "z - y  [{0:s}]".format(fluxColStr), self.fluxFilter,
                                          xRange=xRange, yRange=yRange, order=2,
-                                         xFitRange=(-0.05, 0.8), yFitRange=(-0.06, 0.3),
+                                         xFitRange=(-0.05, 0.8), yFitRange=(-0.03, 0.32),
                                          fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                          magThreshold=self.config.analysis.magThreshold, camera=camera,
                                          hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
@@ -1112,15 +1112,15 @@ class ColorAnalysisTask(CmdLineTask):
                       self.config.plotRanges[filtersStr + "Y1"])
             nameStr = filtersStr + fluxColStr
             self.log.info("nameStr = {:s}".format(nameStr))
-            fitLineUpper = [0.20, -0.3]
-            fitLineLower = [0.01, -0.29]
+            fitLineUpper = [0.65, -3.5]
+            fitLineLower = [-0.01, -0.96]
             poly = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                          self.log, catColors("HSC-Z", "NB0921", mags, good),
                                          catColors("NB0921", "HSC-Y", mags, good),
                                          "z-n921  [{0:s}]".format(fluxColStr),
                                          "n921-y  [{0:s}]".format(fluxColStr), self.fluxFilter,
                                          xRange=xRange, yRange=yRange,
-                                         order=2, xFitRange=(-0.09, 0.16), yFitRange=(0.003, 0.18),
+                                         order=2, xFitRange=(-0.08, 0.2), yFitRange=(0.006, 0.19),
                                          fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                          magThreshold=self.config.analysis.magThreshold, camera=camera,
                                          hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
