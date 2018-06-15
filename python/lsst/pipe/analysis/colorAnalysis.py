@@ -1369,14 +1369,36 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         axes[0].axhspan(axes[0].get_ylim()[0], yMinPad, xmin=xMin, xmax=xMax, **kwargs)
         axes[0].axhspan(yMaxPad, axes[0].get_ylim()[1], xmin=xMin, xmax=xMax, **kwargs)
     if fitLineUpper:
-        scaleLine = 0.05*deltaX*max(1.0, min(3.0, abs(1.0/fitLineUpper[1])))
-        xLineUpper = np.linspace(xLine[crossIdxUpper] - scaleLine, xLine[crossIdxUpper] + scaleLine, 100)
-        yLineUpper = fitLineUpper[0] + fitLineUpper[1]*xLineUpper
+        # Find some sensible plotting limits for the upper line fit
+        frac = 0.1
+        yLineUpper = fitLineUpper[0] + fitLineUpper[1]*xLine
+        idxAtYlimPlusFrac = np.abs(yLineUpper - (yFitRange[1] + frac*deltaY)).argmin()
+        idxAtYlimMinusFrac = np.abs(yLineUpper - (yFitRange[1] - frac*deltaY)).argmin()
+        idx0 = min(idxAtYlimPlusFrac, idxAtYlimMinusFrac)
+        idx1 = max(idxAtYlimPlusFrac, idxAtYlimMinusFrac)
+        idxAtXlimPlusFrac = np.abs(xLine - (xFitRange[1] + frac*deltaX)).argmin()
+        idxAtXlimMinusFrac = np.abs(xLine - (xFitRange[1] - frac*deltaX)).argmin()
+        idx0 = max(idx0, min(idxAtXlimPlusFrac, idxAtXlimMinusFrac))
+        idx1 = min(idx1, max(idxAtXlimPlusFrac, idxAtXlimMinusFrac))
+        deltaIdx = max(crossIdxUpper - idx0, idx1 - crossIdxUpper)
+        yLineUpper = yLineUpper[crossIdxUpper - deltaIdx:crossIdxUpper + deltaIdx]
+        xLineUpper = xLine[crossIdxUpper - deltaIdx:crossIdxUpper + deltaIdx]
         axes[0].plot(xLineUpper, yLineUpper, "r--")
     if fitLineLower:
-        scaleLine = 0.05*deltaX*max(1.0, min(3.0, abs(1.0/fitLineLower[1])))
-        xLineLower = np.linspace(xLine[crossIdxLower] - scaleLine, xLine[crossIdxLower] + scaleLine, 100)
-        yLineLower = fitLineLower[0] + fitLineLower[1]*xLineLower
+        # Find some sensible plotting limits for the lower line fit
+        frac = 0.1
+        yLineLower = fitLineLower[0] + fitLineLower[1]*xLine
+        idxAtYlimPlusFrac = np.abs(yLineLower - (yFitRange[0] + frac*deltaY)).argmin()
+        idxAtYlimMinusFrac = np.abs(yLineLower - (yFitRange[0] - frac*deltaY)).argmin()
+        idx0 = min(idxAtYlimPlusFrac, idxAtYlimMinusFrac)
+        idx1 = max(idxAtYlimPlusFrac, idxAtYlimMinusFrac)
+        idxAtXlimPlusFrac = np.abs(xLine - (xFitRange[1] + frac*deltaX)).argmin()
+        idxAtXlimMinusFrac = np.abs(xLine - (xFitRange[1] - frac*deltaX)).argmin()
+        idx0 = max(idx0, min(idxAtXlimPlusFrac, idxAtXlimMinusFrac))
+        idx1 = min(idx1, max(idxAtXlimPlusFrac, idxAtXlimMinusFrac))
+        deltaIdx = max(crossIdxLower - idx0, idx1 - crossIdxLower)
+        yLineLower = yLineLower[crossIdxLower - deltaIdx:crossIdxLower + deltaIdx]
+        xLineLower = xLine[crossIdxLower - deltaIdx:crossIdxLower + deltaIdx]
         axes[0].plot(xLineLower, yLineLower, "r--")
 
     # Label total number of objects of each data type
