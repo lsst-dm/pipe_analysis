@@ -77,7 +77,8 @@ class CosmosLabeller(StarGalaxyLabeller):
         return np.array([0 if ii in good else 1 for ii in catalog["id"]])
 
 
-def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", rotation=0, fontSize=9, color="k", coordSys="axes"):
+def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", rotation=0, fontSize=9, color="k", alpha=1.0,
+             coordSys="axes"):
     """Label the plot with the string provided at a given location
 
     Parameters
@@ -100,6 +101,8 @@ def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", rotation=0, fontSize=9, 
        size string, relative to the default font size.  Default is 9 points.
     color: `str`, optional
        Color to plot ``textStr``.  Can be any matplotlib color str.  Default is k (for black).
+    alpha: `float`, optional
+       The matplotlib alpha blending value, between 0 (transparent) and 1 (opaque).
     coordSys : `str`, optional
        Coordinate system for ``xLoc``, ``yLoc``.  Choices and matplotlib mappings are:
        axes => axis.transAxes [the default]
