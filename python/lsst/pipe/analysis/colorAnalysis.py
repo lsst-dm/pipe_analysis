@@ -19,7 +19,8 @@ from .coaddAnalysis import CoaddAnalysisTask
 from .utils import (Filenamer, Enforcer, concatenateCatalogs, getFluxKeys, addColumnsToSchema,
                     makeBadArray, addFlag, addIntFloatOrStrColumn, calibrateCoaddSourceCatalog,
                     fluxToPlotString, writeParquet, getRepoInfo, orthogonalRegression,
-                    distanceSquaredToPoly, p2p1CoeffsFromLinearFit, makeEqnStr, catColors)
+                    distanceSquaredToPoly, p2p1CoeffsFromLinearFit, linesFromP2P1Coeffs,
+                    makeEqnStr, catColors)
 from .plotUtils import AllLabeller, OverlapsStarGalaxyLabeller, plotText, labelCamera, setPtSize
 
 import lsst.afw.geom as afwGeom
@@ -36,6 +37,10 @@ class ColorTransform(Config):
     subDescription = Field(dtype=str, doc="Sub-description of the color transform (added detail)")
     plot = Field(dtype=bool, default=True, doc="Plot this color?")
     coeffs = DictField(keytype=str, itemtype=float, doc="Coefficients for each filter")
+    x0 = Field(dtype=float, default=None, optional=True,
+               doc="x Origin of P1/P2 axis on the color-color plane")
+    y0 = Field(dtype=float, default=None, optional=True,
+               doc="y Origin of P1/P2 axis on the color-color plane")
     requireGreater = DictField(keytype=str, itemtype=float, default={},
                                doc="Minimum values for colors so that this is useful")
     requireLess = DictField(keytype=str, itemtype=float, default={},
@@ -47,13 +52,15 @@ class ColorTransform(Config):
                               doc="Intercept for lower fit line limits")
 
     @classmethod
-    def fromValues(cls, description, subDescription, plot, coeffs, requireGreater={}, requireLess={},
-                   fitLineSlope=None, fitLineUpperIncpt=None, fitLineLowerIncpt=None):
+    def fromValues(cls, description, subDescription, plot, coeffs, x0=None, y0=None, requireGreater={},
+                   requireLess={}, fitLineSlope=None, fitLineUpperIncpt=None, fitLineLowerIncpt=None):
         self = cls()
         self.description = description
         self.subDescription = subDescription
         self.plot = plot
         self.coeffs = coeffs
+        self.x0 = x0
+        self.y0 = y0
         self.requireGreater = requireGreater
         self.requireLess = requireLess
         self.fitLineSlope = fitLineSlope
@@ -65,12 +72,14 @@ class ColorTransform(Config):
 ivezicTransformsSDSS = {
     "wPerp": ColorTransform.fromValues("Ivezic w perpendicular", " (griBlue)", True,
                                        {"SDSS-G": -0.227, "SDSS-R": 0.792, "SDSS-I": -0.567, "": 0.050},
+                                       x0=0.4250, y0=0.0818,
                                        requireGreater={"wPara": -0.2}, requireLess={"wPara": 0.6}),
     "xPerp": ColorTransform.fromValues("Ivezic x perpendicular", " (griRed)", True,
                                        {"SDSS-G": 0.707, "SDSS-R": -0.707, "": -0.988},
                                        requireGreater={"xPara": 0.8}, requireLess={"xPara": 1.6}),
     "yPerp": ColorTransform.fromValues("Ivezic y perpendicular", " (rizRed)", True,
                                        {"SDSS-R": -0.270, "SDSS-I": 0.800, "SDSS-Z": -0.534, "": 0.054},
+                                       x0=0.5763, y0=0.1900,
                                        requireGreater={"yPara": 0.1}, requireLess={"yPara": 1.2}),
     "wPara": ColorTransform.fromValues("Ivezic w parallel", " (griBlue)", False,
                                        {"SDSS-G": 0.928, "SDSS-R": -0.556, "SDSS-I": -0.372, "": -0.425}),
@@ -83,14 +92,17 @@ ivezicTransformsSDSS = {
 ivezicTransformsHSC = {
     "wPerp": ColorTransform.fromValues("Ivezic w perpendicular", " (griBlue)", True,
                                        {"HSC-G": -0.274, "HSC-R": 0.803, "HSC-I": -0.529, "": 0.041},
+                                       x0=0.4481, y0=0.1546,
                                        requireGreater={"wPara": -0.2}, requireLess={"wPara": 0.6},
                                        fitLineSlope=-1/0.52, fitLineUpperIncpt=2.40, fitLineLowerIncpt=0.68),
     "xPerp": ColorTransform.fromValues("Ivezic x perpendicular", " (griRed)", True,
                                        {"HSC-G": -0.680, "HSC-R": 0.731, "HSC-I": -0.051, "": 0.792},
+                                       x0=1.2654, y0=1.3675,
                                        requireGreater={"xPara": 0.8}, requireLess={"xPara": 1.6},
                                        fitLineSlope=-1/13.35, fitLineUpperIncpt=1.73, fitLineLowerIncpt=0.87),
     "yPerp": ColorTransform.fromValues("Ivezic y perpendicular", " (rizRed)", True,
                                        {"HSC-R": -0.227, "HSC-I": 0.793, "HSC-Z": -0.566, "": -0.017},
+                                       x0=1.2219, y0=0.5183,
                                        requireGreater={"yPara": 0.1}, requireLess={"yPara": 1.2},
                                        fitLineSlope=-1/0.40, fitLineUpperIncpt=5.5, fitLineLowerIncpt=2.6),
     # The following still default to the SDSS values.  HSC coeffs will be derived on a subsequent
@@ -244,6 +256,23 @@ class ColorAnalysisConfig(Config):
         if self.correctForGalacticExtinction and self.extinctionCoeffs is None:
             raise ValueError("Must set appropriate extinctionCoeffs config.  See "
                              "config/hsc/extinctionCoeffs.py in obs_subaru for an example.")
+
+        # If a wired origin was included in the config, check that it actually
+        # lies on the wired P1 line (allowing for round-off error for precision
+        # of coefficients specified)
+        if self.transforms:
+            for col, transform in self.transforms.items():
+                if transform.plot and transform.x0 is not None and transform.y0 is not None:
+                    transformPerp = self.transforms[col]
+                    transformPara = self.transforms[col[0] + "Para"]
+                    p1p2Lines = linesFromP2P1Coeffs(list(transformPerp.coeffs.values()),
+                                                    list(transformPara.coeffs.values()))
+                    # Threshold of 2e-2 provides sufficient allowance for round-off error
+                    if (np.abs((p1p2Lines.mP1 - p1p2Lines.mP2)*transformPerp.x0 +
+                               (p1p2Lines.bP1 - p1p2Lines.bP2)) > 2e-2):
+                        raise ValueError(("Wired origin for {} does not lie on line associated with wired "
+                                          "PCA coefficients.  Check that the wired values are correct.").
+                                         format(col))
 
 
 class ColorAnalysisRunner(TaskRunner):
