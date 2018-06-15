@@ -383,9 +383,8 @@ class ColorAnalysisTask(CmdLineTask):
                                         patchList=patchList, hscRun=repoInfo.hscRun, geLabel=geLabel)
 
         # self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
-        if self.config.doPlotPrincipalColors or self.config.doWriteParquetTables:
-            principalColCats = self.transformCatalogs(byFilterForcedCats, self.config.transforms,
-                                                      hscRun=repoInfo.hscRun)
+        principalColCats = self.transformCatalogs(byFilterForcedCats, self.config.transforms,
+                                                  hscRun=repoInfo.hscRun)
 
         # Create and write parquet tables
         if self.config.doWriteParquetTables:
