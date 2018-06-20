@@ -931,7 +931,7 @@ def checkHscStack(metadata):
     """Check to see if data were processed with the HSC stack
     """
     try:
-        hscPipe = metadata.get("HSCPIPE_VERSION")
+        hscPipe = metadata.getScalar("HSCPIPE_VERSION")
     except:
         hscPipe = None
     return hscPipe
