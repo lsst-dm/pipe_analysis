@@ -521,7 +521,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             self.zpLabel = "MEAS_MOSAIC"
         else:
             # Scale fluxes to measured zeropoint
-            self.zp = 2.5*np.log10(metadata.get("FLUXMAG0"))
+            self.zp = 2.5*np.log10(metadata.getScalar("FLUXMAG0"))
             if self.zpLabel is None:
                 self.log.info("Using 2.5*log10(FLUXMAG0) = {:.4f} from FITS header for zeropoint".format(
                               self.zp))
@@ -899,7 +899,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 self.zpLabel += " MEAS_MOSAIC_2"
         else:
             # Scale fluxes to measured zeropoint
-            self.zp = 2.5*np.log10(metadata.get("FLUXMAG0"))
+            self.zp = 2.5*np.log10(metadata.getScalar("FLUXMAG0"))
             if self.zpLabel is None:
                 self.log.info("Using 2.5*log10(FLUXMAG0) = {:.4f} from FITS header for zeropoint".format(
                     self.zp))
