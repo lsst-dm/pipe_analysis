@@ -5,6 +5,7 @@ import re
 
 import numpy as np
 import scipy.odr as scipyOdr
+import scipy.optimize as scipyOptimize
 import scipy.stats as scipyStats
 try:
     import fastparquet
@@ -39,8 +40,8 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "calibrateSourceCatalogMosaic", "calibrateSourceCatalog", "calibrateCoaddSourceCatalog",
            "backoutApCorr", "matchJanskyToDn", "checkHscStack", "fluxToPlotString", "andCatalog",
            "writeParquet", "getRepoInfo", "findCcdKey", "getCcdNameRefList", "getDataExistsRefList",
-           "orthogonalRegression", "distanceSquaredToPoly", "p2p1CoeffsFromLinearFit", "makeEqnStr",
-           "catColors", "setAliasMaps"]
+           "orthogonalRegression", "distanceSquaredToPoly", "p1CoeffsFromP2x0y0", "p2p1CoeffsFromLinearFit",
+           "lineFromP2Coeffs", "linesFromP2P1Coeffs", "makeEqnStr", "catColors", "setAliasMaps"]
 
 
 def writeParquet(table, path, badArray=None):
@@ -1163,27 +1164,66 @@ def distanceSquaredToPoly(x1, y1, x2, poly):
     Parameters
     ----------
     x1, y1 : `float`
-       Point from which to calculate the square of the distance to the the polynomial
+       Point from which to calculate the square of the distance to the
+       polynomial ``poly``.
     x2 : `float`
-       Position on x axis from which to calculate the square of the distace between (``x1``, ``y1``) and
-       poly (the position of the tangent of the polynomial curve closest to point (``x1``, ``y1``))
+       Position on x axis from which to calculate the square of the distance
+       between (``x1``, ``y1``) and ``poly`` (the position of the tangent of
+       the polynomial curve closest to point (``x1``, ``y1``)).
     poly : `numpy.lib.polynomial.poly1d`
-       Numpy polynomial fit from which to calculate the square of the distance to (``x1``, ``y1``) at ``x2``
+       Numpy polynomial fit from which to calculate the square of the distance
+       to (``x1``, ``y1``) at ``x2``.
 
     Returns
     -------
-    `float` square of the distance between (``x1``, ``y1``) and ``poly`` at ``x2``
+    result : `float`
+       Square of the distance between (``x1``, ``y1``) and ``poly`` at ``x2``
     """
     return (x2 - x1)**2 + (poly(x2) - y1)**2
 
 
-def p2p1CoeffsFromLinearFit(m, b, x0, y0):
+def p1CoeffsFromP2x0y0(p2Coeffs, x0, y0):
+    """Compute Ivezic P1 coefficients using the P2 coeffs and origin (x0, y0)
+
+    Reference: Ivezic et al. 2004 (2004AN....325..583I)
+
+    theta = arctan(mP1), where mP1 is the slope of the equivalent straight
+                         line (the P1 line) from the P2 coeffs in the (x, y)
+                         coordinate system and x = c1 - c2, y = c2 - c3
+    P1 = cos(theta)*c1 + ((sin(theta) - cos(theta))*c2 - sin(theta)*c3 + deltaP1
+    P1 = 0 at x0, y0 ==> deltaP1 = -cos(theta)*x0 - sin(theta)*y0
+
+    Parameters
+    ----------
+    p2Coeffs : `list` of `float`
+       List of the four P2 coefficients from which, along with the origin point
+       (``x0``, ``y0``), to compute/derive the associated P1 coefficients.
+    x0, y0 : `float`
+       Coordinates at which to set P1 = 0 (i.e. the P1/P2 axis origin).
+
+    Returns
+    -------
+    p1Coeffs: `list` of `float`
+       The four P1 coefficients.
     """
-    Derive the Ivezic et al. 2004 (2004AN....325..583I) P2 and P1 equations based on linear fit
+    mP1 = p2Coeffs[0]/p2Coeffs[2]
+    cosTheta = np.cos(np.arctan(mP1))
+    sinTheta = np.sin(np.arctan(mP1))
+    deltaP1 = -cosTheta*x0 - sinTheta*y0
+    p1Coeffs = [cosTheta, sinTheta - cosTheta, -sinTheta, deltaP1]
+
+    return p1Coeffs
+
+
+def p2p1CoeffsFromLinearFit(m, b, x0, y0):
+    """Derive the Ivezic et al. 2004 P2 and P1 equations based on linear fit
+
+    Where the linear fit is to the given region in color-color space.
+    Reference: Ivezic et al. 2004 (2004AN....325..583I)
 
     For y = m*x + b fit, where x = c1 - c2 and y = c2 - c3,
     P2 = (-m*c1 + (m + 1)*c2 - c3 - b)/sqrt(m**2 + 1)
-    P2norm = P2/sqrt[(m**2 + (m + 1)**2 + 1**2)]
+    P2norm = P2/sqrt[(m**2 + (m + 1)**2 + 1**2)/(m**2 + 1)]
 
     P1 = cos(theta)*x + sin(theta)*y + deltaP1, theta = arctan(m)
     P1 = cos(theta)*(c1 - c2) + sin(theta)*(c2 - c3) + deltaP1
@@ -1207,25 +1247,97 @@ def p2p1CoeffsFromLinearFit(m, b, x0, y0):
        - ``p2Coeffs`` : four P2 equation coefficents (`list` of `float`).
        - ``p1Coeffs`` : four P1 equation coefficents (`list` of `float`).
     """
-
     # Compute Ivezic P2 coefficients using the linear fit slope and intercept
     scaleFact = np.sqrt(m**2 + 1.0)
     p2Coeffs = [-m/scaleFact, (m + 1.0)/scaleFact, -1.0/scaleFact, -b/scaleFact]
     p2Norm = 0.0
-    for coeff in p2Coeffs[:-1]:
+    for coeff in p2Coeffs[:-1]:  # Omit the constant normalization term
         p2Norm += coeff**2
     p2Norm = np.sqrt(p2Norm)
     p2Coeffs /= p2Norm
 
-    # Compute Ivezic P1 coefficients equation using the linear fit slope and point (x0, y0) as the origin
-    cosTheta = np.cos(np.arctan(m))
-    sinTheta = np.sin(np.arctan(m))
-    deltaP1 = -cosTheta*x0 - sinTheta*y0
-    p1Coeffs = [cosTheta, sinTheta - cosTheta, -sinTheta, deltaP1]
+    # Compute Ivezic P1 coefficients equation using the linear fit slope and
+    # point (x0, y0) as the origin
+    p1Coeffs = p1CoeffsFromP2x0y0(p2Coeffs, x0, y0)
 
     return Struct(
         p2Coeffs=p2Coeffs,
         p1Coeffs=p1Coeffs,
+    )
+
+
+def lineFromP2Coeffs(p2Coeffs):
+    """Compute P1 line in color-color space for given set P2 coefficients
+
+    Reference: Ivezic et al. 2004 (2004AN....325..583I)
+
+    Parameters
+    ----------
+    p2Coeffs : `list` of `float`
+       List of the four P2 coefficients.
+
+    Returns
+    -------
+    result : `lsst.pipe.base.Struct`
+       Result struct with components:
+
+       - ``mP1`` : associated slope for P1 in color-color coordinates (`float`).
+       - ``bP1`` : associated intercept for P1 in color-color coordinates
+                   (`float`).
+    """
+    mP1 = p2Coeffs[0]/p2Coeffs[2]
+    bP1 = -p2Coeffs[3]*np.sqrt(mP1**2 + (mP1 + 1.0)**2 + 1.0)
+    return Struct(
+        mP1=mP1,
+        bP1=bP1,
+    )
+
+
+def linesFromP2P1Coeffs(p2Coeffs, p1Coeffs):
+    """Derive P1/P2 axes in color-color space based on the P2 and P1 coeffs
+
+    Reference: Ivezic et al. 2004 (2004AN....325..583I)
+
+    Parameters
+    ----------
+    p2Coeffs : `list` of `float`
+       List of the four P2 coefficients.
+    p1Coeffs : `list` of `float`
+       List of the four P1 coefficients.
+
+    Returns
+    -------
+    result : `lsst.pipe.base.Struct`
+       Result struct with components:
+
+       - ``mP2``, ``mP1`` : associated slopes for P2 and P1 in color-color
+                            coordinates (`float`).
+       - ``bP2``, ``bP1`` : associated intercepts for P2 and P1 in color-color
+                            coordinates (`float`).
+       - ``x0``, ``y0`` : x and y coordinates of the P2/P1 axes origin in
+                          color-color coordinates (`float`).
+    """
+    p1Line = lineFromP2Coeffs(p2Coeffs)
+    mP1 = p1Line.mP1
+    bP1 = p1Line.bP1
+
+    cosTheta = np.cos(np.arctan(mP1))
+    sinTheta = np.sin(np.arctan(mP1))
+
+    def func2(x):
+        y = [cosTheta*x[0] + sinTheta*x[1] + p1Coeffs[3], mP1*x[0] - x[1] + bP1]
+        return y
+
+    x0y0 = scipyOptimize.fsolve(func2, [1, 1])
+    mP2 = -1.0/mP1
+    bP2 = x0y0[1] - mP2*x0y0[0]
+    return Struct(
+        mP2=mP2,
+        bP2=bP2,
+        mP1=mP1,
+        bP1=bP1,
+        x0=x0y0[0],
+        y0=x0y0[1],
     )
 
 
