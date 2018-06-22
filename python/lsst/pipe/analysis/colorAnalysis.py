@@ -1272,6 +1272,8 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
             poly = np.polyfit(xx[keep], yy[keep], order)
             dy = yy - np.polyval(poly, xx)
             q1, q3 = np.percentile(dy[keep], [25, 75])
+            # The difference between q3 and q1 is the interquartile distance.
+            # 0.74*interquartileDistance is an estimate of standard deviation.
             clip = rej*0.74*(q3 - q1)
             keep = np.logical_not(np.abs(dy) > clip)
             # After the first iteration, reset the vertical and horizontal clipping to be less restrictive
