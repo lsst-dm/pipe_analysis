@@ -697,20 +697,37 @@ def addRotPoint(catalog, width, height, nQuarter, prefix=""):
     return newCatalog
 
 
-def makeBadArray(catalog, flagList=[], onlyReadStars=False):
+def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True, tractInnerOnly=False):
     """Create a boolean array indicating sources deemed unsuitable for qa analyses
 
-    Sets value to True for unisolated objects (deblend_nChild > 0) and any of the flags listed
-    in self.config.analysis.flags.  If self.config.onlyReadStars is True, sets boolean as True
-    for all galaxies classified as extended (base_ClassificationExtendedness_value > 0.5).
+    Sets value to True for unisolated objects (deblend_nChild > 0), "sky" objects (merge_peak_sky),
+    and any of the flags listed in self.config.analysis.flags.  If onlyReadStars is True, sets boolean
+    as True for all galaxies classified as extended (base_ClassificationExtendedness_value > 0.5).  If
+    patchInnerOnly is True (the default), sets the bad boolean array value to True for any sources
+    for which detect_isPatchInner is False (to avoid duplicates in overlapping patches).  If
+    tractInnerOnly is True, sets the bad boolean value to True for any sources for which
+    detect_isTractInner is False (to avoid duplicates in overlapping patches).  Note, however, that
+    the default for tractInnerOnly is False as we are currently only running these scripts at the
+    per-tract level, so there are no tract duplicates (and omitting the "outer" ones would just leave
+    an empty band around the tract edges).
 
     Parameters
     ----------
     catalog : `lsst.afw.table.source.source.SourceCatalog`
-       The source catalog under consideration
+       The source catalog under consideration.
     flagList : `list`
        The list of flags for which, if any is set for a given source, set bad entry to True for
-       that source
+       that source.
+    onlyReadStars : `bool`, optional
+       Boolean indicating if you want to select objects classified as stars only (based on
+       base_ClassificationExtendedness_value > 0.5, `False` by default).
+    patchInnerOnly : `bool`, optional
+       Whether to select only sources for which detect_isPatchInner is `True` (`True` by default).
+    tractInnerOnly : `bool`, optional
+       Whether to select only sources for which detect_isTractInner is `True` (`False` by default).
+       Note that these scripts currently only ever run at the per-tract level, so we do not need
+       to filter out sources for which detect_isTractInner is False as, with only one tract, there
+       are no duplicated tract inner/outer sources.
 
     Returns
     -------
@@ -719,7 +736,12 @@ def makeBadArray(catalog, flagList=[], onlyReadStars=False):
        innapropriate for qa analyses
     """
     bad = np.zeros(len(catalog), dtype=bool)
-    bad |= catalog["deblend_nChild"] > 0  # Exclude non-deblended (i.e parents)
+    if "detect_isPatchInner" in catalog.schema and patchInnerOnly:
+        bad |= ~catalog["detect_isPatchInner"]
+    if "detect_isTractInner" in catalog.schema and tractInnerOnly:
+        bad |= ~catalog["detect_isTractInner"]
+    bad |= catalog["deblend_nChild"] > 0  # Exclude non-deblended (i.e. parents)
+    bad |= catalog["merge_peak_sky"]  # Exclude "sky" objects
     for flag in flagList:
         bad |= catalog[flag]
     if onlyReadStars and "base_ClassificationExtendedness_value" in catalog.schema:
