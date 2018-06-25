@@ -81,7 +81,8 @@ class CoaddAnalysisConfig(Config):
                                                    "modelfit_CModel"],
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(base_PsfFlux)")
     columnsToCopy = ListField(dtype=str,
-                              default=["calib_psfUsed", "calib_psfCandidate", ],
+                              default=["calib_psfUsed", "calib_psfCandidate", "detect_isPatchInner",
+                                       "detect_isTractInner", "merge_peak_sky"],
                               doc="List of columns to copy from one source catalog to another.")
     doWriteParquetTables = Field(dtype=bool, default=True,
                                  doc=("Write out Parquet tables (for subsequent interactive analysis)?"
@@ -219,8 +220,38 @@ class CoaddAnalysisTask(CmdLineTask):
             if haveForced:
                 forced = addFootprintNPix(forced, fromCat=unforced)
 
+        # Must do the overlaps before purging the catalogs of non-primary sources
+        if self.config.doPlotOverlaps:
+            # Determine if any patches in the patchList actually overlap
+            overlappingPatches = checkPatchOverlap(patchList, repoInfo.tractInfo)
+            if not overlappingPatches:
+                self.log.info("No overlapping patches...skipping overlap plots")
+            else:
+                self.catLabel = "nChild = 0"
+                if haveForced:
+                    forcedOverlaps = self.overlaps(forced)
+                    if forcedOverlaps:
+                        self.plotOverlaps(forcedOverlaps, filenamer, repoInfo.dataId, butler=repoInfo.butler,
+                                          camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
+                                          patchList=patchList, hscRun=repoInfo.hscRun,
+                                          matchRadius=self.config.matchOverlapRadius, zpLabel=self.zpLabel,
+                                          forcedStr=forcedStr, postFix="_forced",
+                                          fluxToPlotList=["modelfit_CModel", ])
+                    self.log.info("Number of forced overlap objects matched = {:d}".
+                                  format(len(forcedOverlaps)))
+                unforcedOverlaps = self.overlaps(unforced)
+                if unforcedOverlaps:
+                    self.plotOverlaps(unforcedOverlaps, filenamer, repoInfo.dataId, butler=repoInfo.butler,
+                                      camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
+                                      patchList=patchList, hscRun=repoInfo.hscRun,
+                                      matchRadius=self.config.matchOverlapRadius, zpLabel=self.zpLabel,
+                                      forcedStr="unforced", postFix="_unforced",
+                                      fluxToPlotList=["modelfit_CModel", ])
+                self.log.info("Number of unforced overlap objects matched = {:d}".
+                              format(len(unforcedOverlaps)))
+
         # Set boolean array indicating sources deemed unsuitable for qa analyses
-        self.catLabel = "nChild = 0"
+        self.catLabel = "noDuplicates"
         bad = makeBadArray(unforced, flagList=self.config.analysis.flags,
                            onlyReadStars=self.config.onlyReadStars)
         if haveForced:
@@ -310,23 +341,6 @@ class CoaddAnalysisTask(CmdLineTask):
                                      camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
                                      patchList=patchList, hscRun=repoInfo.hscRun,
                                      matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
-        if self.config.doPlotOverlaps:
-            # Determine if any patches in the patchList actually overlap
-            overlappingPatches = checkPatchOverlap(patchList, repoInfo.tractInfo)
-            if not overlappingPatches:
-                self.log.info("No overlapping patches...skipping overlap plots")
-            else:
-                if haveForced:
-                    overlaps = self.overlaps(forced, flagsCat)
-                else:
-                    overlaps = self.overlaps(unforced, flagsCat)
-                self.log.info("Number of overlap objects matched = {:d}".format(len(overlaps)))
-                if overlaps:
-                    self.plotOverlaps(overlaps, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                                      camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
-                                      patchList=patchList, hscRun=repoInfo.hscRun,
-                                      matchRadius=self.config.matchOverlapRadius, zpLabel=self.zpLabel,
-                                      forcedStr=forcedStr)
 
         if self.config.doPlotMatches:
             if haveForced:
@@ -403,12 +417,26 @@ class CoaddAnalysisTask(CmdLineTask):
                                               col not in catalog.schema and col in unforced.schema and
                                               not (hscRun and col == "slot_Centroid_flag")])
 
+            # Set boolean array indicating sources deemed unsuitable for qa analyses
+            bad = makeBadArray(catalog, flagList=self.config.analysis.flags,
+                               onlyReadStars=self.config.onlyReadStars)
+
             catalog = self.calibrateCatalogs(catalog, wcs=wcs)
 
             if dataset.startswith("deepCoadd_"):
                 packedMatches = butler.get("deepCoadd_measMatch", dataRef.dataId)
             else:
                 packedMatches = butler.get(dataset + "Match", dataRef.dataId)
+
+            # Purge the match list of sources flagged in the catalog
+            badIds = catalog["id"][bad]
+            badMatch = np.zeros(len(packedMatches), dtype=bool)
+            for iMat, iMatch in enumerate(packedMatches):
+                if iMatch["second"] in badIds:
+                    badMatch[iMat] = True
+            self.catLabel = "noDuplicates"
+            self.zpLabel = self.zpLabel + " " + self.catLabel
+            packedMatches = packedMatches[~badMatch].copy(deep=True)
             # The reference object loader grows the bbox by the config parameter pixelMargin.  This
             # is set to 50 by default but is not reflected by the radius parameter set in the
             # metadata, so some matches may reside outside the circle searched within this radius
@@ -775,23 +803,24 @@ class CoaddAnalysisTask(CmdLineTask):
                 return True
         return False
 
-    def overlaps(self, catalog, flagsCat):
-        # Don't include parents of blended objects
-        noParentsCat = catalog[flagsCat["deblend_nChild"] == 0].copy(deep=True)
-        matches = afwTable.matchRaDec(noParentsCat, self.config.matchOverlapRadius*afwGeom.arcseconds)
+    def overlaps(self, catalog):
+        badForOverlap = makeBadArray(catalog, flagList=self.config.analysis.flags,
+                                     onlyReadStars=self.config.onlyReadStars, patchInnerOnly=False)
+        goodCat = catalog[~badForOverlap]
+        matches = afwTable.matchRaDec(goodCat, self.config.matchOverlapRadius*afwGeom.arcseconds)
         if not matches:
             self.log.info("Did not find any overlapping matches")
         return joinMatches(matches, "first_", "second_")
 
     def plotOverlaps(self, overlaps, filenamer, dataId, butler=None, camera=None, ccdList=None,
                      tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                     forcedStr=None, fluxToPlotList=None, flagsCat=None):
+                     forcedStr=None, postFix="", fluxToPlotList=None, flagsCat=None):
         if fluxToPlotList is None:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
         magEnforcer = Enforcer(requireLess={"star": {"stdev": 0.003*self.unitScale}})
         for col in fluxToPlotList:
-            shortName = "overlap_" + col
+            shortName = "overlap_" + col + postFix
             self.log.info("shortName = {:s}".format(shortName))
             if "first_" + col + "_flux" in overlaps.schema:
                 self.AnalysisClass(overlaps, MagDiff("first_" + col + "_flux", "second_" + col + "_flux",
@@ -806,7 +835,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                              zpLabel=zpLabel, forcedStr=forcedStr)
         unitStr = "mas" if self.config.toMilli else "arcsec"
         distEnforcer = Enforcer(requireLess={"star": {"stdev": 0.005*self.unitScale}})
-        shortName = "overlap_distance"
+        shortName = "overlap_distance" + postFix
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(overlaps,
                            lambda cat: cat["distance"]*(1.0*afwGeom.radians).asArcseconds()*self.unitScale,
@@ -1145,7 +1174,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                           not (repoInfo2.hscRun and col == "slot_Centroid_flag")])
 
         # Set boolean array indicating sources deemed unsuitable for qa analyses
-        self.catLabel = "nChild = 0"
+        self.catLabel = "noDuplicates"
         bad1 = makeBadArray(unforced1, flagList=self.config.analysis.flags,
                             onlyReadStars=self.config.onlyReadStars)
         bad2 = makeBadArray(unforced2, flagList=self.config.analysis.flags,

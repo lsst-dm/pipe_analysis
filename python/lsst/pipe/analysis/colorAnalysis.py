@@ -16,11 +16,11 @@ from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError
 from lsst.coadd.utils import TractDataIdContainer
 from .analysis import Analysis, AnalysisConfig
 from .coaddAnalysis import CoaddAnalysisTask
-from .utils import (Filenamer, Enforcer, concatenateCatalogs, checkIdLists, getFluxKeys, addPatchColumn,
-                    calibrateCoaddSourceCatalog, fluxToPlotString, writeParquet, getRepoInfo,
-                    orthogonalRegression, distanceSquaredToPoly, p2p1CoeffsFromLinearFit, makeEqnStr,
-                    catColors)
-from .plotUtils import OverlapsStarGalaxyLabeller, labelCamera, setPtSize
+from .utils import (Filenamer, Enforcer, concatenateCatalogs, getFluxKeys, addColumnsToSchema,
+                    makeBadArray, addPatchColumn, calibrateCoaddSourceCatalog, fluxToPlotString,
+                    writeParquet, getRepoInfo, orthogonalRegression, distanceSquaredToPoly,
+                    p2p1CoeffsFromLinearFit, makeEqnStr, catColors)
+from .plotUtils import OverlapsStarGalaxyLabeller, labelCamera, setPtSize, plotText
 
 import lsst.afw.geom as afwGeom
 import lsst.afw.table as afwTable
@@ -343,7 +343,7 @@ class ColorAnalysisTask(CmdLineTask):
         byFilterForcedCats = {ff: self.readCatalogs(patchRefList,
                                                     self.config.coaddName + "Coadd_forced_src") for
                               ff, patchRefList in patchRefsByFilter.items()}
-
+        self.forcedStr = "forced"
         for cat in byFilterForcedCats.values():
             calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
         byFilterForcedCats = self.correctForGalacticExtinction(byFilterForcedCats, repoInfo.tractInfo)
@@ -368,7 +368,7 @@ class ColorAnalysisTask(CmdLineTask):
         for fluxColumn in ["base_PsfFlux_flux", "modelfit_CModel_flux"]:
             self.plotStarColorColor(principalColCats, byFilterForcedCats, filenamer, repoInfo.dataId,
                                     fluxColumn, camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
-                                    patchList=patchList, hscRun=repoInfo.hscRun)
+                                    patchList=patchList, hscRun=repoInfo.hscRun, forcedStr=self.forcedStr)
 
     def readCatalogs(self, patchRefList, dataset):
         """Read in and concatenate catalogs of type dataset in lists of data references
@@ -397,6 +397,11 @@ class ColorAnalysisTask(CmdLineTask):
         for patchRef in patchRefList:
             if patchRef.datasetExists(dataset):
                 cat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+                if dataset is not "deepCoadd_meas":
+                    unforcedCat = patchRef.get("deepCoadd_meas", immediate=True,
+                                               flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+                    cat = addColumnsToSchema(unforcedCat, cat, ["detect_isPatchInner", "detect_isTractInner",
+                                                                "merge_peak_sky"])
                 if self.config.doWriteParquetTables:
                     cat = addPatchColumn(cat, patchRef.dataId["patch"])
                 catList.append(cat)
@@ -523,14 +528,8 @@ class ColorAnalysisTask(CmdLineTask):
             new[col][:] = value
 
         # Flag bad values
-        bad = np.zeros(num, dtype=bool)
-        for dataCat, flagsCat in zip(catalogs.values(), flagsCats.values()):
-            if not checkIdLists(dataCat, flagsCat):
-                raise RuntimeError(
-                    "Catalog being used for flags does not have the same object list as the data catalog")
-            for flag in self.flags:
-                if flag in flagsCat.schema:
-                    bad |= flagsCat[flag]
+        for dataCat in catalogs.values():
+            bad = makeBadArray(dataCat, flagList=self.flags)
         # Can't set column for flags; do row-by-row
         for row, badValue in zip(new, bad):
             row.setFlag(badKey, bool(badValue))
@@ -613,6 +612,8 @@ class ColorAnalysisTask(CmdLineTask):
             else:
                 raise RuntimeError("Unknown transformation: {:s}".format(self.config.transforms))
 
+            catLabel = "noDuplicates"
+            forcedStr = self.forcedStr + " " + catLabel
             shortName = "color_" + col
             self.log.info("shortName = {:s}".format(shortName + transform.subDescription))
             self.AnalysisClass(principalColCats, colorsInRange, "%s (%s)" % (col + transform.subDescription,
@@ -621,7 +622,8 @@ class ColorAnalysisTask(CmdLineTask):
                                qMin=-0.2, qMax=0.2, magThreshold=self.config.analysis.magThreshold,
                                ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
-                                         plotRunStats=False, extraLabels=principalColorStrs)
+                                         forcedStr=forcedStr, plotRunStats=False,
+                                         extraLabels=principalColorStrs)
 
             # Plot selections of stars for different criteria
             if self.config.transforms == ivezicTransformsHSC:
@@ -691,6 +693,8 @@ class ColorAnalysisTask(CmdLineTask):
                           **kwargs)
                 if camera is not None:
                     labelCamera(camera, plt, axes, 0.5, 1.09)
+                if catLabel is not None:
+                    plotText(catLabel, plt, axes, 0.13, -0.09, color="green")
                 if hscRun is not None:
                     axes.set_title("HSC stack run: " + hscRun, color="#800080")
 
@@ -702,16 +706,15 @@ class ColorAnalysisTask(CmdLineTask):
                 plt.close(fig)
 
     def plotStarColorColor(self, principalColCats, byFilterCats, filenamer, dataId, fluxColumn, butler=None,
-                           camera=None, tractInfo=None, patchList=None, hscRun=None):
+                           camera=None, tractInfo=None, patchList=None, hscRun=None, forcedStr=None):
         num = len(list(byFilterCats.values())[0])
         zp = 0.0
         mags = {ff: zp - 2.5*np.log10(byFilterCats[ff][fluxColumn]) for ff in byFilterCats}
 
         bad = np.zeros(num, dtype=bool)
         for cat in byFilterCats.values():
-            for flag in self.flags:
-                if flag in cat.schema:
-                    bad |= cat[flag]
+            bad = makeBadArray(cat, flagList=self.flags)
+        catLabel = "noDuplicates"
 
         bright = mags[self.fluxFilter] < self.config.analysis.magThreshold
         prettyBrightThreshold = self.config.analysis.magThreshold
@@ -763,7 +766,7 @@ class ColorAnalysisTask(CmdLineTask):
                                              xFitRange=(0.3, 1.12), yFitRange=(0.04, 0.5),
                                              fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
-                                             hscRun=hscRun, unitScale=self.unitScale)
+                                             catLabel=catLabel, hscRun=hscRun, unitScale=self.unitScale)
             transformPerp = self.config.transforms["xPerp"]
             transformPara = self.config.transforms["xPara"]
             fitLineUpper = [transformPerp.fitLineUpperIncpt, transformPerp.fitLineSlope]
@@ -781,7 +784,8 @@ class ColorAnalysisTask(CmdLineTask):
                                              xFitRange=(1.05, 1.45), yFitRange=(0.78, 1.65),
                                              fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
-                                             hscRun=hscRun, unitScale=self.unitScale, closeToVertical=True)
+                                             catLabel=catLabel, hscRun=hscRun, unitScale=self.unitScale,
+                                             closeToVertical=True)
             # Lower branch only; upper branch is noisy due to astrophysics
             nameStr = filtersStr + fluxColStr
             self.log.info("nameStr = {:s}".format(nameStr))
@@ -796,7 +800,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          xFitRange=(0.23, 1.2), yFitRange=(0.05, 0.6),
                                          fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                          magThreshold=self.config.analysis.magThreshold, camera=camera,
-                                         hscRun=hscRun, unitScale=self.unitScale)
+                                         catLabel=catLabel, hscRun=hscRun, unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
             if fluxColumn is not "base_PsfFlux_flux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
@@ -834,7 +838,7 @@ class ColorAnalysisTask(CmdLineTask):
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.03*self.unitScale}}),
                                          camera=camera, tractInfo=tractInfo, patchList=patchList,
-                                         hscRun=hscRun)
+                                         hscRun=hscRun, forcedStr=forcedStr)
         if filters.issuperset(set(("HSC-R", "HSC-I", "HSC-Z"))):
             # Do a linear fit to regions defined in Ivezic transforms
             transformPerp = self.config.transforms["yPerp"]
@@ -859,7 +863,7 @@ class ColorAnalysisTask(CmdLineTask):
                                              xFitRange=(0.92, 2.02), yFitRange=(0.4, 0.83),
                                              fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
-                                             hscRun=hscRun, unitScale=self.unitScale)
+                                             catLabel=catLabel, hscRun=hscRun, unitScale=self.unitScale)
             nameStr = filtersStr + fluxColStr
             fitLineUpper = [0.94, -0.27]
             fitLineLower = [0.046, -0.55]
@@ -873,7 +877,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          xFitRange=(0.0, 1.6), yFitRange=(-0.03, 0.7),
                                          fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                          magThreshold=self.config.analysis.magThreshold, camera=camera,
-                                         hscRun=hscRun, unitScale=self.unitScale)
+                                         catLabel=catLabel, hscRun=hscRun, unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
             if fluxColumn is not "base_PsfFlux_flux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
@@ -910,7 +914,7 @@ class ColorAnalysisTask(CmdLineTask):
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.03*self.unitScale}}),
                                          camera=camera, tractInfo=tractInfo, patchList=patchList,
-                                         hscRun=hscRun)
+                                         hscRun=hscRun, forcedStr=forcedStr)
         if filters.issuperset(set(("HSC-I", "HSC-Z", "HSC-Y"))):
             filtersStr = "izy"
             nameStr = filtersStr + fluxColStr
@@ -930,7 +934,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          xFitRange=(-0.05, 0.8), yFitRange=(-0.06, 0.3),
                                          fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                          magThreshold=self.config.analysis.magThreshold, camera=camera,
-                                         hscRun=hscRun, unitScale=self.unitScale)
+                                         catLabel=catLabel, hscRun=hscRun, unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
             if fluxColumn is not "base_PsfFlux_flux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
@@ -967,7 +971,7 @@ class ColorAnalysisTask(CmdLineTask):
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.03*self.unitScale}}),
                                          camera=camera, tractInfo=tractInfo, patchList=patchList,
-                                         hscRun=hscRun)
+                                         hscRun=hscRun, forcedStr=forcedStr)
 
         if filters.issuperset(set(("HSC-Z", "NB0921", "HSC-Y"))):
             filtersStr = "z9y"
@@ -988,7 +992,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          order=2, xFitRange=(-0.09, 0.16), yFitRange=(0.003, 0.18),
                                          fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                          magThreshold=self.config.analysis.magThreshold, camera=camera,
-                                         hscRun=hscRun, unitScale=self.unitScale)
+                                         catLabel=catLabel, hscRun=hscRun, unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
             if fluxColumn is not "base_PsfFlux_flux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
@@ -1025,7 +1029,7 @@ class ColorAnalysisTask(CmdLineTask):
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.03*self.unitScale}}),
                                          camera=camera, tractInfo=tractInfo, patchList=patchList,
-                                         hscRun=hscRun)
+                                         hscRun=hscRun, forcedStr=forcedStr)
 
     def _getConfigName(self):
         return None
@@ -1041,7 +1045,8 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
                           transformPara=None, mags=None, principalCol=None, xRange=None, yRange=None,
                           order=1, iterations=3, rej=3.0, xFitRange=None, yFitRange=None,
                           fitLineUpper=None, fitLineLower=None, numBins="auto", hscRun=None, logger=None,
-                          magThreshold=99.9, camera=None, unitScale=1.0, closeToVertical=False):
+                          magThreshold=99.9, camera=None, catLabel=None, unitScale=1.0,
+                          closeToVertical=False):
     fig, axes = plt.subplots(nrows=1, ncols=2, sharex=False, sharey=False)
     fig.subplots_adjust(wspace=0.46, bottom=0.15, left=0.11, right=0.96, top=0.9)
     axes[0].tick_params(which="both", direction="in", labelsize=9)
@@ -1408,6 +1413,8 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
 
     if camera is not None:
         labelCamera(camera, plt, axes[0], 0.5, 1.04)
+    if catLabel is not None:
+        plotText(catLabel, plt, axes[0], 0.85, -0.14, fontSize=9)
     if hscRun is not None:
         axes[0].set_title("HSC stack run: " + hscRun, color="#800080")
 
