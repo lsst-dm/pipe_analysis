@@ -30,7 +30,7 @@ from .utils import (Filenamer, Enforcer, MagDiff, MagDiffMatches, MagDiffCompare
                     addColumnsToSchema, addApertureFluxesHSC, addFpPoint,
                     addFootprintNPix, makeBadArray, addIntFloatOrStrColumn,
                     calibrateCoaddSourceCatalog, backoutApCorr, matchJanskyToDn,
-                    fluxToPlotString, andCatalog, writeParquet, getRepoInfo)
+                    fluxToPlotString, andCatalog, writeParquet, getRepoInfo, setAliasMaps)
 from .plotUtils import (CosmosLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
                         MatchesStarGalaxyLabeller)
 
@@ -82,8 +82,15 @@ class CoaddAnalysisConfig(Config):
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(base_PsfFlux)")
     columnsToCopy = ListField(dtype=str,
                               default=["calib_psf_used", "calib_psf_candidate", "detect_isPatchInner",
-                                       "detect_isTractInner", "merge_peak_sky"],
+                                       "detect_isTractInner", "merge_peak_sky", "calib_psfUsed",
+                                       "calib_psfCandidate", ],
                               doc="List of columns to copy from one source catalog to another.")
+    flagsToAlias = DictField(keytype=str, itemtype=str,
+                             default={"calib_psf_used": "calib_psfUsed",
+                                      "calib_psf_candidate": "calib_psfCandidate",
+                                      "calib_astrometry_used": "calib_astrometryUsed"},
+                             doc=("List of flags to alias to old, pre-RFC-498, names for backwards "
+                                  "compatibility with old processings"))
     doWriteParquetTables = Field(dtype=bool, default=True,
                                  doc=("Write out Parquet tables (for subsequent interactive analysis)?"
                                       "\nNOTE: if True but fastparquet package is unavailable, a warning is "
@@ -186,15 +193,6 @@ class CoaddAnalysisTask(CmdLineTask):
             unforced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_meas")
             unforced = self.calibrateCatalogs(unforced, wcs=repoInfo.wcs)
 
-        # Set an alias map for differing src naming conventions of different stacks (if any)
-        if repoInfo.hscRun is not None and self.config.srcSchemaMap is not None:
-            coaddList = [unforced.schema.getAliasMap(), ]
-            if haveForced:
-                coaddList += [forced.schema.getAliasMap()]
-            for aliasMap in coaddList:
-                for lsstName, otherName in self.config.srcSchemaMap.items():
-                    aliasMap.set(lsstName, otherName)
-
         if haveForced:
             # copy over some fields from unforced to forced catalog
             forced = addColumnsToSchema(unforced, forced,
@@ -212,6 +210,16 @@ class CoaddAnalysisTask(CmdLineTask):
             forced = addColumnsToSchema(refBandCat, forced,
                                         [col for col in refBandList if col not in forced.schema and
                                          col in refBandCat.schema])
+
+        # Set some aliases for differing schema naming conventions
+        coaddList = [unforced, ]
+        if haveForced:
+            coaddList += [forced]
+        aliasDictList = [self.config.flagsToAlias, ]
+        if repoInfo.hscRun is not None and self.config.srcSchemaMap is not None:
+            aliasDictList += [self.config.srcSchemaMap]
+        for cat in coaddList:
+            cat = setAliasMaps(cat, aliasDictList)
 
         forcedStr = "forced" if haveForced else "unforced"
 
@@ -345,10 +353,12 @@ class CoaddAnalysisTask(CmdLineTask):
         if self.config.doPlotMatches:
             if haveForced:
                 matches = self.readSrcMatches(patchRefList, self.config.coaddName + "Coadd_forced_src",
-                                              hscRun=repoInfo.hscRun, wcs=repoInfo.wcs)
+                                              hscRun=repoInfo.hscRun, wcs=repoInfo.wcs,
+                                              aliasDictList=aliasDictList)
             else:
                 matches = self.readSrcMatches(patchRefList, self.config.coaddName + "Coadd_meas",
-                                              hscRun=repoInfo.hscRun, wcs=repoInfo.wcs)
+                                              hscRun=repoInfo.hscRun, wcs=repoInfo.wcs,
+                                              aliasDictList=aliasDictList)
             self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId, butler=repoInfo.butler,
                              camera=repoInfo.camera, tractInfo=repoInfo.tractInfo, patchList=patchList,
                              hscRun=repoInfo.hscRun, zpLabel=self.zpLabel, forcedStr=forcedStr)
@@ -396,7 +406,7 @@ class CoaddAnalysisTask(CmdLineTask):
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
         return concatenateCatalogs(catList)
 
-    def readSrcMatches(self, dataRefList, dataset, hscRun=None, wcs=None):
+    def readSrcMatches(self, dataRefList, dataset, hscRun=None, wcs=None, aliasDictList=None):
         catList = []
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
@@ -407,6 +417,9 @@ class CoaddAnalysisTask(CmdLineTask):
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+            # Set some aliases for differing schema naming conventions
+            if aliasDictList is not None:
+                catalog = setAliasMaps(catalog, aliasDictList)
             if dataset != "deepCoadd_meas" and any(ss not in catalog.schema
                                                    for ss in self.config.columnsToCopy):
                 unforced = dataRef.get("deepCoadd_meas", immediate=True,
@@ -417,6 +430,8 @@ class CoaddAnalysisTask(CmdLineTask):
                                               list(self.config.analysis.flags) if
                                               col not in catalog.schema and col in unforced.schema and
                                               not (hscRun and col == "slot_Centroid_flag")])
+                if aliasDictList is not None:
+                    catalog = setAliasMaps(catalog, aliasDictList)
 
             # Set boolean array indicating sources deemed unsuitable for qa analyses
             bad = makeBadArray(catalog, flagList=self.config.analysis.flags,
@@ -463,12 +478,10 @@ class CoaddAnalysisTask(CmdLineTask):
                 self.log.warn("No matches for %s" % (dataRef.dataId,))
                 continue
 
-            # Set the alias map for the matches sources (i.e. the .second attribute schema for each match)
-            if self.config.srcSchemaMap and hscRun:
+            # Set the alias maps for the matches sources (i.e. the .second attribute schema for each match)
+            if aliasDictList is not None:
                 for mm in matches:
-                    aliasMap = mm.second.schema.getAliasMap()
-                    for lsstName, otherName in self.config.srcSchemaMap.items():
-                        aliasMap.set(lsstName, otherName)
+                    mm.second = setAliasMaps(mm.second, aliasDictList)
 
             matchMeta = butler.get(dataset, dataRef.dataId,
                                    flags=afwTable.SOURCE_IO_NO_FOOTPRINTS).getTable().getMetadata()
@@ -482,11 +495,10 @@ class CoaddAnalysisTask(CmdLineTask):
             # Optionally backout aperture corrections
             if self.config.doBackoutApCorr:
                 catalog = backoutApCorr(catalog)
-            # Need to set the aliap map for the matched catalog sources
-            if self.config.srcSchemaMap and hscRun:
-                aliasMap = catalog.schema.getAliasMap()
-                for lsstName, otherName in self.config.srcSchemaMap.items():
-                    aliasMap.set("src_" + lsstName, "src_" + otherName)
+            # Set the alias maps for the matched catalog sources
+            if aliasDictList is not None:
+                catalog = setAliasMaps(catalog, aliasDictList, prefix="src_")
+
             catList.append(catalog)
 
         if not catList:
@@ -882,7 +894,7 @@ class CoaddAnalysisTask(CmdLineTask):
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_flux", ct, zp=0.0,
                                                        unitScale=self.unitScale),
-                               "MagPsf(unforced) - ref (calib_photom_used) (%s)" % unitStr, shortName,
+                               "   MagPsf(unforced) - ref (calib_photom_used) (%s)" % unitStr, shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_photometry_used"],
                                qMin=-0.15, qMax=0.15, labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
                                unitScale=self.unitScale,
@@ -1138,30 +1150,6 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         unforced2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_meas")
         unforced2 = self.calibrateCatalogs(unforced2, wcs=repoInfo2.wcs)
 
-        # Set an alias map for differing src naming conventions of different stacks (if any)
-        if self.config.srcSchemaMap:
-            repoList = [repoInfo1.hscRun, repoInfo2.hscRun]
-            coaddList = [unforced1, unforced2]
-            if haveForced:
-                repoList += repoList
-                coaddList += [forced1, forced2]
-            for hscRun, catalog in zip(repoList, coaddList):
-                if hscRun:
-                    aliasMap = catalog.schema.getAliasMap()
-                    for lsstName, otherName in self.config.srcSchemaMap.items():
-                        aliasMap.set(lsstName, otherName)
-                else:
-                    if "base_SdssCentroid_x" not in catalog.schema:
-                        if "base_TransformedCentroid_x" in catalog.schema:
-                            # Need this for LSST cat since base_SdssCentroid doesn't exist in forced schema
-                            # but still don't have errors...
-                            aliasMap = catalog.schema.getAliasMap()
-                            aliasMap.set("base_SdssCentroid", "base_TransformedCentroid")
-                            aliasMap.set("base_SdssCentroid_x", "base_TransformedCentroid_x")
-                            aliasMap.set("base_SdssCentroid_y", "base_TransformedCentroid_y")
-                            aliasMap.set("base_SdssCentroid_flag", "base_TransformedCentroid_flag")
-                        else:
-                            self.log.warn("Could not find base_SdssCentroid (or equivalent) flags")
         forcedStr = "forced" if haveForced else "unforced"
 
         if haveForced:
@@ -1176,6 +1164,20 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                           list(self.config.analysis.flags) if
                                           col not in forced2.schema and col in unforced2.schema and
                                           not (repoInfo2.hscRun and col == "slot_Centroid_flag")])
+
+        # Set an alias map for differing schema naming conventions of different stacks (if any)
+        repoList = [repoInfo1.hscRun, repoInfo2.hscRun]
+        coaddList = [unforced1, unforced2]
+        if haveForced:
+            repoList += repoList
+            coaddList += [forced1, forced2]
+        aliasDictList0 = [self.config.flagsToAlias, ]
+        for hscRun, catalog in zip(repoList, coaddList):
+            aliasDictList = aliasDictList0
+            if hscRun is not None and self.config.srcSchemaMap is not None:
+                aliasDictList += [self.config.srcSchemaMap]
+            if aliasDictList is not None:
+                catalog = setAliasMaps(catalog, aliasDictList)
 
         # Set boolean array indicating sources deemed unsuitable for qa analyses
         self.catLabel = "noDuplicates"
@@ -1199,6 +1201,12 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             forced1 = unforced1
             forced2 = unforced2
         forced = self.matchCatalogs(forced1, forced2)
+
+        aliasDictList = aliasDictList0
+        if hscRun is not None and self.config.srcSchemaMap is not None:
+            aliasDictList += [self.config.srcSchemaMap]
+        if aliasDictList is not None:
+            forced = setAliasMaps(forced, aliasDictList)
 
         self.log.info("\nNumber of sources in catalogs: first = {0:d} and second = {1:d}".format(
                       len(forced1), len(forced2)))
