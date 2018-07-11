@@ -742,7 +742,8 @@ def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True,
     if "detect_isTractInner" in catalog.schema and tractInnerOnly:
         bad |= ~catalog["detect_isTractInner"]
     bad |= catalog["deblend_nChild"] > 0  # Exclude non-deblended (i.e. parents)
-    bad |= catalog["merge_peak_sky"]  # Exclude "sky" objects
+    if "merge_peak_sky" in catalog.schema:
+        bad |= catalog["merge_peak_sky"]  # Exclude "sky" objects (currently only inserted in coadds)
     for flag in flagList:
         bad |= catalog[flag]
     if onlyReadStars and "base_ClassificationExtendedness_value" in catalog.schema:
