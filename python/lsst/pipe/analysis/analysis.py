@@ -79,9 +79,9 @@ class Analysis(object):
             self.qMin /= 2.0
             self.qMax /= 2.0
         self.goodKeys = goodKeys  # include if goodKey = True
-        self.calibUsedOnly = len([key for key in self.goodKeys if "Used" in key])
+        self.calibUsedOnly = len([key for key in self.goodKeys if "used" in key])
         if self.calibUsedOnly > 0:
-            self.magThreshold = 99  # Want to plot all calibUsed
+            self.magThreshold = 99  # Want to plot all calib_used
 
         self.prefix = prefix
         self.errFunc = errFunc
@@ -672,15 +672,15 @@ class Analysis(object):
         for flag in flags:
             bad |= catalog[flag]
         # Cull the catalog down to calibration candidates (or stars if calibration flags not available)
-        if "calib_psfUsed" in catalog.schema:
-            bad |= ~catalog["calib_psfUsed"]
-            catStr = "psfUsed"
+        if "calib_psf_used" in catalog.schema:
+            bad |= ~catalog["calib_psf_used"]
+            catStr = "psf_used"
         elif "base_ClassificationExtendedness_value" in catalog.schema:
             bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
             bad |= -2.5*np.log10(catalog[self.fluxColumn]) > self.magThreshold
             catStr = "ClassExtendedness"
         else:
-            raise RuntimeError("Neither calib_psfUsed nor base_ClassificationExtendedness_value in schema. "
+            raise RuntimeError("Neither calib_psf_used nor base_ClassificationExtendedness_value in schema. "
                                "Skip quiver plot.")
         catalog = catalog[~bad].copy(deep=True)
 
@@ -808,7 +808,7 @@ class Analysis(object):
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
                                  dataName=dataName, **skyPositionKwargs)
         if "galaxy" in self.data and (not any(ss in self.shortName for ss in
-                    ["pStar", "race", "Xx", "Yy", "Resids", "psfUsed", "photometryUsed",
+                    ["pStar", "race", "Xx", "Yy", "Resids", "psf_used", "photometry_used",
                      "gri", "riz", "izy", "z9y", "color_"])):
             styleStr = "sky-gals"
             dataName = "galaxy"
