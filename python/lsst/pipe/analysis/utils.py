@@ -47,13 +47,13 @@ def writeParquet(table, path, badArray=None):
 
     Parameters
     ----------
-    table : `lsst.afw.table.source.source.SourceCatalog`
-       Table to be written to parquet
+    table : `lsst.afw.table.SourceCatalog`
+       Table to be written to parquet.
     path : `str`
        Path to which to write.  Must end in ".parq".
     badArray : `numpy.ndarray`, optional
-       Boolean array with same length as catalog whose values indicate wether the source was deemed
-       innapropriate for qa analyses
+       Boolean array with same length as catalog whose values indicate whether the source was deemed
+       inappropriate for qa analyses (`None` by default).
 
     Returns
     -------
@@ -175,7 +175,7 @@ class MagDiffMatches(object):
 class MagDiffCompare(object):
     """Functor to calculate magnitude difference between two entries in comparison catalogs
 
-    Note that the column entries are in flux units and converted to mags here
+    Note that the column entries are in flux units and converted to mags here.
     """
     def __init__(self, column, unitScale=1.0):
         self.column = column
@@ -512,7 +512,8 @@ def joinCatalogs(catalog1, catalog2, prefix1="cat1_", prefix2="cat2_"):
 
 def getFluxKeys(schema):
     """Retrieve the flux and flux error keys from a schema
-    Both are returned as dicts indexed on the flux name (e.g. "flux.psf" or "cmodel.flux").
+
+    Both are returned as dicts indexed on the flux name (e.g. "base_PsfFlux_flux" or "modelfit_CModel_flux").
     """
     schemaKeys = dict((s.field.getName(), s.key) for s in schema)
     fluxKeys = dict((name, key) for name, key in schemaKeys.items() if
@@ -697,29 +698,51 @@ def addRotPoint(catalog, width, height, nQuarter, prefix=""):
     return newCatalog
 
 
-def makeBadArray(catalog, flagList=[], onlyReadStars=False):
+def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True, tractInnerOnly=False):
     """Create a boolean array indicating sources deemed unsuitable for qa analyses
 
-    Sets value to True for unisolated objects (deblend_nChild > 0) and any of the flags listed
-    in self.config.analysis.flags.  If self.config.onlyReadStars is True, sets boolean as True
-    for all galaxies classified as extended (base_ClassificationExtendedness_value > 0.5).
+    Sets value to True for unisolated objects (deblend_nChild > 0), "sky" objects (merge_peak_sky),
+    and any of the flags listed in self.config.analysis.flags.  If onlyReadStars is True, sets boolean
+    as True for all galaxies classified as extended (base_ClassificationExtendedness_value > 0.5).  If
+    patchInnerOnly is True (the default), sets the bad boolean array value to True for any sources
+    for which detect_isPatchInner is False (to avoid duplicates in overlapping patches).  If
+    tractInnerOnly is True, sets the bad boolean value to True for any sources for which
+    detect_isTractInner is False (to avoid duplicates in overlapping patches).  Note, however, that
+    the default for tractInnerOnly is False as we are currently only running these scripts at the
+    per-tract level, so there are no tract duplicates (and omitting the "outer" ones would just leave
+    an empty band around the tract edges).
 
     Parameters
     ----------
-    catalog : `lsst.afw.table.source.source.SourceCatalog`
-       The source catalog under consideration
+    catalog : `lsst.afw.table.SourceCatalog`
+       The source catalog under consideration.
     flagList : `list`
-       The list of flags for which, if any is set for a given source, set bad entry to True for
-       that source
+       The list of flags for which, if any is set for a given source, set bad entry to `True` for
+       that source.
+    onlyReadStars : `bool`, optional
+       Boolean indicating if you want to select objects classified as stars only (based on
+       base_ClassificationExtendedness_value > 0.5, `False` by default).
+    patchInnerOnly : `bool`, optional
+       Whether to select only sources for which detect_isPatchInner is `True` (`True` by default).
+    tractInnerOnly : `bool`, optional
+       Whether to select only sources for which detect_isTractInner is `True` (`False` by default).
+       Note that these scripts currently only ever run at the per-tract level, so we do not need
+       to filter out sources for which detect_isTractInner is `False` as, with only one tract, there
+       are no duplicated tract inner/outer sources.
 
     Returns
     -------
     badArray : `numpy.ndarray`
-       Boolean array with same length as catalog whose values indicate wether the source was deemed
-       innapropriate for qa analyses
+       Boolean array with same length as catalog whose values indicate whether the source was deemed
+       inappropriate for qa analyses.
     """
     bad = np.zeros(len(catalog), dtype=bool)
-    bad |= catalog["deblend_nChild"] > 0  # Exclude non-deblended (i.e parents)
+    if "detect_isPatchInner" in catalog.schema and patchInnerOnly:
+        bad |= ~catalog["detect_isPatchInner"]
+    if "detect_isTractInner" in catalog.schema and tractInnerOnly:
+        bad |= ~catalog["detect_isTractInner"]
+    bad |= catalog["deblend_nChild"] > 0  # Exclude non-deblended (i.e. parents)
+    bad |= catalog["merge_peak_sky"]  # Exclude "sky" objects
     for flag in flagList:
         bad |= catalog[flag]
     if onlyReadStars and "base_ClassificationExtendedness_value" in catalog.schema:
@@ -735,23 +758,21 @@ def addQaBadFlag(catalog, badArray):
 
     Parameters
     ----------
-    catalog : `lsst.afw.table.source.source.SourceCatalog`
+    catalog : `lsst.afw.table.SourceCatalog`
        Source catalog to which flag will be added.
     badArray : `numpy.ndarray`
-       Boolean array with same length as catalog whose values indicate wether the source was deemed
-       innapropriate for qa analyses.
+       Boolean array with same length as catalog whose values indicate whether the source was deemed
+       inappropriate for qa analyses.
 
     Raises
     ------
     `RuntimeError`
-       If lengths of catalog and badArray are not equal.
+       If lengths of ``catalog`` and ``badArray`` are not equal.
 
     Returns
     -------
-    newCatalog : `lsst.afw.table.source.source.SourceCatalog`
+    newCatalog : `lsst.afw.table.SourceCatalog`
        Source catalog with badQaFlag column added.
-
-
     """
     if len(catalog) != len(badArray):
         raise RuntimeError('Lengths of catalog and bad objects array do not match.')
@@ -778,7 +799,7 @@ def addCcdColumn(catalog, ccd):
 
     Parameters
     ----------
-    catalog : `lsst.afw.table.source.source.SourceCatalog`
+    catalog : `lsst.afw.table.SourceCatalog`
        Source catalog to which ccd column will be added.
     ccd : `int` or `str`
        The ccd id for the catalog.
@@ -786,12 +807,12 @@ def addCcdColumn(catalog, ccd):
     Raises
     ------
     `RuntimeError`
-       If ccd type is not int or str (not yet accommodated).
+       If ``ccd`` type is not `int` or `str` (not yet accommodated).
 
     Returns
     -------
-    newCatalog : `lsst.afw.table.source.source.SourceCatalog`
-       Source catalog with ccd column added.
+    newCatalog : `lsst.afw.table.SourceCatalog`
+       Source catalog with ``ccd`` column added.
     """
     mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
@@ -824,19 +845,19 @@ def addPatchColumn(catalog, patch):
 
     Parameters
     ----------
-    catalog : `lsst.afw.table.source.source.SourceCatalog`
+    catalog : `lsst.afw.table.SourceCatalog`
        Source catalog to which patch column will be added.
     patch : `str`
-       The patch id for the catalog
+       The patch id for the catalog.
 
     Raises
     ------
     `RuntimeError`
-       If patch type is not str
+       If patch type is not `str`
 
     Returns
     -------
-    newCatalog : `lsst.afw.table.source.source.SourceCatalog`
+    newCatalog : `lsst.afw.table.SourceCatalog`
        Source catalog with patch column added.
     """
     if type(patch) is not str:
@@ -986,12 +1007,13 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
     Parameters
     ----------
     dataRef : `lsst.daf.persistence.butlerSubset.ButlerDataRef`
-       The data reference for which the relevant repository information is to be retrieved
+       The data reference for which the relevant repository information is to be retrieved.
     coaddName : `str`, optional
-       The base name of the coadd (e.g. deep or goodSeeing) if dataRef is for coadd level processing
+       The base name of the coadd (e.g. deep or goodSeeing) if ``dataRef`` is for coadd level processing
+       (`None` by default).
     doApplyUberCal : `bool`, optional
-      If True: Set the appropriate dataset type for the uber calibration from meas_mosaic
-      If False (the default): Set the dataset type to the source catalog from single frame processing
+      If `True`: Set the appropriate dataset type for the uber calibration from meas_mosaic.
+      If `False` (the default): Set the dataset type to the source catalog from single frame processing.
     """
     butler = dataRef.getButler()
     camera = butler.get("camera")
@@ -1041,7 +1063,7 @@ def findCcdKey(dataId):
     Raises
     ------
     `RuntimeError`
-       If "ccd" key could not be identified from the current hardwired list
+       If "ccd" key could not be identified from the current hardwired list.
 
     Returns
     -------
@@ -1108,19 +1130,21 @@ def fCubic(p, x):
 def orthogonalRegression(x, y, order, initialGuess=None):
     """Perform an Orthogonal Distance Regression on the given data
 
-    Parameters:
+    Parameters
     ----------
     x, y : `array`
        Arrays of x and y data to fit
     order : `int`, optional
        Order of the polynomial to fit
     initialGuess : `list` of `float`, optional
-       List of the polynomial coefficients (highest power first) of an initial guess to feed to the ODR fit.
-       If no initialGuess is provided, a simple linear fit is performed and used as the guess.
+       List of the polynomial coefficients (highest power first) of an initial guess to feed to
+       the ODR fit.  If no initialGuess is provided, a simple linear fit is performed and used
+       as the guess (`None` by default).
 
-    Returns:
+    Returns
     -------
-    `list` of fit coefficients (highest power first to mimic np.polyfit return)
+    result : `list` of `float`
+       List of the fit coefficients (highest power first to mimic `numpy.polyfit` return).
     """
     if initialGuess is None:
         linReg = scipyStats.linregress(x, y)
@@ -1146,19 +1170,19 @@ def orthogonalRegression(x, y, order, initialGuess=None):
 def distanceSquaredToPoly(x1, y1, x2, poly):
     """Calculate the square of the distance between point (x1, y1) and poly at x2
 
-    Parameters:
+    Parameters
     ----------
     x1, y1 : `float`
        Point from which to calculate the square of the distance to the the polynomial
     x2 : `float`
-       Position on x axis from which to calculate the square of the distace between (x1, y1) and
-       poly (the position of the tangent of the polynomial curve closest to point (x1, y1))
+       Position on x axis from which to calculate the square of the distace between (``x1``, ``y1``) and
+       poly (the position of the tangent of the polynomial curve closest to point (``x1``, ``y1``))
     poly : `numpy.lib.polynomial.poly1d`
-       Numpy polynomial fit from which to calculate the square of the distance to (x1, y1) at x2
+       Numpy polynomial fit from which to calculate the square of the distance to (``x1``, ``y1``) at ``x2``
 
-    Returns:
+    Returns
     -------
-    `float` square of the distance between (x1, y1) and poly at x2
+    `float` square of the distance between (``x1``, ``y1``) and ``poly`` at ``x2``
     """
     return (x2 - x1)**2 + (poly(x2) - y1)**2
 
@@ -1176,18 +1200,22 @@ def p2p1CoeffsFromLinearFit(m, b, x0, y0):
     P1 = cos(theta)*c1 + ((sin(theta) - cos(theta))*c2 - sin(theta)*c3 + deltaP1
     P1 = 0 at x0, y0 ==> deltaP1 = -cos(theta)*x0 - sin(theta)*y0
 
-    Parameters:
+    Parameters
     ----------
     m : `float`
-       Slope of line to convert
+       Slope of line to convert.
     b : `float`
-       Intercept of line to convert
-    x0, y0: `float`
-       Coordinates at which to set P1 = 0
+       Intercept of line to convert.
+    x0, y0 : `float`
+       Coordinates at which to set P1 = 0.
 
-    Returns:
+    Returns
     -------
-    `lsst.pipe.base.Struct` of p2Coeffs and p1Coeffs: `list`
+    result : `lsst.pipe.base.Struct`
+       Result struct with components:
+
+       - ``p2Coeffs`` : four P2 equation coefficents (`list` of `float`).
+       - ``p1Coeffs`` : four P1 equation coefficents (`list` of `float`).
     """
 
     # Compute Ivezic P2 coefficients using the linear fit slope and intercept
@@ -1214,19 +1242,19 @@ def p2p1CoeffsFromLinearFit(m, b, x0, y0):
 def makeEqnStr(varName, coeffList, exponentList):
     """Make a string-formatted equation
 
-    Parameters:
+    Parameters
     ----------
     varName : `str`
-       Name of the equation to be stringified
+       Name of the equation to be stringified.
     coeffList : `list` of `float`
-       List of equation coefficients (matched to exponenets in exponentList list)
+       List of equation coefficients (matched to exponenets in ``exponentList`` list).
     exponentList : `list` of `str`
-       List of equation exponents (matched to coefficients in coeffList list)
+       List of equation exponents (matched to coefficients in ``coeffList`` list).
 
     Raises
     ------
     `RuntimeError`
-       If lengths of coeffList and exponentList are not equal.
+       If lengths of ``coeffList`` and ``exponentList`` are not equal.
 
     Returns
     -------
@@ -1234,7 +1262,6 @@ def makeEqnStr(varName, coeffList, exponentList):
        The stringified equation of the form:
        varName = coeffList[0]exponent[0] + ... + coeffList[n-1]exponent[n-1].
     """
-
     if len(coeffList) != len(exponentList):
         raise RuntimeError("Lengths of coeffList ({0:d}) and exponentList ({1:d}) are not equal".
                            format(len(coeffList), len(exponentList)))
@@ -1254,24 +1281,25 @@ def makeEqnStr(varName, coeffList, exponentList):
 def catColors(c1, c2, magsCat, goodArray=None):
     """Compute color for a set of filters given a catalog of magnitudes by filter
 
-    Parameters:
+    Parameters
     ----------
     c1, c2 : `str`
-       String representation of the filters from which to compute the color
+       String representation of the filters from which to compute the color.
     magsCat : `dict` of `numpy.ndarray`
-       Dict of arrays of magnitude values.  Dict keys are the string representation of the filters
-    goodArray: `numpy.ndarray`, optional
-       Boolean array with same length as the magsCat arrays whose values indicate wether the
-       source was deemed "good" for intended use.  If None, all entries are considered "good".
+       Dict of arrays of magnitude values.  Dict keys are the string representation of the filters.
+    goodArray : `numpy.ndarray`, optional
+       Boolean array with same length as the magsCat arrays whose values indicate whether the
+       source was deemed "good" for intended use.  If `None`, all entries are considered "good"
+       (`None` by default).
 
     Raises
     ------
     `RuntimeError`
-       If lengths of goodArray and magsCat arrays are not equal.
+       If lengths of ``goodArray`` and ``magsCat`` arrays are not equal.
 
     Returns
     -------
-    `numpy.ndarray` of "good" colors (magnitude differeces)
+    `numpy.ndarray` of "good" colors (magnitude differeces).
     """
     if goodArray is None:
         goodArray = np.ones(len(magsCat[c1]), dtype=bool)
