@@ -1072,7 +1072,7 @@ def findCcdKey(dataId):
        The string associated with the "ccd" key.
     """
     ccdKey = None
-    ccdKeyList = ["ccd", "sensor", "camcol"]
+    ccdKeyList = ["ccd", "sensor", "camcol", "detector"]
     for ss in ccdKeyList:
         if ss in dataId:
             ccdKey = ss
