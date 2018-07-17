@@ -18,7 +18,7 @@ from .analysis import Analysis
 from .coaddAnalysis import CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisTask
 from .utils import (Filenamer, MagDiffCompare, traceSizeCompare, percentDiff, ApCorrDiffErr,
                     concatenateCatalogs, addApertureFluxesHSC, addFpPoint, addFootprintNPix,
-                    addRotPoint, makeBadArray, addCcdColumn, calibrateSourceCatalogMosaic,
+                    addRotPoint, makeBadArray, addIntFloatOrStrColumn, calibrateSourceCatalogMosaic,
                     calibrateSourceCatalog, backoutApCorr, matchJanskyToDn, checkHscStack,
                     fluxToPlotString, andCatalog, writeParquet, getRepoInfo, getDataExistsRefList)
 from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText, OverlapsStarGalaxyLabeller
@@ -378,7 +378,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
             # Add ccdId column (useful to have in Parquet tables for subsequent interactive analysis)
             if self.config.doWriteParquetTables:
-                catalog = addCcdColumn(catalog, dataRef.dataId[ccdKey])
+                catalog = addIntFloatOrStrColumn(catalog, dataRef.dataId[ccdKey], "ccdId",
+                                                 "Id of CCD on which source was detected")
 
             # Compute Focal Plane coordinates for each source if not already there
             if self.config.doPlotCentroids or self.config.doPlotFP and self.haveFpCoords:

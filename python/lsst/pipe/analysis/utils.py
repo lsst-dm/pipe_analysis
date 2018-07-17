@@ -34,12 +34,12 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "MagDiffErr", "ApCorrDiffErr", "CentroidDiff", "CentroidDiffErr", "deconvMom",
            "deconvMomStarGal", "concatenateCatalogs", "joinMatches", "checkIdLists", "checkPatchOverlap",
            "joinCatalogs", "getFluxKeys", "addColumnsToSchema", "addApertureFluxesHSC", "addFpPoint",
-           "addFootprintNPix", "addRotPoint", "makeBadArray", "addQaBadFlag", "addCcdColumn",
-           "addPatchColumn", "calibrateSourceCatalogMosaic", "calibrateSourceCatalog",
-           "calibrateCoaddSourceCatalog", "backoutApCorr", "matchJanskyToDn", "checkHscStack",
-           "fluxToPlotString", "andCatalog", "writeParquet", "getRepoInfo", "findCcdKey",
-           "getCcdNameRefList", "getDataExistsRefList", "orthogonalRegression", "distanceSquaredToPoly",
-           "p2p1CoeffsFromLinearFit", "makeEqnStr", "catColors"]
+           "addFootprintNPix", "addRotPoint", "makeBadArray", "addFlag", "addIntFloatOrStrColumn",
+           "calibrateSourceCatalogMosaic", "calibrateSourceCatalog", "calibrateCoaddSourceCatalog",
+           "backoutApCorr", "matchJanskyToDn", "checkHscStack", "fluxToPlotString", "andCatalog",
+           "writeParquet", "getRepoInfo", "findCcdKey", "getCcdNameRefList", "getDataExistsRefList",
+           "orthogonalRegression", "distanceSquaredToPoly", "p2p1CoeffsFromLinearFit", "makeEqnStr",
+           "catColors"]
 
 
 def writeParquet(table, path, badArray=None):
@@ -73,7 +73,9 @@ def writeParquet(table, path, badArray=None):
         raise ValueError('Please provide a filename ending in .parq.')
 
     if badArray is not None:
-        table = addQaBadFlag(table, badArray)  # add flag indicating source "badness" for qa analyses
+        # Add flag indicating source "badness" for qa analyses for the benefit of the Parquet files
+        # being written to disk for subsequent interactive QA analysis.
+        table = addFlag(table, badArray, "qaBad_flag", "Set to True for any source deemed bad for qa")
     df = table.asAstropy().to_pandas()
     df = df.set_index('id', drop=True)
     fastparquet.write(path, df)
@@ -751,19 +753,20 @@ def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True,
     return bad
 
 
-def addQaBadFlag(catalog, badArray):
+def addFlag(catalog, badArray, flagName, doc="General failure flag"):
     """Add a flag for any sources deemed not appropriate for qa analyses
-
-    This flag is being added for the benefit of the Parquet files being written to disk
-    for subsequent interactive QA analysis.
 
     Parameters
     ----------
     catalog : `lsst.afw.table.SourceCatalog`
-       Source catalog to which flag will be added.
+       Source catalog to which the flag will be added.
     badArray : `numpy.ndarray`
-       Boolean array with same length as catalog whose values indicate whether the source was deemed
-       inappropriate for qa analyses.
+       Boolean array with same length as catalog whose values indicate whether the flag flagName
+       should be set for a given oject.
+    flagName : `str`
+       Name of flag to be set
+    doc : `str`, optional
+       Docstring for ``flagName``
 
     Raises
     ------
@@ -773,7 +776,7 @@ def addQaBadFlag(catalog, badArray):
     Returns
     -------
     newCatalog : `lsst.afw.table.SourceCatalog`
-       Source catalog with badQaFlag column added.
+       Source catalog with ``flagName`` column added.
     """
     if len(catalog) != len(badArray):
         raise RuntimeError('Lengths of catalog and bad objects array do not match.')
@@ -781,100 +784,85 @@ def addQaBadFlag(catalog, badArray):
     mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
     schema = mapper.getOutputSchema()
-    qaBadFlag = schema.addField("qaBad_flag", type="Flag", doc="Set to True for any source deemed bad for qa")
+    badFlag = schema.addField(flagName, type="Flag", doc=doc)
     newCatalog = afwTable.SourceCatalog(schema)
     newCatalog.reserve(len(catalog))
+    newCatalog.extend(catalog, mapper)
 
-    for i, src in enumerate(catalog):
-        row = newCatalog.addNew()
-        row.assign(src, mapper)
-        row.set(qaBadFlag, bool(badArray[i]))
+    for i, row in enumerate(newCatalog):
+        row.set(badFlag, bool(badArray[i]))
     return newCatalog
 
 
-def addCcdColumn(catalog, ccd):
-    """Add a column indicating the ccd number of the calexp on which the source was detected
-
-    This column is being added for the benefit of the Parquet files being written to disk the
-    subsequent interactive QA analysis.
+def addIntFloatOrStrColumn(catalog, values, fieldName, fieldDoc):
+    """Add a column of values with name fieldName and doc fieldDoc to the catalog schema
 
     Parameters
     ----------
     catalog : `lsst.afw.table.SourceCatalog`
-       Source catalog to which ccd column will be added.
-    ccd : `int` or `str`
-       The ccd id for the catalog.
+       Source catalog to which the column will be added.
+    values : `list`, `numpy.ndarray`, or scalar of type `int`, `float`, or `str`
+       The list of values to be added.  This list must have the same length as ``catalog`` or
+       length 1 (to add a column with the same value for all objects).
+    fieldName : `str`
+       Name of the field to be added to the schema.
+    fieldDoc : `str`
+       Documentation string for the field to be added to the schema.
 
     Raises
     ------
     `RuntimeError`
-       If ``ccd`` type is not `int` or `str` (not yet accommodated).
+       If type of all ``values`` is not one of `int`, `float`, or `str`.
+    `RuntimeError`
+       If length of ``values`` list is neither 1 nor equal to the ``catalog`` length.
 
     Returns
     -------
     newCatalog : `lsst.afw.table.SourceCatalog`
-       Source catalog with ``ccd`` column added.
+       Source catalog with ``fieldName`` column added.
     """
+    if not isinstance(values, (list, np.ndarray)):
+        if type(values) in (int, float, str):
+            values = [values, ]
+        else:
+            raise RuntimeError(("Have only accommodated int, float, or str types.  Type provided was : "
+                                "{}.  (Note, if you want to add a boolean flag column, use the addFlag "
+                                "function.)").format(type(values)))
+    if len(values) not in (len(catalog), 1):
+        raise RuntimeError(("Length of values list must be either 1 or equal to the catalog length "
+                            "({0:d}).  Length of values list provided was: {1:d}").
+                           format(len(catalog), len(values)))
+
+    size = None
     mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
     schema = mapper.getOutputSchema()
-    fieldName = "ccdId"
-    fieldDoc = "Id of CCD on which source was detected"
 
-    if type(ccd) is int:
-        ccdKey = schema.addField(fieldName, type="I", doc=fieldDoc)
-    elif type(ccd) is str:
-        ccdKey = schema.addField(fieldName, type=str, size=len(ccd), doc=fieldDoc)
+    if all(type(value) is int for value in values):
+        fieldType = "I"
+    elif all(isinstance(value, float) for value in values):
+        fieldType = "D"
+    elif all(type(value) is str for value in values):
+        fieldType = str
+        size = len(max(values, key=len))
     else:
-        raise RuntimeError(("Have only accommdated str or int ccd types.  Type provided was: {}").
-                           format(type(ccd)))
+        raise RuntimeError(("Have only accommodated int, float, or str types.  Type provided for the first "
+                            "element was: {} (and note that all values in the list must have the same type.  "
+                            "Also note, if you want to add a boolean flag column, use the addFlag "
+                            "function.)").format(type(values[0])))
+
+    fieldKey = schema.addField(fieldName, type=fieldType, size=size, doc=fieldDoc)
 
     newCatalog = afwTable.SourceCatalog(schema)
     newCatalog.reserve(len(catalog))
 
     newCatalog.extend(catalog, mapper)
-    for row in newCatalog:
-        row.set(ccdKey, ccd)
-    return newCatalog
-
-
-def addPatchColumn(catalog, patch):
-    """Add a column indicating the patch number of the coadd on which the source was detected
-
-    This column is being added for the benefit of the Parquet files being written to disk the
-    subsequent interactive QA analysis.
-
-    Parameters
-    ----------
-    catalog : `lsst.afw.table.SourceCatalog`
-       Source catalog to which patch column will be added.
-    patch : `str`
-       The patch id for the catalog.
-
-    Raises
-    ------
-    `RuntimeError`
-       If patch type is not `str`
-
-    Returns
-    -------
-    newCatalog : `lsst.afw.table.SourceCatalog`
-       Source catalog with patch column added.
-    """
-    if type(patch) is not str:
-        raise RuntimeError(("Have only accommdated str patch type.  Type provided was: {}").
-                           format(type(patch)))
-    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
-    mapper.addMinimalSchema(catalog[0].schema)
-    schema = mapper.getOutputSchema()
-    patchKey = schema.addField("patchId", type=str, size=len(patch), doc="Patch on which source was detected")
-
-    newCatalog = afwTable.SourceCatalog(schema)
-    newCatalog.reserve(len(catalog))
-
-    newCatalog.extend(catalog, mapper)
-    for row in newCatalog:
-        row.set(patchKey, patch)
+    if len(values) == 1:
+        for row in newCatalog:
+            row.set(fieldKey, values[0])
+    else:
+        for i, row in enumerate(newCatalog):
+            row.set(fieldKey, values[i])
     return newCatalog
 
 

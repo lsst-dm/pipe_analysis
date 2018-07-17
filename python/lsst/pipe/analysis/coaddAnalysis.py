@@ -28,7 +28,7 @@ from .utils import (Filenamer, Enforcer, MagDiff, MagDiffMatches, MagDiffCompare
                     MagDiffErr, CentroidDiff, deconvMom,
                     deconvMomStarGal, concatenateCatalogs, joinMatches, checkPatchOverlap,
                     addColumnsToSchema, addApertureFluxesHSC, addFpPoint,
-                    addFootprintNPix, makeBadArray, addPatchColumn,
+                    addFootprintNPix, makeBadArray, addIntFloatOrStrColumn,
                     calibrateCoaddSourceCatalog, backoutApCorr, matchJanskyToDn,
                     fluxToPlotString, andCatalog, writeParquet, getRepoInfo)
 from .plotUtils import (CosmosLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
@@ -389,7 +389,8 @@ class CoaddAnalysisTask(CmdLineTask):
             if patchRef.datasetExists(dataset):
                 cat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
                 if self.config.doWriteParquetTables:
-                    cat = addPatchColumn(cat, patchRef.dataId["patch"])
+                    cat = addIntFloatOrStrColumn(cat, patchRef.dataId["patch"], "patchId",
+                                                 "Patch on which source was detected")
                 catList.append(cat)
         if not catList:
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
