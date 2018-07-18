@@ -438,6 +438,9 @@ class CoaddAnalysisTask(CmdLineTask):
             self.catLabel = "noDuplicates"
             self.zpLabel = self.zpLabel + " " + self.catLabel
             packedMatches = packedMatches[~badMatch].copy(deep=True)
+            if not packedMatches:
+                self.log.warn("No good matches for %s" % (dataRef.dataId,))
+                continue
             # The reference object loader grows the bbox by the config parameter pixelMargin.  This
             # is set to 50 by default but is not reflected by the radius parameter set in the
             # metadata, so some matches may reside outside the circle searched within this radius
