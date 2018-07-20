@@ -158,7 +158,7 @@ class CoaddAnalysisTask(CmdLineTask):
         CmdLineTask.__init__(self, *args, **kwargs)
         self.unitScale = 1000.0 if self.config.toMilli else 1.0
 
-    def run(self, patchRefList, cosmos=None):
+    def runDataRef(self, patchRefList, cosmos=None):
         haveForced = False  # do forced datasets exits (may not for single band datasets)
         dataset = "Coadd_forced_src"
         # Explicit input file was checked in CoaddAnalysisRunner, so a check on datasetExists
@@ -1102,7 +1102,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         CmdLineTask.__init__(self, *args, **kwargs)
         self.unitScale = 1000.0 if self.config.toMilli else 1.0
 
-    def run(self, patchRefList1, patchRefList2):
+    def runDataRef(self, patchRefList1, patchRefList2):
         haveForced = True  # do forced datasets exits (may not for single band datasets)
         dataset = "Coadd_forced_src"
         patchRefExistsList1 = [patchRef1 for patchRef1 in patchRefList1 if

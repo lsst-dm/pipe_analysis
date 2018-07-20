@@ -192,7 +192,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                             help="Tract(s) to use (do one at a time for overlapping) e.g. 1^5^0")
         return parser
 
-    def run(self, dataRefList, tract=None):
+    def runDataRef(self, dataRefList, tract=None):
         self.log.info("dataRefList size: {:d}".format(len(dataRefList)))
         if tract is None:
             tractList = [0, ]
@@ -602,7 +602,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                             help="Tract(s) to use (do one at a time for overlapping) e.g. 1^5^0")
         return parser
 
-    def run(self, dataRefList1, dataRefList2, tract=None):
+    def runDataRef(self, dataRefList1, dataRefList2, tract=None):
         # This is for the commonZP plots (i.e. all ccds regardless of tract)
         if tract is None:
             tractList = [0, ]
