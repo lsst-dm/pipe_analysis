@@ -337,9 +337,9 @@ class MagDiffErr(object):
 
     def __call__(self, catalog):
         mag1, err1 = self.calib.getMagnitude(catalog["first_" + self.column],
-                                             catalog["first_" + self.column + "Sigma"])
+                                             catalog["first_" + self.column + "Err"])
         mag2, err2 = self.calib.getMagnitude(catalog["second_" + self.column],
-                                             catalog["second_" + self.column + "Sigma"])
+                                             catalog["second_" + self.column + "Err"])
         return np.sqrt(err1**2 + err2**2)*self.unitScale
 
 
@@ -350,8 +350,8 @@ class ApCorrDiffErr(object):
         self.unitScale = unitScale
 
     def __call__(self, catalog):
-        err1 = catalog["first_" + self.column + "Sigma"]
-        err2 = catalog["second_" + self.column + "Sigma"]
+        err1 = catalog["first_" + self.column + "Err"]
+        err2 = catalog["second_" + self.column + "Err"]
         return np.sqrt(err1**2 + err2**2)*self.unitScale
 
 
@@ -375,10 +375,10 @@ class CentroidDiff(object):
 class CentroidDiffErr(CentroidDiff):
     """Functor to calculate difference error for astrometry"""
     def __call__(self, catalog):
-        firstx = self.first + self.centroid + "_xSigma"
-        firsty = self.first + self.centroid + "_ySigma"
-        secondx = self.second + self.centroid + "_xSigma"
-        secondy = self.second + self.centroid + "_ySigma"
+        firstx = self.first + self.centroid + "_xErr"
+        firsty = self.first + self.centroid + "_yErr"
+        secondx = self.second + self.centroid + "_xErr"
+        secondy = self.second + self.centroid + "_yErr"
 
         subkeys1 = [catalog.schema[firstx].asKey(), catalog.schema[firsty].asKey()]
         subkeys2 = [catalog.schema[secondx].asKey(), catalog.schema[secondy].asKey()]
@@ -410,7 +410,7 @@ def deconvMom(catalog):
 def deconvMomStarGal(catalog):
     """Calculate P(star) from deconvolved moments"""
     rTrace = deconvMom(catalog)
-    snr = catalog["base_PsfFlux_flux"]/catalog["base_PsfFlux_fluxSigma"]
+    snr = catalog["base_PsfFlux_flux"]/catalog["base_PsfFlux_fluxErr"]
     poly = (-4.2759879274 + 0.0713088756641*snr + 0.16352932561*rTrace - 4.54656639596e-05*snr*snr -
             0.0482134274008*snr*rTrace + 4.41366874902e-13*rTrace*rTrace + 7.58973714641e-09*snr*snr*snr +
             1.51008430135e-05*snr*snr*rTrace + 4.38493363998e-14*snr*rTrace*rTrace +
@@ -520,8 +520,8 @@ def getFluxKeys(schema):
     schemaKeys = dict((s.field.getName(), s.key) for s in schema)
     fluxKeys = dict((name, key) for name, key in schemaKeys.items() if
                     re.search(r"^(\w+_flux)$", name) and key.getTypeString() != "Flag")
-    errKeys = dict((name + "Sigma", schemaKeys[name + "Sigma"]) for name in fluxKeys.keys() if
-                   name + "Sigma" in schemaKeys)
+    errKeys = dict((name + "Err", schemaKeys[name + "Err"]) for name in fluxKeys.keys() if
+                   name + "Err" in schemaKeys)
     # Also check for any in HSC format
     fluxKeysHSC = dict((name, key) for name, key in schemaKeys.items() if
                        (re.search(r"^(flux\_\w+|\w+\_flux)$", name) or
@@ -579,8 +579,8 @@ def addApertureFluxesHSC(catalog, prefix=""):
         apFluxKey = schema.addField(apName + "_" + apRadii[ia] + "_flux", type="D",
                                     doc="flux within " + apRadii[ia].replace("_", ".") + "-pixel aperture",
                                     units="count")
-        apFluxSigmaKey = schema.addField(apName + "_" + apRadii[ia] + "_fluxSigma", type="D",
-                                         doc="1-sigma flux uncertainty")
+        apFluxErrKey = schema.addField(apName + "_" + apRadii[ia] + "_fluxErr", type="D",
+                                       doc="1-sigma flux uncertainty")
     apFlagKey = schema.addField(apName + "_flag", type="Flag", doc="general failure flag")
 
     newCatalog = afwTable.SourceCatalog(schema)
@@ -592,7 +592,7 @@ def addApertureFluxesHSC(catalog, prefix=""):
         # for ia in range(len(apRadii)):
         for ia in (4,):
             row.set(apFluxKey, source[prefix+"flux_aperture"][ia])
-            row.set(apFluxSigmaKey, source[prefix+"flux_aperture_err"][ia])
+            row.set(apFluxErrKey, source[prefix+"flux_aperture_err"][ia])
         row.set(apFlagKey, source[prefix + "flux_aperture_flag"])
 
     return newCatalog

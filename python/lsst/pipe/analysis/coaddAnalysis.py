@@ -1154,7 +1154,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                     if "base_SdssCentroid_x" not in catalog.schema:
                         if "base_TransformedCentroid_x" in catalog.schema:
                             # Need this for LSST cat since base_SdssCentroid doesn't exist in forced schema
-                            # but still don't have Sigmas...
+                            # but still don't have errors...
                             aliasMap = catalog.schema.getAliasMap()
                             aliasMap.set("base_SdssCentroid", "base_TransformedCentroid")
                             aliasMap.set("base_SdssCentroid_x", "base_TransformedCentroid_x")
