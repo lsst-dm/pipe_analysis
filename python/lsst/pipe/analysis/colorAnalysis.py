@@ -317,7 +317,7 @@ class ColorAnalysisTask(CmdLineTask):
         CmdLineTask.__init__(self, *args, **kwargs)
         self.unitScale = 1000.0 if self.config.toMilli else 1.0
 
-    def run(self, patchRefsByFilter):
+    def runDataRef(self, patchRefsByFilter):
         patchList = []
         repoInfo = None
         self.fluxFilter = None
