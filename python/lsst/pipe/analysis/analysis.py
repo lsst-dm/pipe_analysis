@@ -132,12 +132,13 @@ class Analysis(object):
             # Ensure plot limits always encompass at least mean +/- 6.0*stdev, at most mean +/- 20.0*stddev,
             # and clipped stats range + 25%
             dataType = "all" if "all" in self.data else "star"
-            if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar", "resolution"]):
+            if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar", "resolution",
+                                                       "race"]):
                 self.qMin = max(min(self.qMin, self.stats[dataType].mean - 6.0*self.stats[dataType].stdev,
                                 self.stats[dataType].median - 1.25*self.stats[dataType].clip),
                                 min(self.stats[dataType].mean - 20.0*self.stats[dataType].stdev,
                                     -0.005*self.unitScale))
-            if not any(ss in self.shortName for ss in ["footNpix", "pStar", "resolution"]):
+            if not any(ss in self.shortName for ss in ["footNpix", "pStar", "resolution", "race"]):
                 self.qMax = min(max(self.qMax, self.stats[dataType].mean + 6.0*self.stats[dataType].stdev,
                                 self.stats[dataType].median + 1.25*self.stats[dataType].clip),
                                 max(self.stats[dataType].mean + 20.0*self.stats[dataType].stdev,
@@ -365,8 +366,11 @@ class Analysis(object):
         axScatter.xaxis.set_minor_locator(AutoMinorLocator(2))
         axScatter.yaxis.set_minor_locator(AutoMinorLocator(2))
 
-        axScatter.set_xlabel("%s mag [%s]" % (fluxToPlotString(self.fluxColumn), filterStr))
-        axScatter.set_ylabel(r"%s %s" % (self.quantityName, filterLabelStr))
+        yLabel = r"%s %s" % (self.quantityName, filterLabelStr)
+        fontSize = min(11, max(6, 11 - int(np.log(max(1, len(yLabel) - 45)))))
+
+        axScatter.set_xlabel("%s mag [%s]" % (fluxToPlotString(self.fluxColumn), filterStr), fontSize=11)
+        axScatter.set_ylabel(yLabel, fontsize=fontSize)
 
         if stats is not None:
             l1, l2 = annotateAxes(filename, plt, axScatter, stats, dataType, self.magThreshold,
@@ -468,7 +472,7 @@ class Analysis(object):
             magThreshold += 1.0  # plot to fainter mags for galaxies
         good = (self.mag < magThreshold if magThreshold > 0 else np.ones(len(self.mag), dtype=bool))
         if ((dataName == "star" or "matches" in filename or "compare" in filename) and
-                "pStar" not in filename and "race-" not in filename and "resolution" not in filename):
+                "pStar" not in filename and "race" not in filename and "resolution" not in filename):
             vMin, vMax = 0.4*self.qMin, 0.4*self.qMax
             if "-mag_" in filename or any(ss in filename for ss in ["compareUnforced", "overlap"]):
                 vMin, vMax = 0.6*vMin, 0.6*vMax
@@ -478,7 +482,7 @@ class Analysis(object):
             vMin, vMax = 1.5*self.qMin, 0.5*self.qMax
         elif "raceDiff" in filename or "Resids" in filename:
             vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
-        elif "race-" in filename:
+        elif "race" in filename:
             yDelta = 0.05*(self.qMax - self.qMin)
             vMin, vMax = self.qMin + yDelta, self.qMax - yDelta
         elif "pStar" in filename:
@@ -555,7 +559,10 @@ class Analysis(object):
         mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vMin, vmax=vMax))
         mappable._A = []        # fake up the array of the scalar mappable. Urgh...
         cb = plt.colorbar(mappable)
-        cb.set_label(self.quantityName + filterLabelStr, rotation=270, labelpad=15)
+        colorbarLabel = self.quantityName + " " + filterLabelStr
+        fontSize = min(10, max(6, 10 - int(np.log(max(1, len(colorbarLabel) - 55)))))
+        cb.ax.tick_params(labelsize=max(6, fontSize - 1))
+        cb.set_label(colorbarLabel, fontsize=fontSize, rotation=270, labelpad=15)
         if hscRun is not None:
             axes.set_title("HSC stack run: " + hscRun, color="#800080")
         if camera is not None:
@@ -808,8 +815,8 @@ class Analysis(object):
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
                                  dataName=dataName, **skyPositionKwargs)
         if "galaxy" in self.data and (not any(ss in self.shortName for ss in
-                    ["pStar", "race", "Xx", "Yy", "Resids", "psf_used", "photometry_used",
-                     "gri", "riz", "izy", "z9y", "color_"])):
+                                              ["pStar", "race", "Xx", "Yy", "Resids", "psf_used",
+                                               "photometry_used", "gri", "riz", "izy", "z9y", "color_"])):
             styleStr = "sky-gals"
             dataName = "galaxy"
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
