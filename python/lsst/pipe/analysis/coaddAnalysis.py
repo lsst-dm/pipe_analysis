@@ -1112,10 +1112,8 @@ class CompareCoaddAnalysisConfig(CoaddAnalysisConfig):
 class CompareCoaddAnalysisRunner(TaskRunner):
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
-        parentDir = parsedCmd.input
-        while os.path.exists(os.path.join(parentDir, "_parent")):
-            parentDir = os.path.realpath(os.path.join(parentDir, "_parent"))
-        butlerArgs = dict(root=os.path.join(parentDir, "rerun", parsedCmd.rerun2))
+        rootDir = parsedCmd.input.split("rerun")[0] if len(parsedCmd.rerun) == 2 else parsedCmd.input
+        butlerArgs = dict(root=os.path.join(rootDir, "rerun", parsedCmd.rerun2))
         if parsedCmd.calib is not None:
             butlerArgs["calibRoot"] = parsedCmd.calib
         butler2 = Butler(**butlerArgs)
@@ -1171,6 +1169,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
         patchList1 = [dataRef1.dataId["patch"] for dataRef1 in patchRefList1 if
                       dataRef1.datasetExists(self.config.coaddName + dataset)]
+        patchRefList1 = patchRefExistsList1
 
         repoInfo1 = getRepoInfo(patchRefList1[0], coaddName=self.config.coaddName, coaddDataset=dataset)
         repoInfo2 = getRepoInfo(patchRefList2[0], coaddName=self.config.coaddName, coaddDataset=dataset)

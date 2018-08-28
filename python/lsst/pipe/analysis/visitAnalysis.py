@@ -551,14 +551,12 @@ class CompareVisitAnalysisConfig(VisitAnalysisConfig):
 class CompareVisitAnalysisRunner(TaskRunner):
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
-        parentDir = parsedCmd.input
+        rootDir = parsedCmd.input.split("rerun")[0] if len(parsedCmd.rerun) == 2 else parsedCmd.input
         kwargs["tract"] = parsedCmd.tract
-        while os.path.exists(os.path.join(parentDir, "_parent")):
-            parentDir = os.path.realpath(os.path.join(parentDir, "_parent"))
         # New butler requires identical RepositoryArgs and RepositoryCfg and mapperArgs={} is NOT
         # considered equivalent to mapperArgs={'calibRoot': None}, so only use if pasedCmd.calib
         # is not None
-        butlerArgs = dict(root=os.path.join(parentDir, "rerun", parsedCmd.rerun2))
+        butlerArgs = dict(root=os.path.join(rootDir, "rerun", parsedCmd.rerun2))
         if parsedCmd.calib is not None:
             butlerArgs["calibRoot"] = parsedCmd.calib
         butler2 = Butler(**butlerArgs)
