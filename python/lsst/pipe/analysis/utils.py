@@ -22,6 +22,7 @@ import lsst.afw.cameraGeom as cameraGeom
 import lsst.afw.geom as afwGeom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
+import lsst.pex.config as pexConfig
 
 try:
     from lsst.meas.mosaic.updateExposure import applyMosaicResultsCatalog
@@ -39,7 +40,7 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "backoutApCorr", "matchJanskyToDn", "checkHscStack", "fluxToPlotString", "andCatalog",
            "writeParquet", "getRepoInfo", "findCcdKey", "getCcdNameRefList", "getDataExistsRefList",
            "orthogonalRegression", "distanceSquaredToPoly", "p2p1CoeffsFromLinearFit", "makeEqnStr",
-           "catColors"]
+           "catColors", "setAliasMaps"]
 
 
 def writeParquet(table, path, badArray=None):
@@ -1298,3 +1299,46 @@ def catColors(c1, c2, magsCat, goodArray=None):
                            format(len(goodArray), len(magsCat[c1])))
 
     return (magsCat[c1] - magsCat[c2])[goodArray]
+
+
+def setAliasMaps(catalog, aliasDictList, prefix=""):
+    """Set an alias map for differing schema naming conventions
+
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.SourceCatalog`
+       The source catalog to which the mapping will be added.
+    aliasDictList : `dict` of `str` or `list` of `dict` of `str`
+       A `list` of `dict` or single `dict` representing the alias mappings to
+       be added to ``catalog``'s schema with the key representing the new
+       name to be mapped to the value which represents the old name.  Note
+       that the mapping will only be added if the old name exists in
+       ``catalog``'s schema.
+
+    prefix : `str`, optional
+       This `str` will be prepended to the alias names (used, e.g., in matched
+       catalogs for which "src_" and "ref_" prefixes have been added to all
+       schema names).  Both the old and new names have ``prefix`` associated
+       with them (default is an empty string).
+
+    Raises
+    ------
+    `RuntimeError`
+       If not all elements in ``aliasDictList`` are instances of type `dict` or
+       `lsst.pex.config.dictField.Dict`.
+
+    Returns
+    -------
+    catalog : `lsst.afw.table.SourceCatalog`
+       The source catalog with the alias mappings added to the schema.
+    """
+    if isinstance(aliasDictList, dict):
+        aliasDictList = [aliasDictList, ]
+    if not all(isinstance(aliasDict, (dict, pexConfig.dictField.Dict)) for aliasDict in aliasDictList):
+        raise RuntimeError("All elements in aliasDictList must be instances of type dict")
+    aliasMap = catalog.schema.getAliasMap()
+    for aliasDict in aliasDictList:
+        for newName, oldName in aliasDict.items():
+            if prefix + oldName in catalog.schema:
+                aliasMap.set(prefix + newName, prefix + oldName)
+    return catalog

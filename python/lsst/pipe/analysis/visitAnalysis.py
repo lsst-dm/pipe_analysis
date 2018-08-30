@@ -20,7 +20,8 @@ from .utils import (Filenamer, MagDiffCompare, traceSizeCompare, percentDiff, Ap
                     concatenateCatalogs, addApertureFluxesHSC, addFpPoint, addFootprintNPix,
                     addRotPoint, makeBadArray, addIntFloatOrStrColumn, calibrateSourceCatalogMosaic,
                     calibrateSourceCatalog, backoutApCorr, matchJanskyToDn, checkHscStack,
-                    fluxToPlotString, andCatalog, writeParquet, getRepoInfo, getDataExistsRefList)
+                    fluxToPlotString, andCatalog, writeParquet, getRepoInfo, getDataExistsRefList,
+                    setAliasMaps)
 from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText, OverlapsStarGalaxyLabeller
 
 import lsst.afw.table as afwTable
@@ -112,7 +113,7 @@ class CcdAnalysis(Analysis):
         yFp = self.catalog[self.prefix + "base_FPPosition_y"]
         good = (self.mag < self.config.magThreshold if self.config.magThreshold > 0 else
                 np.ones(len(self.mag), dtype=bool))
-        if "galaxy" in self.data and "calib_psfUsed" not in self.goodKeys:
+        if "galaxy" in self.data and "calib_psf_used" not in self.goodKeys:
             vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
         else:
             vMin, vMax = self.qMin, self.qMax
@@ -224,11 +225,15 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                    "If not, run with --config doApplyUberCal=False".format(repoInfo.dataset))
                 raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo.dataset))
             filenamer = Filenamer(repoInfo.butler, "plotVisit", repoInfo.dataId)
+            # Create list of alias mappings for differing schema naming conventions (if any)
+            aliasDictList = [self.config.flagsToAlias, ]
+            if repoInfo.hscRun is not None and self.config.srcSchemaMap is not None:
+                aliasDictList += [self.config.srcSchemaMap]
             if any(doPlot for doPlot in [self.config.doPlotFootprintNpix, self.config.doPlotQuiver,
                                          self.config.doPlotMags, self.config.doPlotSizes,
                                          self.config.doPlotCentroids, self.config.doPlotStarGalaxy]):
                 commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", repoInfo.ccdKey,
-                                                         hscRun=repoInfo.hscRun)
+                                                         aliasDictList=aliasDictList, hscRun=repoInfo.hscRun)
 
             # Set boolean arrays indicating sources deemed unsuitable for qa analyses
             self.catLabel = "nChild = 0"
@@ -311,7 +316,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                     camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
                                     zpLabel=self.zpLabel)
             if self.config.doPlotMatches:
-                matches = self.readSrcMatches(dataRefListTract, "src")
+                matches = self.readSrcMatches(dataRefListTract, "src", aliasDictList=aliasDictList)
                 self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
                                  butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
                                  hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
@@ -326,7 +331,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                          ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
                                          matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
 
-    def readCatalogs(self, dataRefList, dataset, ccdKey, hscRun=None):
+    def readCatalogs(self, dataRefList, dataset, ccdKey, aliasDictList=None, hscRun=None):
         """Read in and concatenate catalogs of type dataset in lists of data references
 
         If self.config.doWriteParquetTables is True, before appending each catalog to a single
@@ -367,11 +372,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if not dataRef.datasetExists(dataset):
                 continue
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
-            # Set an alias map for differing src naming conventions of different stacks (if any)
-            if hscRun and self.config.srcSchemaMap:
-                aliasMap = catalog.schema.getAliasMap()
-                for lsstName, otherName in self.config.srcSchemaMap.items():
-                    aliasMap.set(lsstName, otherName)
+            # Set some aliases for differing schema naming conventions
+            if aliasDictList is not None:
+                catalog = setAliasMaps(catalog, aliasDictList)
 
             butler = dataRef.getButler()
             metadata = butler.get("calexp_md", dataRef.dataId)
@@ -420,7 +423,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
         return concatenateCatalogs(commonZpCatList), concatenateCatalogs(catList)
 
-    def readSrcMatches(self, dataRefList, dataset):
+    def readSrcMatches(self, dataRefList, dataset, aliasDictList=None):
         catList = []
         dataIdSubList = []
         for dataRef in dataRefList:
@@ -441,12 +444,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-            # Set an alias map for differing src naming conventions of different stacks (if any)
-            if hscRun is not None and self.config.srcSchemaMap:
-                # for cat in [commonZpCat, catalog]:
-                aliasMap = catalog.schema.getAliasMap()
-                for lsstName, otherName in self.config.srcSchemaMap.items():
-                    aliasMap.set(lsstName, otherName)
+            # Set some aliases for differing schema naming conventions
+            if aliasDictList is not None:
+                catalog = setAliasMaps(catalog, aliasDictList)
             catalog = self.calibrateCatalogs(dataRef, catalog, metadata)
             packedMatches = butler.get(dataset + "Match", dataRef.dataId)
             # The reference object loader grows the bbox by the config parameter pixelMargin.  This
@@ -492,11 +492,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             # Optionally backout aperture corrections
             if self.config.doBackoutApCorr:
                 catalog = backoutApCorr(catalog)
-            # Need to set the aliap map for the matched catalog sources
-            if self.config.srcSchemaMap is not None and checkHscStack(metadata) is not None:
-                aliasMap = catalog.schema.getAliasMap()
-                for lsstName, otherName in self.config.srcSchemaMap.items():
-                    aliasMap.set("src_" + lsstName, "src_" + otherName)
+            # Need to set the alias map for the matched catalog sources
+            if aliasDictList is not None:
+                catalog = setAliasMaps(catalog, aliasDictList, prefix="src_")
             # To avoid multiple counting when visit overlaps multiple tracts
             noTractId = dataRef.dataId.copy()
             noTractId.pop("tract")
@@ -667,9 +665,14 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             doReadFootprints = None
             if self.config.doPlotFootprintNpix:
                 doReadFootprints = "light"
+            # Set some aliases for differing schema naming conventions
+            aliasDictList = [self.config.flagsToAlias, ]
+            if (repoInfo1.hscRun or repoInfo2.hscRun) and self.config.srcSchemaMap is not None:
+                aliasDictList += [self.config.srcSchemaMap]
             commonZpCat1, catalog1, commonZpCat2, catalog2 = (
                 self.readCatalogs(dataRefListTract1, dataRefListTract2, "src", hscRun1=repoInfo1.hscRun,
-                                  hscRun2=repoInfo2.hscRun, doReadFootprints=doReadFootprints))
+                                  hscRun2=repoInfo2.hscRun, doReadFootprints=doReadFootprints,
+                                  aliasDictList=aliasDictList))
 
             # Set boolean arrays indicating sources deemed unsuitable for qa analyses
             self.catLabel = "nChild = 0"
@@ -692,6 +695,10 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                           len(catalog1), len(catalog2)))
             commonZpCat = self.matchCatalogs(commonZpCat1, commonZpCat2)
             catalog = self.matchCatalogs(catalog1, catalog2)
+            # Set some aliases for differing schema naming conventions
+            if aliasDictList is not None:
+                for cat in [commonZpCat, catalog]:
+                    cat = setAliasMaps(cat, aliasDictList)
 
             self.log.info("Number of matches (maxDist = {0:.2f} arcsec) = {1:d}".format(
                           self.config.matchRadius, len(catalog)))
@@ -726,8 +733,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 self.plotMags(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
                               camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=repoInfo2.hscRun,
                               matchRadius=self.config.matchRadius, zpLabel=self.zpLabel,
-                              highlightList=[("first_calib_psfUsed", 0, "yellow"),
-                                             ("second_calib_psfUsed", 0, "green")])
+                              highlightList=[("first_calib_psf_used", 0, "yellow"),
+                                             ("second_calib_psf_used", 0, "green")])
             if self.config.doPlotSizes:
                 if ("first_base_SdssShape_psf_xx" in catalog.schema and
                         "second_base_SdssShape_psf_xx" in catalog.schema):
@@ -752,7 +759,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                  matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
 
     def readCatalogs(self, dataRefList1, dataRefList2, dataset, hscRun1=None, hscRun2=None,
-                     doReadFootprints=None):
+                     doReadFootprints=None, aliasDictList=None):
         """Read in and concatenate catalogs of type dataset in lists of data references
 
         Parameters
@@ -802,12 +809,12 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             elif doReadFootprints == "heavy":
                 srcCat1 = dataRef1.get(dataset, immediate=True)
                 srcCat2 = dataRef2.get(dataset, immediate=True)
-            # Set an alias map for differing src naming conventions of different stacks (if any)
+
+            # Set some aliases for differing src naming conventions
             for cat, hscRun in ([srcCat1, hscRun1], [srcCat2, hscRun2]):
-                if self.config.srcSchemaMap and hscRun:
-                    aliasMap = cat.schema.getAliasMap()
-                    for lsstName, otherName in self.config.srcSchemaMap.items():
-                        aliasMap.set(lsstName, otherName)
+                if aliasDictList is not None:
+                    cat = setAliasMaps(cat, aliasDictList)
+
             if self.config.doBackoutApCorr:
                 srcCat1 = backoutApCorr(srcCat1)
                 srcCat2 = backoutApCorr(srcCat2)
@@ -921,7 +928,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, traceSizeCompare(compareCol), "SdssShape Trace Radius Diff (%)",
                          shortName, self.config.analysis, flags=[col + "_flag"], prefix="first_",
-                         goodKeys=["calib_psfUsed"], qMin=-0.5, qMax=1.5,
+                         goodKeys=["calib_psf_used"], qMin=-0.5, qMax=1.5,
                          labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
@@ -931,7 +938,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, traceSizeCompare(compareCol), " SdssShape PSF Trace Radius Diff (%)",
                          shortName, self.config.analysis, flags=[col + "_flag"], prefix="first_",
-                         goodKeys=["calib_psfUsed"], qMin=-1.1, qMax=1.1,
+                         goodKeys=["calib_psf_used"], qMin=-1.1, qMax=1.1,
                          labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
@@ -941,7 +948,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, percentDiff(compareCol), "SdssShape xx Moment Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
-                         goodKeys=["calib_psfUsed"], qMin=-0.5, qMax=1.5,
+                         goodKeys=["calib_psf_used"], qMin=-0.5, qMax=1.5,
                          labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
@@ -951,7 +958,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, percentDiff(compareCol), "SdssShape yy Moment Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
-                         goodKeys=["calib_psfUsed"], qMin=-0.5, qMax=1.5,
+                         goodKeys=["calib_psf_used"], qMin=-0.5, qMax=1.5,
                          labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
@@ -962,7 +969,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, traceSizeCompare(compareCol), "HSM Trace Radius Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
-                         goodKeys=["calib_psfUsed"], qMin=-0.5, qMax=1.5,
+                         goodKeys=["calib_psf_used"], qMin=-0.5, qMax=1.5,
                          labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
@@ -972,7 +979,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, traceSizeCompare(compareCol), "HSM PSF Trace Radius Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
-                         goodKeys=["calib_psfUsed"], qMin=-1.1, qMax=1.1,
+                         goodKeys=["calib_psf_used"], qMin=-1.1, qMax=1.1,
                          labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, hscRun=hscRun,
