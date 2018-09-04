@@ -79,7 +79,7 @@ class CoaddAnalysisConfig(Config):
                              doc="Mapping between different stack (e.g. HSC vs. LSST) schema names")
     fluxToPlotList = ListField(dtype=str, default=["base_GaussianFlux", "ext_photometryKron_KronFlux",
                                                    "modelfit_CModel"],
-                               doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(base_PsfFlux)")
+                               doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(fluxColumn)")
     columnsToCopy = ListField(dtype=str,
                               default=["calib_psf_used", "calib_psf_candidate", "detect_isPatchInner",
                                        "detect_isTractInner", "merge_peak_sky", "calib_psfUsed",

@@ -31,18 +31,19 @@ class AnalysisConfig(Config):
     magPlotStarMin = DictField(
         keytype=str,
         itemtype=float,
-        default={"HSC-G": 16.5, "HSC-R": 17.0, "HSC-I": 16.5, "HSC-Z": 15.5, "HSC-Y": 15.5, "NB0921": 15.5,
-                 "g": 16.5, "r": 15.0, "i": 16.5, "z": 15.5, "y": 15.5},
+        default={"HSC-G": 16.5, "HSC-R": 17.25, "HSC-I": 16.5, "HSC-Z": 15.5, "HSC-Y": 15.25,
+                 "NB0921": 15.0, "g": 16.5, "r": 15.0, "i": 16.5, "z": 15.5, "y": 15.5},
         doc="Minimum magnitude to plot",
     )
     magPlotStarMax = DictField(
         keytype=str,
         itemtype=float,
-        default={"HSC-G": 23.5, "HSC-R": 24.0, "HSC-I": 23.5, "HSC-Z": 22.5, "HSC-Y": 22.5, "NB0921": 22.5,
-                 "g": 23.5, "r": 22.0, "i": 23.5, "z": 22.5, "y": 22.5},
+        default={"HSC-G": 23.75, "HSC-R": 24.25, "HSC-I": 23.75, "HSC-Z": 23.0, "HSC-Y": 22.0,
+                 "NB0921": 22.25, "g": 23.5, "r": 22.0, "i": 23.5, "z": 22.5, "y": 22.5},
         doc="Maximum magnitude to plot",
     )
-    fluxColumn = Field(dtype=str, default="base_PsfFlux_instFlux", doc="Column to use for flux/mag plotting")
+    fluxColumn = Field(dtype=str, default="modelfit_CModel_instFlux",
+                       doc="Column to use for flux/mag plotting")
     coaddZp = Field(dtype=float, default=27.0, doc="Magnitude zero point to apply for coadds")
     commonZp = Field(dtype=float, default=33.0, doc="Magnitude zero point to apply for common ZP plots")
     doPlotOldMagsHist = Field(dtype=bool, default=False, doc="Make older, separated, mag and hist plots?")
@@ -247,13 +248,14 @@ class Analysis(object):
                 deltaMin = max(0.0, self.qMin - galMin)
 
         magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
-        if "matches" in filename:  # narrow magnitude plotting limits for matches
-            magMin += 1
-            magMax -= 1
-        if self.calibUsedOnly > 0 or "color" in filename or "visit" not in filename:
+        if self.calibUsedOnly > 0 or "color" in filename or "visit" not in filename or "matches" in filename:
             if filterStr in self.config.magPlotStarMin.keys():
                 magMin = self.config.magPlotStarMin[filterStr]
-        if self.calibUsedOnly > 0 or "color" in filename:
+                if self.calibUsedOnly == 0 and ("plot-t" in filename or "compare-t" in filename):
+                    magMin -= 1.5  # CModel flux for coadds can have brighter mags than the PSF equivalent
+                    if "matches" in filename:  # But reference catalogs won't go quite so bright
+                        magMin += 1.0
+        if self.calibUsedOnly > 0 or "color" in filename or "matches" in filename:
             if filterStr in self.config.magPlotStarMax.keys():
                 magMax = self.config.magPlotStarMax[filterStr]
         axScatter.set_xlim(magMin, magMax)

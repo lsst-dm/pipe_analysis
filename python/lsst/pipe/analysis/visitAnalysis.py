@@ -156,6 +156,11 @@ class VisitAnalysisConfig(CoaddAnalysisConfig):
     doApplyUberCal = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input?" +
                            " FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
 
+    def setDefaults(self):
+        CoaddAnalysisConfig.setDefaults(self)
+        self.analysis.fluxColumn = "base_PsfFlux_instFlux"
+        self.analysisMatches.fluxColumn = "base_PsfFlux_instFlux"
+
     def validate(self):
         CoaddAnalysisConfig.validate(self)
         if self.doApplyUberCal:
