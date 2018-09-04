@@ -472,6 +472,8 @@ class Analysis(object):
         magThreshold = self.magThreshold
         if dataName == "galaxy" and magThreshold < 99.0:
             magThreshold += 1.0  # plot to fainter mags for galaxies
+        if dataName == "star" and "matches" in filename and magThreshold < 99.0:
+            magThreshold += 1.0  # plot to fainter mags for matching against ref cat
         good = (self.mag < magThreshold if magThreshold > 0 else np.ones(len(self.mag), dtype=bool))
         if ((dataName == "star" or "matches" in filename or "compare" in filename) and
                 "pStar" not in filename and "race" not in filename and "resolution" not in filename):
