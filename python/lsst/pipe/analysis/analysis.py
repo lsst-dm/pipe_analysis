@@ -123,6 +123,9 @@ class Analysis(object):
             self.data = {name: Data(catalog, self.quantity, self.mag, self.good & (labels == value),
                                     colorList[value], self.quantityError, name in labeller.plot) for
                          name, value in labeller.labels.items()}
+            # Sort data dict by number of points in each data type.
+            self.data = {k: self.data[k] for _, k in sorted(((len(v.mag), k) for (k, v) in self.data.items()),
+                                                            reverse=True)}
             self.stats = self.statistics(forcedMean=forcedMean)
             # Make sure you have some good data to plot: only check first dataset in labeller.plot
             # list as it is the most important one (and the only available in many cases where
@@ -278,11 +281,22 @@ class Analysis(object):
         axHistx.set_yscale("log", nonposy="clip")
         axHisty.set_xscale("log", nonposx="clip")
         nTotal = 0
+        fullSampleMag = []
+        fullSampleQuantity = []
         for name, data in self.data.items():
-            nTotal += len(data.mag)
+            if data.plot:
+                nTotal += len(data.mag)
+                fullSampleMag.extend(data.mag)
+                fullSampleQuantity.extend(data.quantity)
         axScatterYlim = np.around(nTotal, -1*int(np.floor(np.log10(nTotal))))
-        axHistx.set_ylim(1, axScatterYlim)
-        axHisty.set_xlim(1, axScatterYlim)
+        axHistx.set_ylim(0.8, axScatterYlim)
+        axHisty.set_xlim(0.8, axScatterYlim)
+
+        # Plot full sample histograms
+        axHistx.hist(fullSampleMag, bins=xBins, color="black", alpha=0.4, label="All")
+        axHisty.hist(fullSampleQuantity, bins=yBins, color="black", orientation="horizontal",
+                     alpha=0.4, label="All")
+
         nxSyDecimal = int(-1.0*np.around(np.log10(0.05*abs(self.magThreshold - magMin)) - 0.5))
         xSyBinwidth = min(0.1, np.around(0.05*abs(self.magThreshold - magMin), nxSyDecimal))
         xSyBins = np.arange(magMin + 0.5*xSyBinwidth, self.magThreshold + 0.5*xSyBinwidth, xSyBinwidth)
@@ -382,18 +396,20 @@ class Analysis(object):
         axHistx.legend(fontsize=7, loc=2)
         axHisty.legend(fontsize=7)
         # Label total number of objects of each data type
-        xLoc, yLoc = 0.09, 1.405
+        xLoc, yLoc = 0.09, 1.355
         lenNameMax = 0
         for name, data in self.data.items():
             if data.mag.any():
                 lenNameMax = len(name) if len(name) > lenNameMax else lenNameMax
         xLoc += 0.02*lenNameMax
 
+        plt.text(xLoc, yLoc, "N$_{all}$  = " + str(len(fullSampleMag)), ha="left", va="center",
+                 fontsize=8, transform=axScatter.transAxes, color="black", alpha=0.6)
         for name, data in self.data.items():
             if not (data.mag.any() and data.plot):
                 continue
             yLoc -= 0.05
-            plt.text(xLoc, yLoc, "Ntotal = " + str(len(data.mag)), ha="left", va="center",
+            plt.text(xLoc, yLoc, "N$_{" + name[:4] + "}$ = " + str(len(data.mag)), ha="left", va="center",
                      fontsize=8, transform=axScatter.transAxes, color=data.color)
 
         labelVisit(filename, plt, axScatter, 1.18, -0.11, color="green")

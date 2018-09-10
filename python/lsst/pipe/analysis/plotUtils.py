@@ -39,6 +39,7 @@ class StarGalaxyLabeller(object):
 
 class OverlapsStarGalaxyLabeller(StarGalaxyLabeller):
     labels = {"star": 0, "galaxy": 1, "split": 2}
+    plot = ["star", "galaxy", "split"]
 
     def __init__(self, first="first_", second="second_"):
         self._first = first
