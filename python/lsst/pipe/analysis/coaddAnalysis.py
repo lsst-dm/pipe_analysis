@@ -791,7 +791,7 @@ class CoaddAnalysisTask(CmdLineTask):
         enforcer = None
         shortName = "pStar"
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(catalog, deconvMomStarGal, "P(star) from deconvolved moments (unforced)",
+        self.AnalysisClass(catalog, deconvMomStarGal, "P(star) from deconvolved moments",
                            shortName, self.config.analysis, qMin=-0.1, qMax=1.39,
                            labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
                            ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
@@ -800,7 +800,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                      forcedStr=forcedStr)
         shortName = "deconvMom"
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(catalog, deconvMom, "Deconvolved moments (unforced)", shortName,
+        self.AnalysisClass(catalog, deconvMom, "Deconvolved moments", shortName,
                            self.config.analysis, qMin=-1.0, qMax=3.0, labeller=StarGalaxyLabeller(),
                            flagsCat=flagsCat,
                            ).plotAll(dataId, filenamer, self.log,
@@ -916,7 +916,7 @@ class CoaddAnalysisTask(CmdLineTask):
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_instFlux", ct, zp=0.0,
                                                        unitScale=self.unitScale),
-                               "MagPsf(unforced) - ref (calib_psf_used) (%s)" % unitStr, shortName,
+                               "MagPsf - ref (calib_psf_used) (%s)" % unitStr, shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_psf_used"],
                                qMin=-0.15, qMax=0.1, labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
                                unitScale=self.unitScale,
@@ -929,7 +929,7 @@ class CoaddAnalysisTask(CmdLineTask):
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_instFlux", ct, zp=0.0,
                                                        unitScale=self.unitScale),
-                               "   MagPsf(unforced) - ref (calib_photom_used) (%s)" % unitStr, shortName,
+                               "   MagPsf - ref (calib_photom_used) (%s)" % unitStr, shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_photometry_used"],
                                qMin=-0.15, qMax=0.15, labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
                                unitScale=self.unitScale,
@@ -941,7 +941,7 @@ class CoaddAnalysisTask(CmdLineTask):
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_instFlux", ct, zp=0.0,
                                                    unitScale=self.unitScale),
-                           "MagPsf(unforced) - ref (%s)" % unitStr, shortName, self.config.analysisMatches,
+                           "MagPsf - ref (%s)" % unitStr, shortName, self.config.analysisMatches,
                            prefix="src_", qMin=-0.15, qMax=0.5, labeller=MatchesStarGalaxyLabeller(),
                            unitScale=self.unitScale,
                            ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
