@@ -529,11 +529,12 @@ class CoaddAnalysisTask(CmdLineTask):
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in fluxToPlotList:
-            if col + "_flux" in catalog.schema:
+            if col + "_instFlux" in catalog.schema:
                 shortName = "mag_" + col + postFix
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog,
-                                   MagDiff(col + "_flux", "base_PsfFlux_flux", unitScale=self.unitScale),
+                                   MagDiff(col + "_instFlux", "base_PsfFlux_instFlux",
+                                           unitScale=self.unitScale),
                                    "Mag(%s) - PSFMag (%s)" % (fluxToPlotString(col), unitStr),
                                    shortName, self.config.analysis,
                                    flags=[col + "_flag"], labeller=StarGalaxyLabeller(),
@@ -550,7 +551,7 @@ class CoaddAnalysisTask(CmdLineTask):
         enforcer = None
         unitStr = " (milli)" if self.config.toMilli else ""
         for col in ["base_PsfFlux", ]:
-            if col + "_flux" in catalog.schema:
+            if col + "_instFlux" in catalog.schema:
                 shortName = "trace" + postFix
                 compareCol = "base_SdssShape"
                 # set limits dynamically...can be very different visit-to-visit due to seeing differences
@@ -588,7 +589,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                                  tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
                                                  matchRadius=matchRadius, zpLabel=zpLabel,
                                                  forcedStr=forcedStr)
-            if col + "_flux" in catalog.schema:
+            if col + "_instFlux" in catalog.schema:
                 shortName = "psfTraceDiff" + postFix
                 compareCol = "base_SdssShape"
                 psfCompareCol = "base_SdssShape_psf"
@@ -800,8 +801,9 @@ class CoaddAnalysisTask(CmdLineTask):
         for col in fluxToPlotList:
             shortName = "compareUnforced_" + col
             self.log.info("shortName = {:s}".format(shortName))
-            if "forced_" + col + "_flux" in catalog.schema:
-                self.AnalysisClass(catalog, MagDiff("forced_" + col + "_flux", "unforced_" + col + "_flux",
+            if "forced_" + col + "_instFlux" in catalog.schema:
+                self.AnalysisClass(catalog, MagDiff("forced_" + col + "_instFlux",
+                                                    "unforced_" + col + "_instFlux",
                                                     unitScale=self.unitScale),
                                    "  Forced - Unforced mag [%s] (%s)" % (fluxToPlotString(col), unitStr),
                                    shortName, self.config.analysis, prefix="forced_", flags=[col + "_flag"],
@@ -838,8 +840,9 @@ class CoaddAnalysisTask(CmdLineTask):
         for col in fluxToPlotList:
             shortName = "overlap_" + col + postFix
             self.log.info("shortName = {:s}".format(shortName))
-            if "first_" + col + "_flux" in overlaps.schema:
-                self.AnalysisClass(overlaps, MagDiff("first_" + col + "_flux", "second_" + col + "_flux",
+            if "first_" + col + "_instFlux" in overlaps.schema:
+                self.AnalysisClass(overlaps, MagDiff("first_" + col + "_instFlux",
+                                                     "second_" + col + "_instFlux",
                                                      unitScale=self.unitScale),
                                    "  Overlap mag difference (%s) (%s)" % (fluxToPlotString(col), unitStr),
                                    shortName, self.config.analysis, prefix="first_", flags=[col + "_flag"],
@@ -879,7 +882,7 @@ class CoaddAnalysisTask(CmdLineTask):
         if "src_calib_psf_used" in matches.schema:
             shortName = description + "_mag_calib_psf_used"
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_flux", ct, zp=0.0,
+            self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_instFlux", ct, zp=0.0,
                                                        unitScale=self.unitScale),
                                "MagPsf(unforced) - ref (calib_psf_used) (%s)" % unitStr, shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_psf_used"],
@@ -892,7 +895,7 @@ class CoaddAnalysisTask(CmdLineTask):
         if "src_calib_photometry_used" in matches.schema:
             shortName = description + "_mag_calib_photometry_used"
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_flux", ct, zp=0.0,
+            self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_instFlux", ct, zp=0.0,
                                                        unitScale=self.unitScale),
                                "   MagPsf(unforced) - ref (calib_photom_used) (%s)" % unitStr, shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_photometry_used"],
@@ -904,7 +907,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                          zpLabel=zpLabel, forcedStr=forcedStr)
         shortName = description + "_mag"
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_flux", ct, zp=0.0,
+        self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_instFlux", ct, zp=0.0,
                                                    unitScale=self.unitScale),
                            "MagPsf(unforced) - ref (%s)" % unitStr, shortName, self.config.analysisMatches,
                            prefix="src_", qMin=-0.15, qMax=0.5, labeller=MatchesStarGalaxyLabeller(),
@@ -1264,13 +1267,15 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             fluxToPlotList = self.config.fluxToPlotList
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in fluxToPlotList:
-            if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
+            if ("first_" + col + "_instFlux" in catalog.schema and "second_" + col + "_instFlux" in
+                catalog.schema):
                 shortName = "diff_" + col + postFix
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, MagDiffCompare(col + "_flux", unitScale=self.unitScale),
+                Analysis(catalog, MagDiffCompare(col + "_instFlux", unitScale=self.unitScale),
                          "      Run Comparison: %s mag diff (%s)" % (fluxToPlotString(col), unitStr),
                          shortName, self.config.analysis, prefix="first_", qMin=-0.05, qMax=0.05,
-                         flags=[col + "_flag"], errFunc=MagDiffErr(col + "_flux", unitScale=self.unitScale),
+                         flags=[col + "_flag"], errFunc=MagDiffErr(col + "_instFlux",
+                                                                   unitScale=self.unitScale),
                          labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat, unitScale=self.unitScale,
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,

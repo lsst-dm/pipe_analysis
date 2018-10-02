@@ -412,7 +412,7 @@ def deconvMom(catalog):
 def deconvMomStarGal(catalog):
     """Calculate P(star) from deconvolved moments"""
     rTrace = deconvMom(catalog)
-    snr = catalog["base_PsfFlux_flux"]/catalog["base_PsfFlux_fluxErr"]
+    snr = catalog["base_PsfFlux_instFlux"]/catalog["base_PsfFlux_instFluxErr"]
     poly = (-4.2759879274 + 0.0713088756641*snr + 0.16352932561*rTrace - 4.54656639596e-05*snr*snr -
             0.0482134274008*snr*rTrace + 4.41366874902e-13*rTrace*rTrace + 7.58973714641e-09*snr*snr*snr +
             1.51008430135e-05*snr*snr*rTrace + 4.38493363998e-14*snr*rTrace*rTrace +
@@ -517,14 +517,23 @@ def joinCatalogs(catalog1, catalog2, prefix1="cat1_", prefix2="cat2_"):
 def getFluxKeys(schema):
     """Retrieve the flux and flux error keys from a schema
 
-    Both are returned as dicts indexed on the flux name (e.g. "base_PsfFlux_flux" or "modelfit_CModel_flux").
+    Both are returned as dicts indexed on the flux name (e.g. "base_PsfFlux_instFlux" or
+    "modelfit_CModel_instFlux").
     """
-    schemaKeys = dict((s.field.getName(), s.key) for s in schema)
-    fluxKeys = dict((name, key) for name, key in schemaKeys.items() if
-                    re.search(r"^(\w+_flux)$", name) and key.getTypeString() != "Flag")
-    errKeys = dict((name + "Err", schemaKeys[name + "Err"]) for name in fluxKeys.keys() if
-                   name + "Err" in schemaKeys)
+
+    fluxTypeStr = "_instFlux"
+    fluxSchemaItems = schema.extract("*" + fluxTypeStr)
+    # Do not include any flag fields (as determined by their type).  Also exclude
+    # slot fields, as these would effectively duplicate whatever they point to.
+    fluxKeys = dict((name, schemaItem.key) for name, schemaItem in list(fluxSchemaItems.items()) if
+                    schemaItem.field.getTypeString() != "Flag" and
+                    not name.startswith("slot"))
+    errSchemaItems = schema.extract("*" + fluxTypeStr + "Err")
+    errKeys = dict((name, schemaItem.key) for name, schemaItem in list(errSchemaItems.items()) if
+                   name[:-len("Err")] in fluxKeys)
+
     # Also check for any in HSC format
+    schemaKeys = dict((s.field.getName(), s.key) for s in schema)
     fluxKeysHSC = dict((name, key) for name, key in schemaKeys.items() if
                        (re.search(r"^(flux\_\w+|\w+\_flux)$", name) or
                         re.search(r"^(\w+flux\_\w+|\w+\_flux)$", name)) and not
@@ -534,8 +543,10 @@ def getFluxKeys(schema):
     if fluxKeysHSC:
         fluxKeys.update(fluxKeysHSC)
         errKeys.update(errKeysHSC)
+
     if not fluxKeys:
         raise RuntimeError("No flux keys found")
+
     return fluxKeys, errKeys
 
 
@@ -578,10 +589,10 @@ def addApertureFluxesHSC(catalog, prefix=""):
     # for ia in range(len(apRadii)):
     # Just to 12 pixels for now...takes a long time...
     for ia in (4,):
-        apFluxKey = schema.addField(apName + "_" + apRadii[ia] + "_flux", type="D",
+        apFluxKey = schema.addField(apName + "_" + apRadii[ia] + "_instFlux", type="D",
                                     doc="flux within " + apRadii[ia].replace("_", ".") + "-pixel aperture",
                                     units="count")
-        apFluxErrKey = schema.addField(apName + "_" + apRadii[ia] + "_fluxErr", type="D",
+        apFluxErrKey = schema.addField(apName + "_" + apRadii[ia] + "_instFluxErr", type="D",
                                        doc="1-sigma flux uncertainty")
     apFlagKey = schema.addField(apName + "_flag", type="Flag", doc="general failure flag")
 
@@ -881,7 +892,7 @@ def calibrateSourceCatalogMosaic(dataRef, catalog, fluxKeys=None, errKeys=None, 
 
     if fluxKeys is None:
         fluxKeys, errKeys = getFluxKeys(catalog.schema)
-    for key in list(fluxKeys.values()) + list(errKeys.values()):
+    for name, key in list(fluxKeys.items()) + list(errKeys.items()):
         if len(catalog[key].shape) > 1:
             continue
         catalog[key] /= factor
@@ -919,7 +930,7 @@ def backoutApCorr(catalog):
     """
     ii = 0
     for k in catalog.schema.getNames():
-        if "_flux" in k and k[:-5] + "_apCorr" in catalog.schema.getNames() and "_apCorr" not in k:
+        if "_instFlux" in k and k[:-5] + "_apCorr" in catalog.schema.getNames() and "_apCorr" not in k:
             if ii == 0:
                 print("Backing out aperture corrections to fluxes")
                 ii += 1
@@ -952,12 +963,14 @@ def checkHscStack(metadata):
 def fluxToPlotString(fluxToPlot):
     """Return a more succint string for fluxes for label plotting
     """
-    fluxStrMap = {"base_PsfFlux_flux": "PSF",
+    fluxStrMap = {"base_PsfFlux_instFlux": "PSF",
+                  "base_PsfFlux_flux": "PSF",
                   "base_PsfFlux": "PSF",
                   "base_GaussianFlux": "Gaussian",
                   "ext_photometryKron_KronFlux": "Kron",
-                  "modelfit_CModel": "CModel",
+                  "modelfit_CModel_instFlux": "CModel",
                   "modelfit_CModel_flux": "CModel",
+                  "modelfit_CModel": "CModel",
                   "base_CircularApertureFlux_12_0": "CircAper 12pix"}
     if fluxToPlot in fluxStrMap:
         return fluxStrMap[fluxToPlot]

@@ -922,7 +922,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                   matchRadius=None, zpLabel=None):
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in ["base_PsfFlux"]:
-            if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
+            if ("first_" + col + "_instFlux" in catalog.schema and
+                "second_" + col + "_instFlux" in catalog.schema):
                 shortName = "trace"
                 compareCol = "base_SdssShape"
                 self.log.info("shortName = {:s}".format(shortName))

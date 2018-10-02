@@ -431,7 +431,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          tractInfo=repoInfo.tractInfo, patchList=patchList,
                                          hscRun=repoInfo.hscRun, geLabel=geLabel)
 
-        for fluxColumn in ["base_PsfFlux_flux", "modelfit_CModel_flux"]:
+        for fluxColumn in ["base_PsfFlux_instFlux", "modelfit_CModel_instFlux"]:
             self.plotStarColorColor(principalColCats, byFilterForcedCats, filenamer, repoInfo.dataId,
                                     fluxColumn, camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
                                     patchList=patchList, hscRun=repoInfo.hscRun, forcedStr=self.forcedStr,
@@ -714,7 +714,7 @@ class ColorAnalysisTask(CmdLineTask):
             shortName = "galaxy-TEST"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(catalog,
-                               GalaxyColor("modelfit_CModel_flux", "slot_CalibFlux_flux", "g_", "i_"),
+                               GalaxyColor("modelfit_CModel_instFlux", "slot_CalibFlux_flux", "g_", "i_"),
                                "(g-i)_cmodel - (g-i)_CalibFlux", shortName, self.config.analysis,
                                flags=["modelfit_CModel_flag", "slot_CalibFlux_flag"], prefix="i_",
                                labeller=OverlapsStarGalaxyLabeller("g_", "i_"),
@@ -723,7 +723,7 @@ class ColorAnalysisTask(CmdLineTask):
     def plotStarPrincipalColors(self, principalColCats, byFilterCats, filenamer, labeller, dataId,
                                 butler=None, camera=None, tractInfo=None, patchList=None, hscRun=None,
                                 geLabel=None):
-        mags = {filterName: -2.5*np.log10(byFilterCats[filterName]["base_PsfFlux_flux"]) for
+        mags = {filterName: -2.5*np.log10(byFilterCats[filterName]["base_PsfFlux_instFlux"]) for
                 filterName in byFilterCats}
         unitStr = "mmag" if self.config.toMilli else "mag"
         for col, transform in self.config.transforms.items():
@@ -780,8 +780,9 @@ class ColorAnalysisTask(CmdLineTask):
 
             # Plot selections of stars for different criteria
             if self.config.transforms == ivezicTransformsHSC:
-                filename = filenamer(dataId, description=filtersStr + fluxToPlotString("base_PsfFlux_flux"),
-                                     style=col+"Selections")
+                filename = filenamer(dataId,
+                                     description=filtersStr + fluxToPlotString("base_PsfFlux_instFlux"),
+                                     style=col + "Selections")
                 qaGood = np.logical_and(np.logical_not(principalColCats["qaBad_flag"]),
                                         principalColCats["numStarFlags"] >= 3)
                 qaGood = np.logical_and(qaGood, mags[self.fluxFilter] < self.config.analysis.magThreshold)
@@ -961,7 +962,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
                                          unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
-            if fluxColumn is not "base_PsfFlux_flux":
+            if fluxColumn is not "base_PsfFlux_instFlux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
                                catColors("HSC-G", "HSC-R", mags, decentStars),
@@ -1040,7 +1041,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
                                          unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
-            if fluxColumn is not "base_PsfFlux_flux":
+            if fluxColumn is not "base_PsfFlux_instFlux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
                                catColors("HSC-R", "HSC-I", mags, decentStars),
@@ -1098,7 +1099,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
                                          unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
-            if fluxColumn is not "base_PsfFlux_flux":
+            if fluxColumn is not "base_PsfFlux_instFlux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
                                catColors("HSC-I", "HSC-Z", mags, decentStars),
@@ -1157,7 +1158,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
                                          unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
-            if fluxColumn is not "base_PsfFlux_flux":
+            if fluxColumn is not "base_PsfFlux_instFlux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
                                catColors("HSC-Z", "NB0921", mags, decentStars),
