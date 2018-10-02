@@ -232,8 +232,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if any(doPlot for doPlot in [self.config.doPlotFootprintNpix, self.config.doPlotQuiver,
                                          self.config.doPlotMags, self.config.doPlotSizes,
                                          self.config.doPlotCentroids, self.config.doPlotStarGalaxy]):
-                commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", repoInfo.ccdKey,
-                                                         aliasDictList=aliasDictList, hscRun=repoInfo.hscRun)
+                commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", repoInfo,
+                                                         aliasDictList=aliasDictList)
 
             # Set boolean arrays indicating sources deemed unsuitable for qa analyses
             self.catLabel = "nChild = 0"
@@ -316,7 +316,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                     camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
                                     zpLabel=self.zpLabel)
             if self.config.doPlotMatches:
-                matches = self.readSrcMatches(dataRefListTract, "src", aliasDictList=aliasDictList)
+                matches = self.readSrcMatches(dataRefListTract, "src", repoInfo, aliasDictList=aliasDictList)
                 self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
                                  butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
                                  hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
@@ -331,7 +331,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                          ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
                                          matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
 
-    def readCatalogs(self, dataRefList, dataset, ccdKey, aliasDictList=None, hscRun=None):
+    def readCatalogs(self, dataRefList, dataset, repoInfo, aliasDictList=None):
         """Read in and concatenate catalogs of type dataset in lists of data references
 
         If self.config.doWriteParquetTables is True, before appending each catalog to a single
@@ -350,11 +350,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
            A list of butler data references whose catalogs of dataset type are to be read in
         dataset : `str`
            Name of the catalog dataset to be read in
-        ccdKey : `str`
-           The key name associated with a ccd
-        hscRun : `NoneType` or `str`, optional
-           If the processing was done with an HSC stack (now obsolete, but processing runs still exist),
-           contains the value of the fits card HSCPIPE_VERSION for the given repository (the default is None)
+        repoInfo : `lsst.pipe.base.Struct`
+           A struct containing relevant information about the repository under
+           study.  Elements used here include the key name associated with a
+           ccd and wether the processing was done with an HSC stack (now
+           obsolete, but processing runs still exist)
 
         Raises
         ------
@@ -376,12 +376,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if aliasDictList is not None:
                 catalog = setAliasMaps(catalog, aliasDictList)
 
-            butler = dataRef.getButler()
-            metadata = butler.get("calexp_md", dataRef.dataId)
-
             # Add ccdId column (useful to have in Parquet tables for subsequent interactive analysis)
             if self.config.doWriteParquetTables:
-                catalog = addIntFloatOrStrColumn(catalog, dataRef.dataId[ccdKey], "ccdId",
+                catalog = addIntFloatOrStrColumn(catalog, dataRef.dataId[repoInfo.ccdKey], "ccdId",
                                                  "Id of CCD on which source was detected")
 
             # Compute Focal Plane coordinates for each source if not already there
@@ -395,7 +392,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     self.haveFpCoords = False
             if self.config.doPlotFootprintNpix:
                 catalog = addFootprintNPix(catalog)
-            if hscRun and self.config.doAddAperFluxHsc:
+            if repoInfo.hscRun and self.config.doAddAperFluxHsc:
                 self.log.info("HSC run: adding aperture flux to schema...")
                 catalog = addApertureFluxesHSC(catalog, prefix="")
             # Optionally backout aperture corrections
@@ -407,7 +404,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             commonZpCat = calibrateSourceCatalog(commonZpCat, self.config.analysis.commonZp)
             commonZpCatList.append(commonZpCat)
             if self.config.doApplyUberCal:
-                if hscRun is not None:
+                if repoInfo.hscRun is not None:
                     if not dataRef.datasetExists("wcs_hsc") or not dataRef.datasetExists("fcr_hsc_md"):
                         continue
                 else:
@@ -415,7 +412,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     if (not (dataRef.datasetExists("jointcal_wcs") or dataRef.datasetExists("wcs")) or not
                             dataRef.datasetExists("fcr_md")):
                         continue
-            catalog = self.calibrateCatalogs(dataRef, catalog, metadata)
+            catalog = self.calibrateCatalogs(dataRef, catalog, repoInfo.metadata)
             catList.append(catalog)
 
         if not catList:
@@ -423,17 +420,14 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
         return concatenateCatalogs(commonZpCatList), concatenateCatalogs(catList)
 
-    def readSrcMatches(self, dataRefList, dataset, aliasDictList=None):
+    def readSrcMatches(self, dataRefList, dataset, repoInfo, aliasDictList=None):
         catList = []
         dataIdSubList = []
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
                 continue
-            butler = dataRef.getButler()
-            metadata = butler.get("calexp_md", dataRef.dataId)
-            hscRun = checkHscStack(metadata)
             if self.config.doApplyUberCal:
-                if hscRun is not None:
+                if repoInfo.hscRun is not None:
                     if not dataRef.datasetExists("wcs_hsc") or not dataRef.datasetExists("fcr_hsc_md"):
                         continue
                 else:
@@ -447,8 +441,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             # Set some aliases for differing schema naming conventions
             if aliasDictList is not None:
                 catalog = setAliasMaps(catalog, aliasDictList)
-            catalog = self.calibrateCatalogs(dataRef, catalog, metadata)
-            packedMatches = butler.get(dataset + "Match", dataRef.dataId)
+            catalog = self.calibrateCatalogs(dataRef, catalog, repoInfo.metadata)
+            packedMatches = repoInfo.butler.get(dataset + "Match", dataRef.dataId)
             # The reference object loader grows the bbox by the config parameter pixelMargin.  This
             # is set to 50 by default but is not reflected by the radius parameter set in the
             # metadata, so some matches may reside outside the circle searched within this radius
@@ -457,7 +451,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             matchmeta = packedMatches.table.getMetadata()
             rad = matchmeta.getDouble("RADIUS")
             matchmeta.setDouble("RADIUS", rad*1.05, "field radius in degrees, approximate, padded")
-            refObjLoader = self.config.refObjLoader.apply(butler=butler)
+            refObjLoader = self.config.refObjLoader.apply(butler=repoInfo.butler)
             matches = refObjLoader.joinMatchListWithCatalog(packedMatches, catalog)
             if not hasattr(matches[0].first, "schema"):
                 raise RuntimeError("Unable to unpack matches.  "
@@ -473,20 +467,20 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             # LSST reads in a_net catalogs with flux in "janskys", so must convert back to DN
             if not noMatches:
                 matches = matchJanskyToDn(matches)
-                if checkHscStack(metadata) is not None and self.config.doAddAperFluxHsc:
+                if repoInfo.hscRun is not None and self.config.doAddAperFluxHsc:
                     addApertureFluxesHSC(matches, prefix="second_")
 
             if not matches:
                 self.log.warn("No matches for {:s}".format(dataRef.dataId))
                 continue
 
-            matchMeta = butler.get(dataset, dataRef.dataId,
-                                   flags=afwTable.SOURCE_IO_NO_FOOTPRINTS).getTable().getMetadata()
+            matchMeta = repoInfo.butler.get(dataset, dataRef.dataId,
+                                            flags=afwTable.SOURCE_IO_NO_FOOTPRINTS).getTable().getMetadata()
             catalog = matchesToCatalog(matches, matchMeta)
             # Compute Focal Plane coordinates for each source if not already there
             if self.config.analysisMatches.doPlotFP:
                 if "src_base_FPPosition_x" not in catalog.schema and "src_focalplane_x" not in catalog.schema:
-                    exp = butler.get("calexp", dataRef.dataId)
+                    exp = repoInfo.butler.get("calexp", dataRef.dataId)
                     det = exp.getDetector()
                     catalog = addFpPoint(det, catalog, prefix="src_")
             # Optionally backout aperture corrections
@@ -670,9 +664,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             if (repoInfo1.hscRun or repoInfo2.hscRun) and self.config.srcSchemaMap is not None:
                 aliasDictList += [self.config.srcSchemaMap]
             commonZpCat1, catalog1, commonZpCat2, catalog2 = (
-                self.readCatalogs(dataRefListTract1, dataRefListTract2, "src", hscRun1=repoInfo1.hscRun,
-                                  hscRun2=repoInfo2.hscRun, doReadFootprints=doReadFootprints,
-                                  aliasDictList=aliasDictList))
+                self.readCatalogs(dataRefListTract1, dataRefListTract2, "src", repoInfo1, repoInfo2,
+                                  doReadFootprints=doReadFootprints, aliasDictList=aliasDictList))
 
             # Set boolean arrays indicating sources deemed unsuitable for qa analyses
             self.catLabel = "nChild = 0"
@@ -758,7 +751,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                  hscRun1=repoInfo1.hscRun, hscRun2=repoInfo2.hscRun,
                                  matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
 
-    def readCatalogs(self, dataRefList1, dataRefList2, dataset, hscRun1=None, hscRun2=None,
+    def readCatalogs(self, dataRefList1, dataRefList2, dataset, repoInfo1, repoInfo2,
                      doReadFootprints=None, aliasDictList=None):
         """Read in and concatenate catalogs of type dataset in lists of data references
 
@@ -771,9 +764,11 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
            compared against the catalogs associated with dataRefList1
         dataset : `str`
            Name of the catalog dataset to be read in
-        hscRun1, hscRun2 : `NoneType` or `str`, optional
-           If the processing was done with an HSC stack (now obsolete, but processing runs still exist),
-           contains the value of the fits card HSCPIPE_VERSION for the given repository (the default is None)
+        repoInfo1, repoInfo2 : `lsst.pipe.base.Struct`
+           A struct containing relevant information about the repository under
+           study.  Elements used here include the butler associated with the
+           repository, the image metadata, and wether the processing was done
+           with an HSC stack (now obsolete, but processing runs still exist)
         doReadFootprints : `NoneType` or `str`, optional
            A string dictating if and what type of Footprint to read in along with the catalog
            None (the default): do not read in Footprints
@@ -811,7 +806,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 srcCat2 = dataRef2.get(dataset, immediate=True)
 
             # Set some aliases for differing src naming conventions
-            for cat, hscRun in ([srcCat1, hscRun1], [srcCat2, hscRun2]):
+            for cat, hscRun in ([srcCat1, repoInfo1.hscRun], [srcCat2, repoInfo2.hscRun]):
                 if aliasDictList is not None:
                     cat = setAliasMaps(cat, aliasDictList)
 
@@ -819,27 +814,23 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 srcCat1 = backoutApCorr(srcCat1)
                 srcCat2 = backoutApCorr(srcCat2)
 
-            butler1 = dataRef1.getButler()
-            butler2 = dataRef2.getButler()
-            metadata1 = butler1.get("calexp_md", dataRef1.dataId)
-            metadata2 = butler2.get("calexp_md", dataRef2.dataId)
-            calexp1 = butler1.get("calexp", dataRef1.dataId)
-            calexp2 = butler2.get("calexp", dataRef2.dataId)
+            calexp1 = repoInfo1.butler.get("calexp", dataRef1.dataId)
+            calexp2 = repoInfo2.butler.get("calexp", dataRef2.dataId)
             nQuarter = calexp1.getDetector().getOrientation().getNQuarter()
             # add footprint nPix column
             if self.config.doPlotFootprintNpix:
                 srcCat1 = addFootprintNPix(srcCat1)
                 srcCat2 = addFootprintNPix(srcCat2)
             # Add rotated point in LSST cat if comparing with HSC cat to compare centroid pixel positions
-            if hscRun2 is not None and hscRun1 is None:
+            if repoInfo2.hscRun is not None and repoInfo1.hscRun is None:
                 srcCat1 = addRotPoint(srcCat1, calexp1.getWidth(), calexp1.getHeight(), nQuarter)
-            if hscRun1 is not None and hscRun2 is None:
+            if repoInfo1.hscRun is not None and repoInfo2.hscRun is None:
                 srcCat2 = addRotPoint(srcCat2, calexp2.getWidth(), calexp2.getHeight(), nQuarter)
 
-            if hscRun1 and self.config.doAddAperFluxHsc:
+            if repoInfo1.hscRun and self.config.doAddAperFluxHsc:
                 self.log.info("HSC run: adding aperture flux to schema1...")
                 srcCat1 = addApertureFluxesHSC(srcCat1, prefix="")
-            if hscRun2 and self.config.doAddAperFluxHsc:
+            if repoInfo2.hscRun and self.config.doAddAperFluxHsc:
                 self.log.info("HSC run: adding aperture flux to schema2...")
                 srcCat2 = addApertureFluxesHSC(srcCat2, prefix="")
 
@@ -851,7 +842,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             commonZpCat2 = calibrateSourceCatalog(commonZpCat2, self.config.analysis.commonZp)
             commonZpCatList2.append(commonZpCat2)
             if self.config.doApplyUberCal1:
-                if hscRun1 is not None:
+                if repoInfo1.hscRun is not None:
                     if not dataRef1.datasetExists("wcs_hsc") or not dataRef1.datasetExists("fcr_hsc_md"):
                         continue
                 # Check for both jointcal_wcs and wcs for compatibility with old datasets
@@ -859,15 +850,17 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                       dataRef1.datasetExists("fcr_md")):
                     continue
             if self.config.doApplyUberCal2:
-                if hscRun2 is not None:
+                if repoInfo2.hscRun is not None:
                     if not dataRef2.datasetExists("wcs_hsc") or not dataRef2.datasetExists("fcr_hsc_md"):
                         continue
                 elif (not (dataRef2.datasetExists("jointcal_wcs") or dataRef2.datasetExists("wcs")) or not
                       dataRef2.datasetExists("fcr_md")):
                     continue
-            srcCat1 = self.calibrateCatalogs(dataRef1, srcCat1, metadata1, self.config.doApplyUberCal1)
+            srcCat1 = self.calibrateCatalogs(dataRef1, srcCat1, repoInfo1.metadata,
+                                             self.config.doApplyUberCal1)
             catList1.append(srcCat1)
-            srcCat2 = self.calibrateCatalogs(dataRef2, srcCat2, metadata2, self.config.doApplyUberCal2)
+            srcCat2 = self.calibrateCatalogs(dataRef2, srcCat2, repoInfo2.metadata,
+                                             self.config.doApplyUberCal2)
             catList2.append(srcCat2)
 
         if not catList1:

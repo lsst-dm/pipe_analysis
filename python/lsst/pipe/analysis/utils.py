@@ -1011,14 +1011,61 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
     Parameters
     ----------
     dataRef : `lsst.daf.persistence.butlerSubset.ButlerDataRef`
-       The data reference for which the relevant repository information is to be retrieved.
+       The data reference for which the relevant repository information
+       is to be retrieved.
     coaddName : `str`, optional
-       The base name of the coadd (e.g. deep or goodSeeing) if ``dataRef`` is for coadd level processing
+       The base name of the coadd (e.g. deep or goodSeeing) if
+       ``dataRef`` is for coadd level processing (`None` by default).
+    coaddDataset : `str`, optional
+       The name of the coadd dataset (e.g. Coadd_forced_src or
+       Coadd_meas) if ``dataRef`` is for coadd level processing
        (`None` by default).
     doApplyUberCal : `bool`, optional
-      If `True`: Set the appropriate dataset type for the uber calibration from meas_mosaic.
-      If `False` (the default): Set the dataset type to the source catalog from single frame processing.
+       If `True`: Set the appropriate dataset type for the uber
+       calibration from meas_mosaic.
+       If `False` (the default): Set the dataset type to the source
+       catalog from single frame processing.
+
+    Raises
+    ------
+    `RuntimeError`
+       If one of ``coaddName`` or ``coaddDataset`` is specified but
+       the other is not.
+
+    Returns
+    -------
+    result : `lsst.pipe.base.Struct`
+       Result struct with components:
+
+       - ``butler`` : the butler associated with ``dataRef``
+         (`lsst.daf.persistence.Butler`).
+       - ``camera`` : the camera associated with ``butler``
+         (`lsst.afw.cameraGeom.Camera`).
+       - ``dataId`` : the dataId associated with ``dataRef``
+         (`lsst.daf.persistence.DataId`).
+       - ``filterName`` : the name of the filter associated with ``dataRef``
+         (`str`).
+       - ``genericFilterName`` : a generic form for ``filterName`` (`str`).
+       - ``ccdKey`` : the ccd key associated with ``dataId`` (`str` or `None`).
+       - ``metadata`` : the metadata associated with ``butler`` and ``dataId``
+         (`lsst.daf.base.propertyContainer.PropertyList`).
+       - ``hscRun`` : string representing "HSCPIPE_VERSION" fits header if
+         the data associated with ``dataRef``'s ``dataset`` were processed with
+         the (now obsolete, but old reruns still exist) "HSC stack", None
+         otherwise (`str` or `None`).
+       - ``dataset`` : the dataset name ("src" if ``dataRef`` is visit level,
+         coaddName + coaddDataset if ``dataRef`` is a coadd (`str`)
+       - ``skyMap`` : the sky map associated with ``dataRef`` if it is a
+         coadd (`lsst.skymap.SkyMap` or `None`).
+       - ``wcs`` : the wcs of the coadd image associated with ``dataRef``
+         -- only needed as a workaround for some old coadd catalogs that were
+         persisted with all nan for ra dec (`lsst.afw.geom.SkyWcs` or `None`).
+       - ``tractInfo`` : the tract information associated with ``dataRef`` if
+         it is a coadd (`lsst.skymap.tractInfo.ExplicitTractInfo` or `None`).
     """
+    if coaddName and not coaddDataset or not coaddName and coaddDataset:
+        raise RuntimeError("If one of coaddName or coaddDataset is specified, the other must be as well.")
+
     butler = dataRef.getButler()
     camera = butler.get("camera")
     dataId = dataRef.dataId
@@ -1031,16 +1078,17 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
     metadata = butler.get(metaStr, dataId)
     hscRun = checkHscStack(metadata)
     dataset = "src"
-    if doApplyUberCal:
-        dataset = "wcs_hsc" if hscRun is not None else "jointcal_wcs"
     skymap = butler.get(coaddName + "Coadd_skyMap") if coaddName is not None else None
     wcs = None
     tractInfo = None
     if isCoadd:
-        coaddDatatype = "Coadd_calexp_hsc" if hscRun else "Coadd_calexp"
-        coadd = butler.get(coaddName + coaddDatatype, dataId)
+        coaddImageName = "Coadd_calexp_hsc" if hscRun else "Coadd_calexp"  # To get the coadd's WCS
+        coadd = butler.get(coaddName + coaddImageName, dataId)
         wcs = coadd.getWcs()
         tractInfo = skymap[dataId["tract"]]
+        dataset = coaddName + coaddDataset
+    if doApplyUberCal:
+        dataset = "wcs_hsc" if hscRun is not None else "jointcal_wcs"
     return Struct(
         butler = butler,
         camera = camera,
