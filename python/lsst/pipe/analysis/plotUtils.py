@@ -77,7 +77,7 @@ class CosmosLabeller(StarGalaxyLabeller):
         return np.array([0 if ii in good else 1 for ii in catalog["id"]])
 
 
-def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", rotation=0, fontSize=9, color="k", coordSys="axes"):
+def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", fontSize=9, color="k", coordSys="axes", **kwargs):
     """Label the plot with the string provided at a given location
 
     Parameters
@@ -93,8 +93,6 @@ def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", rotation=0, fontSize=9, 
        The string will be centered both horizontally and vertically at this position.
     prefix : `str`, optional
        Optional prefix to add to ``textStr``.
-    rotation : `int`, optional
-       Angle in degrees to rotate ``textStr`` for plotting.  Default is 0 degrees.
     fontSize : `int` or `str`, optional
        Size of font for plotting of ``textStr``.  May be either an absolute font size in points, or a
        size string, relative to the default font size.  Default is 9 points.
@@ -105,6 +103,16 @@ def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", rotation=0, fontSize=9, 
        axes => axis.transAxes [the default]
        data => axis.transData
        figure => axis.transFigure
+    **kwargs
+       Arbitrary keyword arguments.  These can include any of those accecpted
+       by matplotlib's matplotlib.pyplot.text function (i.e. are properties of
+       the matplotlib.text.Text class).  Of particular interest here include:
+
+       - ``rotation`` : Angle in degrees to rotate ``textStr`` for plotting
+                        or one of strings "vertical" or "horizontal".  The
+                        matplotlib default is 0 degrees (`int` or `str`).
+       - ``alpha`` : The matplotlib blending value, between 0 (transparent)
+                     and 1 (opaque).  The matplotlib default is 1 (`float`).
 
     Raises
     ------
@@ -120,8 +128,8 @@ def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", rotation=0, fontSize=9, 
     else:
         raise ValueError("Unrecognized coordSys: {}.  Must be one of axes, data, figure".format(coordSys))
     fontSize = int(fontSize - min(3, len(textStr)/10))
-    plt.text(xLoc, yLoc, prefix + textStr, ha="center", va="center", fontsize=fontSize, rotation=rotation,
-             transform=transform, color=color)
+    plt.text(xLoc, yLoc, prefix + textStr, ha="center", va="center", fontsize=fontSize, transform=transform,
+             color=color, **kwargs)
 
 
 def annotateAxes(filename, plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff=0.05,
