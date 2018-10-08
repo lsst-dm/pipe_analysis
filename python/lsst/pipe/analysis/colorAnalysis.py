@@ -41,9 +41,9 @@ class ColorTransform(Config):
                doc="x Origin of P1/P2 axis on the color-color plane")
     y0 = Field(dtype=float, default=None, optional=True,
                doc="y Origin of P1/P2 axis on the color-color plane")
-    requireGreater = DictField(keytype=str, itemtype=float, default={},
+    requireGreater = DictField(keytype=str, itemtype=float, default=None, optional=True,
                                doc="Minimum values for colors so that this is useful")
-    requireLess = DictField(keytype=str, itemtype=float, default={},
+    requireLess = DictField(keytype=str, itemtype=float, default=None, optional=True,
                             doc="Maximum values for colors so that this is useful")
     fitLineSlope = Field(dtype=float, default=None, optional=True, doc="Slope for fit line limits")
     fitLineUpperIncpt = Field(dtype=float, default=None, optional=True,
@@ -52,8 +52,10 @@ class ColorTransform(Config):
                               doc="Intercept for lower fit line limits")
 
     @classmethod
-    def fromValues(cls, description, subDescription, plot, coeffs, x0=None, y0=None, requireGreater={},
-                   requireLess={}, fitLineSlope=None, fitLineUpperIncpt=None, fitLineLowerIncpt=None):
+    def fromValues(cls, description, subDescription, plot, coeffs, x0=None, y0=None, requireGreater=None,
+                   requireLess=None, fitLineSlope=None, fitLineUpperIncpt=None, fitLineLowerIncpt=None):
+        for require in [requireGreater, requireLess]:
+            require = {} if require is None else require
         self = cls()
         self.description = description
         self.subDescription = subDescription
