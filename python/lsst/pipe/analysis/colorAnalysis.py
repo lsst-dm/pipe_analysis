@@ -19,7 +19,8 @@ from .coaddAnalysis import CoaddAnalysisTask
 from .utils import (Filenamer, Enforcer, concatenateCatalogs, getFluxKeys, addColumnsToSchema,
                     makeBadArray, addFlag, addIntFloatOrStrColumn, calibrateCoaddSourceCatalog,
                     fluxToPlotString, writeParquet, getRepoInfo, orthogonalRegression,
-                    distanceSquaredToPoly, p2p1CoeffsFromLinearFit, makeEqnStr, catColors)
+                    distanceSquaredToPoly, p2p1CoeffsFromLinearFit, linesFromP2P1Coeffs,
+                    makeEqnStr, catColors)
 from .plotUtils import AllLabeller, OverlapsStarGalaxyLabeller, plotText, labelCamera, setPtSize
 
 import lsst.afw.geom as afwGeom
@@ -36,9 +37,13 @@ class ColorTransform(Config):
     subDescription = Field(dtype=str, doc="Sub-description of the color transform (added detail)")
     plot = Field(dtype=bool, default=True, doc="Plot this color?")
     coeffs = DictField(keytype=str, itemtype=float, doc="Coefficients for each filter")
-    requireGreater = DictField(keytype=str, itemtype=float, default={},
+    x0 = Field(dtype=float, default=None, optional=True,
+               doc="x Origin of P1/P2 axis on the color-color plane")
+    y0 = Field(dtype=float, default=None, optional=True,
+               doc="y Origin of P1/P2 axis on the color-color plane")
+    requireGreater = DictField(keytype=str, itemtype=float, default=None, optional=True,
                                doc="Minimum values for colors so that this is useful")
-    requireLess = DictField(keytype=str, itemtype=float, default={},
+    requireLess = DictField(keytype=str, itemtype=float, default=None, optional=True,
                             doc="Maximum values for colors so that this is useful")
     fitLineSlope = Field(dtype=float, default=None, optional=True, doc="Slope for fit line limits")
     fitLineUpperIncpt = Field(dtype=float, default=None, optional=True,
@@ -47,13 +52,17 @@ class ColorTransform(Config):
                               doc="Intercept for lower fit line limits")
 
     @classmethod
-    def fromValues(cls, description, subDescription, plot, coeffs, requireGreater={}, requireLess={},
-                   fitLineSlope=None, fitLineUpperIncpt=None, fitLineLowerIncpt=None):
+    def fromValues(cls, description, subDescription, plot, coeffs, x0=None, y0=None, requireGreater=None,
+                   requireLess=None, fitLineSlope=None, fitLineUpperIncpt=None, fitLineLowerIncpt=None):
+        for require in [requireGreater, requireLess]:
+            require = {} if require is None else require
         self = cls()
         self.description = description
         self.subDescription = subDescription
         self.plot = plot
         self.coeffs = coeffs
+        self.x0 = x0
+        self.y0 = y0
         self.requireGreater = requireGreater
         self.requireLess = requireLess
         self.fitLineSlope = fitLineSlope
@@ -65,12 +74,14 @@ class ColorTransform(Config):
 ivezicTransformsSDSS = {
     "wPerp": ColorTransform.fromValues("Ivezic w perpendicular", " (griBlue)", True,
                                        {"SDSS-G": -0.227, "SDSS-R": 0.792, "SDSS-I": -0.567, "": 0.050},
+                                       x0=0.4250, y0=0.0818,
                                        requireGreater={"wPara": -0.2}, requireLess={"wPara": 0.6}),
     "xPerp": ColorTransform.fromValues("Ivezic x perpendicular", " (griRed)", True,
                                        {"SDSS-G": 0.707, "SDSS-R": -0.707, "": -0.988},
                                        requireGreater={"xPara": 0.8}, requireLess={"xPara": 1.6}),
     "yPerp": ColorTransform.fromValues("Ivezic y perpendicular", " (rizRed)", True,
                                        {"SDSS-R": -0.270, "SDSS-I": 0.800, "SDSS-Z": -0.534, "": 0.054},
+                                       x0=0.5763, y0=0.1900,
                                        requireGreater={"yPara": 0.1}, requireLess={"yPara": 1.2}),
     "wPara": ColorTransform.fromValues("Ivezic w parallel", " (griBlue)", False,
                                        {"SDSS-G": 0.928, "SDSS-R": -0.556, "SDSS-I": -0.372, "": -0.425}),
@@ -83,14 +94,17 @@ ivezicTransformsSDSS = {
 ivezicTransformsHSC = {
     "wPerp": ColorTransform.fromValues("Ivezic w perpendicular", " (griBlue)", True,
                                        {"HSC-G": -0.274, "HSC-R": 0.803, "HSC-I": -0.529, "": 0.041},
+                                       x0=0.4481, y0=0.1546,
                                        requireGreater={"wPara": -0.2}, requireLess={"wPara": 0.6},
                                        fitLineSlope=-1/0.52, fitLineUpperIncpt=2.40, fitLineLowerIncpt=0.68),
     "xPerp": ColorTransform.fromValues("Ivezic x perpendicular", " (griRed)", True,
                                        {"HSC-G": -0.680, "HSC-R": 0.731, "HSC-I": -0.051, "": 0.792},
+                                       x0=1.2654, y0=1.3675,
                                        requireGreater={"xPara": 0.8}, requireLess={"xPara": 1.6},
                                        fitLineSlope=-1/13.35, fitLineUpperIncpt=1.73, fitLineLowerIncpt=0.87),
     "yPerp": ColorTransform.fromValues("Ivezic y perpendicular", " (rizRed)", True,
                                        {"HSC-R": -0.227, "HSC-I": 0.793, "HSC-Z": -0.566, "": -0.017},
+                                       x0=1.2219, y0=0.5183,
                                        requireGreater={"yPara": 0.1}, requireLess={"yPara": 1.2},
                                        fitLineSlope=-1/0.40, fitLineUpperIncpt=5.5, fitLineLowerIncpt=2.6),
     # The following still default to the SDSS values.  HSC coeffs will be derived on a subsequent
@@ -244,6 +258,23 @@ class ColorAnalysisConfig(Config):
         if self.correctForGalacticExtinction and self.extinctionCoeffs is None:
             raise ValueError("Must set appropriate extinctionCoeffs config.  See "
                              "config/hsc/extinctionCoeffs.py in obs_subaru for an example.")
+
+        # If a wired origin was included in the config, check that it actually
+        # lies on the wired P1 line (allowing for round-off error for precision
+        # of coefficients specified)
+        if self.transforms:
+            for col, transform in self.transforms.items():
+                if transform.plot and transform.x0 is not None and transform.y0 is not None:
+                    transformPerp = self.transforms[col]
+                    transformPara = self.transforms[col[0] + "Para"]
+                    p1p2Lines = linesFromP2P1Coeffs(list(transformPerp.coeffs.values()),
+                                                    list(transformPara.coeffs.values()))
+                    # Threshold of 2e-2 provides sufficient allowance for round-off error
+                    if (np.abs((p1p2Lines.mP1 - p1p2Lines.mP2)*transformPerp.x0 +
+                               (p1p2Lines.bP1 - p1p2Lines.bP2)) > 2e-2):
+                        raise ValueError(("Wired origin for {} does not lie on line associated with wired "
+                                          "PCA coefficients.  Check that the wired values are correct.").
+                                         format(col))
 
 
 class ColorAnalysisRunner(TaskRunner):
@@ -1243,6 +1274,8 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
             poly = np.polyfit(xx[keep], yy[keep], order)
             dy = yy - np.polyval(poly, xx)
             q1, q3 = np.percentile(dy[keep], [25, 75])
+            # The difference between q3 and q1 is the interquartile distance.
+            # 0.74*interquartileDistance is an estimate of standard deviation.
             clip = rej*0.74*(q3 - q1)
             keep = np.logical_not(np.abs(dy) > clip)
             # After the first iteration, reset the vertical and horizontal clipping to be less restrictive
@@ -1269,7 +1302,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     idxHighDensity = np.argmax(zKeep)
     xHighDensity = xx[keep][idxHighDensity]
     yHighDensity = yy[keep][idxHighDensity]
-    log.info("Highest Density point x, y: {0:.2f} {1:.2f}".format(xHighDensity, yHighDensity))
+    log.info("Highest Density point x, y: {0:.4f} {1:.4f}".format(xHighDensity, yHighDensity))
 
     initialGuess = list(reversed(poly))
     keepOdr = keep.copy()
@@ -1293,21 +1326,6 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
                 format(nKeepOdr, order))
         orthRegCoeffs = orthogonalRegression(xx[keepOdr], yy[keepOdr], order, initialGuess)
     yOrthLine = np.polyval(orthRegCoeffs, xLine)
-    axes[0].plot(xLine, yOrthLine, "g--")
-
-    kwargs = dict(s=3, marker="o", lw=0, alpha=0.4)
-    axes[0].scatter(xx[~keep], yy[~keep], c=zOther, cmap="gray", label="other", **kwargs)
-    axes[0].scatter(xx[keep], yy[keep], c=zKeep, cmap="jet", label="used", **kwargs)
-    axes[0].set_xlabel(xLabel)
-    axes[0].set_ylabel(yLabel, labelpad=-1)
-
-    mappableKeep = plt.cm.ScalarMappable(cmap="jet", norm=plt.Normalize(vmin=zKeep.min(), vmax=zKeep.max()))
-    mappableKeep._A = []        # fake up the array of the scalar mappable. Urgh...
-    caxKeep = plt.axes([0.46, 0.15, 0.022, 0.75])
-    cbKeep = plt.colorbar(mappableKeep, cax=caxKeep)
-    cbKeep.ax.tick_params(labelsize=6)
-    labelPadShift = len(str(zKeep.max()//10)) if zKeep.max()//10 > 0 else 0
-    cbKeep.set_label("Number Density", rotation=270, labelpad=-15 - labelPadShift, fontsize=7)
 
     # Find index where poly and fit range intersect -- to calculate the local slopes of the fit to make
     # sure it is close to the fitLines (log a warning if they are not within 5%)
@@ -1348,6 +1366,33 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         log.warn(message.format("Lower", fitLineLower, bLower, mLower, xLine[crossIdxLower]))
     deltaX = abs(xRange[1] - xRange[0])
     deltaY = abs(yRange[1] - yRange[0])
+
+    # Find some sensible plotting limits for the P1 line fit
+    frac = 0.26
+    crossIdxMid = crossIdxLower + int(0.5*(crossIdxUpper - crossIdxLower))
+    fracIdx = min(int(frac*len(xLine)), len(xLine) - 1 - crossIdxMid)
+    yAtCrossIdxMid = yOrthLine[crossIdxMid]
+    midCrossPlusFracIdx = np.abs(yOrthLine - (yAtCrossIdxMid + frac*deltaY)).argmin()
+    yAtFracIdx = yOrthLine[crossIdxMid + fracIdx]
+    idxP1 = (crossIdxMid + fracIdx) if yAtFracIdx < (yAtCrossIdxMid + frac*deltaY) else midCrossPlusFracIdx
+    deltaIdxP1 = idxP1 - crossIdxMid
+    xP1Line = xLine[crossIdxMid - deltaIdxP1:crossIdxMid + deltaIdxP1]
+    yP1Line = yOrthLine[crossIdxMid - deltaIdxP1:crossIdxMid + deltaIdxP1]
+    axes[0].plot(xP1Line, yP1Line, "g--", lw=0.75)
+
+    kwargs = dict(s=3, marker="o", lw=0, alpha=0.4)
+    axes[0].scatter(xx[~keep], yy[~keep], c=zOther, cmap="gray", label="other", **kwargs)
+    axes[0].scatter(xx[keep], yy[keep], c=zKeep, cmap="jet", label="used", **kwargs)
+    axes[0].set_xlabel(xLabel)
+    axes[0].set_ylabel(yLabel, labelpad=-1)
+
+    mappableKeep = plt.cm.ScalarMappable(cmap="jet", norm=plt.Normalize(vmin=zKeep.min(), vmax=zKeep.max()))
+    mappableKeep._A = []        # fake up the array of the scalar mappable. Urgh...
+    caxKeep = plt.axes([0.46, 0.15, 0.022, 0.75])
+    cbKeep = plt.colorbar(mappableKeep, cax=caxKeep)
+    cbKeep.ax.tick_params(labelsize=6)
+    labelPadShift = len(str(zKeep.max()//10)) if zKeep.max()//10 > 0 else 0
+    cbKeep.set_label("Number Density", rotation=270, labelpad=-15 - labelPadShift, fontsize=7)
 
     if xFitRange:
         # Shade region outside xFitRange
@@ -1415,13 +1460,13 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     axes[0].text(xLoc + fdx*deltaX, yLoc, str(len(xx)), ha="right", color="black", **kwargs)
 
     unitStr = "mmag" if unitScale == 1000 else "mag"
-    axes[1].set_xlabel("Distance to polynomial fit ({:s})".format(unitStr))
+    axes[1].set_xlabel("Dist to poly fit or Pincp Color ({:s})".format(unitStr))
     axes[1].set_ylabel("Number")
     axes[1].set_yscale("log", nonposy="clip")
 
     # Label orthogonal polynomial fit parameters to 2 decimal places
     xLoc = xRange[0] + 0.045*deltaX
-    polyColor = "green"
+    polyColor = "magenta"
     polyFit = orthRegCoeffs
     polyStr = "odr"
     kept = keepOdr
@@ -1445,6 +1490,38 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         # Closest point on line to highest density point
         xHighDensity0 = (xHighDensity + m*(yHighDensity - b))/(m**2.0 + 1.0)
         yHighDensity0 = (m*(xHighDensity + m*yHighDensity) + b)/(m**2.0 + 1.0)
+        bP2 = yHighDensity0 + (1.0/m)*xHighDensity0
+        yP2Line = (-1.0/m)*xLine + bP2
+        # Find some sensible plotting limits for the P2 line fit
+        frac = 0.15
+        idxHd = np.abs(yP2Line - yHighDensity0).argmin()
+        idxFrac = idxHd - int(frac*len(xLine))
+        fracIdx = max(idxHd - int(frac*len(xLine)), 0)
+        yAtIdxFrac = yP2Line[idxFrac]
+        idxHdPlusFrac = np.abs(yP2Line - (yHighDensity0 + frac*deltaY)).argmin()
+        yAtHdPlusFrac = yP2Line[idxHdPlusFrac]
+        idxP2 = idxFrac if yAtIdxFrac < yAtHdPlusFrac else idxHdPlusFrac
+        deltaIdxP2 = idxHd - idxP2
+        xP2Line = xLine[idxHd - deltaIdxP2:idxHd + deltaIdxP2]
+        yP2Line = yP2Line[idxHd - deltaIdxP2:idxHd + deltaIdxP2]
+        axes[0].plot(xP2Line, yP2Line, "g--", lw=0.75)
+        plotText("P2$^{fit}$", plt, axes[0], xP2Line[0] - 0.022*deltaX, yP2Line[0] + 0.04*deltaY,
+                 fontSize=8, color="green", coordSys="data")
+        plotText("P1$^{fit}$", plt, axes[0], xP1Line[0] - 0.07*deltaX, yP1Line[0] + 0.03*deltaY,
+                 fontSize=8, color="green", coordSys="data")
+
+        # Also plot the effective hard wired lines
+        wiredLine = linesFromP2P1Coeffs(list(transformPerp.coeffs.values()),
+                                        list(transformPara.coeffs.values()))
+        yP2LineWired = wiredLine.mP2*xP2Line + wiredLine.bP2
+        yP1LineWired = wiredLine.mP1*xP1Line + wiredLine.bP1
+        axes[0].plot(xP2Line, yP2LineWired, "b--", alpha=0.6, lw=0.75)
+        axes[0].plot(xP1Line, yP1LineWired, "b--", alpha=0.6, lw=0.75)
+        plotText("$_{wired}$", plt, axes[0], xP2Line[0] + 0.032*deltaX, yP2Line[0] + 0.03*deltaY,
+                 fontSize=8, color="blue", coordSys="data", alpha=0.6)
+        plotText("$_{wired}$", plt, axes[0], xP1Line[0] - 0.02*deltaX, yP1Line[0] + 0.02*deltaY,
+                 fontSize=8, color="blue", coordSys="data", alpha=0.6)
+
         # Derive Ivezic P2 and P1 equations based on linear fit and highest density position (where P1 = 0)
         pColCoeffs = p2p1CoeffsFromLinearFit(m, b, xHighDensity0, yHighDensity0)
 
@@ -1457,8 +1534,10 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         else:
             raise RuntimeError("Unknown Principal Color: {0:s}Perp".format(perpIndexStr))
 
-        log.info("{0:s}Perp: P1/P2 origin x, y: {1:.2f} {2:.2f}".format(perpIndexStr,
-                                                                        xHighDensity0, yHighDensity0))
+        log.info("  {0:s}Perp_wired: origin x, y: {1:.4f} {2:.4f}".format(perpIndexStr,
+                                                                          wiredLine.x0, wiredLine.y0))
+        log.info("  {0:s}Perp_fit  : origin x, y: {1:.4f} {2:.4f}".format(perpIndexStr,
+                                                                          xHighDensity0, yHighDensity0))
 
         paraStr = "{0:s}Para{1:s}".format(perpIndexStr, "$_{fit}$")
         paraStr = makeEqnStr(paraStr, pColCoeffs.p1Coeffs, perpFilters)
@@ -1475,12 +1554,12 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
 
         xLoc = xRange[1] - 0.03*deltaX
         yLoc -= 0.05*deltaY
-        axes[0].text(xLoc, yLoc, perpStr, fontsize=6, ha="right", va="center", color="magenta")
+        axes[0].text(xLoc, yLoc, perpStr, fontsize=6, ha="right", va="center", color="green")
         yLoc -= 0.04*deltaY
         axes[0].text(xLoc, yLoc, principalColorStrs[0], fontsize=6, ha="right", va="center",
                      color="blue", alpha=0.8)
         yLoc -= 0.05*deltaY
-        axes[0].text(xLoc, yLoc, paraStr, fontsize=6, ha="right", va="center", color="magenta")
+        axes[0].text(xLoc, yLoc, paraStr, fontsize=6, ha="right", va="center", color="green")
         yLoc -= 0.04*deltaY
         axes[0].text(xLoc, yLoc, principalColorStrs[1], fontsize=6, ha="right", va="center",
                      color="blue", alpha=0.8)
@@ -1522,7 +1601,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     rmsStr = "  rms = {0:5.2f}".format(rms)
 
     count, bins, ignored = axes[1].hist(distance[good], bins=numBins, range=(-4.0*stdDev, 4.0*stdDev),
-                                        normed=True, color=polyColor, alpha=0.5)
+                                        normed=True, color=polyColor, alpha=0.6)
     axes[1].plot(bins, 1/(stdDev*np.sqrt(2*np.pi))*np.exp(-(bins-mean)**2/(2*stdDev**2)),
                  color=polyColor)
     axes[1].axvline(x=mean, color=polyColor, linestyle=":")
@@ -1541,7 +1620,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         pCmean = principalColor[kept].mean()
         pCstdDev = principalColor[kept].std()
         count, nBins, ignored = axes[1].hist(principalColor[kept], bins=bins, range=(-4.0*stdDev, 4.0*stdDev),
-                                             normed=True, color="blue", alpha=0.5)
+                                             normed=True, color="blue", alpha=0.6)
         axes[1].plot(bins, 1/(pCstdDev*np.sqrt(2*np.pi))*np.exp(-(bins-pCmean)**2/(2*pCstdDev**2)),
                      color="blue")
         axes[1].axvline(x=pCmean, color="blue", linestyle=":")
@@ -1559,13 +1638,13 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         fitP2mean = fitP2[kept].mean()
         fitP2stdDev = fitP2[kept].std()
         count, nBins, ignored = axes[1].hist(fitP2[kept], bins=bins, range=(-4.0*stdDev, 4.0*stdDev),
-                                             normed=True, color="magenta", alpha=0.5)
+                                             normed=True, color="green", alpha=0.6)
         axes[1].plot(bins, 1/(fitP2stdDev*np.sqrt(2*np.pi))*np.exp(-(bins-fitP2mean)**2/(2*fitP2stdDev**2)),
-                     color="magenta")
+                     color="green")
         axes[1].axvline(x=fitP2mean, color="magenta", linestyle=":")
         fitP2meanStr = "{0:s}{1:s} = {2:5.2f}".format(perpStr[0:5], "$_{fit}$", fitP2mean)
         fitP2stdStr = "  std = {0:5.2f}".format(fitP2stdDev)
-        kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=7, color="magenta")
+        kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=7, color="green")
         axes[1].annotate(fitP2meanStr, xy=(0.97, 0.895), **kwargs)
         axes[1].annotate(fitP2stdStr, xy=(0.97, 0.86), **kwargs)
         log.info(("Statistics from {0:} of {9:s}Perp_fit ({8:s}): {6:s}\'star\': " +

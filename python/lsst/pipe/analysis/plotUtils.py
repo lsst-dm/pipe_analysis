@@ -77,10 +77,59 @@ class CosmosLabeller(StarGalaxyLabeller):
         return np.array([0 if ii in good else 1 for ii in catalog["id"]])
 
 
-def plotText(zpLabel, plt, axis, xLoc, yLoc, prefix="", rotation=0, fontSize=9, color="k"):
-    fontSize = int(fontSize - min(3, len(zpLabel)/10))
-    plt.text(xLoc, yLoc, prefix + zpLabel, ha="center", va="center", fontsize=fontSize, rotation=rotation,
-             transform=axis.transAxes, color=color)
+def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", fontSize=9, color="k", coordSys="axes", **kwargs):
+    """Label the plot with the string provided at a given location
+
+    Parameters
+    ----------
+    textStr : `str`
+       String of text to plot.
+    plt : `matplotlib.pyplot`
+       Instance of matplotlib pyplot to plot ``textStr``.
+    axis : `matplotlib.axes._axes.Axes`
+       Particular matplotlib axes of ``plt`` on which to plot ``testStr``.
+    xLoc, yLoc : `float`
+       x and y coordinates, in corrdinate system set by ``coordSys``, at which to plot the ``textStr``.
+       The string will be centered both horizontally and vertically at this position.
+    prefix : `str`, optional
+       Optional prefix to add to ``textStr``.
+    fontSize : `int` or `str`, optional
+       Size of font for plotting of ``textStr``.  May be either an absolute font size in points, or a
+       size string, relative to the default font size.  Default is 9 points.
+    color : `str`, optional
+       Color to plot ``textStr``.  Can be any matplotlib color str.  Default is k (for black).
+    coordSys : `str`, optional
+       Coordinate system for ``xLoc``, ``yLoc``.  Choices and matplotlib mappings are:
+       axes => axis.transAxes [the default]
+       data => axis.transData
+       figure => axis.transFigure
+    **kwargs
+       Arbitrary keyword arguments.  These can include any of those accecpted
+       by matplotlib's matplotlib.pyplot.text function (i.e. are properties of
+       the matplotlib.text.Text class).  Of particular interest here include:
+
+       - ``rotation`` : Angle in degrees to rotate ``textStr`` for plotting
+                        or one of strings "vertical" or "horizontal".  The
+                        matplotlib default is 0 degrees (`int` or `str`).
+       - ``alpha`` : The matplotlib blending value, between 0 (transparent)
+                     and 1 (opaque).  The matplotlib default is 1 (`float`).
+
+    Raises
+    ------
+    `ValueError`
+       If unrecognized ``coordSys`` is requested (i.e. something other than axes, data, or figure)
+    """
+    if coordSys == "axes":
+        transform = axis.transAxes
+    elif coordSys == "data":
+        transform = axis.transData
+    elif coordSys == "figure":
+        transform = axis.transFigure
+    else:
+        raise ValueError("Unrecognized coordSys: {}.  Must be one of axes, data, figure".format(coordSys))
+    fontSize = int(fontSize - min(3, len(textStr)/10))
+    plt.text(xLoc, yLoc, prefix + textStr, ha="center", va="center", fontsize=fontSize, transform=transform,
+             color=color, **kwargs)
 
 
 def annotateAxes(filename, plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff=0.05,
