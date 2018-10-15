@@ -273,7 +273,7 @@ class Analysis(object):
         axHistx.set_xlim(axScatter.get_xlim())
         axHisty.set_ylim(axScatter.get_ylim())
         axHistx.set_yscale("log", nonposy="clip")
-        axHisty.set_xscale("log", nonposy="clip")
+        axHisty.set_xscale("log", nonposx="clip")
         nTotal = 0
         for name, data in self.data.items():
             nTotal += len(data.mag)
