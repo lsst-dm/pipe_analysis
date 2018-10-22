@@ -42,7 +42,7 @@ class AnalysisConfig(Config):
                  "g": 23.5, "r": 22.0, "i": 23.5, "z": 22.5, "y": 22.5},
         doc="Maximum magnitude to plot",
     )
-    fluxColumn = Field(dtype=str, default="base_PsfFlux_flux", doc="Column to use for flux/mag plotting")
+    fluxColumn = Field(dtype=str, default="base_PsfFlux_instFlux", doc="Column to use for flux/mag plotting")
     coaddZp = Field(dtype=float, default=27.0, doc="Magnitude zero point to apply for coadds")
     commonZp = Field(dtype=float, default=33.0, doc="Magnitude zero point to apply for common ZP plots")
     doPlotOldMagsHist = Field(dtype=bool, default=False, doc="Make older, separated, mag and hist plots?")
@@ -273,7 +273,7 @@ class Analysis(object):
         axHistx.set_xlim(axScatter.get_xlim())
         axHisty.set_ylim(axScatter.get_ylim())
         axHistx.set_yscale("log", nonposy="clip")
-        axHisty.set_xscale("log", nonposy="clip")
+        axHisty.set_xscale("log", nonposx="clip")
         nTotal = 0
         for name, data in self.data.items():
             nTotal += len(data.mag)
