@@ -31,18 +31,19 @@ class AnalysisConfig(Config):
     magPlotStarMin = DictField(
         keytype=str,
         itemtype=float,
-        default={"HSC-G": 16.5, "HSC-R": 17.0, "HSC-I": 16.5, "HSC-Z": 15.5, "HSC-Y": 15.5, "NB0921": 15.5,
-                 "g": 16.5, "r": 15.0, "i": 16.5, "z": 15.5, "y": 15.5},
+        default={"HSC-G": 16.5, "HSC-R": 17.25, "HSC-I": 16.5, "HSC-Z": 15.5, "HSC-Y": 15.25,
+                 "NB0921": 15.0, "g": 16.5, "r": 15.0, "i": 16.5, "z": 15.5, "y": 15.5},
         doc="Minimum magnitude to plot",
     )
     magPlotStarMax = DictField(
         keytype=str,
         itemtype=float,
-        default={"HSC-G": 23.5, "HSC-R": 24.0, "HSC-I": 23.5, "HSC-Z": 22.5, "HSC-Y": 22.5, "NB0921": 22.5,
-                 "g": 23.5, "r": 22.0, "i": 23.5, "z": 22.5, "y": 22.5},
+        default={"HSC-G": 23.75, "HSC-R": 24.25, "HSC-I": 23.75, "HSC-Z": 23.0, "HSC-Y": 22.0,
+                 "NB0921": 22.25, "g": 23.5, "r": 22.0, "i": 23.5, "z": 22.5, "y": 22.5},
         doc="Maximum magnitude to plot",
     )
-    fluxColumn = Field(dtype=str, default="base_PsfFlux_instFlux", doc="Column to use for flux/mag plotting")
+    fluxColumn = Field(dtype=str, default="modelfit_CModel_instFlux",
+                       doc="Column to use for flux/mag plotting")
     coaddZp = Field(dtype=float, default=27.0, doc="Magnitude zero point to apply for coadds")
     commonZp = Field(dtype=float, default=33.0, doc="Magnitude zero point to apply for common ZP plots")
     doPlotOldMagsHist = Field(dtype=bool, default=False, doc="Make older, separated, mag and hist plots?")
@@ -122,6 +123,9 @@ class Analysis(object):
             self.data = {name: Data(catalog, self.quantity, self.mag, self.good & (labels == value),
                                     colorList[value], self.quantityError, name in labeller.plot) for
                          name, value in labeller.labels.items()}
+            # Sort data dict by number of points in each data type.
+            self.data = {k: self.data[k] for _, k in sorted(((len(v.mag), k) for (k, v) in self.data.items()),
+                                                            reverse=True)}
             self.stats = self.statistics(forcedMean=forcedMean)
             # Make sure you have some good data to plot: only check first dataset in labeller.plot
             # list as it is the most important one (and the only available in many cases where
@@ -132,12 +136,13 @@ class Analysis(object):
             # Ensure plot limits always encompass at least mean +/- 6.0*stdev, at most mean +/- 20.0*stddev,
             # and clipped stats range + 25%
             dataType = "all" if "all" in self.data else "star"
-            if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar", "resolution"]):
+            if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar", "resolution",
+                                                       "race"]):
                 self.qMin = max(min(self.qMin, self.stats[dataType].mean - 6.0*self.stats[dataType].stdev,
                                 self.stats[dataType].median - 1.25*self.stats[dataType].clip),
                                 min(self.stats[dataType].mean - 20.0*self.stats[dataType].stdev,
                                     -0.005*self.unitScale))
-            if not any(ss in self.shortName for ss in ["footNpix", "pStar", "resolution"]):
+            if not any(ss in self.shortName for ss in ["footNpix", "pStar", "resolution", "race"]):
                 self.qMax = min(max(self.qMax, self.stats[dataType].mean + 6.0*self.stats[dataType].stdev,
                                 self.stats[dataType].median + 1.25*self.stats[dataType].clip),
                                 max(self.stats[dataType].mean + 20.0*self.stats[dataType].stdev,
@@ -246,13 +251,14 @@ class Analysis(object):
                 deltaMin = max(0.0, self.qMin - galMin)
 
         magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
-        if "matches" in filename:  # narrow magnitude plotting limits for matches
-            magMin += 1
-            magMax -= 1
-        if self.calibUsedOnly > 0 or "color" in filename or "visit" not in filename:
+        if self.calibUsedOnly > 0 or "color" in filename or "visit" not in filename or "matches" in filename:
             if filterStr in self.config.magPlotStarMin.keys():
                 magMin = self.config.magPlotStarMin[filterStr]
-        if self.calibUsedOnly > 0 or "color" in filename:
+                if self.calibUsedOnly == 0 and ("plot-t" in filename or "compare-t" in filename):
+                    magMin -= 1.5  # CModel flux for coadds can have brighter mags than the PSF equivalent
+                    if "matches" in filename:  # But reference catalogs won't go quite so bright
+                        magMin += 1.0
+        if self.calibUsedOnly > 0 or "color" in filename or "matches" in filename:
             if filterStr in self.config.magPlotStarMax.keys():
                 magMax = self.config.magPlotStarMax[filterStr]
         axScatter.set_xlim(magMin, magMax)
@@ -275,11 +281,22 @@ class Analysis(object):
         axHistx.set_yscale("log", nonposy="clip")
         axHisty.set_xscale("log", nonposx="clip")
         nTotal = 0
+        fullSampleMag = []
+        fullSampleQuantity = []
         for name, data in self.data.items():
-            nTotal += len(data.mag)
+            if data.plot:
+                nTotal += len(data.mag)
+                fullSampleMag.extend(data.mag)
+                fullSampleQuantity.extend(data.quantity)
         axScatterYlim = np.around(nTotal, -1*int(np.floor(np.log10(nTotal))))
-        axHistx.set_ylim(1, axScatterYlim)
-        axHisty.set_xlim(1, axScatterYlim)
+        axHistx.set_ylim(0.8, axScatterYlim)
+        axHisty.set_xlim(0.8, axScatterYlim)
+
+        # Plot full sample histograms
+        axHistx.hist(fullSampleMag, bins=xBins, color="black", alpha=0.4, label="All")
+        axHisty.hist(fullSampleQuantity, bins=yBins, color="black", orientation="horizontal",
+                     alpha=0.4, label="All")
+
         nxSyDecimal = int(-1.0*np.around(np.log10(0.05*abs(self.magThreshold - magMin)) - 0.5))
         xSyBinwidth = min(0.1, np.around(0.05*abs(self.magThreshold - magMin), nxSyDecimal))
         xSyBins = np.arange(magMin + 0.5*xSyBinwidth, self.magThreshold + 0.5*xSyBinwidth, xSyBinwidth)
@@ -365,8 +382,11 @@ class Analysis(object):
         axScatter.xaxis.set_minor_locator(AutoMinorLocator(2))
         axScatter.yaxis.set_minor_locator(AutoMinorLocator(2))
 
-        axScatter.set_xlabel("%s mag [%s]" % (fluxToPlotString(self.fluxColumn), filterStr))
-        axScatter.set_ylabel(r"%s %s" % (self.quantityName, filterLabelStr))
+        yLabel = r"%s %s" % (self.quantityName, filterLabelStr)
+        fontSize = min(11, max(6, 11 - int(np.log(max(1, len(yLabel) - 45)))))
+
+        axScatter.set_xlabel("%s mag [%s]" % (fluxToPlotString(self.fluxColumn), filterStr), fontSize=11)
+        axScatter.set_ylabel(yLabel, fontsize=fontSize)
 
         if stats is not None:
             l1, l2 = annotateAxes(filename, plt, axScatter, stats, dataType, self.magThreshold,
@@ -376,18 +396,20 @@ class Analysis(object):
         axHistx.legend(fontsize=7, loc=2)
         axHisty.legend(fontsize=7)
         # Label total number of objects of each data type
-        xLoc, yLoc = 0.09, 1.405
+        xLoc, yLoc = 0.09, 1.355
         lenNameMax = 0
         for name, data in self.data.items():
             if data.mag.any():
                 lenNameMax = len(name) if len(name) > lenNameMax else lenNameMax
         xLoc += 0.02*lenNameMax
 
+        plt.text(xLoc, yLoc, "N$_{all}$  = " + str(len(fullSampleMag)), ha="left", va="center",
+                 fontsize=8, transform=axScatter.transAxes, color="black", alpha=0.6)
         for name, data in self.data.items():
             if not (data.mag.any() and data.plot):
                 continue
             yLoc -= 0.05
-            plt.text(xLoc, yLoc, "Ntotal = " + str(len(data.mag)), ha="left", va="center",
+            plt.text(xLoc, yLoc, "N$_{" + name[:4] + "}$ = " + str(len(data.mag)), ha="left", va="center",
                      fontsize=8, transform=axScatter.transAxes, color=data.color)
 
         labelVisit(filename, plt, axScatter, 1.18, -0.11, color="green")
@@ -466,9 +488,11 @@ class Analysis(object):
         magThreshold = self.magThreshold
         if dataName == "galaxy" and magThreshold < 99.0:
             magThreshold += 1.0  # plot to fainter mags for galaxies
+        if dataName == "star" and "matches" in filename and magThreshold < 99.0:
+            magThreshold += 1.0  # plot to fainter mags for matching against ref cat
         good = (self.mag < magThreshold if magThreshold > 0 else np.ones(len(self.mag), dtype=bool))
         if ((dataName == "star" or "matches" in filename or "compare" in filename) and
-                "pStar" not in filename and "race-" not in filename and "resolution" not in filename):
+                "pStar" not in filename and "race" not in filename and "resolution" not in filename):
             vMin, vMax = 0.4*self.qMin, 0.4*self.qMax
             if "-mag_" in filename or any(ss in filename for ss in ["compareUnforced", "overlap"]):
                 vMin, vMax = 0.6*vMin, 0.6*vMax
@@ -478,7 +502,7 @@ class Analysis(object):
             vMin, vMax = 1.5*self.qMin, 0.5*self.qMax
         elif "raceDiff" in filename or "Resids" in filename:
             vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
-        elif "race-" in filename:
+        elif "race" in filename:
             yDelta = 0.05*(self.qMax - self.qMin)
             vMin, vMax = self.qMin + yDelta, self.qMax - yDelta
         elif "pStar" in filename:
@@ -555,7 +579,10 @@ class Analysis(object):
         mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vMin, vmax=vMax))
         mappable._A = []        # fake up the array of the scalar mappable. Urgh...
         cb = plt.colorbar(mappable)
-        cb.set_label(self.quantityName + filterLabelStr, rotation=270, labelpad=15)
+        colorbarLabel = self.quantityName + " " + filterLabelStr
+        fontSize = min(10, max(6, 10 - int(np.log(max(1, len(colorbarLabel) - 55)))))
+        cb.ax.tick_params(labelsize=max(6, fontSize - 1))
+        cb.set_label(colorbarLabel, fontsize=fontSize, rotation=270, labelpad=15)
         if hscRun is not None:
             axes.set_title("HSC stack run: " + hscRun, color="#800080")
         if camera is not None:
@@ -808,8 +835,8 @@ class Analysis(object):
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
                                  dataName=dataName, **skyPositionKwargs)
         if "galaxy" in self.data and (not any(ss in self.shortName for ss in
-                    ["pStar", "race", "Xx", "Yy", "Resids", "psf_used", "photometry_used",
-                     "gri", "riz", "izy", "z9y", "color_"])):
+                                              ["pStar", "race", "Xx", "Yy", "Resids", "psf_used",
+                                               "photometry_used", "gri", "riz", "izy", "z9y", "color_"])):
             styleStr = "sky-gals"
             dataName = "galaxy"
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
