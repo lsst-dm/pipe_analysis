@@ -1,3 +1,5 @@
+from matplotlib import pyplot as plt
+from matplotlib.colors import ListedColormap
 import matplotlib.patches as patches
 import numpy as np
 
@@ -17,7 +19,7 @@ __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "M
            "CosmosLabeller", "plotText", "annotateAxes", "labelVisit", "labelCamera",
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
            "plotCcdOutline", "rotatePixelCoords", "bboxToRaDec", "getRaDecMinMaxPatchList", "percent",
-           "setPtSize", "getQuiver"]
+           "setPtSize", "getQuiver", "makeAlphaCmap"]
 
 
 class AllLabeller(object):
@@ -480,3 +482,26 @@ def getQuiver(x, y, e1, e2, ax, color=None, scale=3, width=0.005, label=''):
     q = ax.quiver(x, y, c1, c2, color=color, angles='uv', scale=scale, units='width', pivot='middle',
                   width=width, headwidth=0.0, headlength=0.0, headaxislength=0.0, label=label)
     return q
+
+
+def makeAlphaCmap(cmap=plt.cm.viridis, alpha=1.0):
+    """Given a matplotlib colormap, return it but with given alpha transparency
+
+    Parameters
+    ----------
+    cmap : `matplotlib.colors.ListedColormap`, optional
+       The matplotlib colormap to make transparent with level ``alpha``.
+       Default color map is `plt.cm.viridis`.
+    alpha : `float`, optional
+       The matplotlib blending value, between 0 (transparent) and 1 (opaque)
+       (1.0 by default).
+
+    Returns
+    -------
+    alphaCmap : `matplotlib.colors.ListedColormap`
+       The matplotlib colormap ``cmap`` but with transparency level ``alpha``.
+    """
+    alphaCmap = cmap(np.arange(cmap.N))
+    alphaCmap[:, -1] = alpha
+    alphaCmap = ListedColormap(alphaCmap)
+    return alphaCmap
