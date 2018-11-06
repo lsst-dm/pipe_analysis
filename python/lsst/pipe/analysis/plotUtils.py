@@ -5,6 +5,7 @@ import numpy as np
 
 import lsst.afw.cameraGeom as cameraGeom
 import lsst.afw.geom as afwGeom
+import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 from lsst.pipe.base import Struct
 
@@ -18,8 +19,8 @@ except ImportError:
 __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "MatchesStarGalaxyLabeller",
            "CosmosLabeller", "plotText", "annotateAxes", "labelVisit", "labelCamera",
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
-           "plotCcdOutline", "rotatePixelCoords", "bboxToRaDec", "getRaDecMinMaxPatchList", "percent",
-           "setPtSize", "getQuiver", "makeAlphaCmap"]
+           "plotCcdOutline", "rotatePixelCoords", "bboxToRaDec", "getRaDecMinMaxPatchList",
+           "percent", "setPtSize", "getQuiver", "makeAlphaCmap", "buildTractImage"]
 
 
 class AllLabeller(object):
@@ -505,3 +506,58 @@ def makeAlphaCmap(cmap=plt.cm.viridis, alpha=1.0):
     alphaCmap[:, -1] = alpha
     alphaCmap = ListedColormap(alphaCmap)
     return alphaCmap
+
+
+def buildTractImage(butler, dataId, tractInfo, patchList=None, coaddName="deep"):
+    """Build up an image of an entire tract or list of patches
+
+    Parameters
+    ----------
+    butler : `lsst.daf.persistence.Butler`
+    dataId : `lsst.daf.persistence.DataId`
+       An instance of `lsst.daf.persistence.DataId` from which to extract the
+       filter name.
+    tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
+       Tract information object.
+    patchList : `list` of `str`, optional
+       A list of the patches to include.  If `None`, the full list of patches
+       in ``tractInfo`` will be included.
+    coaddName : `str`, optional
+       The base name of the coadd (e.g. "deep" or "goodSeeing").
+       Default is "deep".
+
+    Raises
+    ------
+    `RuntimeError`
+       If ``nPatches`` is zero, i.e. no data was found.
+
+    Returns
+    -------
+    image : `lsst.afw.image.ImageF`
+       The full tract or patches in ``patchList`` image.
+    """
+    tractBbox = tractInfo.getBBox()
+    nPatches = 0
+    if not patchList:
+        patchList = []
+        nPatchX, nPatchY = tractInfo.getNumPatches()
+        for iPatchX in range(nPatchX):
+            for iPatchY in range(nPatchY):
+                patchList.append("%d,%d" % (iPatchX, iPatchY))
+    tractArray = np.full((tractBbox.getMaxY() + 1, tractBbox.getMaxX() + 1), np.nan, dtype="float32")
+    for patch in patchList:
+        expDataId = {"filter": dataId["filter"], "tract": tractInfo.getId(), "patch": patch}
+        try:
+            exp = butler.get(coaddName + "Coadd_calexp", expDataId, immediate=True)
+            bbox = butler.get(coaddName + "Coadd_calexp_bbox", expDataId, immediate=True)
+            tractArray[bbox.getMinY():bbox.getMaxY() + 1,
+                       bbox.getMinX():bbox.getMaxX() + 1] = exp.maskedImage.image.array
+            nPatches += 1
+        except Exception:
+            continue
+    if nPatches == 0:
+        raise RuntimeError("No data found for tract {:}".format(tractInfo.getId()))
+    tractArray = np.flipud(tractArray)
+    image = afwImage.ImageF(afwGeom.ExtentI(tractBbox.getMaxX() + 1, tractBbox.getMaxY() + 1))
+    image.array[:] = tractArray
+    return image
