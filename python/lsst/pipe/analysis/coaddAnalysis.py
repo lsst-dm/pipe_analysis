@@ -73,6 +73,7 @@ class CoaddAnalysisConfig(Config):
                                   doc="Plot difference between forced and unforced?")
     doPlotQuiver = Field(dtype=bool, default=True, doc="Plot ellipticity residuals quiver plot?")
     doPlotFootprintNpix = Field(dtype=bool, default=True, doc="Plot histogram of footprint nPix?")
+    doPlotInputCounts = Field(dtype=bool, default=True, doc="Make input counts plot?")
     onlyReadStars = Field(dtype=bool, default=False, doc="Only read stars (to save memory)?")
     toMilli = Field(dtype=bool, default=True, doc="Print stats in milli units (i.e. mas, mmag)?")
     srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
@@ -305,6 +306,13 @@ class CoaddAnalysisTask(CmdLineTask):
                             dataId=repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
                             tractInfo=repoInfo.tractInfo, patchList=patchList, hscRun=repoInfo.hscRun,
                             zpLabel=self.zpLabel, forcedStr="unforced", scale=2)
+
+        if self.config.doPlotInputCounts:
+            self.plotInputCounts(unforced, filenamer(repoInfo.dataId, description="inputCounts",
+                                                     style="tract"),
+                                 dataId=repoInfo.dataId, butler=repoInfo.butler, tractInfo=repoInfo.tractInfo,
+                                 patchList=patchList, camera=repoInfo.camera, hscRun=repoInfo.hscRun,
+                                 forcedStr="unforced", alpha=0.5)
 
         if self.config.doPlotMags:
             self.plotMags(unforced, filenamer, repoInfo.dataId, butler=repoInfo.butler,
@@ -1090,6 +1098,16 @@ class CoaddAnalysisTask(CmdLineTask):
                                         butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                         patchList=patchList, hscRun=hscRun, zpLabel=zpLabel,
                                         forcedStr=forcedStr, scale=scale)
+
+    def plotInputCounts(self, catalog, filenamer, dataId, butler, tractInfo, patchList=None, camera=None,
+                        hscRun=None, forcedStr=None, alpha=0.5):
+        shortName = "inputCounts"
+        self.log.info("shortName = {:s}".format(shortName))
+        self.AnalysisClass(catalog, None, "%s" % shortName, shortName,
+                           self.config.analysis, labeller=None,
+                           ).plotInputCounts(catalog, filenamer, self.log, dataId, butler, tractInfo,
+                                             patchList=patchList, camera=camera, forcedStr=forcedStr,
+                                             alpha=alpha, doPlotTractImage=True)
 
     def _getConfigName(self):
         return None
