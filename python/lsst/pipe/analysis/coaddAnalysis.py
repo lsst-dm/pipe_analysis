@@ -23,8 +23,8 @@ from lsst.meas.algorithms import LoadIndexedReferenceObjectsTask
 
 from .analysis import AnalysisConfig, Analysis
 from .utils import (Filenamer, Enforcer, MagDiff, MagDiffMatches, MagDiffCompare,
-                    AstrometryDiff, traceSize, psfTraceSizeDiff, traceSizeCompare, percentDiff,
-                    e1Resids, e2Resids, e1ResidsHsmRegauss, e2ResidsHsmRegauss, FootNpixDiffCompare,
+                    AstrometryDiff, TraceSize, PsfTraceSizeDiff, TraceSizeCompare, PercentDiff,
+                    E1Resids, E2Resids, E1ResidsHsmRegauss, E2ResidsHsmRegauss, FootNpixDiffCompare,
                     MagDiffErr, CentroidDiff, deconvMom,
                     deconvMomStarGal, concatenateCatalogs, joinMatches, checkPatchOverlap,
                     addColumnsToSchema, addApertureFluxesHSC, addFpPoint,
@@ -565,7 +565,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 # Set limits dynamically...can be very different visit-to-visit due to seeing differences
                 # SDSS and HSM should be similar, so limits based on one should be valid for the other and
                 # having the same scale eases comparisons between the two.
-                traceSizeFunc = traceSize(compareCol)
+                traceSizeFunc = TraceSize(compareCol)
 
                 # First do for calib_psf_used only.
                 shortName = "trace" + postFix + "_calib_psf_used"
@@ -591,7 +591,7 @@ class CoaddAnalysisTask(CmdLineTask):
                     shortName = "hsmTrace" + postFix + "_calib_psf_used"
                     compareCol = "ext_shapeHSM_HsmSourceMoments"
                     self.log.info("shortName = {:s}".format(shortName))
-                    self.AnalysisClass(psfUsed, traceSize(compareCol),
+                    self.AnalysisClass(psfUsed, TraceSize(compareCol),
                                        ("          HSM Trace (calib_psf_used): $\sqrt{0.5*(I_{xx}+I_{yy})}$"
                                         " (pixels)"), shortName, self.config.analysis, flags=[col + "_flag"],
                                        goodKeys=["calib_psf_used"], qMin=qMin, qMax=qMax,
@@ -619,7 +619,7 @@ class CoaddAnalysisTask(CmdLineTask):
                     shortName = "hsmTrace" + postFix
                     compareCol = "ext_shapeHSM_HsmSourceMoments"
                     self.log.info("shortName = {:s}".format(shortName))
-                    self.AnalysisClass(starsOnly, traceSize(compareCol),
+                    self.AnalysisClass(starsOnly, TraceSize(compareCol),
                                        "HSM Trace: $\sqrt{0.5*(I_{xx}+I_{yy})}$ (pixels)", shortName,
                                        self.config.analysis, flags=[col + "_flag"], qMin=qMin, qMax=qMax,
                                        labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
@@ -634,7 +634,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 compareCol = "base_SdssShape"
                 psfCompareCol = "base_SdssShape_psf"
                 self.log.info("shortName = {:s}".format(shortName))
-                self.AnalysisClass(catalog, psfTraceSizeDiff(compareCol, psfCompareCol),
+                self.AnalysisClass(catalog, PsfTraceSizeDiff(compareCol, psfCompareCol),
                                    "    SdssShape Trace % diff (psf_used - PSFmodel)", shortName,
                                    self.config.analysis, flags=[col + "_flag"],
                                    goodKeys=["calib_psf_used"], qMin=-3.0, qMax=3.0,
@@ -646,7 +646,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
                 shortName = "e1Resids" + postFix
                 self.log.info("shortName = {:s}".format(shortName))
-                self.AnalysisClass(catalog, e1Resids(compareCol, psfCompareCol, unitScale=self.unitScale),
+                self.AnalysisClass(catalog, E1Resids(compareCol, psfCompareCol, unitScale=self.unitScale),
                                    "        SdssShape e1 resids (psf_used - PSFmodel)%s" % unitStr, shortName,
                                    self.config.analysis, flags=[col + "_flag"], goodKeys=["calib_psf_used"],
                                    qMin=-0.05, qMax=0.05, labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
@@ -658,7 +658,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
                 shortName = "e2Resids" + postFix
                 self.log.info("shortName = {:s}".format(shortName))
-                self.AnalysisClass(catalog, e2Resids(compareCol, psfCompareCol, unitScale=self.unitScale),
+                self.AnalysisClass(catalog, E2Resids(compareCol, psfCompareCol, unitScale=self.unitScale),
                                    "       SdssShape e2 resids (psf_used - PSFmodel)%s" % unitStr, shortName,
                                    self.config.analysis, flags=[col + "_flag"], goodKeys=["calib_psf_used"],
                                    qMin=-0.05, qMax=0.05, labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
@@ -673,7 +673,7 @@ class CoaddAnalysisTask(CmdLineTask):
                     compareCol = "ext_shapeHSM_HsmSourceMoments"
                     psfCompareCol = "ext_shapeHSM_HsmPsfMoments"
                     self.log.info("shortName = {:s}".format(shortName))
-                    self.AnalysisClass(catalog, psfTraceSizeDiff(compareCol, psfCompareCol),
+                    self.AnalysisClass(catalog, PsfTraceSizeDiff(compareCol, psfCompareCol),
                                        "HSM Trace % diff (psf_used - PSFmodel)", shortName,
                                        self.config.analysis, flags=[col + "_flag"],
                                        goodKeys=["calib_psf_used"], qMin=-3.0, qMax=3.0,
@@ -685,7 +685,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                                  forcedStr=forcedStr)
                     shortName = "e1ResidsHsm" + postFix
                     self.log.info("shortName = {:s}".format(shortName))
-                    self.AnalysisClass(catalog, e1Resids(compareCol, psfCompareCol, unitScale=self.unitScale),
+                    self.AnalysisClass(catalog, E1Resids(compareCol, psfCompareCol, unitScale=self.unitScale),
                                        "   HSM e1 resids (psf_used - PSFmodel)%s" % unitStr, shortName,
                                        self.config.analysis, flags=[col + "_flag"],
                                        goodKeys=["calib_psf_used"], qMin=-0.05, qMax=0.05,
@@ -698,7 +698,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                                  forcedStr=forcedStr)
                     shortName = "e2ResidsHsm" + postFix
                     self.log.info("shortName = {:s}".format(shortName))
-                    self.AnalysisClass(catalog, e2Resids(compareCol, psfCompareCol, unitScale=self.unitScale),
+                    self.AnalysisClass(catalog, E2Resids(compareCol, psfCompareCol, unitScale=self.unitScale),
                                        "   HSM e2 resids (psf_used - PSFmodel)%s" % unitStr, shortName,
                                        self.config.analysis, flags=[col + "_flag"],
                                        goodKeys=["calib_psf_used"], qMin=-0.05, qMax=0.05,
@@ -712,7 +712,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
                     shortName = "e1ResidsHsmRegauss" + postFix
                     self.log.info("shortName = {:s}".format(shortName))
-                    self.AnalysisClass(catalog, e1ResidsHsmRegauss(unitScale=self.unitScale),
+                    self.AnalysisClass(catalog, E1ResidsHsmRegauss(unitScale=self.unitScale),
                                        "       HsmRegauss e1 resids (psf_used - HsmPsfMoments)%s" % unitStr,
                                        shortName, self.config.analysis,
                                        flags=[col + "_flag", "ext_shapeHSM_HsmShapeRegauss_flag"],
@@ -727,7 +727,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
                     shortName = "e2ResidsHsmRegauss" + postFix
                     self.log.info("shortName = {:s}".format(shortName))
-                    self.AnalysisClass(catalog, e2ResidsHsmRegauss(unitScale=self.unitScale),
+                    self.AnalysisClass(catalog, E2ResidsHsmRegauss(unitScale=self.unitScale),
                                        "       HsmRegauss e2 resids (psf_used - HsmPsfMoments)%s" % unitStr,
                                        shortName, self.config.analysis,
                                        flags=[col + "_flag", "ext_shapeHSM_HsmShapeRegauss_flag"],
@@ -1449,7 +1449,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                  shortNameBase)
                     compareCol = "base_SdssShape"
                     self.log.info("shortName = {:s}".format(shortName))
-                    Analysis(catalog, traceSizeCompare(compareCol),
+                    Analysis(catalog, TraceSizeCompare(compareCol),
                              "    SdssShape Trace Radius Diff (%)" + subCatString,
                              shortName, self.config.analysis, flags=[col + "_flag"], prefix="first_",
                              goodKeys=goodFlags, qMin=-0.5, qMax=1.5, labeller=OverlapsStarGalaxyLabeller(),
@@ -1463,7 +1463,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                  shortNameBase)
                     compareCol = "base_SdssShape_psf"
                     self.log.info("shortName = {:s}".format(shortName))
-                    Analysis(catalog, traceSizeCompare(compareCol),
+                    Analysis(catalog, TraceSizeCompare(compareCol),
                              "       SdssShape PSF Trace Radius Diff (%)" + subCatString,
                              shortName, self.config.analysis, flags=[col + "_flag"], prefix="first_",
                              goodKeys=goodFlags, qMin=-1.1, qMax=1.1, labeller=OverlapsStarGalaxyLabeller(),
@@ -1478,7 +1478,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                      shortNameBase)
                         compareCol = "ext_shapeHSM_HsmSourceMoments"
                         self.log.info("shortName = {:s}".format(shortName))
-                        Analysis(catalog, traceSizeCompare(compareCol),
+                        Analysis(catalog, TraceSizeCompare(compareCol),
                                  "   HSM Trace Radius Diff (%)" + subCatString, shortName,
                                  self.config.analysis, flags=[col + "_flag"], prefix="first_",
                                  goodKeys=goodFlags, qMin=-0.5, qMax=1.5,
@@ -1493,7 +1493,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                     if "first_ext_shapeHSM_PsfMoments_xx" in catalog.schema:
                         compareCol = "ext_shapeHSM_HsmPsfMoments"
                         self.log.info("shortName = {:s}".format(shortName))
-                        Analysis(catalog, traceSizeCompare(compareCol),
+                        Analysis(catalog, TraceSizeCompare(compareCol),
                                  "      HSM PSF Trace Radius Diff (%)" + subCatString,
                                  shortName, self.config.analysis, flags=[col + "_flag"], prefix="first_",
                                  goodKeys=goodFlags, qMin=-1.1, qMax=1.1,
@@ -1506,7 +1506,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                 shortName = "sdssXx"
                 compareCol = "base_SdssShape_xx"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, percentDiff(compareCol), "SdssShape xx Moment Diff (%)", shortName,
+                Analysis(catalog, PercentDiff(compareCol), "SdssShape xx Moment Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          qMin=-0.5, qMax=1.5, labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
@@ -1516,7 +1516,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                 shortName = "sdssYy"
                 compareCol = "base_SdssShape_yy"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, percentDiff(compareCol), "SdssShape yy Moment Diff (%)", shortName,
+                Analysis(catalog, PercentDiff(compareCol), "SdssShape yy Moment Diff (%)", shortName,
                          self.config.analysis, flags=[col + "_flag"], prefix="first_",
                          qMin=-0.5, qMax=1.5, labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
@@ -1532,7 +1532,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         if "first_" + col in catalog.schema:
             shortName = "diff_resolution"
             self.log.info("shortName = {:s}".format(shortName))
-            Analysis(catalog, percentDiff(col),
+            Analysis(catalog, PercentDiff(col),
                      "           Run Comparison: HsmRegauss Resolution (% diff)",
                      shortName, self.config.analysis, prefix="first_", qMin=-0.2, qMax=0.2,
                      labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat,
@@ -1544,7 +1544,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         if "first_" + col in catalog.schema:
             shortName = "diff_HsmShapeRegauss_e1"
             self.log.info("shortName = {:s}".format(shortName))
-            Analysis(catalog, percentDiff(col),
+            Analysis(catalog, PercentDiff(col),
                      "    Run Comparison: HsmRegauss e1 (% diff)",
                      shortName, self.config.analysis, prefix="first_", qMin=-0.2, qMax=0.2,
                      labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat,
@@ -1556,7 +1556,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         if "first_" + col in catalog.schema:
             shortName = "diff_HsmShapeRegauss_e2"
             self.log.info("shortName = {:s}".format(shortName))
-            Analysis(catalog, percentDiff(col),
+            Analysis(catalog, PercentDiff(col),
                      "    Run Comparison: HsmRegauss e2 (% diff)",
                      shortName, self.config.analysis, prefix="first_", qMin=-0.2, qMax=0.2,
                      labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat,

@@ -16,13 +16,12 @@ from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
 from .analysis import Analysis
 from .coaddAnalysis import CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisTask
-from .utils import (Filenamer, MagDiffCompare, traceSizeCompare, concatenateCatalogs,
-                    addApertureFluxesHSC, addFpPoint, addFootprintNPix, addRotPoint,
-                    makeBadArray, addIntFloatOrStrColumn, calibrateSourceCatalogMosaic,
-                    calibrateSourceCatalog, backoutApCorr, matchJanskyToDn, checkHscStack,
-                    fluxToPlotString, andCatalog, writeParquet, getRepoInfo, getDataExistsRefList,
+from .utils import (Filenamer, concatenateCatalogs, addApertureFluxesHSC, addFpPoint,
+                    addFootprintNPix, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
+                    calibrateSourceCatalogMosaic, calibrateSourceCatalog, backoutApCorr,
+                    matchJanskyToDn, andCatalog, writeParquet, getRepoInfo, getDataExistsRefList,
                     setAliasMaps)
-from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText, OverlapsStarGalaxyLabeller
+from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText
 
 import lsst.afw.table as afwTable
 
@@ -389,7 +388,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             # Compute Focal Plane coordinates for each source if not already there
             if self.config.doPlotCentroids or self.config.doPlotFP and self.haveFpCoords:
                 if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
-                    exp = butler.get("calexp", dataRef.dataId)
+                    exp = repoInfo.butler.get("calexp", dataRef.dataId)
                     det = exp.getDetector()
                     catalog = addFpPoint(det, catalog)
                 xFp = catalog["base_FPPosition_x"]

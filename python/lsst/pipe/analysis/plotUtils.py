@@ -366,7 +366,7 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
         xy = afwGeom.Point2D(w/2, h/2)
         centerX = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
         centerY = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
-        axes.text(centerX, centerY, "%s" % str(ccdLabelStr), ha="center", va= "center", fontsize=fontSize)
+        axes.text(centerX, centerY, "%s" % str(ccdLabelStr), ha="center", va="center", fontsize=fontSize)
 
 
 def plotPatchOutline(axes, tractInfo, patchList):
@@ -451,10 +451,10 @@ def getRaDecMinMaxPatchList(patchList, tractInfo, pad=0.0, nDecimals=4, raMin=36
             decMin = min(np.round(min(decPatch) - pad, nDecimals), decMin)
             decMax = max(np.round(max(decPatch) + pad, nDecimals), decMax)
     return Struct(
-        raMin = raMin,
-        raMax = raMax,
-        decMin = decMin,
-        decMax = decMax,
+        raMin=raMin,
+        raMax=raMax,
+        decMin=decMin,
+        decMax=decMax,
     )
 
 

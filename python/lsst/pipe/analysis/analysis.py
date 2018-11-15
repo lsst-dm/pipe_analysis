@@ -11,7 +11,7 @@ import lsst.afw.geom as afwGeom
 from lsst.display.matplotlib.matplotlib import AsinhNormalize
 from lsst.pex.config import Config, Field, ListField, DictField
 
-from .utils import Data, Stats, e1Resids, e2Resids, checkIdLists, fluxToPlotString
+from .utils import Data, Stats, E1Resids, E2Resids, checkIdLists, fluxToPlotString
 from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotText, plotCameraOutline,
                         plotTractOutline, plotPatchOutline, plotCcdOutline, labelCamera, getQuiver,
                         getRaDecMinMaxPatchList, bboxToRaDec, makeAlphaCmap, buildTractImage)
@@ -743,9 +743,9 @@ class Analysis(object):
                     decMax = max(np.round(max(decPatch) + pad, 2), decMax)
             plotPatchOutline(axes, tractInfo, patchList)
 
-        e1 = e1Resids(compareCol, psfCompareCol)
+        e1 = E1Resids(compareCol, psfCompareCol)
         e1 = e1(catalog)
-        e2 = e2Resids(compareCol, psfCompareCol)
+        e2 = E2Resids(compareCol, psfCompareCol)
         e2 = e2(catalog)
         e = np.sqrt(e1**2 + e2**2)
 
