@@ -209,8 +209,8 @@ class Analysis(object):
         axScatter.axhline(0, linestyle="--", color="0.4")
         axHistx = plt.axes(rect_histx)
         axHisty = plt.axes(rect_histy)
-        axHistx.tick_params(which="both", direction="in", top="on", right="on", labelsize=8)
-        axHisty.tick_params(which="both", direction="in", top="on", right="on", labelsize=8)
+        axHistx.tick_params(which="both", direction="in", top=True, right=True, labelsize=8)
+        axHisty.tick_params(which="both", direction="in", top=True, right=True, labelsize=8)
         # no labels
         axHistx.xaxis.set_major_formatter(nullfmt)
         axHisty.yaxis.set_major_formatter(nullfmt)
@@ -441,7 +441,7 @@ class Analysis(object):
             nValid = np.abs(data.quantity[good]) <= self.qMax  # need to have datapoints lying within range
             if good.sum() == 0 or nValid.sum() == 0:
                 continue
-            num, _, _ = axes.hist(data.quantity[good], numBins, range=(self.qMin, self.qMax), normed=False,
+            num, _, _ = axes.hist(data.quantity[good], numBins, range=(self.qMin, self.qMax), density=False,
                                   color=data.color, label=name, histtype="step")
             numMax = max(numMax, num.max()*1.1)
         axes.set_xlim(self.qMin, self.qMax)
@@ -531,7 +531,7 @@ class Analysis(object):
             vMin, vMax = 4.0*self.qMin, 1.0*self.qMax
 
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.35"))
-        axes.tick_params(which="both", direction="in", top="on", right="on", labelsize=8)
+        axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=8)
         ptSize = None
 
         if dataId is not None and butler is not None and ccdList is not None:
@@ -728,7 +728,7 @@ class Analysis(object):
         decMax = decMin + deltaDeg
 
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.7"))
-        axes.tick_params(which="both", direction="in", top="on", right="on", labelsize=8)
+        axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=8)
 
         if dataId is not None and butler is not None and ccdList is not None:
             plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=zpLabel)

@@ -227,7 +227,7 @@ def filterStrFromFilename(filename):
 
 
 def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
-    axes.tick_params(which="both", direction="in", labelleft="off", labelbottom="off")
+    axes.tick_params(which="both", direction="in", labelleft=False, labelbottom=False)
     axes.locator_params(nbins=6)
     axes.ticklabel_format(useOffset=False)
     camRadius = max(camera.getFpBBox().getWidth(), camera.getFpBBox().getHeight())/2
