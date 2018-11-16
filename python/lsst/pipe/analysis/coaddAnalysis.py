@@ -1444,7 +1444,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                   patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None):
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in ["base_PsfFlux"]:
-            if "first_" + col + "_flux" in catalog.schema and "second_" + col + "_flux" in catalog.schema:
+            if ("first_" + col + "_instFlux" in catalog.schema and
+               "second_" + col + "_instFlux" in catalog.schema):
                 # Make comparison plots for all objects and calib_psf_used only objects
                 for goodFlags in [[], ["calib_psf_used"]]:
                     badFlags = [col + "_flag", "base_SdssShape_flag"]
