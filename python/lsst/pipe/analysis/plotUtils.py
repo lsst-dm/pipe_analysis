@@ -369,22 +369,31 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
         axes.text(centerX, centerY, "%s" % str(ccdLabelStr), ha="center", va="center", fontsize=fontSize)
 
 
-def plotPatchOutline(axes, tractInfo, patchList):
+def plotPatchOutline(axes, tractInfo, patchList, plotUnits="deg", idFontSize=None):
     """!Plot outlines of patches in patchList
     """
-    idFontSize = max(5, 10 - int(0.4*len(patchList)))
+    validWcsUnits = ["deg", "rad"]
+    idFontSize = max(5, 9 - int(0.4*len(patchList))) if not idFontSize else idFontSize
     for ip, patch in enumerate(tractInfo):
         if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
             if len(patchList) < 9:
-                ra, dec = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
-                ras = ra + (ra[0], )
-                decs = dec + (dec[0], )
-                axes.plot(ras, decs, color="black", lw=1, linestyle="solid")
-            ra, dec = bboxToRaDec(patch.getInnerBBox(), tractInfo.getWcs())
-            ras = ra + (ra[0], )
-            decs = dec + (dec[0], )
-            axes.plot(ras, decs, color="black", lw=1, linestyle="dashed")
-            axes.text(percent(ras), percent(decs, 0.5), str(patch.getIndex()),
+                if plotUnits in validWcsUnits:
+                    xCoord, yCoord = bboxToXyCoordLists(patch.getOuterBBox(), wcs=tractInfo.getWcs(),
+                                                        wcsUnits=plotUnits)
+                else:
+                    xCoord, yCoord = bboxToXyCoordLists(patch.getOuterBBox(), wcs=None)
+                xCoords = xCoord + (xCoord[0], )
+                yCoords = yCoord + (yCoord[0], )
+                axes.plot(xCoords, yCoords, color="black", lw=0.5, linestyle="solid")
+            if plotUnits in validWcsUnits:
+                xCoord, yCoord = bboxToXyCoordLists(patch.getInnerBBox(), tractInfo.getWcs(),
+                                                    wcsUnits=plotUnits)
+            else:
+                xCoord, yCoord = bboxToXyCoordLists(patch.getInnerBBox(), wcs=None)
+            xCoords = xCoord + (xCoord[0], )
+            yCoords = yCoord + (yCoord[0], )
+            axes.plot(xCoords, yCoords, color="black", lw=0.8, linestyle="dashed")
+            axes.text(percent(xCoords), percent(yCoords, 0.5), str(patch.getIndex()),
                       fontsize=idFontSize, horizontalalignment="center", verticalalignment="center")
 
 

@@ -802,7 +802,7 @@ class Analysis(object):
 
     def plotInputCounts(self, catalog, filename, log, dataId, butler, tractInfo, patchList=None, camera=None,
                         forcedStr=None, cmap=plt.cm.viridis, alpha=0.5, doPlotTractImage=True,
-                        sizeFactor=5.0, maxDiamPix=1000):
+                        doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000):
         """Plot grayscale image of tract with base_InputCounts_value overplotted
 
         Parameters
@@ -835,8 +835,11 @@ class Analysis(object):
            The matplotlib blending value, between 0 (transparent) and 1 (opaque)
            Default is 0.5.
         doPlotTractImage : `bool`, optional
-           A boolean indicating wether to plot the tract image (grayscale and
+           A boolean indicating whether to plot the tract image (grayscale and
            asinh stretched).  Default is `True`.
+        doPlotPatchOutline : `bool`, optional
+           A boolean indicating whether to overplot the patch outlines and
+           index labels.  Default is `True`.
         sizeFactor : `float`, optional
           Factor by which to multiply the source ellipse sizes for plotting
           (the nominal size is quite small).  Default is 5.0.
@@ -936,6 +939,8 @@ class Analysis(object):
         plt.text(0.45, -0.11, "RA (deg)", **textKwargs)
         plt.text(-0.19, 0.5, "DEC (deg)", rotation=90, **textKwargs)
 
+        if doPlotPatchOutline:
+            plotPatchOutline(axes, tractInfo, patchList, plotUnits="pixel", idFontSize=5)
         if camera is not None:
             labelCamera(camera, plt, axes, 0.5, 1.09)
         labelVisit(filename, plt, axes, 0.5, 1.04)

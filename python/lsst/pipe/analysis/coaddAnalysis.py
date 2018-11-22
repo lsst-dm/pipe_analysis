@@ -312,7 +312,8 @@ class CoaddAnalysisTask(CmdLineTask):
                                                      style="tract"),
                                  dataId=repoInfo.dataId, butler=repoInfo.butler, tractInfo=repoInfo.tractInfo,
                                  patchList=patchList, camera=repoInfo.camera, hscRun=repoInfo.hscRun,
-                                 forcedStr="unforced", alpha=0.5)
+                                 forcedStr="unforced", alpha=0.5, doPlotTractImage=True,
+                                 doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000)
 
         if self.config.doPlotMags:
             self.plotMags(unforced, filenamer, repoInfo.dataId, butler=repoInfo.butler,
@@ -1100,14 +1101,17 @@ class CoaddAnalysisTask(CmdLineTask):
                                         forcedStr=forcedStr, scale=scale)
 
     def plotInputCounts(self, catalog, filenamer, dataId, butler, tractInfo, patchList=None, camera=None,
-                        hscRun=None, forcedStr=None, alpha=0.5):
+                        hscRun=None, forcedStr=None, alpha=0.5, doPlotTractImage=True,
+                        doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000):
         shortName = "inputCounts"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(catalog, None, "%s" % shortName, shortName,
                            self.config.analysis, labeller=None,
                            ).plotInputCounts(catalog, filenamer, self.log, dataId, butler, tractInfo,
                                              patchList=patchList, camera=camera, forcedStr=forcedStr,
-                                             alpha=alpha, doPlotTractImage=True)
+                                             alpha=alpha, doPlotTractImage=doPlotTractImage,
+                                             doPlotPatchOutline=doPlotPatchOutline,
+                                             sizeFactor=sizeFactor, maxDiamPix=maxDiamPix)
 
     def _getConfigName(self):
         return None
