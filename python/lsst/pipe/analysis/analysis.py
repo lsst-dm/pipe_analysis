@@ -14,7 +14,7 @@ from lsst.pex.config import Config, Field, ListField, DictField
 from .utils import Data, Stats, E1Resids, E2Resids, checkIdLists, fluxToPlotString
 from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotText, plotCameraOutline,
                         plotTractOutline, plotPatchOutline, plotCcdOutline, labelCamera, getQuiver,
-                        getRaDecMinMaxPatchList, bboxToRaDec, makeAlphaCmap, buildTractImage)
+                        getRaDecMinMaxPatchList, bboxToXyCoordLists, makeAlphaCmap, buildTractImage)
 
 __all__ = ["AnalysisConfig", "Analysis"]
 
@@ -736,7 +736,7 @@ class Analysis(object):
         if tractInfo is not None and patchList is not None:
             for ip, patch in enumerate(tractInfo):
                 if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
-                    raPatch, decPatch = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
+                    raPatch, decPatch = bboxToXyCoordLists(patch.getOuterBBox(), wcs=tractInfo.getWcs())
                     raMin = min(np.round(min(raPatch) - pad, 2), raMin)
                     raMax = max(np.round(max(raPatch) + pad, 2), raMax)
                     decMin = min(np.round(min(decPatch) - pad, 2), decMin)

@@ -19,7 +19,7 @@ except ImportError:
 __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "MatchesStarGalaxyLabeller",
            "CosmosLabeller", "plotText", "annotateAxes", "labelVisit", "labelCamera",
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
-           "plotCcdOutline", "rotatePixelCoords", "bboxToRaDec", "getRaDecMinMaxPatchList",
+           "plotCcdOutline", "rotatePixelCoords", "bboxToXyCoordLists", "getRaDecMinMaxPatchList",
            "percent", "setPtSize", "getQuiver", "makeAlphaCmap", "buildTractImage"]
 
 
@@ -274,7 +274,7 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
     axes.locator_params(nbins=6)
     axes.ticklabel_format(useOffset=False)
 
-    tractRa, tractDec = bboxToRaDec(tractInfo.getBBox(), tractInfo.getWcs())
+    tractRa, tractDec = bboxToXyCoordLists(tractInfo.getBBox(), wcs=tractInfo.getWcs())
     patchBoundary = getRaDecMinMaxPatchList(patchList, tractInfo, pad=maxDegBeyondPatch)
 
     xMin = min(max(tractRa), patchBoundary.raMax) + buff
@@ -292,7 +292,7 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
         if patchIndexStr in patchList:
             color = ("c", "g", "r", "b", "m")[ip%5]
             alpha = 0.5
-        ra, dec = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
+        ra, dec = bboxToXyCoordLists(patch.getOuterBBox(), wcs=tractInfo.getWcs())
         deltaRa = abs(max(ra) - min(ra))
         deltaDec = abs(max(dec) - min(dec))
         pBuff = 0.5*max(deltaRa, deltaDec)
@@ -408,15 +408,47 @@ def rotatePixelCoords(sources, width, height, nQuarter):
     return sources
 
 
-def bboxToRaDec(bbox, wcs):
-    """Get the corners of a BBox and convert them to lists of RA and Dec."""
+def bboxToXyCoordLists(bbox, wcs=None, wcsUnits="deg"):
+    """Get the corners of a BBox and convert them to x and y coord lists.
+
+    Parameters
+    ----------
+    bbox : `lsst.geom.Box2I`
+       The bounding box under consideration.
+    wcs : `lsst.afw.geom.SkyWcs`, optional
+       If provided, the coordinate lists returned will be Ra and Dec in
+       `wcsUnits`.  Ignored if ``wcs`` is `None`.  Default is "deg".
+    wcsUnits : `str`, optional
+       Coordinate units to be returned if a wcs is provided (ignored
+       otherwise).  Can be either "deg" or "rad".  Default is "deg".
+
+    Raises
+    ------
+    `RuntimeError`
+       If ``wcsUnits`` is neither "deg" nor "rad".
+
+    Returns
+    -------
+    xCoords, yCoords : `list` of `float`
+       The lists associated with the x and y coordinates in appropriate uints.
+    """
+    validWcsUnits = ["deg", "rad"]
     corners = []
     for corner in bbox.getCorners():
         p = afwGeom.Point2D(corner.getX(), corner.getY())
-        coord = wcs.pixelToSky(p)
-        corners.append([coord.getRa().asDegrees(), coord.getDec().asDegrees()])
-    ra, dec = zip(*corners)
-    return ra, dec
+        if wcs:
+            if wcsUnits not in validWcsUnits:
+                raise RuntimeError("wcsUnits must be one of {:}".format(validWcsUnits))
+            coord = wcs.pixelToSky(p)
+            if wcsUnits == "deg":
+                corners.append([coord.getRa().asDegrees(), coord.getDec().asDegrees()])
+            elif wcsUnits == "rad":
+                corners.append([coord.getRa().asRadians(), coord.getDec().asRadians()])
+        else:
+            coord = p
+            corners.append([coord.getX(), coord.getY()])
+    xCoords, yCorrds = zip(*corners)
+    return xCoords, yCorrds
 
 
 def getRaDecMinMaxPatchList(patchList, tractInfo, pad=0.0, nDecimals=4, raMin=360.0, raMax=0.0,
@@ -445,7 +477,7 @@ def getRaDecMinMaxPatchList(patchList, tractInfo, pad=0.0, nDecimals=4, raMin=36
     """
     for ip, patch in enumerate(tractInfo):
         if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
-            raPatch, decPatch = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
+            raPatch, decPatch = bboxToXyCoordLists(patch.getOuterBBox(), wcs=tractInfo.getWcs())
             raMin = min(np.round(min(raPatch) - pad, nDecimals), raMin)
             raMax = max(np.round(max(raPatch) + pad, nDecimals), raMax)
             decMin = min(np.round(min(decPatch) - pad, nDecimals), decMin)
