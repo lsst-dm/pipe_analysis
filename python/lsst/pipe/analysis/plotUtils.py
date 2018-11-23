@@ -1,8 +1,11 @@
+from matplotlib import pyplot as plt
+from matplotlib.colors import ListedColormap
 import matplotlib.patches as patches
 import numpy as np
 
 import lsst.afw.cameraGeom as cameraGeom
 import lsst.afw.geom as afwGeom
+import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 from lsst.pipe.base import Struct
 
@@ -16,8 +19,8 @@ except ImportError:
 __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "MatchesStarGalaxyLabeller",
            "CosmosLabeller", "plotText", "annotateAxes", "labelVisit", "labelCamera",
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
-           "plotCcdOutline", "rotatePixelCoords", "bboxToRaDec", "getRaDecMinMaxPatchList", "percent",
-           "setPtSize", "getQuiver"]
+           "plotCcdOutline", "rotatePixelCoords", "bboxToXyCoordLists", "getRaDecMinMaxPatchList",
+           "percent", "setPtSize", "getQuiver", "makeAlphaCmap", "buildTractImage"]
 
 
 class AllLabeller(object):
@@ -224,7 +227,7 @@ def filterStrFromFilename(filename):
 
 
 def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
-    axes.tick_params(which="both", direction="in", labelleft="off", labelbottom="off")
+    axes.tick_params(which="both", direction="in", labelleft=False, labelbottom=False)
     axes.locator_params(nbins=6)
     axes.ticklabel_format(useOffset=False)
     camRadius = max(camera.getFpBBox().getWidth(), camera.getFpBBox().getHeight())/2
@@ -271,7 +274,7 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
     axes.locator_params(nbins=6)
     axes.ticklabel_format(useOffset=False)
 
-    tractRa, tractDec = bboxToRaDec(tractInfo.getBBox(), tractInfo.getWcs())
+    tractRa, tractDec = bboxToXyCoordLists(tractInfo.getBBox(), wcs=tractInfo.getWcs())
     patchBoundary = getRaDecMinMaxPatchList(patchList, tractInfo, pad=maxDegBeyondPatch)
 
     xMin = min(max(tractRa), patchBoundary.raMax) + buff
@@ -289,7 +292,7 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
         if patchIndexStr in patchList:
             color = ("c", "g", "r", "b", "m")[ip%5]
             alpha = 0.5
-        ra, dec = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
+        ra, dec = bboxToXyCoordLists(patch.getOuterBBox(), wcs=tractInfo.getWcs())
         deltaRa = abs(max(ra) - min(ra))
         deltaDec = abs(max(dec) - min(dec))
         pBuff = 0.5*max(deltaRa, deltaDec)
@@ -363,25 +366,34 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
         xy = afwGeom.Point2D(w/2, h/2)
         centerX = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
         centerY = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
-        axes.text(centerX, centerY, "%s" % str(ccdLabelStr), ha="center", va= "center", fontsize=fontSize)
+        axes.text(centerX, centerY, "%s" % str(ccdLabelStr), ha="center", va="center", fontsize=fontSize)
 
 
-def plotPatchOutline(axes, tractInfo, patchList):
+def plotPatchOutline(axes, tractInfo, patchList, plotUnits="deg", idFontSize=None):
     """!Plot outlines of patches in patchList
     """
-    idFontSize = max(5, 10 - int(0.4*len(patchList)))
+    validWcsUnits = ["deg", "rad"]
+    idFontSize = max(5, 9 - int(0.4*len(patchList))) if not idFontSize else idFontSize
     for ip, patch in enumerate(tractInfo):
         if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
             if len(patchList) < 9:
-                ra, dec = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
-                ras = ra + (ra[0], )
-                decs = dec + (dec[0], )
-                axes.plot(ras, decs, color="black", lw=1, linestyle="solid")
-            ra, dec = bboxToRaDec(patch.getInnerBBox(), tractInfo.getWcs())
-            ras = ra + (ra[0], )
-            decs = dec + (dec[0], )
-            axes.plot(ras, decs, color="black", lw=1, linestyle="dashed")
-            axes.text(percent(ras), percent(decs, 0.5), str(patch.getIndex()),
+                if plotUnits in validWcsUnits:
+                    xCoord, yCoord = bboxToXyCoordLists(patch.getOuterBBox(), wcs=tractInfo.getWcs(),
+                                                        wcsUnits=plotUnits)
+                else:
+                    xCoord, yCoord = bboxToXyCoordLists(patch.getOuterBBox(), wcs=None)
+                xCoords = xCoord + (xCoord[0], )
+                yCoords = yCoord + (yCoord[0], )
+                axes.plot(xCoords, yCoords, color="black", lw=0.5, linestyle="solid")
+            if plotUnits in validWcsUnits:
+                xCoord, yCoord = bboxToXyCoordLists(patch.getInnerBBox(), tractInfo.getWcs(),
+                                                    wcsUnits=plotUnits)
+            else:
+                xCoord, yCoord = bboxToXyCoordLists(patch.getInnerBBox(), wcs=None)
+            xCoords = xCoord + (xCoord[0], )
+            yCoords = yCoord + (yCoord[0], )
+            axes.plot(xCoords, yCoords, color="black", lw=0.8, linestyle="dashed")
+            axes.text(percent(xCoords), percent(yCoords, 0.5), str(patch.getIndex()),
                       fontsize=idFontSize, horizontalalignment="center", verticalalignment="center")
 
 
@@ -405,15 +417,47 @@ def rotatePixelCoords(sources, width, height, nQuarter):
     return sources
 
 
-def bboxToRaDec(bbox, wcs):
-    """Get the corners of a BBox and convert them to lists of RA and Dec."""
+def bboxToXyCoordLists(bbox, wcs=None, wcsUnits="deg"):
+    """Get the corners of a BBox and convert them to x and y coord lists.
+
+    Parameters
+    ----------
+    bbox : `lsst.geom.Box2I`
+       The bounding box under consideration.
+    wcs : `lsst.afw.geom.SkyWcs`, optional
+       If provided, the coordinate lists returned will be Ra and Dec in
+       `wcsUnits`.  Ignored if ``wcs`` is `None`.  Default is "deg".
+    wcsUnits : `str`, optional
+       Coordinate units to be returned if a wcs is provided (ignored
+       otherwise).  Can be either "deg" or "rad".  Default is "deg".
+
+    Raises
+    ------
+    `RuntimeError`
+       If ``wcsUnits`` is neither "deg" nor "rad".
+
+    Returns
+    -------
+    xCoords, yCoords : `list` of `float`
+       The lists associated with the x and y coordinates in appropriate uints.
+    """
+    validWcsUnits = ["deg", "rad"]
     corners = []
     for corner in bbox.getCorners():
         p = afwGeom.Point2D(corner.getX(), corner.getY())
-        coord = wcs.pixelToSky(p)
-        corners.append([coord.getRa().asDegrees(), coord.getDec().asDegrees()])
-    ra, dec = zip(*corners)
-    return ra, dec
+        if wcs:
+            if wcsUnits not in validWcsUnits:
+                raise RuntimeError("wcsUnits must be one of {:}".format(validWcsUnits))
+            coord = wcs.pixelToSky(p)
+            if wcsUnits == "deg":
+                corners.append([coord.getRa().asDegrees(), coord.getDec().asDegrees()])
+            elif wcsUnits == "rad":
+                corners.append([coord.getRa().asRadians(), coord.getDec().asRadians()])
+        else:
+            coord = p
+            corners.append([coord.getX(), coord.getY()])
+    xCoords, yCorrds = zip(*corners)
+    return xCoords, yCorrds
 
 
 def getRaDecMinMaxPatchList(patchList, tractInfo, pad=0.0, nDecimals=4, raMin=360.0, raMax=0.0,
@@ -442,16 +486,16 @@ def getRaDecMinMaxPatchList(patchList, tractInfo, pad=0.0, nDecimals=4, raMin=36
     """
     for ip, patch in enumerate(tractInfo):
         if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
-            raPatch, decPatch = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
+            raPatch, decPatch = bboxToXyCoordLists(patch.getOuterBBox(), wcs=tractInfo.getWcs())
             raMin = min(np.round(min(raPatch) - pad, nDecimals), raMin)
             raMax = max(np.round(max(raPatch) + pad, nDecimals), raMax)
             decMin = min(np.round(min(decPatch) - pad, nDecimals), decMin)
             decMax = max(np.round(max(decPatch) + pad, nDecimals), decMax)
     return Struct(
-        raMin = raMin,
-        raMax = raMax,
-        decMin = decMin,
-        decMax = decMax,
+        raMin=raMin,
+        raMax=raMax,
+        decMin=decMin,
+        decMax=decMax,
     )
 
 
@@ -480,3 +524,81 @@ def getQuiver(x, y, e1, e2, ax, color=None, scale=3, width=0.005, label=''):
     q = ax.quiver(x, y, c1, c2, color=color, angles='uv', scale=scale, units='width', pivot='middle',
                   width=width, headwidth=0.0, headlength=0.0, headaxislength=0.0, label=label)
     return q
+
+
+def makeAlphaCmap(cmap=plt.cm.viridis, alpha=1.0):
+    """Given a matplotlib colormap, return it but with given alpha transparency
+
+    Parameters
+    ----------
+    cmap : `matplotlib.colors.ListedColormap`, optional
+       The matplotlib colormap to make transparent with level ``alpha``.
+       Default color map is `plt.cm.viridis`.
+    alpha : `float`, optional
+       The matplotlib blending value, between 0 (transparent) and 1 (opaque)
+       (1.0 by default).
+
+    Returns
+    -------
+    alphaCmap : `matplotlib.colors.ListedColormap`
+       The matplotlib colormap ``cmap`` but with transparency level ``alpha``.
+    """
+    alphaCmap = cmap(np.arange(cmap.N))
+    alphaCmap[:, -1] = alpha
+    alphaCmap = ListedColormap(alphaCmap)
+    return alphaCmap
+
+
+def buildTractImage(butler, dataId, tractInfo, patchList=None, coaddName="deep"):
+    """Build up an image of an entire tract or list of patches
+
+    Parameters
+    ----------
+    butler : `lsst.daf.persistence.Butler`
+    dataId : `lsst.daf.persistence.DataId`
+       An instance of `lsst.daf.persistence.DataId` from which to extract the
+       filter name.
+    tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
+       Tract information object.
+    patchList : `list` of `str`, optional
+       A list of the patches to include.  If `None`, the full list of patches
+       in ``tractInfo`` will be included.
+    coaddName : `str`, optional
+       The base name of the coadd (e.g. "deep" or "goodSeeing").
+       Default is "deep".
+
+    Raises
+    ------
+    `RuntimeError`
+       If ``nPatches`` is zero, i.e. no data was found.
+
+    Returns
+    -------
+    image : `lsst.afw.image.ImageF`
+       The full tract or patches in ``patchList`` image.
+    """
+    tractBbox = tractInfo.getBBox()
+    nPatches = 0
+    if not patchList:
+        patchList = []
+        nPatchX, nPatchY = tractInfo.getNumPatches()
+        for iPatchX in range(nPatchX):
+            for iPatchY in range(nPatchY):
+                patchList.append("%d,%d" % (iPatchX, iPatchY))
+    tractArray = np.full((tractBbox.getMaxY() + 1, tractBbox.getMaxX() + 1), np.nan, dtype="float32")
+    for patch in patchList:
+        expDataId = {"filter": dataId["filter"], "tract": tractInfo.getId(), "patch": patch}
+        try:
+            exp = butler.get(coaddName + "Coadd_calexp", expDataId, immediate=True)
+            bbox = butler.get(coaddName + "Coadd_calexp_bbox", expDataId, immediate=True)
+            tractArray[bbox.getMinY():bbox.getMaxY() + 1,
+                       bbox.getMinX():bbox.getMaxX() + 1] = exp.maskedImage.image.array
+            nPatches += 1
+        except Exception:
+            continue
+    if nPatches == 0:
+        raise RuntimeError("No data found for tract {:}".format(tractInfo.getId()))
+    tractArray = np.flipud(tractArray)
+    image = afwImage.ImageF(afwGeom.ExtentI(tractBbox.getMaxX() + 1, tractBbox.getMaxY() + 1))
+    image.array[:] = tractArray
+    return image

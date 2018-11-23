@@ -1602,7 +1602,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     rmsStr = "  rms = {0:5.2f}".format(rms)
 
     count, bins, ignored = axes[1].hist(distance[good], bins=numBins, range=(-4.0*stdDev, 4.0*stdDev),
-                                        normed=True, color=polyColor, alpha=0.6)
+                                        density=True, color=polyColor, alpha=0.6)
     axes[1].plot(bins, 1/(stdDev*np.sqrt(2*np.pi))*np.exp(-(bins-mean)**2/(2*stdDev**2)),
                  color=polyColor)
     axes[1].axvline(x=mean, color=polyColor, linestyle=":")
@@ -1621,7 +1621,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         pCmean = principalColor[kept].mean()
         pCstdDev = principalColor[kept].std()
         count, nBins, ignored = axes[1].hist(principalColor[kept], bins=bins, range=(-4.0*stdDev, 4.0*stdDev),
-                                             normed=True, color="blue", alpha=0.6)
+                                             density=True, color="blue", alpha=0.6)
         axes[1].plot(bins, 1/(pCstdDev*np.sqrt(2*np.pi))*np.exp(-(bins-pCmean)**2/(2*pCstdDev**2)),
                      color="blue")
         axes[1].axvline(x=pCmean, color="blue", linestyle=":")
@@ -1639,7 +1639,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         fitP2mean = fitP2[kept].mean()
         fitP2stdDev = fitP2[kept].std()
         count, nBins, ignored = axes[1].hist(fitP2[kept], bins=bins, range=(-4.0*stdDev, 4.0*stdDev),
-                                             normed=True, color="green", alpha=0.6)
+                                             density=True, color="green", alpha=0.6)
         axes[1].plot(bins, 1/(fitP2stdDev*np.sqrt(2*np.pi))*np.exp(-(bins-fitP2mean)**2/(2*fitP2stdDev**2)),
                      color="green")
         axes[1].axvline(x=fitP2mean, color="magenta", linestyle=":")

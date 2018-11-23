@@ -31,8 +31,8 @@ except ImportError:
     applyMosaicResultsCatalog = None
 
 __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCompare",
-           "AstrometryDiff", "traceSize", "psfTraceSizeDiff", "traceSizeCompare", "percentDiff",
-           "e1Resids", "e2Resids", "e1ResidsHsmRegauss", "e2ResidsHsmRegauss", "FootNpixDiffCompare",
+           "AstrometryDiff", "TraceSize", "PsfTraceSizeDiff", "TraceSizeCompare", "PercentDiff",
+           "E1Resids", "E2Resids", "E1ResidsHsmRegauss", "E2ResidsHsmRegauss", "FootNpixDiffCompare",
            "MagDiffErr", "ApCorrDiffErr", "CentroidDiff", "CentroidDiffErr", "deconvMom",
            "deconvMomStarGal", "concatenateCatalogs", "joinMatches", "checkIdLists", "checkPatchOverlap",
            "joinCatalogs", "getFluxKeys", "addColumnsToSchema", "addApertureFluxesHSC", "addFpPoint",
@@ -208,7 +208,7 @@ class AstrometryDiff(object):
         return (first*cosDec1 - second*cosDec2)*(1.0*afwGeom.radians).asArcseconds()*self.unitScale
 
 
-class traceSize(object):
+class TraceSize(object):
     """Functor to calculate trace radius size for sources"""
     def __init__(self, column):
         self.column = column
@@ -218,7 +218,7 @@ class traceSize(object):
         return np.array(srcSize)
 
 
-class psfTraceSizeDiff(object):
+class PsfTraceSizeDiff(object):
     """Functor to calculate trace radius size difference (%) between object and psf model"""
     def __init__(self, column, psfColumn):
         self.column = column
@@ -231,7 +231,7 @@ class psfTraceSizeDiff(object):
         return np.array(sizeDiff)
 
 
-class traceSizeCompare(object):
+class TraceSizeCompare(object):
     """Functor to calculate trace radius size difference (%) between objects in matched catalog"""
     def __init__(self, column):
         self.column = column
@@ -245,7 +245,7 @@ class traceSizeCompare(object):
         return np.array(sizeDiff)
 
 
-class percentDiff(object):
+class PercentDiff(object):
     """Functor to calculate the percent difference between a given column entry in matched catalog"""
     def __init__(self, column):
         self.column = column
@@ -257,7 +257,7 @@ class percentDiff(object):
         return np.array(percentDiff)
 
 
-class e1Resids(object):
+class E1Resids(object):
     """Functor to calculate e1 ellipticity residuals for a given object and psf model"""
     def __init__(self, column, psfColumn, unitScale=1.0):
         self.column = column
@@ -273,7 +273,7 @@ class e1Resids(object):
         return np.array(e1Resids)*self.unitScale
 
 
-class e2Resids(object):
+class E2Resids(object):
     """Functor to calculate e2 ellipticity residuals for a given object and psf model"""
     def __init__(self, column, psfColumn, unitScale=1.0):
         self.column = column
@@ -289,7 +289,7 @@ class e2Resids(object):
         return np.array(e2Resids)*self.unitScale
 
 
-class e1ResidsHsmRegauss(object):
+class E1ResidsHsmRegauss(object):
     """Functor to calculate HSM e1 ellipticity residuals for a given object and psf model"""
     def __init__(self, unitScale=1.0):
         self.unitScale = unitScale
@@ -302,7 +302,7 @@ class e1ResidsHsmRegauss(object):
         return np.array(e1Resids)*self.unitScale
 
 
-class e2ResidsHsmRegauss(object):
+class E2ResidsHsmRegauss(object):
     """Functor to calculate HSM e1 ellipticity residuals for a given object and psf model"""
     def __init__(self, unitScale=1.0):
         self.unitScale = unitScale
@@ -704,7 +704,7 @@ def addRotPoint(catalog, width, height, nQuarter, prefix=""):
         row.assign(source, mapper)
         try:
             rotPoint = rotatePixelCoord(source, width, height, nQuarter).getCentroid()
-        except:
+        except Exception:
             rotPoint = afwGeom.Point2D(np.nan, np.nan)
             row.set(rotFlag, True)
         row.set(rotxKey, rotPoint[0])
@@ -955,7 +955,7 @@ def checkHscStack(metadata):
     """
     try:
         hscPipe = metadata.getScalar("HSCPIPE_VERSION")
-    except:
+    except Exception:
         hscPipe = None
     return hscPipe
 
@@ -1090,18 +1090,18 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
     if doApplyUberCal:
         dataset = "wcs_hsc" if hscRun is not None else "jointcal_wcs"
     return Struct(
-        butler = butler,
-        camera = camera,
-        dataId = dataId,
-        filterName = filterName,
-        genericFilterName = genericFilterName,
-        ccdKey = ccdKey,
-        metadata = metadata,
-        hscRun = hscRun,
-        dataset = dataset,
-        skymap = skymap,
-        wcs = wcs,
-        tractInfo = tractInfo,
+        butler=butler,
+        camera=camera,
+        dataId=dataId,
+        filterName=filterName,
+        genericFilterName=genericFilterName,
+        ccdKey=ccdKey,
+        metadata=metadata,
+        hscRun=hscRun,
+        dataset=dataset,
+        skymap=skymap,
+        wcs=wcs,
+        tractInfo=tractInfo,
     )
 
 

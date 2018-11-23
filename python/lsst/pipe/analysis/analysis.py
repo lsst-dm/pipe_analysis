@@ -7,12 +7,14 @@ from matplotlib.ticker import NullFormatter, AutoMinorLocator
 import numpy as np
 np.seterr(all="ignore")  # noqa E402
 
+import lsst.afw.geom as afwGeom
+from lsst.display.matplotlib.matplotlib import AsinhNormalize
 from lsst.pex.config import Config, Field, ListField, DictField
 
-from .utils import Data, Stats, e1Resids, e2Resids, checkIdLists, fluxToPlotString
+from .utils import Data, Stats, E1Resids, E2Resids, checkIdLists, fluxToPlotString
 from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotText, plotCameraOutline,
                         plotTractOutline, plotPatchOutline, plotCcdOutline, labelCamera, getQuiver,
-                        getRaDecMinMaxPatchList, bboxToRaDec)
+                        getRaDecMinMaxPatchList, bboxToXyCoordLists, makeAlphaCmap, buildTractImage)
 
 __all__ = ["AnalysisConfig", "Analysis"]
 
@@ -111,7 +113,7 @@ class Analysis(object):
                 "Catalog being used for flags does not have the same object list as the data catalog")
         # Don't have flags in match and overlap catalogs (already removed in the latter)
         if ("matches" not in self.shortName and "overlap" not in self.shortName and
-                "quiver" not in self.shortName):
+                "quiver" not in self.shortName and "inputCounts" not in self.shortName):
             for ff in set(list(self.config.flags) + flags):
                 if prefix + ff in flagsCat.schema:
                     self.good &= ~flagsCat[prefix + ff]
@@ -207,8 +209,8 @@ class Analysis(object):
         axScatter.axhline(0, linestyle="--", color="0.4")
         axHistx = plt.axes(rect_histx)
         axHisty = plt.axes(rect_histy)
-        axHistx.tick_params(which="both", direction="in", top="on", right="on", labelsize=8)
-        axHisty.tick_params(which="both", direction="in", top="on", right="on", labelsize=8)
+        axHistx.tick_params(which="both", direction="in", top=True, right=True, labelsize=8)
+        axHisty.tick_params(which="both", direction="in", top=True, right=True, labelsize=8)
         # no labels
         axHistx.xaxis.set_major_formatter(nullfmt)
         axHisty.yaxis.set_major_formatter(nullfmt)
@@ -439,7 +441,7 @@ class Analysis(object):
             nValid = np.abs(data.quantity[good]) <= self.qMax  # need to have datapoints lying within range
             if good.sum() == 0 or nValid.sum() == 0:
                 continue
-            num, _, _ = axes.hist(data.quantity[good], numBins, range=(self.qMin, self.qMax), normed=False,
+            num, _, _ = axes.hist(data.quantity[good], numBins, range=(self.qMin, self.qMax), density=False,
                                   color=data.color, label=name, histtype="step")
             numMax = max(numMax, num.max()*1.1)
         axes.set_xlim(self.qMin, self.qMax)
@@ -529,7 +531,7 @@ class Analysis(object):
             vMin, vMax = 4.0*self.qMin, 1.0*self.qMax
 
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.35"))
-        axes.tick_params(which="both", direction="in", top="on", right="on", labelsize=8)
+        axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=8)
         ptSize = None
 
         if dataId is not None and butler is not None and ccdList is not None:
@@ -726,7 +728,7 @@ class Analysis(object):
         decMax = decMin + deltaDeg
 
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.7"))
-        axes.tick_params(which="both", direction="in", top="on", right="on", labelsize=8)
+        axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=8)
 
         if dataId is not None and butler is not None and ccdList is not None:
             plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=zpLabel)
@@ -734,16 +736,16 @@ class Analysis(object):
         if tractInfo is not None and patchList is not None:
             for ip, patch in enumerate(tractInfo):
                 if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
-                    raPatch, decPatch = bboxToRaDec(patch.getOuterBBox(), tractInfo.getWcs())
+                    raPatch, decPatch = bboxToXyCoordLists(patch.getOuterBBox(), wcs=tractInfo.getWcs())
                     raMin = min(np.round(min(raPatch) - pad, 2), raMin)
                     raMax = max(np.round(max(raPatch) + pad, 2), raMax)
                     decMin = min(np.round(min(decPatch) - pad, 2), decMin)
                     decMax = max(np.round(max(decPatch) + pad, 2), decMax)
             plotPatchOutline(axes, tractInfo, patchList)
 
-        e1 = e1Resids(compareCol, psfCompareCol)
+        e1 = E1Resids(compareCol, psfCompareCol)
         e1 = e1(catalog)
-        e2 = e2Resids(compareCol, psfCompareCol)
+        e2 = E2Resids(compareCol, psfCompareCol)
         e2 = e2(catalog)
         e = np.sqrt(e1**2 + e2**2)
 
@@ -796,6 +798,156 @@ class Analysis(object):
         axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
 
         fig.savefig(filename, dpi=150)
+        plt.close(fig)
+
+    def plotInputCounts(self, catalog, filename, log, dataId, butler, tractInfo, patchList=None, camera=None,
+                        forcedStr=None, cmap=plt.cm.viridis, alpha=0.5, doPlotTractImage=True,
+                        doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000):
+        """Plot grayscale image of tract with base_InputCounts_value overplotted
+
+        Parameters
+        ----------
+        catalog : `lsst.afw.table.SourceCatalog`
+           The source catalog whose objects will be plotted as ellipses (scaled
+           by a factor of ``sizeFactor`` but truncated to a maximum diameter
+           of ``maxDiamPix``) and color-mapped by their base_InputCount_value.
+        filename : `str`
+           Full path and name of the file to which the plot will be written.
+        log : `lsst.log.Log`
+           Logger object for logging messages.
+        dataId : `lsst.daf.persistence.DataId`
+           An instance of `lsst.daf.persistence.DataId` from which to extract
+           the filter name.
+        butler : `lsst.daf.persistence.Butler`
+        tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
+           Tract information object.
+        patchList : `list` of `str`, optional
+           List of patch IDs with data to be plotted.
+        camera : `lsst.afw.cameraGeom.Camera`, optional
+           The base name of the coadd (e.g. deep or goodSeeing).
+           Default is `None`.
+        forcedStr : `str`, optional
+           String to label the catalog type (forced vs. unforced) on the plot.
+        cmap : `matplotlib.colors.ListedColormap`, optional
+           The matplotlib colormap to use.  It will be given transparency level
+           set by ``alpha``.  Default is `None`.
+        alpha : `float`, optional
+           The matplotlib blending value, between 0 (transparent) and 1 (opaque)
+           Default is 0.5.
+        doPlotTractImage : `bool`, optional
+           A boolean indicating whether to plot the tract image (grayscale and
+           asinh stretched).  Default is `True`.
+        doPlotPatchOutline : `bool`, optional
+           A boolean indicating whether to overplot the patch outlines and
+           index labels.  Default is `True`.
+        sizeFactor : `float`, optional
+          Factor by which to multiply the source ellipse sizes for plotting
+          (the nominal size is quite small).  Default is 5.0.
+        maxDiamPix : `int`, optional
+           A maximum diameter to be plotted for any source's ellipse (such that
+           a single ellipse cannot overwhelm the plot and noting that this will
+           not be indicative of the true input counts for the outer pixels as
+           that number strictly applies to the objects centroid pixel).  If a
+           given object gets truncated to this size, an opaque blue outline
+           will be plotted around its ellipse.  Default is 1000.
+        """
+        tractBbox = tractInfo.getBBox()
+        tractWcs = tractInfo.getWcs()
+
+        fig, axes = plt.subplots(1, 1)
+        axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=7)
+        if doPlotTractImage:
+            image = buildTractImage(butler, dataId, tractInfo, patchList=patchList)
+            med = np.nanmedian(image.array)
+            mad = np.nanmedian(abs(image.array - med))
+            imMin = med - 3.0*1.4826*mad
+            imMax = med + 10.0*1.4826*mad
+            norm = AsinhNormalize(minimum=imMin, dataRange=imMax - imMin, Q=8)
+            extent = tractBbox.getMinX(), tractBbox.getMaxX(), tractBbox.getMinY(), tractBbox.getMaxY()
+            axes.imshow(image.array, extent=extent, cmap="gray_r", norm=norm)
+
+        centStr = "slot_Centroid"
+        shapeStr = "slot_Shape"
+
+        diamAs = []  # matplotlib.patches.Ellipse wants diameters for width and height
+        diamBs = []
+        thetas = []
+        edgeColors = []  # to outline any ellipses truncated at maxDiamPix
+
+        for src in catalog:
+            edgeColor = "None"
+            srcQuad = afwGeom.Quadrupole(src[shapeStr + "_xx"], src[shapeStr + "_yy"], src[shapeStr + "_xy"])
+            srcEllip = afwGeom.ellipses.Axes(srcQuad)
+            diamA = srcEllip.getA()*2.0*sizeFactor
+            diamB = srcEllip.getB()*2.0*sizeFactor
+            # Truncate ellipse size to a maximum width or height of maxDiamPix
+            if diamA > maxDiamPix or diamB > maxDiamPix:
+                edgeColor = "blue"
+                if diamA >= diamB:
+                    diamB = diamB*(maxDiamPix/diamA)
+                    diamA = maxDiamPix
+                else:
+                    diamA = diamA*(maxDiamPix/diamB)
+                    diamB = maxDiamPix
+            diamAs.append(diamA)
+            diamBs.append(diamB)
+            thetas.append(np.degrees(srcEllip.getTheta()))
+            edgeColors.append(edgeColor)
+
+        xyOffsets = np.stack((catalog[centStr + "_x"], catalog[centStr + "_y"]), axis=-1)
+        inputCounts = catalog["base_InputCount_value"]
+        bounds = np.arange(inputCounts.max())
+        bounds += 1
+        alphaCmap = makeAlphaCmap(cmap=cmap, alpha=alpha)
+        norm = matplotlib.colors.BoundaryNorm(bounds, alphaCmap.N)
+        alphaCmap.set_under("r")
+
+        ellipsePatchList = [matplotlib.patches.Ellipse(xy=xy, width=diamA, height=diamB, angle=theta)
+                            for xy, diamA, diamB, theta in zip(xyOffsets, diamAs, diamBs, thetas)]
+        ec = matplotlib.collections.PatchCollection(ellipsePatchList, cmap=alphaCmap, norm=norm,
+                                                    edgecolors=edgeColors, linewidth=0.1)
+
+        ec.set_array(inputCounts)
+        axes.add_collection(ec)
+        cbar = plt.colorbar(ec, extend="min", fraction=0.04)
+        cbar.set_label("InputCount: ellipse size * {:} [maxDiam = {:}] (pixels)".
+                       format(sizeFactor, maxDiamPix), fontsize=7)
+        cbar.ax.tick_params(direction="in", labelsize=7)
+
+        axes.set_xlim(tractBbox.getMinX(), tractBbox.getMaxX())
+        axes.set_ylim(tractBbox.getMinY(), tractBbox.getMaxY())
+
+        filterStr = dataId["filter"]
+        filterLabelStr = "[" + filterStr + "]"
+        axes.set_xlabel("xTract (pixels) {0:s}".format(filterLabelStr), size=9)
+        axes.set_ylabel("yTract (pixels) {0:s}".format(filterLabelStr), size=9)
+
+        # Get Ra and DEC tract limits to add to plot axis labels
+        tract00 = tractWcs.pixelToSky(tractBbox.getMinX(),
+                                      tractBbox.getMinY()).getPosition(units=afwGeom.degrees)
+        tract0N = tractWcs.pixelToSky(tractBbox.getMinX(),
+                                      tractBbox.getMaxY()).getPosition(units=afwGeom.degrees)
+        tractN0 = tractWcs.pixelToSky(tractBbox.getMaxX(),
+                                      tractBbox.getMinY()).getPosition(units=afwGeom.degrees)
+
+        textKwargs = dict(ha="left", va="center", transform=axes.transAxes, fontsize=7, color="blue")
+        plt.text(-0.05, -0.07, str("{:.2f}".format(tract00.getX())), **textKwargs)
+        plt.text(-0.17, 0.00, str("{:.2f}".format(tract00.getY())), **textKwargs)
+        plt.text(0.96, -0.07, str("{:.2f}".format(tractN0.getX())), **textKwargs)
+        plt.text(-0.17, 0.97, str("{:.2f}".format(tract0N.getY())), **textKwargs)
+        textKwargs["fontsize"] = 8
+        plt.text(0.45, -0.11, "RA (deg)", **textKwargs)
+        plt.text(-0.19, 0.5, "DEC (deg)", rotation=90, **textKwargs)
+
+        if doPlotPatchOutline:
+            plotPatchOutline(axes, tractInfo, patchList, plotUnits="pixel", idFontSize=5)
+        if camera is not None:
+            labelCamera(camera, plt, axes, 0.5, 1.09)
+        labelVisit(filename, plt, axes, 0.5, 1.04)
+        if forcedStr is not None:
+            plotText(forcedStr, plt, axes, 0.99, -0.1, prefix="cat: ", fontSize=8, color="green")
+
+        fig.savefig(filename, dpi=1200)  # Needs to be fairly hi-res to see enough detail
         plt.close(fig)
 
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
