@@ -320,6 +320,9 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
     """!Plot outlines of CCDs in ccdList
     """
     dataIdCopy = dataId.copy()
+    if "raftName" in dataId:  # Pop these so that the ccd is looked up by just the detector field
+        dataIdCopy.pop("raftName")
+        dataIdCopy.pop("detectorName")
     for ccd in ccdList:
         ccdKey = findCcdKey(dataId)
         ccdLabelStr = str(ccd)
