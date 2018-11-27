@@ -53,6 +53,7 @@ class CoaddAnalysisConfig(Config):
                                   "example.  If the colorterms for the appropriate reference dataset are "
                                   "loaded, they will be applied.  Otherwise, no colorterms will be applied "
                                   "to the reference catalog."))
+    doApplyColorTerms = Field(dtype=bool, default=True, doc="Apply colorterms to reference magnitudes?")
     analysis = ConfigField(dtype=AnalysisConfig, doc="Analysis plotting options")
     analysisMatches = ConfigField(dtype=AnalysisConfig, doc="Analysis plotting options for matches")
     matchesMaxDistance = Field(dtype=float, default=0.15, doc="Maximum plotting distance for matches")
@@ -915,12 +916,16 @@ class CoaddAnalysisTask(CmdLineTask):
                     zpLabel=None, forcedStr=None, flagsCat=None):
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.030*self.unitScale}}),
-
-        try:
+        if self.config.doApplyColorTerms:
             ct = self.config.colorterms.getColorterm(filterName, self.config.refObjLoader.ref_dataset_name)
-        except Exception:
-            # Pass in a null colorterm.  Note the filterName must match for the source and reference catalogs
-            ct = Colorterm(primary=filterName, secondary=filterName)
+        else:
+            # Pass in a null colorterm.
+            # Obtain the filter name from the reference loader filter map, if present, otherwise set
+            # to the canonical filter name.
+            refFilterName = (self.config.refObjLoader.filterMap[filterName] if
+                             filterName in self.config.refObjLoader.filterMap.keys() else
+                             afwImage.Filter(afwImage.Filter(filterName).getId()).getName())
+            ct = Colorterm(primary=refFilterName, secondary=refFilterName)
             self.log.warn("Note: no colorterms loaded for {:s}, thus no colorterms will be applied to "
                           "the reference catalog".format(self.config.refObjLoader.ref_dataset_name))
         if "src_calib_psf_used" in matches.schema:
