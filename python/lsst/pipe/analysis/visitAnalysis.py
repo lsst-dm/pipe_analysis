@@ -265,6 +265,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             except Exception:
                 pass
 
+            if self.config.doPlotPsfFluxHist:
+                self.plotPsfFluxHist(commonZpCat,
+                                     filenamer(repoInfo.dataId, description="base_PsfFlux", style="hist"),
+                                     repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
+                                     ccdList=ccdListPerTract, hscRun=repoInfo.hscRun, zpLabel="raw")
             if self.config.doPlotFootprintNpix:
                 self.plotFootprintHist(catalog,
                                        filenamer(repoInfo.dataId, description="footNpix", style="hist"),

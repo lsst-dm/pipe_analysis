@@ -29,19 +29,19 @@ class AnalysisConfig(Config):
     clip = Field(dtype=float, default=4.0, doc="Rejection threshold (stdev)")
     magThreshold = Field(dtype=float, default=21.0, doc="Magnitude threshold to apply")
     magPlotMin = Field(dtype=float, default=14.5, doc="Minimum magnitude to plot")
-    magPlotMax = Field(dtype=float, default=26.0, doc="Maximum magnitude to plot")
+    magPlotMax = Field(dtype=float, default=25.99, doc="Maximum magnitude to plot")
     magPlotStarMin = DictField(
         keytype=str,
         itemtype=float,
         default={"HSC-G": 16.5, "HSC-R": 17.25, "HSC-I": 16.5, "HSC-Z": 15.5, "HSC-Y": 15.25,
-                 "NB0921": 15.0, "g": 16.5, "r": 15.0, "i": 16.5, "z": 15.5, "y": 15.5},
+                 "NB0921": 15.0, "u": 13.75, "g": 16.5, "r": 15.0, "i": 16.5, "z": 15.5, "y": 15.5},
         doc="Minimum magnitude to plot",
     )
     magPlotStarMax = DictField(
         keytype=str,
         itemtype=float,
         default={"HSC-G": 23.75, "HSC-R": 24.25, "HSC-I": 23.75, "HSC-Z": 23.0, "HSC-Y": 22.0,
-                 "NB0921": 22.25, "g": 23.5, "r": 22.0, "i": 23.5, "z": 22.5, "y": 22.5},
+                 "NB0921": 22.25, "u": 21.5, "g": 23.5, "r": 22.0, "i": 23.5, "z": 22.5, "y": 22.5},
         doc="Maximum magnitude to plot",
     )
     fluxColumn = Field(dtype=str, default="modelfit_CModel_instFlux",
@@ -139,12 +139,13 @@ class Analysis(object):
             # and clipped stats range + 25%
             dataType = "all" if "all" in self.data else "star"
             if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar", "resolution",
-                                                       "race"]):
+                                                       "race", "rawPsfFlux"]):
                 self.qMin = max(min(self.qMin, self.stats[dataType].mean - 6.0*self.stats[dataType].stdev,
                                 self.stats[dataType].median - 1.25*self.stats[dataType].clip),
                                 min(self.stats[dataType].mean - 20.0*self.stats[dataType].stdev,
                                     -0.005*self.unitScale))
-            if not any(ss in self.shortName for ss in ["footNpix", "pStar", "resolution", "race"]):
+            if not any(ss in self.shortName for ss in ["footNpix", "pStar", "resolution", "race",
+                                                       "rawPsfFlux"]):
                 self.qMax = min(max(self.qMax, self.stats[dataType].mean + 6.0*self.stats[dataType].stdev,
                                 self.stats[dataType].median + 1.25*self.stats[dataType].clip),
                                 max(self.stats[dataType].mean + 20.0*self.stats[dataType].stdev,
@@ -196,12 +197,12 @@ class Analysis(object):
         # definitions for the axes
         left, width = 0.12, 0.62
         bottom, height = 0.10, 0.62
-        left_h = left + width + 0.03
+        left_h = left + width + 0.015
         bottom_h = bottom + width + 0.02
         rect_scatter = [left, bottom, width, height]
         rect_histx = [left, bottom_h, width, 0.23]
-        rect_histy = [left_h, bottom, 0.20, height]
-        topRight = [left_h + 0.003, bottom_h + 0.01, 0.22, 0.22]
+        rect_histy = [left_h, bottom, 0.18, height]
+        topRight = [left_h - 0.028, bottom_h, 0.23, 0.23]
         # start with a rectangular Figure
         plt.figure(1)
 
@@ -427,37 +428,69 @@ class Analysis(object):
         plt.close()
 
     def plotHistogram(self, filename, numBins=51, stats=None, hscRun=None, matchRadius=None, zpLabel=None,
-                      forcedStr=None, camera=None, filterStr=None):
+                      forcedStr=None, camera=None, ccdList=None, filterStr=None, vertLineList=None,
+                      logPlot=True, density=False, cumulative=False, addDataList=None, addDataLabelList=None):
         """Plot histogram of quantity"""
         fig, axes = plt.subplots(1, 1)
         axes.axvline(0, linestyle="--", color="0.6")
-        numMax = 0
+        if vertLineList:
+            for xLine in vertLineList:
+                axes.axvline(xLine, linestyle="--", color="0.6")
+        numMin = 0 if density else 0.9
+        numMax = 1
+        alpha = 0.4
+        ic = 1
         for name, data in self.data.items():
             if not data.mag.any():
                 continue
+            color = "tab:" + data.color
+            ic += 1
             good = np.isfinite(data.quantity)
-            if self.magThreshold is not None:
+            if self.magThreshold is not None and zpLabel is not "raw":
                 good &= data.mag < self.magThreshold
             nValid = np.abs(data.quantity[good]) <= self.qMax  # need to have datapoints lying within range
             if good.sum() == 0 or nValid.sum() == 0:
                 continue
-            num, _, _ = axes.hist(data.quantity[good], numBins, range=(self.qMin, self.qMax), density=False,
-                                  color=data.color, label=name, histtype="step")
-            numMax = max(numMax, num.max()*1.1)
+            num, fluxBins, _ = axes.hist(data.quantity[good], bins=numBins, range=(self.qMin, self.qMax),
+                                         density=density, log=logPlot, color=color, alpha=alpha,
+                                         label=name, histtype="stepfilled")
+            if cumulative:
+                axes2 = axes.twinx()  # instantiate a second axes that shares the same x-axis
+                axes2.hist(data.quantity[good], bins=fluxBins, density=True, log=False, color=data.color,
+                           label=name + "_cum", histtype="step", cumulative=cumulative)
+            # yaxis limit for non-normalized histograms
+            numMax = max(numMax, num.max()*1.1) if not density else numMax
+        if cumulative:
+            axes2.set_ylim(0, 1.05)
+            axes2.tick_params(axis="y", which="both", direction="in")
+            axes2.set_ylabel("Cumulative Fraction", rotation=270, labelpad=12, color=color)
+            axes2.legend(loc="right")
+            axes2.grid(True, "both", color="black", alpha=0.3)
+        hatches = ["\\\\", "//", "*", "+"]
+        if addDataList is not None:
+            hatch = ""
+            cmap = plt.cm.Spectral
+            addColors = [cmap(i) for i in np.linspace(0, 1, len(addDataList))]
+            if addDataLabelList is None:
+                addDataLabelList = ["" for i in len(addDataList)]
+            for i, extraData in enumerate(addDataList):
+                axes.hist(extraData, bins=fluxBins, density=density, log=logPlot, color=addColors[i],
+                          alpha=0.65, label=addDataLabelList[i], histtype="step", hatch=hatches[i%4])
+
+        axes.tick_params(axis="both", which="both", direction="in")
         axes.set_xlim(self.qMin, self.qMax)
-        axes.set_ylim(0.9, numMax)
+        axes.set_ylim(numMin, numMax)
         if filterStr is None:
             filterStr = ''
         axes.set_xlabel("{0:s} [{1:s}]".format(self.quantityName, filterStr))
-        axes.set_ylabel("Number")
-        axes.set_yscale("log", nonposy="clip")
+        axes.set_ylabel("Number", color=color, alpha=alpha)
         x0, y0 = 0.03, 0.97
         if self.qMin == 0.0:
             x0, y0 = 0.68, 0.81
         if stats is not None:
             annotateAxes(filename, plt, axes, stats, "star", self.magThreshold, x0=x0, y0=y0,
                          isHist=True, hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
-        axes.legend()
+        axes.legend(loc="upper right")
         if camera is not None:
             labelCamera(camera, plt, axes, 0.5, 1.09)
         labelVisit(filename, plt, axes, 0.5, 1.04)
@@ -466,6 +499,13 @@ class Analysis(object):
             plotText(zpLabel, plt, axes, 0.13, -0.09, prefix=prefix, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
+
+        if camera is not None and ccdList is not None:
+            if ccdList:
+                axTopMiddle = plt.axes([0.42, 0.68, 0.2, 0.2])
+                axTopMiddle.set_aspect("equal")
+                plotCameraOutline(plt, axTopMiddle, camera, ccdList)
+
         fig.savefig(filename, dpi=120)
         plt.close(fig)
 
