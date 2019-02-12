@@ -3,7 +3,7 @@ from __future__ import print_function
 import matplotlib
 matplotlib.use("Agg")  # noqa E402
 import matplotlib.pyplot as plt
-from matplotlib.ticker import NullFormatter, AutoMinorLocator
+from matplotlib.ticker import NullFormatter, AutoMinorLocator, FormatStrFormatter
 import numpy as np
 np.seterr(all="ignore")  # noqa E402
 
@@ -398,6 +398,16 @@ class Analysis(object):
         axScatter.legend(handles=dataPoints, loc=1, fontsize=8)
         axHistx.legend(fontsize=7, loc=2)
         axHisty.legend(fontsize=7)
+        # Add an axis with units of FWHM = 2*sqrt(2*ln(2))*Trace for Trace plots
+        if "race" in self.shortName and "iff" not in self.shortName:
+            axHisty2 = axHisty.twinx()  # instantiate a second axes that shares the same x-axis
+            sigmaToFwhm = 2.0*np.sqrt(2.0*np.log(2.0))
+            axHisty2.set_ylim(axScatterY1*sigmaToFwhm, axScatterY2*sigmaToFwhm)
+            axHisty2.yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
+            axHisty2.tick_params(axis="y", which="both", direction="in", labelsize=8)
+            axHisty2.set_ylabel("FWHM: $2\sqrt{2\,ln\,2}*$Trace (pixels)", rotation=270, labelpad=13,
+                                fontsize=fontSize)
+
         # Label total number of objects of each data type
         xLoc, yLoc = 0.09, 1.355
         lenNameMax = 0
