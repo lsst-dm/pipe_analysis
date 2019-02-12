@@ -310,9 +310,9 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
                                               centerDec < yMax - 0.2*pBuff):
                 axes.text(percent(ra), percent(dec, 0.5), str(patchIndexStr),
                           fontsize=fontSize - 1, horizontalalignment="center", verticalalignment="center")
-    axes.text(percent((xMin, xMax), 1.06), percent((yMin, yMax), -0.08), "RA",
+    axes.text(percent((xMin, xMax), 1.065), percent((yMin, yMax), -0.08), "RA",
               fontsize=fontSize, horizontalalignment="center", verticalalignment="center", color="green")
-    axes.text(percent((xMin, xMax), 1.15), percent((yMin, yMax), 0.01), "Dec",
+    axes.text(percent((xMin, xMax), 1.15), percent((yMin, yMax), -0.02), "Dec",
               fontsize=fontSize, horizontalalignment="center", verticalalignment="center",
               rotation="vertical", color="green")
     axes.set_xlim(xlim)

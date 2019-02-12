@@ -3,7 +3,7 @@ from __future__ import print_function
 import matplotlib
 matplotlib.use("Agg")  # noqa E402
 import matplotlib.pyplot as plt
-from matplotlib.ticker import NullFormatter, AutoMinorLocator
+from matplotlib.ticker import NullFormatter, AutoMinorLocator, FormatStrFormatter
 import numpy as np
 np.seterr(all="ignore")  # noqa E402
 
@@ -198,12 +198,12 @@ class Analysis(object):
         # definitions for the axes
         left, width = 0.12, 0.62
         bottom, height = 0.10, 0.62
-        left_h = left + width + 0.03
-        bottom_h = bottom + width + 0.02
+        left_h = left + width + 0.02
+        bottom_h = bottom + width + 0.03
         rect_scatter = [left, bottom, width, height]
-        rect_histx = [left, bottom_h, width, 0.23]
-        rect_histy = [left_h, bottom, 0.20, height]
-        topRight = [left_h + 0.003, bottom_h + 0.01, 0.22, 0.22]
+        rect_histx = [left, bottom_h, width, 0.22]
+        rect_histy = [left_h, bottom, 0.18, height]
+        topRight = [left_h - 0.013, bottom_h, 0.22, 0.22]
         # start with a rectangular Figure
         plt.figure(1)
 
@@ -400,6 +400,16 @@ class Analysis(object):
         axScatter.legend(handles=dataPoints, loc=1, fontsize=8)
         axHistx.legend(fontsize=7, loc=2)
         axHisty.legend(fontsize=7)
+        # Add an axis with units of FWHM = 2*sqrt(2*ln(2))*Trace for Trace plots
+        if "race" in self.shortName and "iff" not in self.shortName:
+            axHisty2 = axHisty.twinx()  # instantiate a second axes that shares the same x-axis
+            sigmaToFwhm = 2.0*np.sqrt(2.0*np.log(2.0))
+            axHisty2.set_ylim(axScatterY1*sigmaToFwhm, axScatterY2*sigmaToFwhm)
+            axHisty2.yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
+            axHisty2.tick_params(axis="y", which="both", direction="in", labelsize=8)
+            axHisty2.set_ylabel("FWHM: $2\sqrt{2\,ln\,2}*$Trace (pixels)", rotation=270, labelpad=13,
+                                fontsize=fontSize)
+
         # Label total number of objects of each data type
         xLoc, yLoc = 0.09, 1.355
         lenNameMax = 0
