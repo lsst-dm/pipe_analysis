@@ -31,7 +31,8 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "deconvMomStarGal", "concatenateCatalogs", "joinMatches", "checkIdLists", "checkPatchOverlap",
            "joinCatalogs", "getFluxKeys", "addColumnsToSchema", "addApertureFluxesHSC", "addFpPoint",
            "addFootprintNPix", "addRotPoint", "makeBadArray", "addFlag", "addIntFloatOrStrColumn",
-           "calibrateSourceCatalogMosaic", "calibrateSourceCatalog", "calibrateCoaddSourceCatalog",
+           "calibrateSourceCatalogMosaic", "calibrateSourceCatalogPhotoCalib",
+           "calibrateSourceCatalog", "calibrateCoaddSourceCatalog",
            "backoutApCorr", "matchJanskyToDn", "checkHscStack", "fluxToPlotString", "andCatalog",
            "writeParquet", "getRepoInfo", "findCcdKey", "getCcdNameRefList", "getDataExistsRefList",
            "orthogonalRegression", "distanceSquaredToPoly", "p1CoeffsFromP2x0y0", "p2p1CoeffsFromLinearFit",
@@ -888,10 +889,81 @@ def calibrateSourceCatalogMosaic(dataRef, catalog, fluxKeys=None, errKeys=None, 
 
     if fluxKeys is None:
         fluxKeys, errKeys = getFluxKeys(catalog.schema)
-    for name, key in list(fluxKeys.items()) + list(errKeys.items()):
-        if len(catalog[key].shape) > 1:
+    for fluxName, fluxKey in list(fluxKeys.items()) + list(errKeys.items()):
+        if len(catalog[fluxKey].shape) > 1:
             continue
-        catalog[key] /= factor
+        catalog[fluxKey] /= factor
+    return catalog
+
+
+def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
+    """Calibrate catalog with (e.g. jointcal/meas_mosaic) PhotoCalib results
+
+    Parameters
+    ----------
+    dataRef : `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+       The data reference for which the relevant datasets are to be retrieved.
+    catalog : `lsst.afw.table.SourceCatalog`
+       The source catalog to which the calibrations will be applied.
+    fluxKeys : `dict`, optional
+       A `dict` of the flux keys to which the photometric calibration will
+       be applied.  If not provided, the getFluxKeys function will be used
+       to set it.
+    zp : `float`, optional
+       A constant zero point magnitude to which to scale all the fluxes in
+       ``fluxKeys``.
+
+    Returns
+    -------
+    catalog : `lsst.afw.table.SourceCatalog`
+       The calibrated catalog.
+    """
+    wcs = dataRef.get("jointcal_wcs")
+    for record in catalog:
+        record.updateCoord(wcs)
+
+    photoCalib = dataRef.get("jointcal_photoCalib")
+    # TODO: need to scale these until DM-10153 is completed and PhotoCalib has
+    # replaced Calib entirely
+    referenceFlux = 1e23*10**(48.6/-2.5)*1e9
+    # Convert to constant zero point, as for the coadds
+    factor = referenceFlux/10.0**(0.4*zp)
+    if fluxKeys is None:
+        fluxKeys, errKeys = getFluxKeys(catalog.schema)
+
+    for fluxName, fluxKey in list(fluxKeys.items()):
+        if len(catalog[fluxKey].shape) > 1:
+            continue
+        try:  # photoCalib.instFluxToNanojansky() requires an error for each flux
+            fluxErrKey = catalog.schema.find(fluxName + "Err").key
+        except KeyError:
+            fluxErrKey = None
+        baseName = fluxName.replace("_instFlux", "")
+        if fluxErrKey:
+            calibratedFluxAndErrArray = photoCalib.instFluxToNanojansky(catalog, baseName)
+            catalog[fluxKey] = calibratedFluxAndErrArray[:, 0]
+            catalog[fluxErrKey] = calibratedFluxAndErrArray[:, 1]
+        else:
+            # photoCalib requires an error for each flux, but some don't
+            # have one in the schema (currently only certain deblender
+            # fields, e.g. deblend_psf_instFlux), so we compute the flux
+            # correction factor from any slot flux (it only depends on
+            # position, so any slot with a successful measurement will do)
+            # and apply that to any flux entries that do not have errors.
+            for fluxSlotName in catalog.schema.extract("slot*instFlux"):
+                photoCalibFactor = None
+                for src in catalog:
+                    if np.isfinite(src[fluxSlotName]):
+                        baseSlotName = fluxSlotName.replace("_instFlux", "")
+                        photoCalibFactor = (photoCalib.instFluxToNanojansky(src, baseSlotName).value /
+                                            src[fluxSlotName])
+                        break
+                if photoCalibFactor:
+                    catalog[fluxKey] *= photoCalibFactor
+                    break
+        catalog[fluxKey] /= factor
+        if fluxErrKey:
+            catalog[fluxErrKey] /= factor
     return catalog
 
 
