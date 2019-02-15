@@ -18,7 +18,8 @@ from .analysis import Analysis
 from .coaddAnalysis import CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisTask
 from .utils import (Filenamer, concatenateCatalogs, addApertureFluxesHSC, addFpPoint,
                     addFootprintNPix, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
-                    calibrateSourceCatalogMosaic, calibrateSourceCatalog, backoutApCorr,
+                    calibrateSourceCatalogMosaic, calibrateSourceCatalogPhotoCalib,
+                    calibrateSourceCatalog, backoutApCorr,
                     matchJanskyToDn, andCatalog, writeParquet, getRepoInfo, getDataExistsRefList,
                     setAliasMaps)
 from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText
@@ -152,8 +153,8 @@ class CcdAnalysis(Analysis):
 
 
 class VisitAnalysisConfig(CoaddAnalysisConfig):
-    doApplyUberCal = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input?" +
-                           " FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
+    doApplyUberCal = Field(dtype=bool, default=True, doc="Apply uberCal (jointcal/meas_mosaic) results " +
+                           "to input?  FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
 
     def setDefaults(self):
         CoaddAnalysisConfig.setDefaults(self)
@@ -162,12 +163,6 @@ class VisitAnalysisConfig(CoaddAnalysisConfig):
 
     def validate(self):
         CoaddAnalysisConfig.validate(self)
-        if self.doApplyUberCal:
-            try:
-                import lsst.meas.mosaic  # noqa F401
-            except ImportError:
-                raise ValueError("Cannot apply uber calibrations because meas_mosaic could not be imported."
-                                 "\nEither setup meas_mosaic or run with --config doApplyUberCal=False")
 
 
 class VisitAnalysisRunner(TaskRunner):
@@ -414,9 +409,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 else:
                     # Check for both jointcal_wcs and wcs for compatibility with old datasets
                     if (not (dataRef.datasetExists("jointcal_wcs") or dataRef.datasetExists("wcs")) or not
-                            dataRef.datasetExists("fcr_md")):
+                        (dataRef.datasetExists("jointcal_photoCalib") or dataRef.datasetExists("fcr_md"))):
                         continue
-            catalog = self.calibrateCatalogs(dataRef, catalog, repoInfo.metadata)
+            catalog = self.calibrateCatalogs(dataRef, catalog, repoInfo.metadata, repoInfo.dataset)
             catList.append(catalog)
 
         if not catList:
@@ -437,7 +432,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 else:
                     # Check for both jointcal_wcs and wcs for compatibility with old datasets
                     if (not (dataRef.datasetExists("jointcal_wcs") or dataRef.datasetExists("wcs")) or not
-                            dataRef.datasetExists("fcr_md")):
+                        (dataRef.datasetExists("jointcal_photoCalib") or dataRef.datasetExists("fcr_md"))):
                         continue
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
@@ -445,7 +440,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             # Set some aliases for differing schema naming conventions
             if aliasDictList is not None:
                 catalog = setAliasMaps(catalog, aliasDictList)
-            catalog = self.calibrateCatalogs(dataRef, catalog, repoInfo.metadata)
+            catalog = self.calibrateCatalogs(dataRef, catalog, repoInfo.metadata, repoInfo.dataset)
             packedMatches = repoInfo.butler.get(dataset + "Match", dataRef.dataId)
             # The reference object loader grows the bbox by the config parameter pixelMargin.  This
             # is set to 50 by default but is not reflected by the radius parameter set in the
@@ -505,17 +500,31 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
         return concatenateCatalogs(catList)
 
-    def calibrateCatalogs(self, dataRef, catalog, metadata):
+    def calibrateCatalogs(self, dataRef, catalog, metadata, photoCalibDataset):
         self.zp = 0.0
         try:
             self.zpLabel = self.zpLabel
         except Exception:
             self.zpLabel = None
         if self.config.doApplyUberCal:
-            calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
-            if self.zpLabel is None:
-                self.log.info("Applying meas_mosaic calibration to catalog")
-            self.zpLabel = "MEAS_MOSAIC"
+            if "jointcal" in photoCalibDataset:  # i.e. the processing was post-photoCalib output generation
+                if not self.zpLabel:
+                    zpStr = "MMphotoCalib" if dataRef.datasetExists("fcr_md") else "JOINTCAL"
+                    self.log.info("Applying {:} photoCalib calibration to catalog".format(zpStr))
+                self.zpLabel = "MMphotoCalib" if dataRef.datasetExists("fcr_md") else "JOINTCAL"
+                calibrated = calibrateSourceCatalogPhotoCalib(dataRef, catalog, zp=self.zp)
+            else:
+                # If here, the data were processed pre-photoCalib output generation, so must use old method
+                try:
+                    import lsst.meas.mosaic  # noqa : F401
+                except ImportError:
+                    raise ValueError("Cannot apply uber calibrations because meas_mosaic "
+                                     "could not be imported."
+                                     "\nEither setup meas_mosaic or run with --config doApplyUberCal=False")
+                if self.zpLabel is None:
+                    self.log.info("Applying meas_mosaic calibration to catalog")
+                self.zpLabel = "MEAS_MOSAIC"
+                calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
         else:
             # Scale fluxes to measured zeropoint
             self.zp = 2.5*np.log10(metadata.getScalar("FLUXMAG0"))
@@ -543,13 +552,6 @@ class CompareVisitAnalysisConfig(VisitAnalysisConfig):
 
     def validate(self):
         super(CoaddAnalysisConfig, self).validate()
-        if self.doApplyUberCal1 or self.doApplyUberCal2:
-            try:
-                import lsst.meas.mosaic  # noqa F401
-            except ImportError:
-                raise ValueError("Cannot apply uber calibrations because meas_mosaic could not be imported."
-                                 "\nEither setup meas_mosaic or run with --config doApplyUberCal1=False "
-                                 "doApplyUberCal2=False")
 
 
 class CompareVisitAnalysisRunner(TaskRunner):
@@ -728,9 +730,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             if self.config.doPlotMags:
                 self.plotMags(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
                               camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=hscRun,
-                              matchRadius=self.config.matchRadius, zpLabel=self.zpLabel,
-                              highlightList=[("first_calib_psf_used", 0, "yellow"),
-                                             ("second_calib_psf_used", 0, "green")])
+                              matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
             if self.config.doPlotSizes:
                 if ("first_base_SdssShape_psf_xx" in catalog.schema and
                         "second_base_SdssShape_psf_xx" in catalog.schema):
@@ -846,21 +846,21 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 if repoInfo1.hscRun is not None:
                     if not dataRef1.datasetExists("wcs_hsc") or not dataRef1.datasetExists("fcr_hsc_md"):
                         continue
-                # Check for both jointcal_wcs and wcs for compatibility with old datasets
+                    # Check for both jointcal_wcs and wcs for compatibility with old datasets
                 elif (not (dataRef1.datasetExists("jointcal_wcs") or dataRef1.datasetExists("wcs")) or not
-                      dataRef1.datasetExists("fcr_md")):
+                      (dataRef1.datasetExists("jointcal_photoCalib") or dataRef1.datasetExists("fcr_md"))):
                     continue
             if self.config.doApplyUberCal2:
                 if repoInfo2.hscRun is not None:
                     if not dataRef2.datasetExists("wcs_hsc") or not dataRef2.datasetExists("fcr_hsc_md"):
                         continue
                 elif (not (dataRef2.datasetExists("jointcal_wcs") or dataRef2.datasetExists("wcs")) or not
-                      dataRef2.datasetExists("fcr_md")):
+                      (dataRef2.datasetExists("jointcal_photoCalib") or dataRef2.datasetExists("fcr_md"))):
                     continue
-            srcCat1 = self.calibrateCatalogs(dataRef1, srcCat1, repoInfo1.metadata,
+            srcCat1 = self.calibrateCatalogs(dataRef1, srcCat1, repoInfo1.metadata, repoInfo1.dataset,
                                              self.config.doApplyUberCal1)
             catList1.append(srcCat1)
-            srcCat2 = self.calibrateCatalogs(dataRef2, srcCat2, repoInfo2.metadata,
+            srcCat2 = self.calibrateCatalogs(dataRef2, srcCat2, repoInfo2.metadata, repoInfo2.dataset,
                                              self.config.doApplyUberCal2)
             catList2.append(srcCat2)
 
@@ -871,7 +871,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         return (concatenateCatalogs(commonZpCatList1), concatenateCatalogs(catList1),
                 concatenateCatalogs(commonZpCatList2), concatenateCatalogs(catList2))
 
-    def calibrateCatalogs(self, dataRef, catalog, metadata, doApplyUberCal):
+    def calibrateCatalogs(self, dataRef, catalog, metadata, photoCalibDataset, doApplyUberCal):
         """Determine and apply appropriate flux calibration to the catalog
 
         Parameters
@@ -893,12 +893,28 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         except Exception:
             self.zpLabel = None
         if doApplyUberCal:
-            calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
-            if self.zpLabel is None:
-                self.log.info("Applying meas_mosaic calibration to catalog")
-                self.zpLabel = "MEAS_MOSAIC_1"
-            elif len(self.zpLabel) < 20:
-                self.zpLabel += " MEAS_MOSAIC_2"
+            if "jointcal" in photoCalibDataset:  # i.e. the processing was post-photoCalib output generation
+                if self.zpLabel is None:
+                    self.zpLabel = "MMphotoCalib_1" if dataRef.datasetExists("fcr_md") else "JOINTCAL_1"
+                elif len(self.zpLabel) < 20:
+                    self.zpLabel += " MMphotoCalib_2" if dataRef.datasetExists("fcr_md") else " JOINTCAL_2"
+                    self.log.info("Applying {:} calibration to catalogs".format(self.zpLabel))
+                calibrated = calibrateSourceCatalogPhotoCalib(dataRef, catalog, zp=self.zp)
+            else:
+                # If here, the data were processed pre-photoCalib output generation, so must use old method
+                try:
+                    import lsst.meas.mosaic  # noqa : F401
+                except ImportError:
+                    raise ValueError("Cannot apply uber calibrations because meas_mosaic "
+                                     "could not be imported."
+                                     "\nEither setup meas_mosaic or run with --config doApplyUberCal=False")
+                if self.zpLabel is None:
+                    self.log.info("Applying meas_mosaic calibration to catalog")
+                    self.zpLabel = "MEAS_MOSAIC_1"
+                elif len(self.zpLabel) < 20:
+                    self.zpLabel += " MEAS_MOSAIC_2"
+                    self.log.info("Applying {:} calibration to catalogs".format(self.zpLabel))
+                calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
         else:
             # Scale fluxes to measured zeropoint
             self.zp = 2.5*np.log10(metadata.getScalar("FLUXMAG0"))
