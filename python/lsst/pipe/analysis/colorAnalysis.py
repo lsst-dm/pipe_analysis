@@ -13,7 +13,7 @@ from collections import defaultdict
 
 from lsst.pex.config import Config, Field, ConfigField, ListField, DictField, ConfigDictField
 from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError
-from lsst.coadd.utils import TractDataIdContainer
+from lsst.pipe.drivers.utils import TractDataIdContainer
 from .analysis import Analysis, AnalysisConfig
 from .coaddAnalysis import CoaddAnalysisTask
 from .utils import (Filenamer, Enforcer, concatenateCatalogs, getFluxKeys, addColumnsToSchema,
