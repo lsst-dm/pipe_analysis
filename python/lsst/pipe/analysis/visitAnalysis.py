@@ -504,6 +504,21 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         return concatenateCatalogs(catList)
 
     def calibrateCatalogs(self, dataRef, catalog, metadata, photoCalibDataset):
+        """Determine and apply appropriate flux calibration to the catalog.
+
+        Parameters
+        ----------
+        dataRef : `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+           A dataRef is needed for call to meas_mosaic's applyMosaicResultsCatalog() in
+           utils' calibrateSourceCatalogMosaic()
+        catalog : `lsst.afw.table.source.source.SourceCatalog`
+           The catalog to which the calibration is applied in place
+        metadata : `lsst.daf.base.propertyContainer.propertyList.PropertyList`
+           The metadata associated with the catalog to obtain the FLUXMAG0 zeropoint
+        photoCalibDataset : `str`
+           Name of the dataSet to be used for the uber calibration (e.g.
+           "jointcal_photoCalib" or "fcr_md").
+        """
         self.zp = 0.0
         try:
             self.zpLabel = self.zpLabel
@@ -886,7 +901,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 concatenateCatalogs(commonZpCatList2), concatenateCatalogs(catList2))
 
     def calibrateCatalogs(self, dataRef, catalog, metadata, photoCalibDataset, doApplyUberCal, useMeasMosaic):
-        """Determine and apply appropriate flux calibration to the catalog
+        """Determine and apply appropriate flux calibration to the catalog.
 
         Parameters
         ----------
@@ -897,6 +912,9 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
            The catalog to which the calibration is applied in place
         metadata : `lsst.daf.base.propertyContainer.propertyList.PropertyList`
            The metadata associated with the catalog to obtain the FLUXMAG0 zeropoint
+        photoCalibDataset : `str`
+           Name of the dataSet to be used for the uber calibration (e.g.
+           "jointcal_photoCalib" or "fcr_md").
         doApplyUberCal : `bool`
            If True: Apply the flux and wcs uber calibrations from meas_mosaic to
                     the caltalog.
