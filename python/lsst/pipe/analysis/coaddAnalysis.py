@@ -82,7 +82,9 @@ class CoaddAnalysisConfig(Config):
                                                    "modelfit_CModel"],
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(fluxColumn)")
     columnsToCopy = ListField(dtype=str,
-                              default=["calib_psf_used", "calib_psf_candidate", "detect_isPatchInner",
+                              default=["calib_psf_used", "calib_psf_candidate", "calib_psf_reserved",
+                                       "calib_astrometry_used", "calib_photometry_used",
+                                       "calib_photometry_reserved", "detect_isPatchInner",
                                        "detect_isTractInner", "merge_peak_sky", "calib_psfUsed",
                                        "calib_psfCandidate", ],
                               doc="List of columns to copy from one source catalog to another.")
