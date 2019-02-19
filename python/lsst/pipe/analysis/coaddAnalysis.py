@@ -13,7 +13,7 @@ from lsst.daf.persistence.butler import Butler
 from lsst.pex.config import (Config, Field, ConfigField, ListField, DictField, ConfigDictField,
                              ConfigurableField)
 from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError
-from lsst.coadd.utils import TractDataIdContainer
+from lsst.pipe.drivers.utils import TractDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
 from lsst.meas.astrom import AstrometryConfig
 from lsst.meas.extensions.astrometryNet import LoadAstrometryNetObjectsTask
@@ -82,7 +82,9 @@ class CoaddAnalysisConfig(Config):
                                                    "modelfit_CModel"],
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(fluxColumn)")
     columnsToCopy = ListField(dtype=str,
-                              default=["calib_psf_used", "calib_psf_candidate", "detect_isPatchInner",
+                              default=["calib_psf_used", "calib_psf_candidate", "calib_psf_reserved",
+                                       "calib_astrometry_used", "calib_photometry_used",
+                                       "calib_photometry_reserved", "detect_isPatchInner",
                                        "detect_isTractInner", "merge_peak_sky", "calib_psfUsed",
                                        "calib_psfCandidate", ],
                               doc="List of columns to copy from one source catalog to another.")
