@@ -7,12 +7,6 @@ import numpy as np
 import scipy.odr as scipyOdr
 import scipy.optimize as scipyOptimize
 import scipy.stats as scipyStats
-try:
-    import fastparquet
-except ImportError:
-    fastparquet = None
-    import logging
-    logging.warning('fastparquet package not available.  Parquet files will not be written.')
 
 from contextlib import contextmanager
 
@@ -68,7 +62,11 @@ def writeParquet(table, path, badArray=None):
     format using the fastparquet library.  If fastparquet is not
     available, then it will do nothing.
     """
-    if fastparquet is None:
+    try:
+        import fastparquet  # noqa : F401
+    except ImportError:
+        import logging  # noqa : F401
+        logging.warning('fastparquet package not available.  Parquet files will not be written.')
         return
 
     if not path.endswith('.parq'):
