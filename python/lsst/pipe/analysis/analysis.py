@@ -496,9 +496,9 @@ class Analysis(object):
         if ((dataName == "star" or "matches" in filename or "compare" in filename) and
                 "pStar" not in filename and "race" not in filename and "resolution" not in filename):
             vMin, vMax = 0.4*self.qMin, 0.4*self.qMax
-            if "-mag_" in filename or any(ss in filename for ss in ["compareUnforced", "overlap"]):
+            if "-mag_" in filename or any(ss in filename for ss in ["compareUnforced", "overlap", "matches"]):
                 vMin, vMax = 0.6*vMin, 0.6*vMax
-            if "-matches_mag" in filename:
+            if "-matches" in filename and "_mag" in filename:
                 vMax = -vMin
         elif "CModel" in filename and "overlap" not in filename:
             vMin, vMax = 1.5*self.qMin, 0.5*self.qMax

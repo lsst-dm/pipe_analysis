@@ -1039,7 +1039,8 @@ def fluxToPlotString(fluxToPlot):
                   "modelfit_CModel_instFlux": "CModel",
                   "modelfit_CModel_flux": "CModel",
                   "modelfit_CModel": "CModel",
-                  "base_CircularApertureFlux_12_0": "CircAper 12pix"}
+                  "base_CircularApertureFlux_12_0_instFlux": "CircAper12pix",
+                  "base_CircularApertureFlux_12_0": "CircAper12pix"}
     if fluxToPlot in fluxStrMap:
         return fluxStrMap[fluxToPlot]
     else:

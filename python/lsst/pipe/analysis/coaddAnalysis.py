@@ -916,6 +916,8 @@ class CoaddAnalysisTask(CmdLineTask):
                     zpLabel=None, forcedStr=None, flagsCat=None):
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.030*self.unitScale}}),
+        fluxToPlotList = ["base_PsfFlux_instFlux", "base_CircularApertureFlux_12_0_instFlux"]
+
         if self.config.doApplyColorTerms:
             ct = self.config.colorterms.getColorterm(filterName, self.config.refObjLoader.ref_dataset_name)
         else:
@@ -928,43 +930,45 @@ class CoaddAnalysisTask(CmdLineTask):
             ct = Colorterm(primary=refFilterName, secondary=refFilterName)
             self.log.warn("Note: no colorterms loaded for {:s}, thus no colorterms will be applied to "
                           "the reference catalog".format(self.config.refObjLoader.ref_dataset_name))
-        if "src_calib_psf_used" in matches.schema:
-            shortName = description + "_mag_calib_psf_used"
+        for fluxName in fluxToPlotList:
+            if "src_calib_psf_used" in matches.schema:
+                shortName = description + "_" + fluxToPlotString(fluxName) + "_mag_calib_psf_used"
+                self.log.info("shortName = {:s}".format(shortName))
+                self.AnalysisClass(matches, MagDiffMatches(fluxName, ct, zp=0.0, unitScale=self.unitScale),
+                                   "%s - ref (calib_psf_used) (%s)" % (fluxToPlotString(fluxName), unitStr),
+                                   shortName,
+                                   self.config.analysisMatches, prefix="src_", goodKeys=["calib_psf_used"],
+                                   qMin=-0.15, qMax=0.1, labeller=MatchesStarGalaxyLabeller(),
+                                   flagsCat=flagsCat, unitScale=self.unitScale,
+                                   ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
+                                             camera=camera, ccdList=ccdList, tractInfo=tractInfo,
+                                             patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
+                                             zpLabel=zpLabel, forcedStr=forcedStr)
+            if "src_calib_photometry_used" in matches.schema:
+                shortName = description + "_" + fluxToPlotString(fluxName) + "_mag_calib_photometry_used"
+                self.log.info("shortName = {:s}".format(shortName))
+                self.AnalysisClass(matches, MagDiffMatches(fluxName, ct, zp=0.0, unitScale=self.unitScale),
+                                   "   %s - ref (calib_photom_used) (%s)" % (fluxToPlotString(fluxName),
+                                                                             unitStr),
+                                   shortName, self.config.analysisMatches, prefix="src_",
+                                   goodKeys=["calib_photometry_used"], qMin=-0.15, qMax=0.15,
+                                   labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
+                                   unitScale=self.unitScale,
+                                   ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
+                                             camera=camera, ccdList=ccdList, tractInfo=tractInfo,
+                                             patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
+                                             zpLabel=zpLabel, forcedStr=forcedStr)
+            shortName = description + "_" + fluxToPlotString(fluxName) + "_mag"
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_instFlux", ct, zp=0.0,
-                                                       unitScale=self.unitScale),
-                               "MagPsf - ref (calib_psf_used) (%s)" % unitStr, shortName,
-                               self.config.analysisMatches, prefix="src_", goodKeys=["calib_psf_used"],
-                               qMin=-0.15, qMax=0.1, labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
+            self.AnalysisClass(matches, MagDiffMatches(fluxName, ct, zp=0.0, unitScale=self.unitScale),
+                               "%s - ref (%s)" % (fluxToPlotString(fluxName), unitStr), shortName,
+                               self.config.analysisMatches,
+                               prefix="src_", qMin=-0.15, qMax=0.5, labeller=MatchesStarGalaxyLabeller(),
                                unitScale=self.unitScale,
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                          camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                          patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                          zpLabel=zpLabel, forcedStr=forcedStr)
-        if "src_calib_photometry_used" in matches.schema:
-            shortName = description + "_mag_calib_photometry_used"
-            self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_instFlux", ct, zp=0.0,
-                                                       unitScale=self.unitScale),
-                               "   MagPsf - ref (calib_photom_used) (%s)" % unitStr, shortName,
-                               self.config.analysisMatches, prefix="src_", goodKeys=["calib_photometry_used"],
-                               qMin=-0.15, qMax=0.15, labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
-                               unitScale=self.unitScale,
-                               ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
-                                         camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                                         patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                         zpLabel=zpLabel, forcedStr=forcedStr)
-        shortName = description + "_mag"
-        self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(matches, MagDiffMatches("base_PsfFlux_instFlux", ct, zp=0.0,
-                                                   unitScale=self.unitScale),
-                           "MagPsf - ref (%s)" % unitStr, shortName, self.config.analysisMatches,
-                           prefix="src_", qMin=-0.15, qMax=0.5, labeller=MatchesStarGalaxyLabeller(),
-                           unitScale=self.unitScale,
-                           ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
-                                     camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
-                                     hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
-                                     forcedStr=forcedStr)
 
         unitStr = "mas" if self.config.toMilli else "arcsec"
         if "src_calib_astrometry_used" in matches.schema:
