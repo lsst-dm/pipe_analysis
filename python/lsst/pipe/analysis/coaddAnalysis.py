@@ -220,7 +220,7 @@ class CoaddAnalysisTask(CmdLineTask):
         if haveForced:
             coaddList += [forced]
         aliasDictList = [self.config.flagsToAlias, ]
-        if repoInfo.hscRun is not None and self.config.srcSchemaMap is not None:
+        if repoInfo.hscRun and self.config.srcSchemaMap is not None:
             aliasDictList += [self.config.srcSchemaMap]
         for cat in coaddList:
             cat = setAliasMaps(cat, aliasDictList)
@@ -432,7 +432,7 @@ class CoaddAnalysisTask(CmdLineTask):
             # (which requires a refObjLoader to be initialized).
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
             # Set some aliases for differing schema naming conventions
-            if aliasDictList is not None:
+            if aliasDictList:
                 catalog = setAliasMaps(catalog, aliasDictList)
             if dataset != "deepCoadd_meas" and any(ss not in catalog.schema
                                                    for ss in self.config.columnsToCopy):
@@ -444,7 +444,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                               list(self.config.analysis.flags) if
                                               col not in catalog.schema and col in unforced.schema and
                                               not (hscRun and col == "slot_Centroid_flag")])
-                if aliasDictList is not None:
+                if aliasDictList:
                     catalog = setAliasMaps(catalog, aliasDictList)
 
             # Set boolean array indicating sources deemed unsuitable for qa analyses
@@ -493,7 +493,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 continue
 
             # Set the alias maps for the matches sources (i.e. the .second attribute schema for each match)
-            if aliasDictList is not None:
+            if aliasDictList:
                 for mm in matches:
                     mm.second = setAliasMaps(mm.second, aliasDictList)
 
@@ -510,7 +510,7 @@ class CoaddAnalysisTask(CmdLineTask):
             if self.config.doBackoutApCorr:
                 catalog = backoutApCorr(catalog)
             # Set the alias maps for the matched catalog sources
-            if aliasDictList is not None:
+            if aliasDictList:
                 catalog = setAliasMaps(catalog, aliasDictList, prefix="src_")
 
             catList.append(catalog)
@@ -538,7 +538,7 @@ class CoaddAnalysisTask(CmdLineTask):
     def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                  patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
                  fluxToPlotList=None, postFix="", flagsCat=None, highlightList=None):
-        if fluxToPlotList is None:
+        if not fluxToPlotList:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
@@ -837,7 +837,7 @@ class CoaddAnalysisTask(CmdLineTask):
     def plotCompareUnforced(self, forced, unforced, filenamer, dataId, butler=None, camera=None, ccdList=None,
                             tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
                             fluxToPlotList=None):
-        if fluxToPlotList is None:
+        if not fluxToPlotList:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = None
@@ -878,7 +878,7 @@ class CoaddAnalysisTask(CmdLineTask):
     def plotOverlaps(self, overlaps, filenamer, dataId, butler=None, camera=None, ccdList=None,
                      tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
                      forcedStr=None, postFix="", fluxToPlotList=None, flagsCat=None):
-        if fluxToPlotList is None:
+        if not fluxToPlotList:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
         magEnforcer = Enforcer(requireLess={"star": {"stdev": 0.003*self.unitScale}})
@@ -1242,9 +1242,9 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         aliasDictList0 = [self.config.flagsToAlias, ]
         for hscRun, catalog in zip(repoList, coaddList):
             aliasDictList = aliasDictList0
-            if hscRun is not None and self.config.srcSchemaMap is not None:
+            if hscRun and self.config.srcSchemaMap is not None:
                 aliasDictList += [self.config.srcSchemaMap]
-            if aliasDictList is not None:
+            if aliasDictList:
                 catalog = setAliasMaps(catalog, aliasDictList)
 
         # Set boolean array indicating sources deemed unsuitable for qa analyses
@@ -1272,9 +1272,9 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         forced = self.matchCatalogs(forced1, forced2)
 
         aliasDictList = aliasDictList0
-        if hscRun is not None and self.config.srcSchemaMap is not None:
+        if hscRun and self.config.srcSchemaMap is not None:
             aliasDictList += [self.config.srcSchemaMap]
-        if aliasDictList is not None:
+        if aliasDictList:
             forced = setAliasMaps(forced, aliasDictList)
             unforced = setAliasMaps(unforced, aliasDictList)
 
@@ -1282,7 +1282,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                       len(forced1), len(forced2)))
 
         filenamer = Filenamer(repoInfo1.butler, "plotCompareCoadd", repoInfo1.dataId)
-        hscRun = repoInfo1.hscRun if repoInfo1.hscRun is not None else repoInfo2.hscRun
+        hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
+
         if self.config.doPlotMags:
             self.plotMags(forced, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
                           camera=repoInfo1.camera, tractInfo=repoInfo1.tractInfo, patchList=patchList1,
@@ -1343,11 +1344,9 @@ class CompareCoaddAnalysisTask(CmdLineTask):
     def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                  patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
                  fluxToPlotList=None, postFix="", flagsCat=None, highlightList=None):
-        if fluxToPlotList is None:
+        if not fluxToPlotList:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
-        if fluxToPlotList is None:
-            fluxToPlotList = self.config.fluxToPlotList
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in fluxToPlotList:
             if ("first_" + col + "_instFlux" in catalog.schema and "second_" + col + "_instFlux" in
@@ -1372,9 +1371,9 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         distEnforcer = None
         centroidStr1, centroidStr2 = "base_SdssCentroid", "base_SdssCentroid"
         if bool(hscRun1) ^ bool(hscRun2):
-            if hscRun1 is None:
+            if not hscRun1:
                 centroidStr1 = "base_SdssCentroid_Rot"
-            if hscRun2 is None:
+            if not hscRun2:
                 centroidStr2 = "base_SdssCentroid_Rot"
 
         shortName = "diff_x"
@@ -1592,7 +1591,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
     def plotApCorrs(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                     tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
                     forcedStr=None, fluxToPlotList=None):
-        if fluxToPlotList is None:
+        if not fluxToPlotList:
             fluxToPlotList = self.config.fluxToPlotList
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in fluxToPlotList:
