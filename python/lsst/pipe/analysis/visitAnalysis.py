@@ -30,7 +30,7 @@ import lsst.afw.table as afwTable
 class CcdAnalysis(Analysis):
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
                 tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
-                postFix="", plotRunStats=True, highlightList=None, haveFpCoords=None):
+                uberCalLabel=None, postFix="", plotRunStats=True, highlightList=None, haveFpCoords=None):
         stats = self.stats
         if self.config.doPlotCcdXy:
             self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix),
@@ -263,22 +263,21 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             except Exception:
                 pass
 
+            # Dict of all parameters common to plot* functions
+            plotKwargs = dict(butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
+                              hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
+
             if self.config.doPlotFootprintNpix:
                 self.plotFootprintHist(catalog,
                                        filenamer(repoInfo.dataId, description="footNpix", style="hist"),
-                                       repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
-                                       ccdList=ccdListPerTract, hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
-                self.plotFootprint(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                                   camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
-                                   zpLabel=self.zpLabel, plotRunStats=False,
-                                   highlightList=[("parent", 0, "yellow"), ])
+                                       repoInfo.dataId, **plotKwargs)
+                self.plotFootprint(catalog, filenamer, repoInfo.dataId, plotRunStats=False,
+                                   highlightList=[("parent", 0, "yellow"), ], **plotKwargs)
 
             if self.config.doPlotQuiver:
                 self.plotQuiver(catalog,
                                 filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
-                                dataId=repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
-                                ccdList=ccdListPerTract, hscRun=repoInfo.hscRun, zpLabel=self.zpLabel,
-                                scale=2)
+                                dataId=repoInfo.dataId, scale=2, **plotKwargs)
 
             # Create mag comparison plots using common ZP
             if self.config.doPlotMags and not commonZpDone:
@@ -287,41 +286,29 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     zpLabel = zpLabel + " " + self.catLabel
                 except Exception:
                     pass
-                self.plotMags(commonZpCat, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                              camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
-                              zpLabel=zpLabel,
+                self.plotMags(commonZpCat, filenamer, repoInfo.dataId,
                               fluxToPlotList=["base_GaussianFlux", "base_CircularApertureFlux_12_0"],
-                              postFix="_commonZp")
+                              postFix="_commonZp", **plotKwargs)
                 commonZpDone = True
             # Now source catalog calibrated to either FLUXMAG0 or meas_mosaic result for remainder of plots
             if self.config.doPlotMags:
-                self.plotMags(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                              camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
-                              zpLabel=self.zpLabel)
+                self.plotMags(catalog, filenamer, repoInfo.dataId, **plotKwargs)
             if self.config.doPlotStarGalaxy:
                 if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
-                    self.plotStarGal(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                                     camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
-                                     zpLabel=self.zpLabel)
+                    self.plotStarGal(catalog, filenamer, repoInfo.dataId, **plotKwargs)
                 else:
                     self.log.warn("Cannot run plotStarGal: " +
                                   "ext_shapeHSM_HsmSourceMoments_xx not in catalog.schema")
             if self.config.doPlotSizes:
                 if "base_SdssShape_psf_xx" in catalog.schema:
-                    self.plotSizes(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                                   camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
-                                   zpLabel=self.zpLabel)
+                    self.plotSizes(catalog, filenamer, repoInfo.dataId, **plotKwargs)
                 else:
                     self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
             if self.config.doPlotCentroids and self.haveFpCoords:
-                self.plotCentroidXY(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                                    camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
-                                    zpLabel=self.zpLabel)
+                self.plotCentroidXY(catalog, filenamer, repoInfo.dataId, **plotKwargs)
             if self.config.doPlotMatches:
                 matches = self.readSrcMatches(dataRefListTract, "src", repoInfo, aliasDictList=aliasDictList)
-                self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
-                                 butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
-                                 hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
+                self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId, **plotKwargs)
 
             for cat in self.config.externalCatalogs:
                 if self.config.photoCatName not in cat:
@@ -329,9 +316,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                         matches = self.matchCatalog(catalog, repoInfo.filterName,
                                                     self.config.externalCatalogs[cat])
                         self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
-                                         butler=repoInfo.butler, camera=repoInfo.camera,
-                                         ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
-                                         matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                                         **plotKwargs)
 
     def readCatalogs(self, dataRefList, dataset, repoInfo, aliasDictList=None):
         """Read in and concatenate catalogs of type dataset in lists of data references

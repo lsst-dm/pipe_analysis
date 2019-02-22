@@ -184,7 +184,8 @@ class Analysis(object):
 
     def plotAgainstMagAndHist(self, log, filename, stats=None, camera=None, ccdList=None, tractInfo=None,
                               patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
-                              plotRunStats=True, highlightList=None, filterStr=None, extraLabels=None):
+                              plotRunStats=True, highlightList=None, filterStr=None, extraLabels=None,
+                              uberCalLabel=None):
         """Plot quantity against magnitude with side histogram"""
         if filterStr is None:
             filterStr = ""
@@ -417,7 +418,9 @@ class Analysis(object):
         labelVisit(filename, plt, axScatter, 1.18, -0.11, color="green")
         if zpLabel is not None:
             prefix = "" if "GE applied" in zpLabel else "zp: "
-            plotText(zpLabel, plt, axScatter, 0.09, -0.11, prefix=prefix, color="green")
+            plotText(zpLabel, plt, axScatter, 0.09, -0.09, prefix=prefix, color="green")
+        if uberCalLabel:
+            plotText(uberCalLabel, plt, axScatter, 0.09, -0.14, prefix="uberCal: ", fontSize=8, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axScatter, 0.87, -0.11, prefix="cat: ", color="green")
         if extraLabels is not None:
@@ -427,7 +430,7 @@ class Analysis(object):
         plt.close()
 
     def plotHistogram(self, filename, numBins=51, stats=None, hscRun=None, matchRadius=None, zpLabel=None,
-                      forcedStr=None, camera=None, filterStr=None):
+                      forcedStr=None, camera=None, filterStr=None, uberCalLabel=None):
         """Plot histogram of quantity"""
         fig, axes = plt.subplots(1, 1)
         axes.axvline(0, linestyle="--", color="0.6")
@@ -463,7 +466,9 @@ class Analysis(object):
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
             prefix = "" if "GE applied" in zpLabel else "zp: "
-            plotText(zpLabel, plt, axes, 0.13, -0.09, prefix=prefix, color="green")
+            plotText(zpLabel, plt, axes, 0.13, -0.08, prefix=prefix, color="green")
+        if uberCalLabel:
+            plotText(uberCalLabel, plt, axes, 0.13, -0.12, prefix="uberCal: ", fontSize=8, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
         fig.savefig(filename, dpi=120)
@@ -471,7 +476,8 @@ class Analysis(object):
 
     def plotSkyPosition(self, filename, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
                         camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
-                        matchRadius=None, zpLabel=None, highlightList=None, forcedStr=None, dataName="star"):
+                        matchRadius=None, zpLabel=None, highlightList=None, forcedStr=None,
+                        dataName="star", uberCalLabel=None):
         """Plot quantity as a function of position"""
         pad = 0.02  # Number of degrees to pad the axis ranges
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
@@ -592,7 +598,9 @@ class Analysis(object):
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
             prefix = "" if "GE applied" in zpLabel else "zp: "
-            plotText(zpLabel, plt, axes, 0.13, -0.09, prefix=prefix, color="green")
+            plotText(zpLabel, plt, axes, 0.13, -0.07, prefix=prefix, color="green")
+        if uberCalLabel:
+            plotText(uberCalLabel, plt, axes, 0.13, -0.11, prefix="uberCal: ", fontSize=8, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
         if highlightList is not None:
@@ -635,7 +643,8 @@ class Analysis(object):
         fig.savefig(filename, dpi=150)
         plt.close(fig)
 
-    def plotRaDec(self, filename, stats=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None):
+    def plotRaDec(self, filename, stats=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
+                  uberCalLabel=None):
         """Plot quantity as a function of RA, Dec"""
 
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
@@ -673,6 +682,8 @@ class Analysis(object):
         if zpLabel is not None:
             prefix = "" if "GE applied" in zpLabel else "zp: "
             plotText(zpLabel, plt, axes[0], 0.13, -0.09, prefix=prefix, color="green")
+        if uberCalLabel:
+            plotText(uberCalLabel, plt, axes[0], 0.13, -0.14, prefix="uberCal: ", fontSize=8, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes[0], 0.85, -0.09, prefix="cat: ", color="green")
         fig.savefig(filename, dpi=120)
@@ -680,7 +691,8 @@ class Analysis(object):
 
     def plotQuiver(self, catalog, filename, log, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
                    camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
-                   matchRadius=None, zpLabel=None, forcedStr=None, dataName="star", scale=1):
+                   matchRadius=None, zpLabel=None, forcedStr=None, dataName="star", uberCalLabel=None,
+                   scale=1):
         """Plot ellipticity residuals quiver plot"""
 
         # Use HSM algorithm results if present, if not, use SDSS Shape
@@ -791,18 +803,20 @@ class Analysis(object):
             labelCamera(camera, plt, axes, 0.5, 1.09)
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
-            plotText(zpLabel, plt, axes, 0.13, -0.1, prefix="zp: ", color="green")
-        plotText(shapeAlgorithm, plt, axes, 0.77, -0.1, prefix="Shape Alg: ", fontSize=8, color="green")
+            plotText(zpLabel, plt, axes, 0.13, -0.08, prefix="zp: ", color="green")
+        if uberCalLabel:
+            plotText(uberCalLabel, plt, axes, 0.13, -0.12, prefix="uberCal: ", fontSize=8, color="green")
+        plotText(shapeAlgorithm, plt, axes, 0.85, -0.08, prefix="Shape Alg: ", fontSize=8, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes, 0.99, -0.1, prefix="cat: ", fontSize=8, color="green")
+            plotText(forcedStr, plt, axes, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
         axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
 
         fig.savefig(filename, dpi=150)
         plt.close(fig)
 
     def plotInputCounts(self, catalog, filename, log, dataId, butler, tractInfo, patchList=None, camera=None,
-                        forcedStr=None, cmap=plt.cm.viridis, alpha=0.5, doPlotTractImage=True,
-                        doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000):
+                        forcedStr=None, uberCalLabel=None, cmap=plt.cm.viridis, alpha=0.5,
+                        doPlotTractImage=True, doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000):
         """Plot grayscale image of tract with base_InputCounts_value overplotted
 
         Parameters
@@ -945,37 +959,36 @@ class Analysis(object):
             labelCamera(camera, plt, axes, 0.5, 1.09)
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes, 0.99, -0.1, prefix="cat: ", fontSize=8, color="green")
+            plotText(forcedStr, plt, axes, 0.99, -0.11, prefix="cat: ", fontSize=8, color="green")
+        if uberCalLabel:
+            plotText(uberCalLabel, plt, axes, 0.01, -0.11, prefix="uberCal: ", fontSize=8, color="green")
 
         fig.savefig(filename, dpi=1200)  # Needs to be fairly hi-res to see enough detail
         plt.close(fig)
 
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
                 tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
-                postFix="", plotRunStats=True, highlightList=None, extraLabels=None):
+                postFix="", plotRunStats=True, highlightList=None, extraLabels=None, uberCalLabel=None):
         """Make all plots"""
         stats = self.stats
+        # Dict of all parameters common to plot* functions
+        plotKwargs = dict(stats=stats, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
+                          patchList=patchList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
+                          forcedStr=forcedStr, uberCalLabel=uberCalLabel)
         if "galacticExtinction" not in self.shortName:
             self.plotAgainstMagAndHist(log, filenamer(dataId, description=self.shortName,
                                                       style="psfMagHist" + postFix),
-                                       stats=stats, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                                       patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                       zpLabel=zpLabel, forcedStr=forcedStr, plotRunStats=plotRunStats,
-                                       highlightList=highlightList, filterStr=dataId['filter'],
-                                       extraLabels=extraLabels)
+                                       plotRunStats=plotRunStats, highlightList=highlightList,
+                                       filterStr=dataId['filter'], extraLabels=extraLabels, **plotKwargs)
 
         if self.config.doPlotOldMagsHist and "galacticExtinction" not in self.shortName:
             self.plotAgainstMag(filenamer(dataId, description=self.shortName, style="psfMag" + postFix),
-                                stats=stats, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
-                                forcedStr=forcedStr)
+                                **plotKwargs)
             self.plotHistogram(filenamer(dataId, description=self.shortName, style="hist" + postFix),
-                               stats=stats, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
-                               forcedStr=forcedStr)
+                               **plotKwargs)
 
-        skyPositionKwargs = dict(stats=stats, dataId=dataId, butler=butler, camera=camera, ccdList=ccdList,
-                                 tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
-                                 matchRadius=matchRadius, zpLabel=zpLabel, highlightList=highlightList,
-                                 forcedStr=forcedStr)
+        skyPositionKwargs = dict(dataId=dataId, butler=butler, highlightList=highlightList)
+        skyPositionKwargs.update(plotKwargs)
         if "all" in self.data:
             styleStr = "sky-all"
             dataName = "all"
@@ -1001,8 +1014,7 @@ class Analysis(object):
 
         if self.config.doPlotRaDec:
             self.plotRaDec(filenamer(dataId, description=self.shortName, style="radec" + postFix),
-                           stats=stats, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
-                           forcedStr=forcedStr)
+                           **plotKwargs)
         log.info("Statistics from %s of %s: %s" % (dataId, self.quantityName, stats))
         if enforcer:
             enforcer(stats, dataId, log, self.quantityName)

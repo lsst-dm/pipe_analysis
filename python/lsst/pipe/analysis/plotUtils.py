@@ -20,7 +20,8 @@ __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "M
            "CosmosLabeller", "plotText", "annotateAxes", "labelVisit", "labelCamera",
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
            "plotCcdOutline", "rotatePixelCoords", "bboxToXyCoordLists", "getRaDecMinMaxPatchList",
-           "percent", "setPtSize", "getQuiver", "makeAlphaCmap", "buildTractImage"]
+           "percent", "setPtSize", "getQuiver", "makeAlphaCmap", "buildTractImage",
+           "determineUberCalLabel"]
 
 
 class AllLabeller(object):
@@ -605,3 +606,39 @@ def buildTractImage(butler, dataId, tractInfo, patchList=None, coaddName="deep")
     image = afwImage.ImageF(afwGeom.ExtentI(tractBbox.getMaxX() + 1, tractBbox.getMaxY() + 1))
     image.array[:] = tractArray
     return image
+
+
+def determineUberCalLabel(repoInfo, patch, coaddName="deep"):
+    """Determine uber-calibration (meas_mosaic/jointcal) applied to make coadd.
+
+    Parameters
+    ----------
+    repoInfo : `lsst.pipe.base.struct.Struct`
+       A struct containing elements with repo information needed to create
+       appropriate dataIds to look for the uber-calibration datasets.
+    patch : `str`
+       An existing patch to use in the coaddDataId.
+    coaddName : `str`, optional
+       The base name of the coadd (e.g. "deep" or "goodSeeing").
+       Default is "deep".
+
+    Returns
+    -------
+    uberCalLabel : `str`
+       The label to be used for the uberCal used.
+    """
+    # Find a visit/ccd input so that you can check for meas_mosaic input (i.e. to set uberCalLabel)
+    coaddDataId = {"tract": repoInfo.tractInfo.getId(), "patch": patch, "filter": repoInfo.filterName}
+    coadd = repoInfo.butler.get(coaddName + "Coadd_calexp", coaddDataId, immediate=True)
+    coaddInputs = coadd.getInfo().getCoaddInputs()
+    visitDataId = {"visit": coaddInputs.ccds[0]["visit"], "ccd": coaddInputs.ccds[0]["ccd"],
+                   "filter": repoInfo.filterName, "tract": repoInfo.tractInfo.getId()}
+    if repoInfo.butler.datasetExists("fcr_md", dataId=visitDataId):
+        uberCalLabel = "MEAS_MOSAIC"
+    elif (not repoInfo.butler.datasetExists("fcr_md", dataId=visitDataId) and
+          repoInfo.butler.datasetExists("jointcal_photoCalib", dataId=visitDataId)):
+        uberCalLabel = "JOINTCAL"
+    else:
+        uberCalLabel = "None"
+
+    return uberCalLabel
