@@ -79,8 +79,8 @@ class CoaddAnalysisConfig(Config):
     toMilli = Field(dtype=bool, default=True, doc="Print stats in milli units (i.e. mas, mmag)?")
     srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
                              doc="Mapping between different stack (e.g. HSC vs. LSST) schema names")
-    fluxToPlotList = ListField(dtype=str, default=["base_GaussianFlux", "ext_photometryKron_KronFlux",
-                                                   "modelfit_CModel"],
+    fluxToPlotList = ListField(dtype=str, default=["base_GaussianFlux", "base_CircularApertureFlux_12_0",
+                                                   "ext_photometryKron_KronFlux", "modelfit_CModel"],
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(fluxColumn)")
     columnsToCopy = ListField(dtype=str,
                               default=["calib_psf_used", "calib_psf_candidate", "calib_psf_reserved",
@@ -526,7 +526,7 @@ class CoaddAnalysisTask(CmdLineTask):
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in fluxToPlotList:
-            if col + "_instFlux" in catalog.schema:
+            if col + "_instFlux" in catalog.schema and not (forcedStr == "forced" and "CircularAper" in col):
                 shortName = "mag_" + col + postFix
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog,
