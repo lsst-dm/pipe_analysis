@@ -248,10 +248,10 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
             # Create and write parquet tables
             if self.config.doWriteParquetTables:
-                tableFilenamer = Filenamer(repoInfo.butler, 'qaTableVisit', repoInfo.dataId)
-                writeParquet(catalog, tableFilenamer(repoInfo.dataId, description='catalog'), badArray=bad)
-                writeParquet(commonZpCat, tableFilenamer(repoInfo.dataId, description='commonZp'),
-                             badArray=badCommonZp)
+                dataRef_catalog = repoInfo.butler.dataRef('analysisVisitTable', dataId=repoInfo.dataId)
+                writeParquet(dataRef_catalog, catalog, badArray=bad)
+                dataRef_commonZp = repoInfo.butler.dataRef('analysisVisitTable_commonZp', dataId=repoInfo.dataId)
+                writeParquet(dataRef_commonZp, commonZpCat, badArray=badCommonZp)
                 if self.config.writeParquetOnly:
                     self.log.info("Exiting after writing Parquet tables.  No plots generated.")
                     return

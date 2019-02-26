@@ -13,5 +13,7 @@ setupRequired(pipe_drivers)
 setupRequired(pipe_tasks)
 setupRequired(sconsUtils)
 
+setupOptional(qa_explorer)
+
 envPrepend(PYTHONPATH, ${PRODUCT_DIR}/python)
 envPrepend(PATH, ${PRODUCT_DIR}/bin)

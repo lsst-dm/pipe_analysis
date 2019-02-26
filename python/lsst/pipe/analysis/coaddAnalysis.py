@@ -271,10 +271,11 @@ class CoaddAnalysisTask(CmdLineTask):
 
         # Create and write parquet tables
         if self.config.doWriteParquetTables:
-            tableFilenamer = Filenamer(repoInfo.butler, 'qaTableCoadd', repoInfo.dataId)
             if haveForced:
-                writeParquet(forced, tableFilenamer(repoInfo.dataId, description='forced'), badArray=bad)
-            writeParquet(unforced, tableFilenamer(repoInfo.dataId, description='unforced'), badArray=bad)
+                dataRef_forced = repoInfo.butler.dataRef('analysisCoaddTable_forced', dataId=repoInfo.dataId)
+                writeParquet(dataRef_forced, forced, badArray=bad)
+            dataRef_unforced = repoInfo.butler.dataRef('analysisCoaddTable_unforced', dataId=repoInfo.dataId)
+            writeParquet(dataRef_unforced, unforced, badArray=bad)
             if self.config.writeParquetOnly:
                 self.log.info("Exiting after writing Parquet tables.  No plots generated.")
                 return
