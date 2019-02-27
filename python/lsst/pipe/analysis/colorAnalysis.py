@@ -419,8 +419,8 @@ class ColorAnalysisTask(CmdLineTask):
 
         # Create and write parquet tables
         if self.config.doWriteParquetTables:
-            tableFilenamer = Filenamer(repoInfo.butler, 'qaTableColor', repoInfo.dataId)
-            writeParquet(principalColCats, tableFilenamer(repoInfo.dataId, description='forced'))
+            dataRef_color = repoInfo.butler.dataRef('analysisColorTable', dataId=repoInfo.dataId)
+            writeParquet(dataRef_color, principalColCats)
             if self.config.writeParquetOnly:
                 self.log.info("Exiting after writing Parquet tables.  No plots generated.")
                 return

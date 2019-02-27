@@ -38,15 +38,15 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "lineFromP2Coeffs", "linesFromP2P1Coeffs", "makeEqnStr", "catColors", "setAliasMaps"]
 
 
-def writeParquet(table, path, badArray=None):
-    """Write an afwTable into Parquet format
+def writeParquet(dataRef, table, badArray=None):
+    """Write an afwTable to a desired ParquetTable butler dataset
 
     Parameters
     ----------
+    dataRef : `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+        Reference to butler dataset.
     table : `lsst.afw.table.SourceCatalog`
        Table to be written to parquet.
-    path : `str`
-       Path to which to write.  Must end in ".parq".
     badArray : `numpy.ndarray`, optional
        Boolean array with same length as catalog whose values indicate whether the source was deemed
        inappropriate for qa analyses (`None` by default).
@@ -59,18 +59,16 @@ def writeParquet(table, path, badArray=None):
     -----
     This function first converts the afwTable to an astropy table,
     then to a pandas DataFrame, which is then written to parquet
-    format using the fastparquet library.  If fastparquet is not
+    format using the butler.  If qa_explorer is not
     available, then it will do nothing.
     """
-    try:
-        import fastparquet  # noqa : F401
-    except ImportError:
-        import logging  # noqa : F401
-        logging.warning('fastparquet package not available.  Parquet files will not be written.')
-        return
 
-    if not path.endswith('.parq'):
-        raise ValueError('Please provide a filename ending in .parq.')
+    try:
+        from lsst.qa.explorer.parquetTable import ParquetTable
+    except ImportError:
+        import logging
+        logging.warning('Parquet files will not be written (qa_explorer is not setup).')
+        return
 
     if badArray is not None:
         # Add flag indicating source "badness" for qa analyses for the benefit of the Parquet files
@@ -78,8 +76,8 @@ def writeParquet(table, path, badArray=None):
         table = addFlag(table, badArray, "qaBad_flag", "Set to True for any source deemed bad for qa")
     df = table.asAstropy().to_pandas()
     df = df.set_index('id', drop=True)
-    fastparquet.write(path, df)
 
+    dataRef.put(ParquetTable(dataFrame=df))
 
 class Filenamer(object):
     """Callable that provides a filename given a style"""
