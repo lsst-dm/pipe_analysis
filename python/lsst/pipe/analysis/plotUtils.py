@@ -139,7 +139,7 @@ def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", fontSize=9, color="k", c
 
 def annotateAxes(filename, plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff=0.05,
                  fontSize=8, ha="left", va="top", color="blue", isHist=False, hscRun=None, matchRadius=None,
-                 writeMinMax=None, unitScale=1.0):
+                 matchRadiusUnitStr="\"", writeMinMax=None, unitScale=1.0):
     xOffFact = 0.67*len(" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]))
     axes.annotate(dataSet+r" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]),
                   xy=(x0, y0), xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize, color=color)
@@ -175,8 +175,8 @@ def annotateAxes(filename, plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=
                       xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize)
         yOffMult += 1
     if matchRadius is not None:
-        axes.annotate("Match radius = {0:.2f}\"".format(matchRadius), xy=(x0, y0 - yOffMult*yOff),
-                      xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize)
+        axes.annotate("Match radius = {0:.2f}{1:s}".format(matchRadius, matchRadiusUnitStr),
+                      xy=(x0, y0 - yOffMult*yOff), xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize)
         yOffMult += 1
     if hscRun is not None:
         axes.annotate("HSC stack run: {0:s}".format(hscRun), xy=(x0, y0 - yOffMult*yOff),

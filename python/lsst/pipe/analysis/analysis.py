@@ -151,7 +151,7 @@ class Analysis(object):
                                     0.005*self.unitScale))
 
     def plotAgainstMag(self, filename, stats=None, camera=None, ccdList=None, tractInfo=None, patchList=None,
-                       hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None):
+                       hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None):
         """Plot quantity against magnitude"""
         fig, axes = plt.subplots(1, 1)
         plt.axhline(0, linestyle="--", color="0.4")
@@ -171,7 +171,8 @@ class Analysis(object):
         axes.set_xlim(magMin, magMax)
         if stats is not None:
             annotateAxes(filename, plt, axes, stats, "star", self.magThreshold, hscRun=hscRun,
-                         matchRadius=matchRadius, unitScale=self.unitScale)
+                         matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                         unitScale=self.unitScale)
         axes.legend(handles=dataPoints, loc=1, fontsize=8)
         labelVisit(filename, plt, axes, 0.5, 1.05)
         if zpLabel is not None:
@@ -183,9 +184,9 @@ class Analysis(object):
         plt.close(fig)
 
     def plotAgainstMagAndHist(self, log, filename, stats=None, camera=None, ccdList=None, tractInfo=None,
-                              patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
-                              plotRunStats=True, highlightList=None, filterStr=None, extraLabels=None,
-                              uberCalLabel=None):
+                              patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
+                              zpLabel=None, forcedStr=None, plotRunStats=True, highlightList=None,
+                              filterStr=None, extraLabels=None, uberCalLabel=None):
         """Plot quantity against magnitude with side histogram"""
         if filterStr is None:
             filterStr = ""
@@ -393,7 +394,8 @@ class Analysis(object):
 
         if stats is not None:
             l1, l2 = annotateAxes(filename, plt, axScatter, stats, dataType, self.magThreshold,
-                                  hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
+                                  hscRun=hscRun, matchRadius=matchRadius,
+                                  matchRadiusUnitStr=matchRadiusUnitStr, unitScale=self.unitScale)
         dataPoints = dataPoints + runStats + [l1, l2]
         axScatter.legend(handles=dataPoints, loc=1, fontsize=8)
         axHistx.legend(fontsize=7, loc=2)
@@ -429,8 +431,9 @@ class Analysis(object):
         plt.savefig(filename, dpi=120)
         plt.close()
 
-    def plotHistogram(self, filename, numBins=51, stats=None, hscRun=None, matchRadius=None, zpLabel=None,
-                      forcedStr=None, camera=None, filterStr=None, uberCalLabel=None):
+    def plotHistogram(self, filename, numBins=51, stats=None, hscRun=None, matchRadius=None,
+                      matchRadiusUnitStr=None, zpLabel=None, forcedStr=None, camera=None, filterStr=None,
+                      uberCalLabel=None):
         """Plot histogram of quantity"""
         fig, axes = plt.subplots(1, 1)
         axes.axvline(0, linestyle="--", color="0.6")
@@ -459,7 +462,8 @@ class Analysis(object):
             x0, y0 = 0.68, 0.81
         if stats is not None:
             annotateAxes(filename, plt, axes, stats, "star", self.magThreshold, x0=x0, y0=y0,
-                         isHist=True, hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
+                         isHist=True, hscRun=hscRun, matchRadius=matchRadius,
+                         matchRadiusUnitStr=matchRadiusUnitStr, unitScale=self.unitScale)
         axes.legend()
         if camera is not None:
             labelCamera(camera, plt, axes, 0.5, 1.09)
@@ -476,8 +480,8 @@ class Analysis(object):
 
     def plotSkyPosition(self, filename, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
                         camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
-                        matchRadius=None, zpLabel=None, highlightList=None, forcedStr=None,
-                        dataName="star", uberCalLabel=None):
+                        matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, highlightList=None,
+                        forcedStr=None, dataName="star", uberCalLabel=None):
         """Plot quantity as a function of position"""
         pad = 0.02  # Number of degrees to pad the axis ranges
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
@@ -643,8 +647,8 @@ class Analysis(object):
         fig.savefig(filename, dpi=150)
         plt.close(fig)
 
-    def plotRaDec(self, filename, stats=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
-                  uberCalLabel=None):
+    def plotRaDec(self, filename, stats=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
+                  zpLabel=None, forcedStr=None, uberCalLabel=None):
         """Plot quantity as a function of RA, Dec"""
 
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
@@ -675,9 +679,11 @@ class Analysis(object):
         axes[0].legend()
         if stats is not None:
             annotateAxes(filename, plt, axes[0], stats, "star", self.magThreshold, x0=0.03, yOff=0.07,
-                         hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
+                         hscRun=hscRun, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                         unitScale=self.unitScale)
             annotateAxes(filename, plt, axes[1], stats, "star", self.magThreshold, x0=0.03, yOff=0.07,
-                         hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
+                         hscRun=hscRun, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                         unitScale=self.unitScale)
         labelVisit(filename, plt, axes[0], 0.5, 1.1)
         if zpLabel is not None:
             prefix = "" if "GE applied" in zpLabel else "zp: "
@@ -967,13 +973,15 @@ class Analysis(object):
         plt.close(fig)
 
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
-                tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
-                postFix="", plotRunStats=True, highlightList=None, extraLabels=None, uberCalLabel=None):
+                tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
+                zpLabel=None, forcedStr=None, postFix="", plotRunStats=True, highlightList=None,
+                extraLabels=None, uberCalLabel=None):
         """Make all plots"""
         stats = self.stats
         # Dict of all parameters common to plot* functions
         plotKwargs = dict(stats=stats, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                          patchList=patchList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
+                          patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
+                          matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel,
                           forcedStr=forcedStr, uberCalLabel=uberCalLabel)
         if "galacticExtinction" not in self.shortName:
             self.plotAgainstMagAndHist(log, filenamer(dataId, description=self.shortName,

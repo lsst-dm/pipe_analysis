@@ -19,9 +19,8 @@ from .coaddAnalysis import CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddA
 from .utils import (Filenamer, concatenateCatalogs, addApertureFluxesHSC, addFpPoint,
                     addFootprintNPix, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
                     calibrateSourceCatalogMosaic, calibrateSourceCatalogPhotoCalib,
-                    calibrateSourceCatalog, backoutApCorr,
-                    matchJanskyToDn, andCatalog, writeParquet, getRepoInfo, getDataExistsRefList,
-                    setAliasMaps)
+                    calibrateSourceCatalog, backoutApCorr, matchJanskyToDn, andCatalog, writeParquet,
+                    getRepoInfo, getCcdNameRefList, getDataExistsRefList, setAliasMaps)
 from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText
 
 import lsst.afw.table as afwTable
@@ -29,29 +28,34 @@ import lsst.afw.table as afwTable
 
 class CcdAnalysis(Analysis):
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
-                tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
-                uberCalLabel=None, postFix="", plotRunStats=True, highlightList=None, haveFpCoords=None):
+                tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
+                zpLabel=None, forcedStr=None, uberCalLabel=None, postFix="", plotRunStats=True,
+                highlightList=None, haveFpCoords=None):
         stats = self.stats
         if self.config.doPlotCcdXy:
             self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix),
-                         stats=self.stats, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
+                         stats=self.stats, hscRun=hscRun, matchRadius=matchRadius,
+                         matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel)
         if self.config.doPlotFP and haveFpCoords:
             self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa" + postFix),
                                 stats=stats, camera=camera, ccdList=ccdList, hscRun=hscRun,
-                                matchRadius=matchRadius, zpLabel=zpLabel)
+                                matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                                zpLabel=zpLabel)
 
         return Analysis.plotAll(self, dataId, filenamer, log, enforcer=enforcer, butler=butler, camera=camera,
-                                ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
-                                postFix=postFix, plotRunStats=plotRunStats, highlightList=highlightList)
+                                ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
+                                matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, postFix=postFix,
+                                plotRunStats=plotRunStats, highlightList=highlightList)
 
     def plotFP(self, dataId, filenamer, log, enforcer=None, camera=None, ccdList=None, hscRun=None,
-               matchRadius=None, zpLabel=None, forcedStr=None):
+               matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None):
         self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa"), stats=self.stats,
                             camera=camera, ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
-                            zpLabel=zpLabel, forcedStr=forcedStr)
+                            matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, forcedStr=forcedStr)
 
     def plotCcd(self, filename, centroid="base_SdssCentroid", cmap=plt.cm.nipy_spectral, idBits=32,
-                visitMultiplier=200, stats=None, hscRun=None, matchRadius=None, zpLabel=None):
+                visitMultiplier=200, stats=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
+                zpLabel=None):
         """Plot quantity as a function of CCD x,y"""
         xx = self.catalog[self.prefix + centroid + "_x"]
         yy = self.catalog[self.prefix + centroid + "_y"]
@@ -86,9 +90,11 @@ class CcdAnalysis(Analysis):
         fig.text(0.02, 0.5, self.quantityName, ha="center", va="center", rotation="vertical")
         if stats is not None:
             annotateAxes(filename, plt, axes[0], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
-                         hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
+                         hscRun=hscRun, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                         unitScale=self.unitScale)
             annotateAxes(filename, plt, axes[1], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
-                         hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
+                         hscRun=hscRun, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                         unitScale=self.unitScale)
         axes[0].set_xlim(-100, 2150)
         axes[1].set_xlim(-100, 4300)
         axes[0].set_ylim(self.qMin, self.qMax)
@@ -107,7 +113,8 @@ class CcdAnalysis(Analysis):
         plt.close(fig)
 
     def plotFocalPlane(self, filename, cmap=plt.cm.Spectral, stats=None, camera=None, ccdList=None,
-                       hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None, fontSize=8):
+                       hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None,
+                       fontSize=8):
         """Plot quantity colormaped on the focal plane"""
         xFp = self.catalog[self.prefix + "base_FPPosition_x"]
         yFp = self.catalog[self.prefix + "base_FPPosition_y"]
@@ -559,8 +566,10 @@ class CompareVisitAnalysisConfig(VisitAnalysisConfig):
 
     def setDefaults(self):
         VisitAnalysisConfig.setDefaults(self)
-        # Use a tighter match radius for comparing runs: they are calibrated and we want to avoid mis-matches
-        self.matchRadius = 0.2
+        # If matching on Ra/Dec, use a tighter match radius for comparing runs:
+        # they are calibrated and we want to avoid mis-matches
+        self.matchRadiusRaDec = 0.2
+        self.matchRadiusXy = 1.0e-5  # has to be bigger than absolute zero
         if "base_PsfFlux" not in self.fluxToPlotList:
             self.fluxToPlotList.append("base_PsfFlux")  # Add PSF flux to default list for comparison scripts
 
@@ -704,15 +713,17 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
 
             self.log.info("\nNumber of sources in catalogs: first = {0:d} and second = {1:d}".format(
                           len(catalog1), len(catalog2)))
-            commonZpCat = self.matchCatalogs(commonZpCat1, commonZpCat2)
-            catalog = self.matchCatalogs(catalog1, catalog2)
+            commonZpCat = self.matchCatalogs(commonZpCat1, commonZpCat2, matchRadius=self.matchRadius,
+                                             matchControl=self.matchControl)
+            catalog = self.matchCatalogs(catalog1, catalog2, matchRadius=self.matchRadius,
+                                         matchControl=self.matchControl)
             # Set some aliases for differing schema naming conventions
             if aliasDictList:
                 for cat in [commonZpCat, catalog]:
                     cat = setAliasMaps(cat, aliasDictList)
 
-            self.log.info("Number of matches (maxDist = {0:.2f} arcsec) = {1:d}".format(
-                          self.config.matchRadius, len(catalog)))
+            self.log.info("Number of matches (maxDist = {0:.2f} {1:s}) = {2:d}".format(
+                          self.matchRadius, self.matchRadiusUnitStr, len(catalog)))
 
             try:
                 self.zpLabel = self.zpLabel + " " + self.catLabel
@@ -721,10 +732,18 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
 
             filenamer = Filenamer(repoInfo1.butler, "plotCompareVisit", repoInfo1.dataId)
             hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
+
+            # Dict of all parameters common to plot* functions
+            tractInfo1 = repoInfo1.tractInfo if self.config.doApplyUberCal1 else None
+            tractInfo2 = repoInfo2.tractInfo if self.config.doApplyUberCal2 else None
+            tractInfo = tractInfo1 if (tractInfo1 or tractInfo2) else None
+            plotKwargs1 = dict(butler=repoInfo1.butler, camera=repoInfo1.camera, hscRun=hscRun,
+                               matchRadius=self.matchRadius, matchRadiusUnitStr=self.matchRadiusUnitStr,
+                               zpLabel=self.zpLabel, tractInfo=tractInfo)
+
             if self.config.doPlotFootprintNpix:
-                self.plotFootprint(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
-                                   camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=hscRun,
-                                   matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                self.plotFootprint(catalog, filenamer, repoInfo1.dataId, ccdList=ccdListPerTract1,
+                                   **plotKwargs1)
 
             # Create mag comparison plots using common ZP
             if not commonZpDone:
@@ -734,37 +753,27 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 except Exception:
                     pass
 
-                self.plotMags(commonZpCat, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
-                              camera=repoInfo1.camera, ccdList=fullCcdList, hscRun=hscRun,
-                              matchRadius=self.config.matchRadius, zpLabel=zpLabel,
+                self.plotMags(commonZpCat, filenamer, repoInfo1.dataId, ccdList=fullCcdList,
                               fluxToPlotList=["base_GaussianFlux", "base_CircularApertureFlux_12_0"],
-                              postFix="_commonZp")
+                              postFix="_commonZp", **plotKwargs1)
                 commonZpDone = True
 
             if self.config.doPlotMags:
-                self.plotMags(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
-                              camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=hscRun,
-                              matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                self.plotMags(catalog, filenamer, repoInfo1.dataId, ccdList=ccdListPerTract1, **plotKwargs1)
             if self.config.doPlotSizes:
                 if ("first_base_SdssShape_psf_xx" in catalog.schema and
                         "second_base_SdssShape_psf_xx" in catalog.schema):
-                    self.plotSizes(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
-                                   camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=hscRun,
-                                   matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                    self.plotSizes(catalog, filenamer, repoInfo1.dataId, ccdList=ccdListPerTract1,
+                                   **plotKwargs1)
                 else:
                     self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
             if self.config.doApCorrs:
-                self.plotApCorrs(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
-                                 camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=hscRun,
-                                 matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                self.plotApCorrs(catalog, filenamer, repoInfo1.dataId, ccdList=ccdListPerTract1, **plotKwargs1)
             if self.config.doPlotCentroids:
-                self.plotCentroids(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
-                                   camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=hscRun,
-                                   matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                self.plotCentroids(catalog, filenamer, repoInfo1.dataId, ccdList=ccdListPerTract1,
+                                   **plotKwargs1)
             if self.config.doPlotStarGalaxy:
-                self.plotStarGal(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
-                                 camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=hscRun,
-                                 matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                self.plotStarGal(catalog, filenamer, repoInfo1.dataId, ccdList=ccdListPerTract1, **plotKwargs1)
 
     def readCatalogs(self, dataRefList1, dataRefList2, dataset, repoInfo1, repoInfo2,
                      doReadFootprints=None, aliasDictList=None):
