@@ -1143,21 +1143,26 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
     isCoadd = True if "patch" in dataId else False
     ccdKey = None if isCoadd else findCcdKey(dataId)
     # Check metadata to see if stack used was HSC
-    metaStr = coaddName + coaddDataset + "_md" if coaddName is not None else "calexp_md"
+    metaStr = coaddName + coaddDataset + "_md" if coaddName else "calexp_md"
     metadata = butler.get(metaStr, dataId)
     hscRun = checkHscStack(metadata)
     dataset = "src"
-    skymap = butler.get(coaddName + "Coadd_skyMap") if coaddName is not None else None
+    skymap = butler.get(coaddName + "Coadd_skyMap") if coaddName else None
     wcs = None
     tractInfo = None
     if isCoadd:
         coaddImageName = "Coadd_calexp_hsc" if hscRun else "Coadd_calexp"  # To get the coadd's WCS
         coadd = butler.get(coaddName + coaddImageName, dataId)
         wcs = coadd.getWcs()
-        tractInfo = skymap[dataId["tract"]]
         dataset = coaddName + coaddDataset
+        tractInfo = skymap[dataId["tract"]]
     if doApplyUberCal:
-        dataset = "wcs_hsc" if hscRun is not None else "jointcal_wcs"
+        dataset = "wcs_hsc" if hscRun else "jointcal_wcs"
+        skymap = skymap if skymap else butler.get("deepCoadd_skyMap")
+        try:
+            tractInfo = skymap[dataId["tract"]]
+        except:
+            tractInfo = None
     return Struct(
         butler=butler,
         camera=camera,

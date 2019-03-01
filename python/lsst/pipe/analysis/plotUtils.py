@@ -286,13 +286,15 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
     ylim = yMin, yMax
     axes.fill(tractRa, tractDec, fill=True, edgecolor='k', lw=1, linestyle='solid',
               color="black", alpha=0.2)
+    prop_cycle = plt.rcParams['axes.prop_cycle']
+    colors = prop_cycle.by_key()['color']
+    colors.pop(colors.index('#7f7f7f'))  # get rid of the gray one as that's our no-data colour
+    colors.append("gold")
     for ip, patch in enumerate(tractInfo):
         patchIndexStr = str(patch.getIndex()[0]) + "," + str(patch.getIndex()[1])
         color = "k"
         alpha = 0.05
-        if patchIndexStr in patchList:
-            color = ("c", "g", "r", "b", "m")[ip%5]
-            alpha = 0.5
+        (color, alpha) = (colors[ip%len(colors)], 0.5) if patchIndexStr in patchList else (color, alpha)
         ra, dec = bboxToXyCoordLists(patch.getOuterBBox(), wcs=tractInfo.getWcs())
         deltaRa = abs(max(ra) - min(ra))
         deltaDec = abs(max(dec) - min(dec))
@@ -317,7 +319,7 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
     axes.set_ylim(ylim)
 
 
-def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
+def plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=None, zpLabel=None, fontSize=8):
     """!Plot outlines of CCDs in ccdList
     """
     dataIdCopy = dataId.copy()
@@ -344,11 +346,14 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
         # Check metadata to see if stack used was HSC
         metadata = butler.get("calexp_md", dataIdCopy)
         hscRun = checkHscStack(metadata)
-        if zpLabel is not None:
-            if zpLabel == "MEAS_MOSAIC" or "MEAS_MOSAIC_1" in zpLabel:
-                applyMosaicResultsExposure(dataRef, calexp=calexp)
-
-        wcs = calexp.getWcs()
+        if zpLabel and (zpLabel == "MEAS_MOSAIC" or "MEAS_MOSAIC_1" in zpLabel):
+            applyMosaicResultsExposure(dataRef, calexp=calexp)
+            wcs = calexp.getWcs()
+        elif zpLabel and (zpLabel == "MMphotoCalib" or zpLabel == "JOINTCAL" or
+                          "MMphotoCalib" in zpLabel or "JOINTCAL_1" in zpLabel):
+            wcs = dataRef.get("jointcal_wcs")
+        else:
+            wcs = calexp.getWcs()
         w = calexp.getWidth()
         h = calexp.getHeight()
         if zpLabel is not None:
@@ -360,17 +365,26 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
 
         ras = list()
         decs = list()
+        coords = list()
         for x, y in zip([0, w, w, 0, 0], [0, 0, h, h, 0]):
             xy = afwGeom.Point2D(x, y)
             ra = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
             dec = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
             ras.append(ra)
             decs.append(dec)
-        axes.plot(ras, decs, "k-", linewidth=1)
+            coords.append(afwGeom.SpherePoint(ra, dec, afwGeom.degrees))
         xy = afwGeom.Point2D(w/2, h/2)
         centerX = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
         centerY = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
-        axes.text(centerX, centerY, "%s" % str(ccdLabelStr), ha="center", va="center", fontsize=fontSize)
+        inTract = False
+        if tractInfo is not None:
+            for coord in coords:
+                if tractInfo.contains(coord):
+                    inTract = True
+                    break
+        if not tractInfo or inTract:
+            axes.plot(ras, decs, "k-", linewidth=1)
+            axes.text(centerX, centerY, "%s" % str(ccdLabelStr), ha="center", va="center", fontsize=fontSize)
 
 
 def plotPatchOutline(axes, tractInfo, patchList, plotUnits="deg", idFontSize=None):

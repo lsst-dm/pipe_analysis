@@ -681,8 +681,12 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                     self.log.fatal("No data found for {:s} dataset...are you sure you ran meas_mosaic? If "
                                    "not, run with --config doApplyUberCal2=False".format(repoInfo2.dataset))
                 raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo2.dataset))
+            ccdIntersectList = list(set(ccdListPerTract1).intersection(set(ccdListPerTract2)))
             self.log.info("tract: {:d} ".format(repoInfo1.dataId["tract"]))
             self.log.info("ccdListPerTract1: {} ".format(ccdListPerTract1))
+            self.log.info("ccdListPerTract2: {} ".format(ccdListPerTract2))
+            self.log.info("ccdIntersectList: {}".format(ccdIntersectList))
+
             doReadFootprints = None
             if self.config.doPlotFootprintNpix:
                 doReadFootprints = "light"
@@ -742,7 +746,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                zpLabel=self.zpLabel, tractInfo=tractInfo)
 
             if self.config.doPlotFootprintNpix:
-                self.plotFootprint(catalog, filenamer, repoInfo1.dataId, ccdList=ccdListPerTract1,
+                self.plotFootprint(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
                                    **plotKwargs1)
 
             # Create mag comparison plots using common ZP
@@ -759,21 +763,21 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 commonZpDone = True
 
             if self.config.doPlotMags:
-                self.plotMags(catalog, filenamer, repoInfo1.dataId, ccdList=ccdListPerTract1, **plotKwargs1)
+                self.plotMags(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList, **plotKwargs1)
             if self.config.doPlotSizes:
                 if ("first_base_SdssShape_psf_xx" in catalog.schema and
                         "second_base_SdssShape_psf_xx" in catalog.schema):
-                    self.plotSizes(catalog, filenamer, repoInfo1.dataId, ccdList=ccdListPerTract1,
+                    self.plotSizes(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
                                    **plotKwargs1)
                 else:
                     self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
             if self.config.doApCorrs:
-                self.plotApCorrs(catalog, filenamer, repoInfo1.dataId, ccdList=ccdListPerTract1, **plotKwargs1)
+                self.plotApCorrs(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList, **plotKwargs1)
             if self.config.doPlotCentroids:
-                self.plotCentroids(catalog, filenamer, repoInfo1.dataId, ccdList=ccdListPerTract1,
+                self.plotCentroids(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
                                    **plotKwargs1)
             if self.config.doPlotStarGalaxy:
-                self.plotStarGal(catalog, filenamer, repoInfo1.dataId, ccdList=ccdListPerTract1, **plotKwargs1)
+                self.plotStarGal(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList, **plotKwargs1)
 
     def readCatalogs(self, dataRefList1, dataRefList2, dataset, repoInfo1, repoInfo2,
                      doReadFootprints=None, aliasDictList=None):

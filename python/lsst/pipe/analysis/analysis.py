@@ -225,7 +225,7 @@ class Analysis(object):
                 axTopRight.set_aspect("equal")
                 plotCameraOutline(plt, axTopRight, camera, ccdList)
 
-        if self.config.doPlotTractOutline and tractInfo is not None and len(patchList) > 0:
+        if self.config.doPlotTractOutline and tractInfo is not None and patchList:
             axTopRight = plt.axes(topRight)
             axTopRight.set_aspect("equal")
             plotTractOutline(axTopRight, tractInfo, patchList)
@@ -420,7 +420,7 @@ class Analysis(object):
         labelVisit(filename, plt, axScatter, 1.18, -0.11, color="green")
         if zpLabel is not None:
             prefix = "" if "GE applied" in zpLabel else "zp: "
-            plotText(zpLabel, plt, axScatter, 0.09, -0.09, prefix=prefix, color="green")
+            plotText(zpLabel, plt, axScatter, 0.09, -0.1, prefix=prefix, color="green")
         if uberCalLabel:
             plotText(uberCalLabel, plt, axScatter, 0.09, -0.14, prefix="uberCal: ", fontSize=8, color="green")
         if forcedStr is not None:
@@ -545,7 +545,13 @@ class Analysis(object):
         ptSize = None
 
         if dataId is not None and butler is not None and ccdList is not None:
-            plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=zpLabel)
+            if "commonZp" in filename:
+                plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=None, zpLabel=zpLabel)
+            else:
+                plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=tractInfo, zpLabel=zpLabel)
+            if tractInfo is not None:
+                tractRa, tractDec = bboxToXyCoordLists(tractInfo.getBBox(), wcs=tractInfo.getWcs())
+                axes.plot(tractRa, tractDec, "w--", linewidth=1, alpha=0.7, label=str(tractInfo.getId()))
 
         if tractInfo is not None and patchList is not None:
             patchBoundary = getRaDecMinMaxPatchList(patchList, tractInfo, pad=pad, nDecimals=2, raMin=raMin,
@@ -608,11 +614,11 @@ class Analysis(object):
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
         if highlightList is not None:
-            axes.legend(loc='upper left', bbox_to_anchor=(-0.05, 1.15), fancybox=True, shadow=True,
-                        fontsize=7)
+            axes.legend(loc='upper left', bbox_to_anchor=(-0.05, 1.15), fancybox=True, fontsize=7,
+                        markerscale=1.2, scatterpoints=3, framealpha=0.35, facecolor="k")
         else:
-            axes.legend(loc='upper left', bbox_to_anchor=(-0.02, 1.08), fancybox=True, shadow=True,
-                        fontsize=9)
+            axes.legend(loc='upper left', bbox_to_anchor=(-0.01, 1.12), fancybox=True, fontsize=8,
+                        markerscale=1.2, scatterpoints=3, framealpha=0.35, facecolor="k")
 
         meanStr = "{0.mean:.4f}".format(stats0)
         stdevStr = "{0.stdev:.4f}".format(stats0)
@@ -749,7 +755,7 @@ class Analysis(object):
         axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=8)
 
         if dataId is not None and butler is not None and ccdList is not None:
-            plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=zpLabel)
+            plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=tractInfo, zpLabel=zpLabel)
 
         if tractInfo is not None and patchList is not None:
             for ip, patch in enumerate(tractInfo):
