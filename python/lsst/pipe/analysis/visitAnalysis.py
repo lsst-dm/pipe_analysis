@@ -820,81 +820,69 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         commonZpCatList1 = []
         catList2 = []
         commonZpCatList2 = []
-        for dataRef1, dataRef2 in zip(dataRefList1, dataRefList2):
-            if not dataRef1.datasetExists(dataset) or not dataRef2.datasetExists(dataset):
-                continue
-            if not doReadFootprints:
-                srcCat1 = dataRef1.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-                srcCat2 = dataRef2.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-            elif doReadFootprints == "light":
-                srcCat1 = dataRef1.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
-                srcCat2 = dataRef2.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
-            elif doReadFootprints == "heavy":
-                srcCat1 = dataRef1.get(dataset, immediate=True)
-                srcCat2 = dataRef2.get(dataset, immediate=True)
+        self.zpLabel1 = None
+        self.zpLabel2 = None
+        for iCat, catList, commonZpCatList, dataRefList, repoInfo, doApplyUberCal, useMeasMosaic in [
+                [1, catList1, commonZpCatList1, dataRefList1, repoInfo1,
+                 self.config.doApplyUberCal1, self.config.useMeasMosaic1],
+                [2, catList2, commonZpCatList2, dataRefList2, repoInfo2,
+                 self.config.doApplyUberCal2, self.config.useMeasMosaic2]]:
+            for dataRef in dataRefList:
+                if not dataRef.datasetExists(dataset):
+                    continue
+                if not doReadFootprints:
+                    srcCat = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+                elif doReadFootprints == "light":
+                    srcCat = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+                elif doReadFootprints == "heavy":
+                    srcCat = dataRef.get(dataset, immediate=True)
 
-            # Set some aliases for differing src naming conventions
-            for cat, hscRun in ([srcCat1, repoInfo1.hscRun], [srcCat2, repoInfo2.hscRun]):
+                # Set some aliases for differing src naming conventions
                 if aliasDictList:
-                    cat = setAliasMaps(cat, aliasDictList)
+                    srcCat = setAliasMaps(srcCat, aliasDictList)
 
-            if self.config.doBackoutApCorr:
-                srcCat1 = backoutApCorr(srcCat1)
-                srcCat2 = backoutApCorr(srcCat2)
+                if self.config.doBackoutApCorr:
+                    srcCat = backoutApCorr(srcCat)
 
-            calexp1 = repoInfo1.butler.get("calexp", dataRef1.dataId)
-            calexp2 = repoInfo2.butler.get("calexp", dataRef2.dataId)
-            nQuarter = calexp1.getDetector().getOrientation().getNQuarter()
-            # add footprint nPix column
-            if self.config.doPlotFootprintNpix:
-                srcCat1 = addFootprintNPix(srcCat1)
-                srcCat2 = addFootprintNPix(srcCat2)
-            # Add rotated point in LSST cat if comparing with HSC cat to compare centroid pixel positions
-            if repoInfo2.hscRun and not repoInfo1.hscRun:
-                srcCat1 = addRotPoint(srcCat1, calexp1.getWidth(), calexp1.getHeight(), nQuarter)
-            if repoInfo1.hscRun and not repoInfo2.hscRun:
-                srcCat2 = addRotPoint(srcCat2, calexp2.getWidth(), calexp2.getHeight(), nQuarter)
+                calexp = repoInfo.butler.get("calexp", dataRef.dataId)
+                nQuarter = calexp.getDetector().getOrientation().getNQuarter()
+                # add footprint nPix column
+                if self.config.doPlotFootprintNpix:
+                    srcCat = addFootprintNPix(srcCat)
+                # Add rotated point in LSST cat if comparing with HSC cat to compare centroid pixel positions
+                if repoInfo.hscRun and not (repoInfo1.hscRun and repoInfo2.hscRun):
+                    srcCat = addRotPoint(srcCat, calexp.getWidth(), calexp.getHeight(), nQuarter)
 
-            if repoInfo1.hscRun and self.config.doAddAperFluxHsc:
-                self.log.info("HSC run: adding aperture flux to schema1...")
-                srcCat1 = addApertureFluxesHSC(srcCat1, prefix="")
-            if repoInfo2.hscRun and self.config.doAddAperFluxHsc:
-                self.log.info("HSC run: adding aperture flux to schema2...")
-                srcCat2 = addApertureFluxesHSC(srcCat2, prefix="")
+                if repoInfo.hscRun and self.config.doAddAperFluxHsc:
+                    self.log.info("HSC run: adding aperture flux to schema...")
+                    srcCat = addApertureFluxesHSC(srcCat, prefix="")
 
-            # Scale fluxes to common zeropoint to make basic comparison plots without calibrated ZP influence
-            commonZpCat1 = srcCat1.copy(True)
-            commonZpCat1 = calibrateSourceCatalog(commonZpCat1, self.config.analysis.commonZp)
-            commonZpCatList1.append(commonZpCat1)
-            commonZpCat2 = srcCat2.copy(True)
-            commonZpCat2 = calibrateSourceCatalog(commonZpCat2, self.config.analysis.commonZp)
-            commonZpCatList2.append(commonZpCat2)
-            if self.config.doApplyUberCal1:
-                if repoInfo1.hscRun:
-                    if not dataRef1.datasetExists("wcs_hsc") or not dataRef1.datasetExists("fcr_hsc_md"):
-                        continue
+                # Scale fluxes to common zeropoint to make basic comparison plots without calibration influence
+                commonZpCat = srcCat.copy(True)
+                commonZpCat = calibrateSourceCatalog(commonZpCat, self.config.analysis.commonZp)
+                commonZpCatList.append(commonZpCat)
+                if self.config.doApplyUberCal:
+                    if repoInfo.hscRun:
+                        if not dataRef.datasetExists("wcs_hsc") or not dataRef.datasetExists("fcr_hsc_md"):
+                            continue
                     # Check for both jointcal_wcs and wcs for compatibility with old datasets
-                elif (not (dataRef1.datasetExists("jointcal_wcs") or dataRef1.datasetExists("wcs")) or not
-                      (dataRef1.datasetExists("jointcal_photoCalib") or dataRef1.datasetExists("fcr_md"))):
-                    continue
-            if self.config.doApplyUberCal2:
-                if repoInfo2.hscRun:
-                    if not dataRef2.datasetExists("wcs_hsc") or not dataRef2.datasetExists("fcr_hsc_md"):
+                    elif (not (dataRef.datasetExists("jointcal_wcs") or dataRef.datasetExists("wcs")) or not
+                          (dataRef.datasetExists("jointcal_photoCalib") or dataRef.datasetExists("fcr_md"))):
                         continue
-                elif (not (dataRef2.datasetExists("jointcal_wcs") or dataRef2.datasetExists("wcs")) or not
-                      (dataRef2.datasetExists("jointcal_photoCalib") or dataRef2.datasetExists("fcr_md"))):
-                    continue
-            srcCat1 = self.calibrateCatalogs(dataRef1, srcCat1, repoInfo1.metadata, repoInfo1.dataset,
-                                             self.config.doApplyUberCal1, self.config.useMeasMosaic1)
-            catList1.append(srcCat1)
-            srcCat2 = self.calibrateCatalogs(dataRef2, srcCat2, repoInfo2.metadata, repoInfo2.dataset,
-                                             self.config.doApplyUberCal2, self.config.useMeasMosaic2)
-            catList2.append(srcCat2)
+                srcCat, zpLabel = self.calibrateCatalogs(dataRef, srcCat, repoInfo.metadata, repoInfo.dataset,
+                                                         doApplyUberCal, useMeasMosaic)
+                self.zpLabel1 = zpLabel if iCat == 1 and not self.zpLabel1 else self.zpLabel1
+                self.zpLabel2 = zpLabel if iCat == 2 and not self.zpLabel2 else self.zpLabel2
 
+                catList.append(srcCat)
+
+        self.zpLabel = self.zpLabel1 + "_1 " + self.zpLabel2 + "_2"
+        self.log.info("Applying {:} calibration to catalogs".format(self.zpLabel))
         if not catList1:
             raise TaskError("No catalogs read: %s" % ([dataRefList1[0].dataId for dataRef1 in dataRefList1]))
         if not catList2:
             raise TaskError("No catalogs read: %s" % ([dataRefList2[0].dataId for dataRef2 in dataRefList2]))
+
         return (concatenateCatalogs(commonZpCatList1), concatenateCatalogs(catList1),
                 concatenateCatalogs(commonZpCatList2), concatenateCatalogs(catList2))
 
@@ -921,22 +909,22 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         useMeasMosaic : `bool`
            Use meas_mosaic's applyMosaicResultsCatalog for the uber-calibration
            (even if photoCalib object exists).  For testing implementations.
+
+        Returns
+        -------
+        calibrated : `lsst.afw.table.source.source.SourceCatalog`
+           The calibrated source catalog.
+        zpLabel : `str`
+           A label indicating the uberCalibration applied (currently either
+           jointcal or meas_mosaic).
         """
         self.zp = 0.0
-        try:
-            self.zpLabel = self.zpLabel
-        except Exception:
-            self.zpLabel = None
         if doApplyUberCal:
             if "jointcal" in photoCalibDataset and not useMeasMosaic:
                 # i.e. the processing was post-photoCalib output generation
                 # AND you want the photoCalib flux object used for the
                 # calibration (as opposed to meas_mosaic's fcr object).
-                if self.zpLabel is None:
-                    self.zpLabel = "MMphotoCalib_1" if dataRef.datasetExists("fcr_md") else "JOINTCAL_1"
-                elif len(self.zpLabel) < 20:
-                    self.zpLabel += " MMphotoCalib_2" if dataRef.datasetExists("fcr_md") else " JOINTCAL_2"
-                    self.log.info("Applying {:} calibration to catalogs".format(self.zpLabel))
+                zpLabel = "MMphotoCalib" if dataRef.datasetExists("fcr_md") else "JOINTCAL"
                 calibrated = calibrateSourceCatalogPhotoCalib(dataRef, catalog, zp=self.zp)
             else:
                 # If here, the data were processed pre-photoCalib output
@@ -948,22 +936,14 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                     raise ValueError("Cannot apply uber calibrations because meas_mosaic "
                                      "could not be imported."
                                      "\nEither setup meas_mosaic or run with --config doApplyUberCal=False")
-                if not self.zpLabel:
-                    self.log.info("Applying meas_mosaic calibration to catalog")
-                    self.zpLabel = "MEAS_MOSAIC_1"
-                elif len(self.zpLabel) < 20:
-                    self.zpLabel += " MEAS_MOSAIC_2"
-                    self.log.info("Applying {:} calibration to catalogs".format(self.zpLabel))
+                zpLabel = "MEAS_MOSAIC"
                 calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
         else:
             # Scale fluxes to measured zeropoint
             self.zp = 2.5*np.log10(metadata.getScalar("FLUXMAG0"))
-            if not self.zpLabel:
-                self.log.info("Using 2.5*log10(FLUXMAG0) = {:.4f} from FITS header for zeropoint".format(
-                    self.zp))
-                self.zpLabel = "FLUXMAG0_1"
-            elif len(self.zpLabel) < 20:
-                self.zpLabel += " FLUXMAG0_2"
+            self.log.info("Using 2.5*log10(FLUXMAG0) = {:.4f} from FITS header for zeropoint".format(
+                self.zp))
+            zpLabel = "FLUXMAG0"
             calibrated = calibrateSourceCatalog(catalog, self.zp)
 
-        return calibrated
+        return calibrated, zpLabel
