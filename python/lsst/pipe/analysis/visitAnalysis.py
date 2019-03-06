@@ -240,81 +240,89 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 aliasDictList += [self.config.srcSchemaMap]
             if any(doPlot for doPlot in [self.config.doPlotFootprintNpix, self.config.doPlotQuiver,
                                          self.config.doPlotMags, self.config.doPlotSizes,
-                                         self.config.doPlotCentroids, self.config.doPlotStarGalaxy]):
+                                         self.config.doPlotCentroids, self.config.doPlotStarGalaxy,
+                                         self.config.doWriteParquetTables]):
                 commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", repoInfo,
                                                          aliasDictList=aliasDictList)
 
-            # Set boolean arrays indicating sources deemed unsuitable for qa analyses
-            self.catLabel = "nChild = 0"
-            bad = makeBadArray(catalog, flagList=self.config.analysis.flags,
-                               onlyReadStars=self.config.onlyReadStars)
-            badCommonZp = makeBadArray(commonZpCat, flagList=self.config.analysis.flags,
-                                       onlyReadStars=self.config.onlyReadStars)
+                # Set boolean arrays indicating sources deemed unsuitable for qa analyses
+                self.catLabel = "nChild = 0"
+                bad = makeBadArray(catalog, flagList=self.config.analysis.flags,
+                                   onlyReadStars=self.config.onlyReadStars)
+                badCommonZp = makeBadArray(commonZpCat, flagList=self.config.analysis.flags,
+                                           onlyReadStars=self.config.onlyReadStars)
 
-            # Create and write parquet tables
-            if self.config.doWriteParquetTables:
-                dataRef_catalog = repoInfo.butler.dataRef('analysisVisitTable', dataId=repoInfo.dataId)
-                writeParquet(dataRef_catalog, catalog, badArray=bad)
-                dataRef_commonZp = repoInfo.butler.dataRef('analysisVisitTable_commonZp', dataId=repoInfo.dataId)
-                writeParquet(dataRef_commonZp, commonZpCat, badArray=badCommonZp)
-                if self.config.writeParquetOnly:
-                    self.log.info("Exiting after writing Parquet tables.  No plots generated.")
-                    return
+                # Create and write parquet tables
+                if self.config.doWriteParquetTables:
+                    dataRef_catalog = repoInfo.butler.dataRef('analysisVisitTable', dataId=repoInfo.dataId)
+                    writeParquet(dataRef_catalog, catalog, badArray=bad)
+                    dataRef_commonZp = repoInfo.butler.dataRef('analysisVisitTable_commonZp',
+                                                               dataId=repoInfo.dataId)
+                    writeParquet(dataRef_commonZp, commonZpCat, badArray=badCommonZp)
+                    if self.config.writeParquetOnly:
+                        self.log.info("Exiting after writing Parquet tables.  No plots generated.")
+                        return
 
-            # purge the catalogs of flagged sources
-            catalog = catalog[~bad].copy(deep=True)
-            commonZpCat = commonZpCat[~badCommonZp].copy(deep=True)
+                # purge the catalogs of flagged sources
+                catalog = catalog[~bad].copy(deep=True)
+                commonZpCat = commonZpCat[~badCommonZp].copy(deep=True)
 
-            try:
-                self.zpLabel = self.zpLabel + " " + self.catLabel
-            except Exception:
-                pass
-
-            # Dict of all parameters common to plot* functions
-            plotKwargs = dict(butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
-                              hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
-
-            if self.config.doPlotFootprintNpix:
-                self.plotFootprintHist(catalog,
-                                       filenamer(repoInfo.dataId, description="footNpix", style="hist"),
-                                       repoInfo.dataId, **plotKwargs)
-                self.plotFootprint(catalog, filenamer, repoInfo.dataId, plotRunStats=False,
-                                   highlightList=[("parent", 0, "yellow"), ], **plotKwargs)
-
-            if self.config.doPlotQuiver:
-                self.plotQuiver(catalog,
-                                filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
-                                dataId=repoInfo.dataId, scale=2, **plotKwargs)
-
-            # Create mag comparison plots using common ZP
-            if self.config.doPlotMags and not commonZpDone:
-                zpLabel = "common (" + str(self.config.analysis.commonZp) + ")"
                 try:
-                    zpLabel = zpLabel + " " + self.catLabel
+                    self.zpLabel = self.zpLabel + " " + self.catLabel
                 except Exception:
                     pass
-                self.plotMags(commonZpCat, filenamer, repoInfo.dataId,
-                              fluxToPlotList=["base_GaussianFlux", "base_CircularApertureFlux_12_0"],
-                              postFix="_commonZp", **plotKwargs)
-                commonZpDone = True
-            # Now source catalog calibrated to either FLUXMAG0 or meas_mosaic result for remainder of plots
-            if self.config.doPlotMags:
-                self.plotMags(catalog, filenamer, repoInfo.dataId, **plotKwargs)
-            if self.config.doPlotStarGalaxy:
-                if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
-                    self.plotStarGal(catalog, filenamer, repoInfo.dataId, **plotKwargs)
-                else:
-                    self.log.warn("Cannot run plotStarGal: " +
-                                  "ext_shapeHSM_HsmSourceMoments_xx not in catalog.schema")
-            if self.config.doPlotSizes:
-                if "base_SdssShape_psf_xx" in catalog.schema:
-                    self.plotSizes(catalog, filenamer, repoInfo.dataId, **plotKwargs)
-                else:
-                    self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
-            if self.config.doPlotCentroids and self.haveFpCoords:
-                self.plotCentroidXY(catalog, filenamer, repoInfo.dataId, **plotKwargs)
+
+                # Dict of all parameters common to plot* functions
+                plotKwargs = dict(butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
+                                  hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
+
+                if self.config.doPlotFootprintNpix:
+                    self.plotFootprintHist(catalog,
+                                           filenamer(repoInfo.dataId, description="footNpix", style="hist"),
+                                           repoInfo.dataId, **plotKwargs)
+                    self.plotFootprint(catalog, filenamer, repoInfo.dataId, plotRunStats=False,
+                                       highlightList=[("parent", 0, "yellow"), ], **plotKwargs)
+
+                if self.config.doPlotQuiver:
+                    self.plotQuiver(catalog,
+                                    filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
+                                    dataId=repoInfo.dataId, scale=2, **plotKwargs)
+
+                # Create mag comparison plots using common ZP
+                if self.config.doPlotMags and not commonZpDone:
+                    zpLabel = "common (%s)" % self.config.analysis.commonZp
+                    try:
+                        zpLabel += " " + self.catLabel
+                    except Exception:
+                        pass
+                    plotKwargs.update(dict(zpLabel=zpLabel))
+                    self.plotMags(commonZpCat, filenamer, repoInfo.dataId,
+                                  fluxToPlotList=["base_GaussianFlux", "base_CircularApertureFlux_12_0"],
+                                  postFix="_commonZp", **plotKwargs)
+                    commonZpDone = True
+                # Now source catalog calibrated to either FLUXMAG0 or meas_mosaic result for remainder of plots
+                plotKwargs.update(dict(zpLabel=self.zpLabel))
+                if self.config.doPlotMags:
+                    self.plotMags(catalog, filenamer, repoInfo.dataId, **plotKwargs)
+                if self.config.doPlotStarGalaxy:
+                    if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+                        self.plotStarGal(catalog, filenamer, repoInfo.dataId, **plotKwargs)
+                    else:
+                        self.log.warn("Cannot run plotStarGal: " +
+                                      "ext_shapeHSM_HsmSourceMoments_xx not in catalog.schema")
+                if self.config.doPlotSizes:
+                    if "base_SdssShape_psf_xx" in catalog.schema:
+                        self.plotSizes(catalog, filenamer, repoInfo.dataId, **plotKwargs)
+                    else:
+                        self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
+                if self.config.doPlotCentroids and self.haveFpCoords:
+                    self.plotCentroidXY(catalog, filenamer, repoInfo.dataId, **plotKwargs)
+
             if self.config.doPlotMatches:
                 matches = self.readSrcMatches(dataRefListTract, "src", repoInfo, aliasDictList=aliasDictList)
+                # Dict of all parameters common to plot* functions
+                plotKwargs = dict(butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
+                                  hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
                 self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId, **plotKwargs)
 
             for cat in self.config.externalCatalogs:
@@ -639,17 +647,6 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             raise TaskError("Lengths of comparison dataRefLists do not match!")
         commonZpDone = False
 
-        # Get a butler and dataId for each dataset.  Needed for feeding a butler and camera into the
-        # plotting functions (for labelling the camera and plotting ccd outlines) in addition to
-        # determining if the data were processed with the HSC stack.  We assume all processing in a
-        # given rerun is self-consistent, so only need one valid dataId per comparison rerun.
-        for dataRefListTract1, dataRefListTract2 in zip(dataRefListPerTract1, dataRefListPerTract2):
-            repoInfo1 = getRepoInfo(dataRefListTract1[0], doApplyUberCal=self.config.doApplyUberCal1)
-            repoInfo2 = getRepoInfo(dataRefListTract2[0], doApplyUberCal=self.config.doApplyUberCal2)
-            break
-
-        fullCcdList = getDataExistsRefList(dataRefList1, repoInfo1.dataset)
-
         i = -1
         for dataRefListTract1, dataRefListTract2 in zip(dataRefListPerTract1, dataRefListPerTract2):
             i += 1
@@ -659,6 +656,15 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             if not dataRefListTract2:
                 self.log.info("No data found in --rerun2 for tract: {:d}".format(tractList[i]))
                 continue
+            # Get a butler and dataId for each dataset.  Needed for feeding a butler and camera into the
+            # plotting functions (for labelling the camera and plotting ccd outlines) in addition to
+            # determining if the data were processed with the HSC stack.  We assume all processing in a
+            # given rerun is self-consistent, so only need one valid dataId per comparison rerun.
+            repoInfo1 = getRepoInfo(dataRefListTract1[0], doApplyUberCal=self.config.doApplyUberCal1)
+            repoInfo2 = getRepoInfo(dataRefListTract2[0], doApplyUberCal=self.config.doApplyUberCal2)
+
+            fullCameraCcdList1 = getCcdNameRefList(dataRefListTract1)
+
             ccdListPerTract1 = getDataExistsRefList(dataRefListTract1, repoInfo1.dataset)
             ccdListPerTract2 = getDataExistsRefList(dataRefListTract2, repoInfo2.dataset)
             if not ccdListPerTract1:
@@ -756,12 +762,13 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                     zpLabel = zpLabel + " " + self.catLabel
                 except Exception:
                     pass
-
-                self.plotMags(commonZpCat, filenamer, repoInfo1.dataId, ccdList=fullCcdList,
+                plotKwargs1.update(dict(zpLabel=zpLabel))
+                self.plotMags(commonZpCat, filenamer, repoInfo1.dataId, ccdList=fullCameraCcdList1,
                               fluxToPlotList=["base_GaussianFlux", "base_CircularApertureFlux_12_0"],
                               postFix="_commonZp", **plotKwargs1)
                 commonZpDone = True
 
+            plotKwargs1.update(dict(zpLabel=self.zpLabel))
             if self.config.doPlotMags:
                 self.plotMags(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList, **plotKwargs1)
             if self.config.doPlotSizes:

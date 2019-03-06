@@ -170,6 +170,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def __init__(self, *args, **kwargs):
         CmdLineTask.__init__(self, *args, **kwargs)
+        self.zpLabel = None
         self.unitScale = 1000.0 if self.config.toMilli else 1.0
         self.matchRadius = self.config.matchRadiusXy if self.config.matchXy else self.config.matchRadiusRaDec
         self.matchRadiusUnitStr = " (pixels)" if self.config.matchXy else "\""
@@ -186,6 +187,7 @@ class CoaddAnalysisTask(CmdLineTask):
         # will be found)
         if patchRefList[0].datasetExists(self.config.coaddName + dataset):
             haveForced = True
+        forcedStr = "forced" if haveForced else "unforced"
         if not haveForced:
             self.log.warn("No forced dataset exists for, e.g.,: {:} (only showing first dataId in "
                           "patchRefList).\nPlotting unforced results only.".format(patchRefList[0].dataId))
@@ -201,161 +203,171 @@ class CoaddAnalysisTask(CmdLineTask):
         self.uberCalLabel = determineUberCalLabel(repoInfo, patchList[0], coaddName=self.config.coaddName)
         self.log.info("Uber-calibration used: {:}".format(self.uberCalLabel))
 
-        if (self.config.doPlotMags or self.config.doPlotStarGalaxy or self.config.doPlotOverlaps or
-                self.config.doPlotCompareUnforced or cosmos or self.config.externalCatalogs):
-            if haveForced:
-                forced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_forced_src")
-                forced = self.calibrateCatalogs(forced, wcs=repoInfo.wcs)
-            unforced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_meas")
-            unforced = self.calibrateCatalogs(unforced, wcs=repoInfo.wcs)
-
-        if haveForced:
-            # copy over some fields from unforced to forced catalog
-            forced = addColumnsToSchema(unforced, forced,
-                                        [col for col in list(self.config.columnsToCopy) +
-                                         list(self.config.analysis.flags) if
-                                         col not in forced.schema and col in unforced.schema and
-                                         not (repoInfo.hscRun and col == "slot_Centroid_flag")])
-            # Add the reference band flags for forced photometry to forced catalog
-            refBandCat = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_ref")
-            if len(forced) != len(refBandCat):
-                raise RuntimeError(("Lengths of forced (N = {0:d}) and ref (N = {0:d}) cats don't match").
-                                   format(len(forced), len(refBandCat)))
-            refBandList = list(s.field.getName() for s in refBandCat.schema if "merge_measurement_"
-                               in s.field.getName())
-            forced = addColumnsToSchema(refBandCat, forced,
-                                        [col for col in refBandList if col not in forced.schema and
-                                         col in refBandCat.schema])
-
         # Set some aliases for differing schema naming conventions
-        coaddList = [unforced, ]
-        if haveForced:
-            coaddList += [forced]
         aliasDictList = [self.config.flagsToAlias, ]
         if repoInfo.hscRun and self.config.srcSchemaMap is not None:
             aliasDictList += [self.config.srcSchemaMap]
-        for cat in coaddList:
-            cat = setAliasMaps(cat, aliasDictList)
-
-        forcedStr = "forced" if haveForced else "unforced"
-
-        if self.config.doPlotFootprintNpix:
-            unforced = addFootprintNPix(unforced, fromCat=unforced)
-            if haveForced:
-                forced = addFootprintNPix(forced, fromCat=unforced)
 
         # Dict of all parameters common to plot* functions
         plotKwargs = dict(butler=repoInfo.butler, camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
                           patchList=patchList, hscRun=repoInfo.hscRun, zpLabel=self.zpLabel,
                           uberCalLabel=self.uberCalLabel)
-        # Must do the overlaps before purging the catalogs of non-primary sources
-        if self.config.doPlotOverlaps:
-            # Determine if any patches in the patchList actually overlap
-            overlappingPatches = checkPatchOverlap(patchList, repoInfo.tractInfo)
-            if not overlappingPatches:
-                self.log.info("No overlapping patches...skipping overlap plots")
-            else:
-                self.catLabel = "nChild = 0"
+
+        if any (doPlot for doPlot in [self.config.doPlotMags, self.config.doPlotStarGalaxy,
+                                      self.config.doPlotOverlaps, self.config.doPlotCompareUnforced,
+                                      cosmos, self.config.externalCatalogs,
+                                      self.config.doWriteParquetTables]):
+            if haveForced:
+                forced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_forced_src")
+                forced = self.calibrateCatalogs(forced, wcs=repoInfo.wcs)
+            unforced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_meas")
+            unforced = self.calibrateCatalogs(unforced, wcs=repoInfo.wcs)
+            plotKwargs.update(dict(zpLabel=self.zpLabel))
+            if haveForced:
+                # copy over some fields from unforced to forced catalog
+                forced = addColumnsToSchema(unforced, forced,
+                                            [col for col in list(self.config.columnsToCopy) +
+                                             list(self.config.analysis.flags) if
+                                             col not in forced.schema and col in unforced.schema and
+                                             not (repoInfo.hscRun and col == "slot_Centroid_flag")])
+                # Add the reference band flags for forced photometry to forced catalog
+                refBandCat = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_ref")
+                if len(forced) != len(refBandCat):
+                    raise RuntimeError(("Lengths of forced (N = {0:d}) and ref (N = {0:d}) cats don't match").
+                                       format(len(forced), len(refBandCat)))
+                refBandList = list(s.field.getName() for s in refBandCat.schema if "merge_measurement_"
+                                   in s.field.getName())
+                forced = addColumnsToSchema(refBandCat, forced,
+                                            [col for col in refBandList if col not in forced.schema and
+                                             col in refBandCat.schema])
+
+            # Set some aliases for differing schema naming conventions
+            coaddList = [unforced, ]
+            if haveForced:
+                coaddList += [forced]
+            for cat in coaddList:
+                cat = setAliasMaps(cat, aliasDictList)
+
+            if self.config.doPlotFootprintNpix:
+                unforced = addFootprintNPix(unforced, fromCat=unforced)
                 if haveForced:
-                    forcedOverlaps = self.overlaps(forced)
-                    if forcedOverlaps:
-                        self.plotOverlaps(forcedOverlaps, filenamer, repoInfo.dataId,
-                                          matchRadius=self.config.matchOverlapRadius, matchRadiusUnitStr="\"",
-                                          forcedStr=forcedStr, postFix="_forced",
+                    forced = addFootprintNPix(forced, fromCat=unforced)
+
+            # Must do the overlaps before purging the catalogs of non-primary sources
+            if self.config.doPlotOverlaps:
+                # Determine if any patches in the patchList actually overlap
+                overlappingPatches = checkPatchOverlap(patchList, repoInfo.tractInfo)
+                if not overlappingPatches:
+                    self.log.info("No overlapping patches...skipping overlap plots")
+                else:
+                    self.catLabel = "nChild = 0"
+                    if haveForced:
+                        forcedOverlaps = self.overlaps(forced)
+                        if forcedOverlaps:
+                            self.plotOverlaps(forcedOverlaps, filenamer, repoInfo.dataId,
+                                              matchRadius=self.config.matchOverlapRadius,
+                                              matchRadiusUnitStr="\"",
+                                              forcedStr=forcedStr, postFix="_forced",
+                                              fluxToPlotList=["modelfit_CModel", ], **plotKwargs)
+                            self.log.info("Number of forced overlap objects matched = {:d}".
+                                          format(len(forcedOverlaps)))
+                    unforcedOverlaps = self.overlaps(unforced)
+                    if unforcedOverlaps:
+                        self.plotOverlaps(unforcedOverlaps, filenamer, repoInfo.dataId,
+                                          matchRadius=self.config.matchOverlapRadius,
+                                          matchRadiusUnitStr="\"",
+                                          forcedStr="unforced", postFix="_unforced",
                                           fluxToPlotList=["modelfit_CModel", ], **plotKwargs)
-                    self.log.info("Number of forced overlap objects matched = {:d}".
-                                  format(len(forcedOverlaps)))
-                unforcedOverlaps = self.overlaps(unforced)
-                if unforcedOverlaps:
-                    self.plotOverlaps(unforcedOverlaps, filenamer, repoInfo.dataId,
-                                      matchRadius=self.config.matchOverlapRadius, matchRadiusUnitStr="\"",
-                                      forcedStr="unforced", postFix="_unforced",
-                                      fluxToPlotList=["modelfit_CModel", ], **plotKwargs)
-                self.log.info("Number of unforced overlap objects matched = {:d}".
-                              format(len(unforcedOverlaps)))
+                        self.log.info("Number of unforced overlap objects matched = {:d}".
+                                      format(len(unforcedOverlaps)))
 
-        # Set boolean array indicating sources deemed unsuitable for qa analyses
-        self.catLabel = "noDuplicates"
-        bad = makeBadArray(unforced, flagList=self.config.analysis.flags,
-                           onlyReadStars=self.config.onlyReadStars)
-        if haveForced:
-            bad |= makeBadArray(forced, flagList=self.config.analysis.flags,
-                                onlyReadStars=self.config.onlyReadStars)
-
-        # Create and write parquet tables
-        if self.config.doWriteParquetTables:
+            # Set boolean array indicating sources deemed unsuitable for qa analyses
+            self.catLabel = "noDuplicates"
+            bad = makeBadArray(unforced, flagList=self.config.analysis.flags,
+                               onlyReadStars=self.config.onlyReadStars)
             if haveForced:
-                dataRef_forced = repoInfo.butler.dataRef('analysisCoaddTable_forced', dataId=repoInfo.dataId)
-                writeParquet(dataRef_forced, forced, badArray=bad)
-            dataRef_unforced = repoInfo.butler.dataRef('analysisCoaddTable_unforced', dataId=repoInfo.dataId)
-            writeParquet(dataRef_unforced, unforced, badArray=bad)
-            if self.config.writeParquetOnly:
-                self.log.info("Exiting after writing Parquet tables.  No plots generated.")
-                return
+                bad |= makeBadArray(forced, flagList=self.config.analysis.flags,
+                                    onlyReadStars=self.config.onlyReadStars)
 
-        # Purge the catalogs of flagged sources
-        unforced = unforced[~bad].copy(deep=True)
-        if haveForced:
-            forced = forced[~bad].copy(deep=True)
-        else:
-            forced = unforced
-        self.zpLabel = self.zpLabel + " " + self.catLabel
-        if haveForced:
-            self.log.info("\nNumber of sources in catalogs: unforced = {0:d} and forced = {1:d}".format(
-                len(unforced), len(forced)))
-        else:
-            self.log.info("\nNumber of sources in catalog: unforced = {0:d}".format(len(unforced)))
+            # Create and write parquet tables
+            if self.config.doWriteParquetTables:
+                if haveForced:
+                    dataRef_forced = repoInfo.butler.dataRef('analysisCoaddTable_forced',
+                                                             dataId=repoInfo.dataId)
+                    writeParquet(dataRef_forced, forced, badArray=bad)
+                dataRef_unforced = repoInfo.butler.dataRef('analysisCoaddTable_unforced',
+                                                           dataId=repoInfo.dataId)
+                writeParquet(dataRef_unforced, unforced, badArray=bad)
+                if self.config.writeParquetOnly:
+                    self.log.info("Exiting after writing Parquet tables.  No plots generated.")
+                    return
 
-        flagsCat = unforced
-
-        if self.config.doPlotFootprintNpix:
-            self.plotFootprintHist(forced, filenamer(repoInfo.dataId, description="footNpix", style="hist"),
-                                   repoInfo.dataId, flagsCat=flagsCat, **plotKwargs)
-            self.plotFootprint(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr, flagsCat=flagsCat,
-                               **plotKwargs)
-
-        if self.config.doPlotQuiver:
-            self.plotQuiver(unforced, filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
-                            dataId=repoInfo.dataId, forcedStr="unforced", scale=2, **plotKwargs)
-
-        if self.config.doPlotInputCounts:
-            self.plotInputCounts(unforced, filenamer(repoInfo.dataId, description="inputCounts",
-                                                     style="tract"), dataId=repoInfo.dataId,
-                                 forcedStr="unforced", alpha=0.5,
-                                 doPlotTractImage=True, doPlotPatchOutline=True, sizeFactor=5.0,
-                                 maxDiamPix=1000, **plotKwargs)
-
-        if self.config.doPlotMags:
-            self.plotMags(unforced, filenamer, repoInfo.dataId, forcedStr="unforced",
-                          postFix="_unforced", flagsCat=flagsCat, **plotKwargs)
+            # Purge the catalogs of flagged sources
+            unforced = unforced[~bad].copy(deep=True)
             if haveForced:
-                self.plotMags(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr, postFix="_forced",
-                              flagsCat=flagsCat,
-                              highlightList=[("merge_measurement_" + repoInfo.genericFilterName, 0,
-                                              "yellow"), ], **plotKwargs)
-        if self.config.doPlotStarGalaxy:
-            if "ext_shapeHSM_HsmSourceMoments_xx" in unforced.schema:
-                self.plotStarGal(unforced, filenamer, repoInfo.dataId, forcedStr="unforced", **plotKwargs)
+                forced = forced[~bad].copy(deep=True)
             else:
-                self.log.warn("Cannot run plotStarGal: ext_shapeHSM_HsmSourceMoments_xx not in forced.schema")
-
-        if self.config.doPlotSizes:
-            if all(ss in unforced.schema for ss in ["base_SdssShape_psf_xx", "calib_psf_used"]):
-                self.plotSizes(unforced, filenamer, repoInfo.dataId, forcedStr="unforced", postFix="_unforced",
-                               **plotKwargs)
-            else:
-                self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx and/or calib_psf_used "
-                              "not in unforced.schema")
+                forced = unforced
+            self.zpLabel = self.zpLabel + " " + self.catLabel
             if haveForced:
-                if all(ss in forced.schema for ss in ["base_SdssShape_psf_xx", "calib_psf_used"]):
-                    self.plotSizes(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr, **plotKwargs)
+                self.log.info("\nNumber of sources in catalogs: unforced = {0:d} and forced = {1:d}".format(
+                    len(unforced), len(forced)))
+            else:
+                self.log.info("\nNumber of sources in catalog: unforced = {0:d}".format(len(unforced)))
+
+            flagsCat = unforced
+
+            if self.config.doPlotFootprintNpix:
+                self.plotFootprintHist(forced,
+                                       filenamer(repoInfo.dataId, description="footNpix", style="hist"),
+                                       repoInfo.dataId, flagsCat=flagsCat, **plotKwargs)
+                self.plotFootprint(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr, flagsCat=flagsCat,
+                                   **plotKwargs)
+
+            if self.config.doPlotQuiver:
+                self.plotQuiver(unforced,
+                                filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
+                                dataId=repoInfo.dataId, forcedStr="unforced", scale=2, **plotKwargs)
+
+            if self.config.doPlotInputCounts:
+                self.plotInputCounts(unforced, filenamer(repoInfo.dataId, description="inputCounts",
+                                                         style="tract"), dataId=repoInfo.dataId,
+                                     forcedStr="unforced", alpha=0.5,
+                                     doPlotTractImage=True, doPlotPatchOutline=True, sizeFactor=5.0,
+                                     maxDiamPix=1000, **plotKwargs)
+
+            if self.config.doPlotMags:
+                self.plotMags(unforced, filenamer, repoInfo.dataId, forcedStr="unforced",
+                              postFix="_unforced", flagsCat=flagsCat, **plotKwargs)
+                if haveForced:
+                    self.plotMags(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr, postFix="_forced",
+                                  flagsCat=flagsCat,
+                                  highlightList=[("merge_measurement_" + repoInfo.genericFilterName, 0,
+                                                  "yellow"), ], **plotKwargs)
+            if self.config.doPlotStarGalaxy:
+                if "ext_shapeHSM_HsmSourceMoments_xx" in unforced.schema:
+                    self.plotStarGal(unforced, filenamer, repoInfo.dataId, forcedStr="unforced", **plotKwargs)
+                else:
+                    self.log.warn("Cannot run plotStarGal: ext_shapeHSM_HsmSourceMoments_xx not "
+                                  "in forced.schema")
+
+            if self.config.doPlotSizes:
+                if all(ss in unforced.schema for ss in ["base_SdssShape_psf_xx", "calib_psf_used"]):
+                    self.plotSizes(unforced, filenamer, repoInfo.dataId, forcedStr="unforced",
+                                   postFix="_unforced", **plotKwargs)
                 else:
                     self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx and/or calib_psf_used "
-                                  "not in forced.schema")
-        if cosmos:
-            self.plotCosmos(forced, filenamer, cosmos, repoInfo.dataId)
-        if self.config.doPlotCompareUnforced and haveForced:
-            self.plotCompareUnforced(forced, unforced, filenamer, repoInfo.dataId, **plotKwargs)
+                                  "not in unforced.schema")
+                if haveForced:
+                    if all(ss in forced.schema for ss in ["base_SdssShape_psf_xx", "calib_psf_used"]):
+                        self.plotSizes(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr, **plotKwargs)
+                    else:
+                        self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx and/or calib_psf_used "
+                                      "not in forced.schema")
+            if cosmos:
+                self.plotCosmos(forced, filenamer, cosmos, repoInfo.dataId)
+            if self.config.doPlotCompareUnforced and haveForced:
+                self.plotCompareUnforced(forced, unforced, filenamer, repoInfo.dataId, **plotKwargs)
 
         if self.config.doPlotMatches:
             if haveForced:
@@ -366,6 +378,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 matches = self.readSrcMatches(patchRefList, self.config.coaddName + "Coadd_meas",
                                               hscRun=repoInfo.hscRun, wcs=repoInfo.wcs,
                                               aliasDictList=aliasDictList)
+            plotKwargs.update(dict(zpLabel=self.zpLabel))
             self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId, forcedStr=forcedStr,
                              **plotKwargs)
 
