@@ -63,21 +63,28 @@ class CoaddAnalysisConfig(Config):
     externalCatalogs = ConfigDictField(keytype=str, itemtype=AstrometryConfig, default={},
                                        doc="Additional external catalogs for matching")
     refObjLoader = ConfigurableField(target=LoadIndexedReferenceObjectsTask, doc="Reference object loader")
-    doPlotMags = Field(dtype=bool, default=True, doc="Plot magnitudes?")
-    doPlotSizes = Field(dtype=bool, default=True, doc="Plot PSF sizes?")
-    doPlotCentroids = Field(dtype=bool, default=True, doc="Plot centroids?")
-    doApCorrs = Field(dtype=bool, default=True, doc="Plot aperture corrections?")
+    doPlotMags = Field(dtype=bool, default=True, doc="Plot magnitudes? (ignored if plotMatchesOnly is True)")
+    doPlotSizes = Field(dtype=bool, default=True, doc="Plot PSF sizes? (ignored if plotMatchesOnly is True)")
+    doPlotCentroids = Field(dtype=bool, default=True, doc=("Plot centroids? "
+                                                           "(ignored if plotMatchesOnly is True)"))
+    doApCorrs = Field(dtype=bool, default=True, doc=("Plot aperture corrections? "
+                                                     "(ignored if plotMatchesOnly is True)"))
     doBackoutApCorr = Field(dtype=bool, default=False, doc="Backout aperture corrections?")
     doAddAperFluxHsc = Field(dtype=bool, default=False,
                              doc="Add a field containing 12 pix circular aperture flux to HSC table?")
-    doPlotStarGalaxy = Field(dtype=bool, default=True, doc="Plot star/galaxy?")
-    doPlotOverlaps = Field(dtype=bool, default=True, doc="Plot overlaps?")
+    doPlotStarGalaxy = Field(dtype=bool, default=True, doc=("Plot star/galaxy? "
+                                                            "(ignored if plotMatchesOnly is True)"))
+    doPlotOverlaps = Field(dtype=bool, default=True, doc="Plot overlaps? (ignored if plotMatchesOnly is True)")
+    plotMatchesOnly = Field(dtype=bool, default=False, doc="Only make plots related to reference cat matches?")
     doPlotMatches = Field(dtype=bool, default=True, doc="Plot matches?")
-    doPlotCompareUnforced = Field(dtype=bool, default=True,
-                                  doc="Plot difference between forced and unforced?")
-    doPlotQuiver = Field(dtype=bool, default=True, doc="Plot ellipticity residuals quiver plot?")
-    doPlotFootprintNpix = Field(dtype=bool, default=True, doc="Plot histogram of footprint nPix?")
-    doPlotInputCounts = Field(dtype=bool, default=True, doc="Make input counts plot?")
+    doPlotCompareUnforced = Field(dtype=bool, default=True, doc=("Plot difference between forced and unforced"
+                                                                 "? (ignored if plotMatchesOnly is True)"))
+    doPlotQuiver = Field(dtype=bool, default=True, doc=("Plot ellipticity residuals quiver plot? "
+                                                        "(ignored if plotMatchesOnly is True)"))
+    doPlotFootprintNpix = Field(dtype=bool, default=True, doc=("Plot histogram of footprint nPix? "
+                                                               "(ignored if plotMatchesOnly is True)"))
+    doPlotInputCounts = Field(dtype=bool, default=True, doc=("Make input counts plot? "
+                                                             "(ignored if plotMatchesOnly is True)"))
     onlyReadStars = Field(dtype=bool, default=False, doc="Only read stars (to save memory)?")
     toMilli = Field(dtype=bool, default=True, doc="Print stats in milli units (i.e. mas, mmag)?")
     srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
@@ -120,6 +127,17 @@ class CoaddAnalysisConfig(Config):
         Config.validate(self)
         if self.writeParquetOnly and not self.doWriteParquetTables:
             raise ValueError("Cannot writeParquetOnly if doWriteParquetTables is False")
+        if self.plotMatchesOnly:
+            self.doPlotMatches = True
+            self.doPlotMags = False
+            self.doPlotSizes = False
+            self.doPlotCentroids = False
+            self.doPlotStarGalaxy = False
+            self.doPlotOverlaps = False
+            self.doPlotCompareUnforced = False
+            self.doPlotQuiver = False
+            self.doPlotFootprintNpix = False
+            self.doPlotInputCounts = False
 
 
 class CoaddAnalysisRunner(TaskRunner):
