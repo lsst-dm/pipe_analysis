@@ -25,12 +25,13 @@ from .analysis import AnalysisConfig, Analysis
 from .utils import (Filenamer, Enforcer, MagDiff, MagDiffMatches, MagDiffCompare,
                     AstrometryDiff, TraceSize, PsfTraceSizeDiff, TraceSizeCompare, PercentDiff,
                     E1Resids, E2Resids, E1ResidsHsmRegauss, E2ResidsHsmRegauss, FootNpixDiffCompare,
-                    MagDiffErr, CentroidDiff, deconvMom,
+                    MagDiffCompareErr, CentroidDiff, deconvMom,
                     deconvMomStarGal, concatenateCatalogs, joinMatches, checkPatchOverlap,
                     addColumnsToSchema, addApertureFluxesHSC, addFpPoint,
                     addFootprintNPix, makeBadArray, addIntFloatOrStrColumn,
                     calibrateCoaddSourceCatalog, backoutApCorr, matchJanskyToDn,
-                    fluxToPlotString, andCatalog, writeParquet, getRepoInfo, setAliasMaps)
+                    fluxToPlotString, andCatalog, writeParquet, getRepoInfo, setAliasMaps,
+                    addPreComputedColumns)
 from .plotUtils import (CosmosLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
                         MatchesStarGalaxyLabeller, determineUberCalLabel)
 
@@ -272,7 +273,7 @@ class CoaddAnalysisTask(CmdLineTask):
                     forced = addFootprintNPix(forced, fromCat=unforced)
 
             # Must do the overlaps before purging the catalogs of non-primary sources
-            if self.config.doPlotOverlaps:
+            if self.config.doPlotOverlaps and not self.config.writeParquetOnly:
                 # Determine if any patches in the patchList actually overlap
                 overlappingPatches = checkPatchOverlap(patchList, repoInfo.tractInfo)
                 if not overlappingPatches:
@@ -310,11 +311,17 @@ class CoaddAnalysisTask(CmdLineTask):
             # Create and write parquet tables
             if self.config.doWriteParquetTables:
                 if haveForced:
+                    # Add pre-computed columns for parquet tables
+                    forced = addPreComputedColumns(forced, fluxToPlotList=self.config.fluxToPlotList,
+                                                   toMilli=self.config.toMilli, unforcedCat=unforced)
                     dataRef_forced = repoInfo.butler.dataRef('analysisCoaddTable_forced',
                                                              dataId=repoInfo.dataId)
                     writeParquet(dataRef_forced, forced, badArray=bad)
                 dataRef_unforced = repoInfo.butler.dataRef('analysisCoaddTable_unforced',
                                                            dataId=repoInfo.dataId)
+                # Add pre-computed columns for parquet tables
+                unforced = addPreComputedColumns(unforced, fluxToPlotList=self.config.fluxToPlotList,
+                                                 toMilli=self.config.toMilli)
                 writeParquet(dataRef_unforced, unforced, badArray=bad)
                 if self.config.writeParquetOnly:
                     self.log.info("Exiting after writing Parquet tables.  No plots generated.")
@@ -1333,8 +1340,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                 Analysis(catalog, MagDiffCompare(col + "_instFlux", unitScale=self.unitScale),
                          "      Run Comparison: %s mag diff (%s)" % (fluxToPlotString(col), unitStr),
                          shortName, self.config.analysis, prefix="first_", qMin=-0.05, qMax=0.05,
-                         flags=[col + "_flag"], errFunc=MagDiffErr(col + "_instFlux",
-                                                                   unitScale=self.unitScale),
+                         flags=[col + "_flag"], errFunc=MagDiffCompareErr(col + "_instFlux",
+                                                                          unitScale=self.unitScale),
                          labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat, unitScale=self.unitScale,
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
