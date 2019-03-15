@@ -64,7 +64,7 @@ class Analysis(object):
 
     def __init__(self, catalog, func, quantityName, shortName, config, qMin=-0.2, qMax=0.2,
                  prefix="", flags=[], goodKeys=[], errFunc=None, labeller=AllLabeller(), flagsCat=None,
-                 magThreshold=21, forcedMean=None, unitScale=1.0):
+                 magThreshold=21, forcedMean=None, unitScale=1.0, compareCat=None):
         self.catalog = catalog
         self.func = func
         self.quantityName = quantityName
@@ -121,7 +121,7 @@ class Analysis(object):
             self.good &= flagsCat[prefix + kk]
 
         if labeller is not None:
-            labels = labeller(catalog)
+            labels = labeller(catalog, compareCat) if compareCat else labeller(catalog)
             self.data = {name: Data(catalog, self.quantity, self.mag, self.good & (labels == value),
                                     colorList[value], self.quantityError, name in labeller.plot) for
                          name, value in labeller.labels.items()}

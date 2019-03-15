@@ -829,28 +829,18 @@ class CoaddAnalysisTask(CmdLineTask):
                             tractInfo=None, patchList=None, hscRun=None, zpLabel=None, fluxToPlotList=None,
                             uberCalLabel=None, matchRadius=None, matchRadiusUnitStr=None, matchControl=None):
         fluxToPlotList = fluxToPlotList if fluxToPlotList else self.config.fluxToPlotList
-        matchRadius = matchRadius if matchRadius else self.matchRadius
-        matchControl = matchControl if matchControl else self.matchControl
-        matchRadiusUnitStr = matchRadiusUnitStr if matchRadiusUnitStr else self.matchRadiusUnitStr
-
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = None
-        if self.config.matchXy:
-            matches = afwTable.matchXy(forced, unforced, matchRadius, matchControl)
-        else:
-            matches = afwTable.matchRaDec(forced, unforced, matchRadius*afwGeom.arcseconds, matchControl)
-        catalog = joinMatches(matches, "forced_", "unforced_")
         for col in fluxToPlotList:
+            magDiffFunc = MagDiff(col + "_instFlux", col + "_instFlux", unitScale=self.unitScale)
             shortName = "compareUnforced_" + col
             self.log.info("shortName = {:s}".format(shortName))
-            if "forced_" + col + "_instFlux" in catalog.schema:
-                self.AnalysisClass(catalog, MagDiff("forced_" + col + "_instFlux",
-                                                    "unforced_" + col + "_instFlux",
-                                                    unitScale=self.unitScale),
+            if col + "_instFlux" in forced.schema:
+                self.AnalysisClass(forced, magDiffFunc(forced, unforced),
                                    "  Forced - Unforced mag [%s] (%s)" % (fluxToPlotString(col), unitStr),
-                                   shortName, self.config.analysis, prefix="forced_", flags=[col + "_flag"],
-                                   labeller=OverlapsStarGalaxyLabeller("forced_", "unforced_"),
-                                   unitScale=self.unitScale,
+                                   shortName, self.config.analysis, prefix="", flags=[col + "_flag"],
+                                   labeller=OverlapsStarGalaxyLabeller(first="", second=""),
+                                   unitScale=self.unitScale, compareCat=unforced,
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
