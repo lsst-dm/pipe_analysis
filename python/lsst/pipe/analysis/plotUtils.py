@@ -645,8 +645,15 @@ def determineUberCalLabel(repoInfo, patch, coaddName="deep"):
     coaddDataId = {"tract": repoInfo.tractInfo.getId(), "patch": patch, "filter": repoInfo.filterName}
     coadd = repoInfo.butler.get(coaddName + "Coadd_calexp", coaddDataId, immediate=True)
     coaddInputs = coadd.getInfo().getCoaddInputs()
-    visitDataId = {"visit": coaddInputs.ccds[0]["visit"], "ccd": coaddInputs.ccds[0]["ccd"],
-                   "filter": repoInfo.filterName, "tract": repoInfo.tractInfo.getId()}
+    try:
+        visitDataId = {"visit": coaddInputs.ccds[0]["visit"], "ccd": coaddInputs.ccds[0]["ccd"],
+                       "filter": repoInfo.filterName, "tract": repoInfo.tractInfo.getId()}
+        repoInfo.butler.datasetExists("jointcal_photoCalib", dataId=visitDataId)
+    except Exception:  # The above will throw if ccd is not a valid dataId key, try detector instead
+        visitDataId = {"visit": coaddInputs.ccds[0]["visit"], "detector": coaddInputs.ccds[0]["ccd"],
+                       "filter": repoInfo.filterName, "tract": repoInfo.tractInfo.getId()}
+        repoInfo.butler.datasetExists("jointcal_photoCalib", dataId=visitDataId)
+
     if repoInfo.butler.datasetExists("fcr_md", dataId=visitDataId):
         uberCalLabel = "MEAS_MOSAIC"
     elif (not repoInfo.butler.datasetExists("fcr_md", dataId=visitDataId) and
