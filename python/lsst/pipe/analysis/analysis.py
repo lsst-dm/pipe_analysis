@@ -29,19 +29,19 @@ class AnalysisConfig(Config):
     clip = Field(dtype=float, default=4.0, doc="Rejection threshold (stdev)")
     magThreshold = Field(dtype=float, default=21.0, doc="Magnitude threshold to apply")
     magPlotMin = Field(dtype=float, default=14.5, doc="Minimum magnitude to plot")
-    magPlotMax = Field(dtype=float, default=26.0, doc="Maximum magnitude to plot")
+    magPlotMax = Field(dtype=float, default=25.99, doc="Maximum magnitude to plot")
     magPlotStarMin = DictField(
         keytype=str,
         itemtype=float,
         default={"HSC-G": 16.5, "HSC-R": 17.25, "HSC-I": 16.5, "HSC-Z": 15.5, "HSC-Y": 15.25,
-                 "NB0921": 15.0, "g": 16.5, "r": 15.0, "i": 16.5, "z": 15.5, "y": 15.5},
+                 "NB0921": 15.0, "u": 13.75, "g": 15.5, "r": 15.0, "i": 15.5, "z": 14.5, "y": 14.0},
         doc="Minimum magnitude to plot",
     )
     magPlotStarMax = DictField(
         keytype=str,
         itemtype=float,
         default={"HSC-G": 23.75, "HSC-R": 24.25, "HSC-I": 23.75, "HSC-Z": 23.0, "HSC-Y": 22.0,
-                 "NB0921": 22.25, "g": 23.5, "r": 22.0, "i": 23.5, "z": 22.5, "y": 22.5},
+                 "NB0921": 22.25, "u": 21.5, "g": 22.5, "r": 22.0, "i": 21.5, "z": 21.0, "y": 20.0},
         doc="Maximum magnitude to plot",
     )
     fluxColumn = Field(dtype=str, default="modelfit_CModel_instFlux",
