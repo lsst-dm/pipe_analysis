@@ -247,6 +247,7 @@ class ColorAnalysisConfig(Config):
         Config.setDefaults(self)
         self.transforms = ivezicTransformsHSC
         self.analysis.flags = []  # We remove bad source ourself
+        self.analysis.fluxColumn = "base_PsfFlux_instFlux"
         self.analysis.magThreshold = 22.0  # RHL requested this limit
         if self.correctForGalacticExtinction:
             self.flags += ["galacticExtinction_flag"]
@@ -414,24 +415,33 @@ class ColorAnalysisTask(CmdLineTask):
                                         patchList=patchList, hscRun=repoInfo.hscRun, geLabel=geLabel)
 
         # self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
-        principalColCats = self.transformCatalogs(byFilterForcedCats, self.config.transforms,
-                                                  hscRun=repoInfo.hscRun)
-
+        principalColCatsPsf = self.transformCatalogs(byFilterForcedCats, self.config.transforms,
+                                                     "base_PsfFlux_instFlux", hscRun=repoInfo.hscRun)
+        principalColCatsCModel = self.transformCatalogs(byFilterForcedCats, self.config.transforms,
+                                                        "modelfit_CModel_instFlux", hscRun=repoInfo.hscRun)
         # Create and write parquet tables
         if self.config.doWriteParquetTables:
             dataRef_color = repoInfo.butler.dataRef('analysisColorTable', dataId=repoInfo.dataId)
-            writeParquet(dataRef_color, principalColCats)
+            writeParquet(dataRef_color, principalColCatsPsf)
             if self.config.writeParquetOnly:
                 self.log.info("Exiting after writing Parquet tables.  No plots generated.")
                 return
 
         if self.config.doPlotPrincipalColors:
+            principalColCats = (principalColCatsCModel if "CModel" in self.fluxColumn else principalColCatsPsf)
             self.plotStarPrincipalColors(principalColCats, byFilterForcedCats, filenamer,
                                          NumStarLabeller(3), repoInfo.dataId, camera=repoInfo.camera,
                                          tractInfo=repoInfo.tractInfo, patchList=patchList,
                                          hscRun=repoInfo.hscRun, geLabel=geLabel)
 
         for fluxColumn in ["base_PsfFlux_instFlux", "modelfit_CModel_instFlux"]:
+            if fluxColumn == "base_PsfFlux_instFlux":
+                principalColCats = principalColCatsPsf
+            elif fluxColumn == "modelfit_CModel_instFlux":
+                principalColCats = principalColCatsCModel
+            else:
+                raise RuntimeError("Have not computed transformations for: {:s}".format(fluxColumn))
+
             self.plotStarColorColor(principalColCats, byFilterForcedCats, filenamer, repoInfo.dataId,
                                     fluxColumn, camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
                                     patchList=patchList, hscRun=repoInfo.hscRun, forcedStr=self.forcedStr,
@@ -601,7 +611,7 @@ class ColorAnalysisTask(CmdLineTask):
                           format(tractInfo.getId(), str(tractInfo.getCtrCoord())))
         return catalog
 
-    def transformCatalogs(self, catalogs, transforms, flagsCats=None, hscRun=None):
+    def transformCatalogs(self, catalogs, transforms, fluxColumn, flagsCats=None, hscRun=None):
         """
         Transform catalog entries according to the color transform given
 
@@ -640,7 +650,7 @@ class ColorAnalysisTask(CmdLineTask):
                 schema.addField(col, float, transforms[col].description + transforms[col].subDescription)
         schema.addField("numStarFlags", type=np.int32, doc="Number of times source was flagged as star")
         badKey = schema.addField("qaBad_flag", type="Flag", doc="Is this a bad source for color qa analyses?")
-        schema.addField(self.fluxColumn, type=np.float64, doc="Flux from filter " + self.fluxFilter)
+        schema.addField(fluxColumn, type=np.float64, doc="Flux from filter " + self.fluxFilter)
 
         # Copy basics (id, RA, Dec)
         new = afwTable.SourceCatalog(schema)
@@ -656,7 +666,7 @@ class ColorAnalysisTask(CmdLineTask):
                 if filterName == "":  # Constant: already done
                     continue
                 cat = catalogs[filterName]
-                mag = -2.5*np.log10(cat[self.fluxColumn])
+                mag = -2.5*np.log10(cat[fluxColumn])
                 value += mag*coeff
             new[col][:] = value
 
@@ -674,7 +684,7 @@ class ColorAnalysisTask(CmdLineTask):
             numStarFlags += np.where(cat[self.classificationColumn] < 0.5, 1, 0)
         new["numStarFlags"][:] = numStarFlags
 
-        new[self.fluxColumn][:] = catalogs[self.fluxFilter][self.fluxColumn]
+        new[fluxColumn][:] = catalogs[self.fluxFilter][fluxColumn]
 
         return new
 
@@ -892,8 +902,8 @@ class ColorAnalysisTask(CmdLineTask):
         decentGalaxies = ~isStarFlag & ~bad & prettyBright
 
         # The combined catalog is only used in the Distance (from the poly fit) AnalysisClass plots
-        combined = (self.transformCatalogs(byFilterCats, straightTransforms, hscRun=hscRun)[goodCombined].
-                    copy(True))
+        combined = (self.transformCatalogs(byFilterCats, straightTransforms, "base_PsfFlux_instFlux",
+                                           hscRun=hscRun)[goodCombined].copy(True))
         filters = set(byFilterCats.keys())
         goodMags = {filterName: mags[filterName][good] for filterName in byFilterCats}
         decentStarsMag = mags[self.fluxFilter][decentStars]
@@ -1618,9 +1628,11 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
 
     # Plot hardwired principal color distributions
     if principalCol is not None:
-        pCmean = principalColor[kept].mean()
-        pCstdDev = principalColor[kept].std()
-        count, nBins, ignored = axes[1].hist(principalColor[kept], bins=bins, range=(-4.0*stdDev, 4.0*stdDev),
+        pCkept = principalColor[kept].copy()
+        pCmean = pCkept[good].mean()
+        pCstdDev = pCkept[good].std()
+
+        count, nBins, ignored = axes[1].hist(pCkept[good], bins=bins, range=(-4.0*stdDev, 4.0*stdDev),
                                              density=True, color="blue", alpha=0.6)
         axes[1].plot(bins, 1/(pCstdDev*np.sqrt(2*np.pi))*np.exp(-(bins-pCmean)**2/(2*pCstdDev**2)),
                      color="blue")
@@ -1632,13 +1644,14 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         axes[1].annotate(pCstdStr, xy=(0.97, 0.93), **kwargs)
         log.info(("Statistics from {0:} of {9:s}Perp_wired ({8:s}): {6:s}\'star\': " +
                   "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; median={5:.4f})" +
-                  "{7:s}").format(dataId, pCmean, pCstdDev, len(principalColor[kept]), len(principalColor),
-                                  np.median(principalColor[kept]), "{", "}", unitStr, perpIndexStr))
+                  "{7:s}").format(dataId, pCmean, pCstdDev, len(pCkept[good]), len(pCkept),
+                                  np.median(pCkept[good]), "{", "}", unitStr, perpIndexStr))
     # Plot fitted principal color distributions
     if fitP2 is not None:
-        fitP2mean = fitP2[kept].mean()
-        fitP2stdDev = fitP2[kept].std()
-        count, nBins, ignored = axes[1].hist(fitP2[kept], bins=bins, range=(-4.0*stdDev, 4.0*stdDev),
+        fitP2kept = fitP2[kept].copy()
+        fitP2mean = fitP2kept[good].mean()
+        fitP2stdDev = fitP2kept[good].std()
+        count, nBins, ignored = axes[1].hist(fitP2kept[good], bins=bins, range=(-4.0*stdDev, 4.0*stdDev),
                                              density=True, color="green", alpha=0.6)
         axes[1].plot(bins, 1/(fitP2stdDev*np.sqrt(2*np.pi))*np.exp(-(bins-fitP2mean)**2/(2*fitP2stdDev**2)),
                      color="green")
@@ -1650,8 +1663,8 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         axes[1].annotate(fitP2stdStr, xy=(0.97, 0.86), **kwargs)
         log.info(("Statistics from {0:} of {9:s}Perp_fit ({8:s}): {6:s}\'star\': " +
                   "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; median={5:.4f})" +
-                  "{7:s}").format(dataId, fitP2mean, fitP2stdDev, len(fitP2[kept]), len(fitP2),
-                                  np.median(fitP2[kept]), "{", "}", unitStr, perpIndexStr))
+                  "{7:s}").format(dataId, fitP2mean, fitP2stdDev, len(fitP2kept[good]), len(fitP2kept),
+                                  np.median(fitP2kept[good]), "{", "}", unitStr, perpIndexStr))
 
     axes[1].set_ylim(axes[1].get_ylim()[0], axes[1].get_ylim()[1]*2.5)
 
