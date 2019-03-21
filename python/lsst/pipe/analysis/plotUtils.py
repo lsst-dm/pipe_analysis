@@ -20,7 +20,8 @@ __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "M
            "CosmosLabeller", "plotText", "annotateAxes", "labelVisit", "labelCamera",
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
            "plotCcdOutline", "rotatePixelCoords", "bboxToXyCoordLists", "getRaDecMinMaxPatchList",
-           "percent", "setPtSize", "getQuiver", "makeAlphaCmap", "buildTractImage"]
+           "percent", "setPtSize", "getQuiver", "makeAlphaCmap", "buildTractImage",
+           "determineUberCalLabel"]
 
 
 class AllLabeller(object):
@@ -138,7 +139,7 @@ def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", fontSize=9, color="k", c
 
 def annotateAxes(filename, plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff=0.05,
                  fontSize=8, ha="left", va="top", color="blue", isHist=False, hscRun=None, matchRadius=None,
-                 writeMinMax=None, unitScale=1.0):
+                 matchRadiusUnitStr="\"", writeMinMax=None, unitScale=1.0):
     xOffFact = 0.67*len(" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]))
     axes.annotate(dataSet+r" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]),
                   xy=(x0, y0), xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize, color=color)
@@ -174,8 +175,8 @@ def annotateAxes(filename, plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=
                       xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize)
         yOffMult += 1
     if matchRadius is not None:
-        axes.annotate("Match radius = {0:.2f}\"".format(matchRadius), xy=(x0, y0 - yOffMult*yOff),
-                      xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize)
+        axes.annotate("Match radius = {0:.2f}{1:s}".format(matchRadius, matchRadiusUnitStr),
+                      xy=(x0, y0 - yOffMult*yOff), xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize)
         yOffMult += 1
     if hscRun is not None:
         axes.annotate("HSC stack run: {0:s}".format(hscRun), xy=(x0, y0 - yOffMult*yOff),
@@ -285,13 +286,15 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
     ylim = yMin, yMax
     axes.fill(tractRa, tractDec, fill=True, edgecolor='k', lw=1, linestyle='solid',
               color="black", alpha=0.2)
+    prop_cycle = plt.rcParams['axes.prop_cycle']
+    colors = prop_cycle.by_key()['color']
+    colors.pop(colors.index('#7f7f7f'))  # get rid of the gray one as that's our no-data colour
+    colors.append("gold")
     for ip, patch in enumerate(tractInfo):
         patchIndexStr = str(patch.getIndex()[0]) + "," + str(patch.getIndex()[1])
         color = "k"
         alpha = 0.05
-        if patchIndexStr in patchList:
-            color = ("c", "g", "r", "b", "m")[ip%5]
-            alpha = 0.5
+        (color, alpha) = (colors[ip%len(colors)], 0.5) if patchIndexStr in patchList else (color, alpha)
         ra, dec = bboxToXyCoordLists(patch.getOuterBBox(), wcs=tractInfo.getWcs())
         deltaRa = abs(max(ra) - min(ra))
         deltaDec = abs(max(dec) - min(dec))
@@ -307,16 +310,16 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
                                               centerDec < yMax - 0.2*pBuff):
                 axes.text(percent(ra), percent(dec, 0.5), str(patchIndexStr),
                           fontsize=fontSize - 1, horizontalalignment="center", verticalalignment="center")
-    axes.text(percent((xMin, xMax), 1.06), percent((yMin, yMax), -0.08), "RA",
+    axes.text(percent((xMin, xMax), 1.065), percent((yMin, yMax), -0.08), "RA",
               fontsize=fontSize, horizontalalignment="center", verticalalignment="center", color="green")
-    axes.text(percent((xMin, xMax), 1.15), percent((yMin, yMax), 0.01), "Dec",
+    axes.text(percent((xMin, xMax), 1.15), percent((yMin, yMax), -0.02), "Dec",
               fontsize=fontSize, horizontalalignment="center", verticalalignment="center",
               rotation="vertical", color="green")
     axes.set_xlim(xlim)
     axes.set_ylim(ylim)
 
 
-def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
+def plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=None, zpLabel=None, fontSize=8):
     """!Plot outlines of CCDs in ccdList
     """
     dataIdCopy = dataId.copy()
@@ -343,11 +346,14 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
         # Check metadata to see if stack used was HSC
         metadata = butler.get("calexp_md", dataIdCopy)
         hscRun = checkHscStack(metadata)
-        if zpLabel is not None:
-            if zpLabel == "MEAS_MOSAIC" or "MEAS_MOSAIC_1" in zpLabel:
-                applyMosaicResultsExposure(dataRef, calexp=calexp)
-
-        wcs = calexp.getWcs()
+        if zpLabel and (zpLabel == "MEAS_MOSAIC" or "MEAS_MOSAIC_1" in zpLabel):
+            applyMosaicResultsExposure(dataRef, calexp=calexp)
+            wcs = calexp.getWcs()
+        elif zpLabel and (zpLabel == "MMphotoCalib" or zpLabel == "JOINTCAL" or
+                          "MMphotoCalib" in zpLabel or "JOINTCAL_1" in zpLabel):
+            wcs = dataRef.get("jointcal_wcs")
+        else:
+            wcs = calexp.getWcs()
         w = calexp.getWidth()
         h = calexp.getHeight()
         if zpLabel is not None:
@@ -359,17 +365,26 @@ def plotCcdOutline(axes, butler, dataId, ccdList, zpLabel=None, fontSize=8):
 
         ras = list()
         decs = list()
+        coords = list()
         for x, y in zip([0, w, w, 0, 0], [0, 0, h, h, 0]):
             xy = afwGeom.Point2D(x, y)
             ra = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
             dec = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
             ras.append(ra)
             decs.append(dec)
-        axes.plot(ras, decs, "k-", linewidth=1)
+            coords.append(afwGeom.SpherePoint(ra, dec, afwGeom.degrees))
         xy = afwGeom.Point2D(w/2, h/2)
         centerX = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
         centerY = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
-        axes.text(centerX, centerY, "%s" % str(ccdLabelStr), ha="center", va="center", fontsize=fontSize)
+        inTract = False
+        if tractInfo is not None:
+            for coord in coords:
+                if tractInfo.contains(coord):
+                    inTract = True
+                    break
+        if not tractInfo or inTract:
+            axes.plot(ras, decs, "k-", linewidth=1)
+            axes.text(centerX, centerY, "%s" % str(ccdLabelStr), ha="center", va="center", fontsize=fontSize)
 
 
 def plotPatchOutline(axes, tractInfo, patchList, plotUnits="deg", idFontSize=None):
@@ -605,3 +620,39 @@ def buildTractImage(butler, dataId, tractInfo, patchList=None, coaddName="deep")
     image = afwImage.ImageF(afwGeom.ExtentI(tractBbox.getMaxX() + 1, tractBbox.getMaxY() + 1))
     image.array[:] = tractArray
     return image
+
+
+def determineUberCalLabel(repoInfo, patch, coaddName="deep"):
+    """Determine uber-calibration (meas_mosaic/jointcal) applied to make coadd.
+
+    Parameters
+    ----------
+    repoInfo : `lsst.pipe.base.struct.Struct`
+       A struct containing elements with repo information needed to create
+       appropriate dataIds to look for the uber-calibration datasets.
+    patch : `str`
+       An existing patch to use in the coaddDataId.
+    coaddName : `str`, optional
+       The base name of the coadd (e.g. "deep" or "goodSeeing").
+       Default is "deep".
+
+    Returns
+    -------
+    uberCalLabel : `str`
+       The label to be used for the uberCal used.
+    """
+    # Find a visit/ccd input so that you can check for meas_mosaic input (i.e. to set uberCalLabel)
+    coaddDataId = {"tract": repoInfo.tractInfo.getId(), "patch": patch, "filter": repoInfo.filterName}
+    coadd = repoInfo.butler.get(coaddName + "Coadd_calexp", coaddDataId, immediate=True)
+    coaddInputs = coadd.getInfo().getCoaddInputs()
+    visitDataId = {"visit": coaddInputs.ccds[0]["visit"], "ccd": coaddInputs.ccds[0]["ccd"],
+                   "filter": repoInfo.filterName, "tract": repoInfo.tractInfo.getId()}
+    if repoInfo.butler.datasetExists("fcr_md", dataId=visitDataId):
+        uberCalLabel = "MEAS_MOSAIC"
+    elif (not repoInfo.butler.datasetExists("fcr_md", dataId=visitDataId) and
+          repoInfo.butler.datasetExists("jointcal_photoCalib", dataId=visitDataId)):
+        uberCalLabel = "JOINTCAL"
+    else:
+        uberCalLabel = "None"
+
+    return uberCalLabel

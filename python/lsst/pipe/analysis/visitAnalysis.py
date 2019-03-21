@@ -18,9 +18,9 @@ from .analysis import Analysis
 from .coaddAnalysis import CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisTask
 from .utils import (Filenamer, concatenateCatalogs, addApertureFluxesHSC, addFpPoint,
                     addFootprintNPix, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
-                    calibrateSourceCatalogMosaic, calibrateSourceCatalog, backoutApCorr,
-                    matchJanskyToDn, andCatalog, writeParquet, getRepoInfo, getDataExistsRefList,
-                    setAliasMaps)
+                    calibrateSourceCatalogMosaic, calibrateSourceCatalogPhotoCalib,
+                    calibrateSourceCatalog, backoutApCorr, matchJanskyToDn, andCatalog, writeParquet,
+                    getRepoInfo, getCcdNameRefList, getDataExistsRefList, setAliasMaps)
 from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText
 
 import lsst.afw.table as afwTable
@@ -28,29 +28,34 @@ import lsst.afw.table as afwTable
 
 class CcdAnalysis(Analysis):
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
-                tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
-                postFix="", plotRunStats=True, highlightList=None, haveFpCoords=None):
+                tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
+                zpLabel=None, forcedStr=None, uberCalLabel=None, postFix="", plotRunStats=True,
+                highlightList=None, haveFpCoords=None):
         stats = self.stats
         if self.config.doPlotCcdXy:
             self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix),
-                         stats=self.stats, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel)
+                         stats=self.stats, hscRun=hscRun, matchRadius=matchRadius,
+                         matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel)
         if self.config.doPlotFP and haveFpCoords:
             self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa" + postFix),
                                 stats=stats, camera=camera, ccdList=ccdList, hscRun=hscRun,
-                                matchRadius=matchRadius, zpLabel=zpLabel)
+                                matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                                zpLabel=zpLabel)
 
         return Analysis.plotAll(self, dataId, filenamer, log, enforcer=enforcer, butler=butler, camera=camera,
-                                ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius, zpLabel=zpLabel,
-                                postFix=postFix, plotRunStats=plotRunStats, highlightList=highlightList)
+                                ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
+                                matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, postFix=postFix,
+                                plotRunStats=plotRunStats, highlightList=highlightList)
 
     def plotFP(self, dataId, filenamer, log, enforcer=None, camera=None, ccdList=None, hscRun=None,
-               matchRadius=None, zpLabel=None, forcedStr=None):
+               matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None):
         self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa"), stats=self.stats,
                             camera=camera, ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
-                            zpLabel=zpLabel, forcedStr=forcedStr)
+                            matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, forcedStr=forcedStr)
 
     def plotCcd(self, filename, centroid="base_SdssCentroid", cmap=plt.cm.nipy_spectral, idBits=32,
-                visitMultiplier=200, stats=None, hscRun=None, matchRadius=None, zpLabel=None):
+                visitMultiplier=200, stats=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
+                zpLabel=None):
         """Plot quantity as a function of CCD x,y"""
         xx = self.catalog[self.prefix + centroid + "_x"]
         yy = self.catalog[self.prefix + centroid + "_y"]
@@ -71,7 +76,7 @@ class CcdAnalysis(Analysis):
                 continue
             if len(data.mag) == 0:
                 continue
-            if ptSize is None:
+            if not ptSize:
                 ptSize = min(12, max(4, int(25/np.log10(len(data.mag)))))
             selection = data.selection & good
             quantity = data.quantity[good[data.selection]]
@@ -85,9 +90,11 @@ class CcdAnalysis(Analysis):
         fig.text(0.02, 0.5, self.quantityName, ha="center", va="center", rotation="vertical")
         if stats is not None:
             annotateAxes(filename, plt, axes[0], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
-                         hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
+                         hscRun=hscRun, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                         unitScale=self.unitScale)
             annotateAxes(filename, plt, axes[1], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
-                         hscRun=hscRun, matchRadius=matchRadius, unitScale=self.unitScale)
+                         hscRun=hscRun, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                         unitScale=self.unitScale)
         axes[0].set_xlim(-100, 2150)
         axes[1].set_xlim(-100, 4300)
         axes[0].set_ylim(self.qMin, self.qMax)
@@ -100,13 +107,14 @@ class CcdAnalysis(Analysis):
         cb = fig.colorbar(mappable, cax=cax)
         cb.set_label("CCD index", rotation=270, labelpad=15)
         labelVisit(filename, plt, axes[0], 0.5, 1.1)
-        if zpLabel is not None:
+        if zpLabel:
             plotText(zpLabel, plt, axes[0], 0.08, -0.11, prefix="zp: ", color="green")
         fig.savefig(filename)
         plt.close(fig)
 
     def plotFocalPlane(self, filename, cmap=plt.cm.Spectral, stats=None, camera=None, ccdList=None,
-                       hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None, fontSize=8):
+                       hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None,
+                       fontSize=8):
         """Plot quantity colormaped on the focal plane"""
         xFp = self.catalog[self.prefix + "base_FPPosition_x"]
         yFp = self.catalog[self.prefix + "base_FPPosition_y"]
@@ -138,22 +146,25 @@ class CcdAnalysis(Analysis):
         mappable._A = []        # fake up the array of the scalar mappable. Urgh...
         cb = plt.colorbar(mappable)
         cb.set_label(self.quantityName, rotation=270, labelpad=15)
-        if hscRun is not None:
+        if hscRun:
             axes.set_title("HSC stack run: " + hscRun, color="#800080")
         labelVisit(filename, plt, axes, 0.5, 1.04)
-        if camera is not None:
+        if camera:
             labelCamera(camera, plt, axes, 0.5, 1.09)
-        if zpLabel is not None:
+        if zpLabel:
             plotText(zpLabel, plt, axes, 0.08, -0.1, prefix="zp: ", color="green")
-        if forcedStr is not None:
+        if forcedStr:
             plotText(forcedStr, plt, axes, 0.86, -0.1, prefix="cat: ", color="green")
         fig.savefig(filename)
         plt.close(fig)
 
 
 class VisitAnalysisConfig(CoaddAnalysisConfig):
-    doApplyUberCal = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input?" +
-                           " FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
+    doApplyUberCal = Field(dtype=bool, default=True, doc="Apply uberCal (jointcal/meas_mosaic) results " +
+                           "to input?  FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
+    useMeasMosaic = Field(dtype=bool, default=False, doc="Use meas_mosaic's applyMosaicResultsExposure " +
+                          "to apply meas_mosaic ubercal results to catalog (i.e. as opposed to using " +
+                          "the photoCalib object)?")
 
     def setDefaults(self):
         CoaddAnalysisConfig.setDefaults(self)
@@ -162,12 +173,6 @@ class VisitAnalysisConfig(CoaddAnalysisConfig):
 
     def validate(self):
         CoaddAnalysisConfig.validate(self)
-        if self.doApplyUberCal:
-            try:
-                import lsst.meas.mosaic  # noqa F401
-            except ImportError:
-                raise ValueError("Cannot apply uber calibrations because meas_mosaic could not be imported."
-                                 "\nEither setup meas_mosaic or run with --config doApplyUberCal=False")
 
 
 class VisitAnalysisRunner(TaskRunner):
@@ -231,99 +236,94 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             filenamer = Filenamer(repoInfo.butler, "plotVisit", repoInfo.dataId)
             # Create list of alias mappings for differing schema naming conventions (if any)
             aliasDictList = [self.config.flagsToAlias, ]
-            if repoInfo.hscRun is not None and self.config.srcSchemaMap is not None:
+            if repoInfo.hscRun and self.config.srcSchemaMap is not None:
                 aliasDictList += [self.config.srcSchemaMap]
             if any(doPlot for doPlot in [self.config.doPlotFootprintNpix, self.config.doPlotQuiver,
                                          self.config.doPlotMags, self.config.doPlotSizes,
-                                         self.config.doPlotCentroids, self.config.doPlotStarGalaxy]):
+                                         self.config.doPlotCentroids, self.config.doPlotStarGalaxy,
+                                         self.config.doWriteParquetTables]):
                 commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", repoInfo,
                                                          aliasDictList=aliasDictList)
 
-            # Set boolean arrays indicating sources deemed unsuitable for qa analyses
-            self.catLabel = "nChild = 0"
-            bad = makeBadArray(catalog, flagList=self.config.analysis.flags,
-                               onlyReadStars=self.config.onlyReadStars)
-            badCommonZp = makeBadArray(commonZpCat, flagList=self.config.analysis.flags,
-                                       onlyReadStars=self.config.onlyReadStars)
+                # Set boolean arrays indicating sources deemed unsuitable for qa analyses
+                self.catLabel = "nChild = 0"
+                bad = makeBadArray(catalog, flagList=self.config.analysis.flags,
+                                   onlyReadStars=self.config.onlyReadStars)
+                badCommonZp = makeBadArray(commonZpCat, flagList=self.config.analysis.flags,
+                                           onlyReadStars=self.config.onlyReadStars)
 
-            # Create and write parquet tables
-            if self.config.doWriteParquetTables:
-                dataRef_catalog = repoInfo.butler.dataRef('analysisVisitTable', dataId=repoInfo.dataId)
-                writeParquet(dataRef_catalog, catalog, badArray=bad)
-                dataRef_commonZp = repoInfo.butler.dataRef('analysisVisitTable_commonZp', dataId=repoInfo.dataId)
-                writeParquet(dataRef_commonZp, commonZpCat, badArray=badCommonZp)
-                if self.config.writeParquetOnly:
-                    self.log.info("Exiting after writing Parquet tables.  No plots generated.")
-                    return
+                # Create and write parquet tables
+                if self.config.doWriteParquetTables:
+                    dataRef_catalog = repoInfo.butler.dataRef('analysisVisitTable', dataId=repoInfo.dataId)
+                    writeParquet(dataRef_catalog, catalog, badArray=bad)
+                    dataRef_commonZp = repoInfo.butler.dataRef('analysisVisitTable_commonZp',
+                                                               dataId=repoInfo.dataId)
+                    writeParquet(dataRef_commonZp, commonZpCat, badArray=badCommonZp)
+                    if self.config.writeParquetOnly:
+                        self.log.info("Exiting after writing Parquet tables.  No plots generated.")
+                        return
 
-            # purge the catalogs of flagged sources
-            catalog = catalog[~bad].copy(deep=True)
-            commonZpCat = commonZpCat[~badCommonZp].copy(deep=True)
+                # purge the catalogs of flagged sources
+                catalog = catalog[~bad].copy(deep=True)
+                commonZpCat = commonZpCat[~badCommonZp].copy(deep=True)
 
-            try:
-                self.zpLabel = self.zpLabel + " " + self.catLabel
-            except Exception:
-                pass
-
-            if self.config.doPlotFootprintNpix:
-                self.plotFootprintHist(catalog,
-                                       filenamer(repoInfo.dataId, description="footNpix", style="hist"),
-                                       repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
-                                       ccdList=ccdListPerTract, hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
-                self.plotFootprint(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                                   camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
-                                   zpLabel=self.zpLabel, plotRunStats=False,
-                                   highlightList=[("parent", 0, "yellow"), ])
-
-            if self.config.doPlotQuiver:
-                self.plotQuiver(catalog,
-                                filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
-                                dataId=repoInfo.dataId, butler=repoInfo.butler, camera=repoInfo.camera,
-                                ccdList=ccdListPerTract, hscRun=repoInfo.hscRun, zpLabel=self.zpLabel,
-                                scale=2)
-
-            # Create mag comparison plots using common ZP
-            if self.config.doPlotMags and not commonZpDone:
-                zpLabel = "common (" + str(self.config.analysis.commonZp) + ")"
                 try:
-                    zpLabel = zpLabel + " " + self.catLabel
+                    self.zpLabel = self.zpLabel + " " + self.catLabel
                 except Exception:
                     pass
-                self.plotMags(commonZpCat, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                              camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
-                              zpLabel=zpLabel,
-                              fluxToPlotList=["base_GaussianFlux", "base_CircularApertureFlux_12_0"],
-                              postFix="_commonZp")
-                commonZpDone = True
-            # Now source catalog calibrated to either FLUXMAG0 or meas_mosaic result for remainder of plots
-            if self.config.doPlotMags:
-                self.plotMags(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                              camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
-                              zpLabel=self.zpLabel)
-            if self.config.doPlotStarGalaxy:
-                if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
-                    self.plotStarGal(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                                     camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
-                                     zpLabel=self.zpLabel)
-                else:
-                    self.log.warn("Cannot run plotStarGal: " +
-                                  "ext_shapeHSM_HsmSourceMoments_xx not in catalog.schema")
-            if self.config.doPlotSizes:
-                if "base_SdssShape_psf_xx" in catalog.schema:
-                    self.plotSizes(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                                   camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
-                                   zpLabel=self.zpLabel)
-                else:
-                    self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
-            if self.config.doPlotCentroids and self.haveFpCoords:
-                self.plotCentroidXY(catalog, filenamer, repoInfo.dataId, butler=repoInfo.butler,
-                                    camera=repoInfo.camera, ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
-                                    zpLabel=self.zpLabel)
+
+                # Dict of all parameters common to plot* functions
+                plotKwargs = dict(butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
+                                  hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
+
+                if self.config.doPlotFootprintNpix:
+                    self.plotFootprintHist(catalog,
+                                           filenamer(repoInfo.dataId, description="footNpix", style="hist"),
+                                           repoInfo.dataId, **plotKwargs)
+                    self.plotFootprint(catalog, filenamer, repoInfo.dataId, plotRunStats=False,
+                                       highlightList=[("parent", 0, "yellow"), ], **plotKwargs)
+
+                if self.config.doPlotQuiver:
+                    self.plotQuiver(catalog,
+                                    filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
+                                    dataId=repoInfo.dataId, scale=2, **plotKwargs)
+
+                # Create mag comparison plots using common ZP
+                if self.config.doPlotMags and not commonZpDone:
+                    zpLabel = "common (%s)" % self.config.analysis.commonZp
+                    try:
+                        zpLabel += " " + self.catLabel
+                    except Exception:
+                        pass
+                    plotKwargs.update(dict(zpLabel=zpLabel))
+                    self.plotMags(commonZpCat, filenamer, repoInfo.dataId,
+                                  fluxToPlotList=["base_GaussianFlux", "base_CircularApertureFlux_12_0"],
+                                  postFix="_commonZp", **plotKwargs)
+                    commonZpDone = True
+                # Now source catalog calibrated to either FLUXMAG0 or meas_mosaic result for remainder of plots
+                plotKwargs.update(dict(zpLabel=self.zpLabel))
+                if self.config.doPlotMags:
+                    self.plotMags(catalog, filenamer, repoInfo.dataId, **plotKwargs)
+                if self.config.doPlotStarGalaxy:
+                    if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+                        self.plotStarGal(catalog, filenamer, repoInfo.dataId, **plotKwargs)
+                    else:
+                        self.log.warn("Cannot run plotStarGal: " +
+                                      "ext_shapeHSM_HsmSourceMoments_xx not in catalog.schema")
+                if self.config.doPlotSizes:
+                    if "base_SdssShape_psf_xx" in catalog.schema:
+                        self.plotSizes(catalog, filenamer, repoInfo.dataId, **plotKwargs)
+                    else:
+                        self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
+                if self.config.doPlotCentroids and self.haveFpCoords:
+                    self.plotCentroidXY(catalog, filenamer, repoInfo.dataId, **plotKwargs)
+
             if self.config.doPlotMatches:
                 matches = self.readSrcMatches(dataRefListTract, "src", repoInfo, aliasDictList=aliasDictList)
-                self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
-                                 butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
-                                 hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
+                # Dict of all parameters common to plot* functions
+                plotKwargs = dict(butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
+                                  hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
+                self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId, **plotKwargs)
 
             for cat in self.config.externalCatalogs:
                 if self.config.photoCatName not in cat:
@@ -331,9 +331,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                         matches = self.matchCatalog(catalog, repoInfo.filterName,
                                                     self.config.externalCatalogs[cat])
                         self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
-                                         butler=repoInfo.butler, camera=repoInfo.camera,
-                                         ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
-                                         matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                                         **plotKwargs)
 
     def readCatalogs(self, dataRefList, dataset, repoInfo, aliasDictList=None):
         """Read in and concatenate catalogs of type dataset in lists of data references
@@ -377,7 +375,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 continue
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
             # Set some aliases for differing schema naming conventions
-            if aliasDictList is not None:
+            if aliasDictList:
                 catalog = setAliasMaps(catalog, aliasDictList)
 
             # Add ccdId column (useful to have in Parquet tables for subsequent interactive analysis)
@@ -408,15 +406,15 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             commonZpCat = calibrateSourceCatalog(commonZpCat, self.config.analysis.commonZp)
             commonZpCatList.append(commonZpCat)
             if self.config.doApplyUberCal:
-                if repoInfo.hscRun is not None:
+                if repoInfo.hscRun:
                     if not dataRef.datasetExists("wcs_hsc") or not dataRef.datasetExists("fcr_hsc_md"):
                         continue
                 else:
                     # Check for both jointcal_wcs and wcs for compatibility with old datasets
                     if (not (dataRef.datasetExists("jointcal_wcs") or dataRef.datasetExists("wcs")) or not
-                            dataRef.datasetExists("fcr_md")):
+                        (dataRef.datasetExists("jointcal_photoCalib") or dataRef.datasetExists("fcr_md"))):
                         continue
-            catalog = self.calibrateCatalogs(dataRef, catalog, repoInfo.metadata)
+            catalog = self.calibrateCatalogs(dataRef, catalog, repoInfo.metadata, repoInfo.dataset)
             catList.append(catalog)
 
         if not catList:
@@ -431,21 +429,21 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if not dataRef.datasetExists(dataset):
                 continue
             if self.config.doApplyUberCal:
-                if repoInfo.hscRun is not None:
+                if repoInfo.hscRun:
                     if not dataRef.datasetExists("wcs_hsc") or not dataRef.datasetExists("fcr_hsc_md"):
                         continue
                 else:
                     # Check for both jointcal_wcs and wcs for compatibility with old datasets
                     if (not (dataRef.datasetExists("jointcal_wcs") or dataRef.datasetExists("wcs")) or not
-                            dataRef.datasetExists("fcr_md")):
+                        (dataRef.datasetExists("jointcal_photoCalib") or dataRef.datasetExists("fcr_md"))):
                         continue
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
             # Set some aliases for differing schema naming conventions
-            if aliasDictList is not None:
+            if aliasDictList:
                 catalog = setAliasMaps(catalog, aliasDictList)
-            catalog = self.calibrateCatalogs(dataRef, catalog, repoInfo.metadata)
+            catalog = self.calibrateCatalogs(dataRef, catalog, repoInfo.metadata, repoInfo.dataset)
             packedMatches = repoInfo.butler.get(dataset + "Match", dataRef.dataId)
             # The reference object loader grows the bbox by the config parameter pixelMargin.  This
             # is set to 50 by default but is not reflected by the radius parameter set in the
@@ -471,7 +469,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             # LSST reads in a_net catalogs with flux in "janskys", so must convert back to DN
             if not noMatches:
                 matches = matchJanskyToDn(matches)
-                if repoInfo.hscRun is not None and self.config.doAddAperFluxHsc:
+                if repoInfo.hscRun and self.config.doAddAperFluxHsc:
                     addApertureFluxesHSC(matches, prefix="second_")
 
             if not matches:
@@ -491,7 +489,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if self.config.doBackoutApCorr:
                 catalog = backoutApCorr(catalog)
             # Need to set the alias map for the matched catalog sources
-            if aliasDictList is not None:
+            if aliasDictList:
                 catalog = setAliasMaps(catalog, aliasDictList, prefix="src_")
             # To avoid multiple counting when visit overlaps multiple tracts
             noTractId = dataRef.dataId.copy()
@@ -505,21 +503,55 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
         return concatenateCatalogs(catList)
 
-    def calibrateCatalogs(self, dataRef, catalog, metadata):
+    def calibrateCatalogs(self, dataRef, catalog, metadata, photoCalibDataset):
+        """Determine and apply appropriate flux calibration to the catalog.
+
+        Parameters
+        ----------
+        dataRef : `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+           A dataRef is needed for call to meas_mosaic's applyMosaicResultsCatalog() in
+           utils' calibrateSourceCatalogMosaic()
+        catalog : `lsst.afw.table.source.source.SourceCatalog`
+           The catalog to which the calibration is applied in place
+        metadata : `lsst.daf.base.propertyContainer.propertyList.PropertyList`
+           The metadata associated with the catalog to obtain the FLUXMAG0 zeropoint
+        photoCalibDataset : `str`
+           Name of the dataSet to be used for the uber calibration (e.g.
+           "jointcal_photoCalib" or "fcr_md").
+        """
         self.zp = 0.0
         try:
             self.zpLabel = self.zpLabel
         except Exception:
             self.zpLabel = None
         if self.config.doApplyUberCal:
-            calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
-            if self.zpLabel is None:
-                self.log.info("Applying meas_mosaic calibration to catalog")
-            self.zpLabel = "MEAS_MOSAIC"
+            if "jointcal" in photoCalibDataset and not self.config.useMeasMosaic:
+                # i.e. the processing was post-photoCalib output generation
+                # AND you want the photoCalib flux object used for the
+                # calibration (as opposed to meas_mosaic's fcr object).
+                if not self.zpLabel:
+                    zpStr = "MMphotoCalib" if dataRef.datasetExists("fcr_md") else "JOINTCAL"
+                    self.log.info("Applying {:} photoCalib calibration to catalog".format(zpStr))
+                self.zpLabel = "MMphotoCalib" if dataRef.datasetExists("fcr_md") else "JOINTCAL"
+                calibrated = calibrateSourceCatalogPhotoCalib(dataRef, catalog, zp=self.zp)
+            else:
+                # If here, the data were processed pre-photoCalib output
+                # generation, so must use old method OR old method was
+                # explicitly requested via useMeasMosaic.
+                try:
+                    import lsst.meas.mosaic  # noqa : F401
+                except ImportError:
+                    raise ValueError("Cannot apply uber calibrations because meas_mosaic "
+                                     "could not be imported."
+                                     "\nEither setup meas_mosaic or run with --config doApplyUberCal=False")
+                if not self.zpLabel:
+                    self.log.info("Applying meas_mosaic calibration to catalog")
+                self.zpLabel = "MEAS_MOSAIC"
+                calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
         else:
             # Scale fluxes to measured zeropoint
             self.zp = 2.5*np.log10(metadata.getScalar("FLUXMAG0"))
-            if self.zpLabel is None:
+            if not self.zpLabel:
                 self.log.info("Using 2.5*log10(FLUXMAG0) = {:.4f} from FITS header for zeropoint".format(
                               self.zp))
             self.zpLabel = "FLUXMAG0"
@@ -529,27 +561,28 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
 
 class CompareVisitAnalysisConfig(VisitAnalysisConfig):
-    doApplyUberCal1 = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input1?" +
-                            " FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
-    doApplyUberCal2 = Field(dtype=bool, default=True, doc="Apply meas_mosaic ubercal results to input2?" +
-                            " FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
+    doApplyUberCal1 = Field(dtype=bool, default=True, doc="Apply uberCal (jointcal/meas_mosaic) results " +
+                            "to input1? FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
+    useMeasMosaic1 = Field(dtype=bool, default=False, doc="Use meas_mosaic's applyMosaicResultsExposure " +
+                           "to apply meas_mosaice ubercal results to input1 (i.e. as opposed to using " +
+                           "the photoCalib object)?")
+    doApplyUberCal2 = Field(dtype=bool, default=True, doc="Apply uberCal (jointcal/meas_mosaic) results " +
+                            "to input2? FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
+    useMeasMosaic2 = Field(dtype=bool, default=False, doc="Use meas_mosaic's applyMosaicResultsExposure " +
+                           "to apply meas_mosaice ubercal results to input2 (i.e. as opposed to using " +
+                           "the photoCalib object)?")
 
     def setDefaults(self):
         VisitAnalysisConfig.setDefaults(self)
-        # Use a tighter match radius for comparing runs: they are calibrated and we want to avoid mis-matches
-        self.matchRadius = 0.2
+        # If matching on Ra/Dec, use a tighter match radius for comparing runs:
+        # they are calibrated and we want to avoid mis-matches
+        self.matchRadiusRaDec = 0.2
+        self.matchRadiusXy = 1.0e-5  # has to be bigger than absolute zero
         if "base_PsfFlux" not in self.fluxToPlotList:
             self.fluxToPlotList.append("base_PsfFlux")  # Add PSF flux to default list for comparison scripts
 
     def validate(self):
         super(CoaddAnalysisConfig, self).validate()
-        if self.doApplyUberCal1 or self.doApplyUberCal2:
-            try:
-                import lsst.meas.mosaic  # noqa F401
-            except ImportError:
-                raise ValueError("Cannot apply uber calibrations because meas_mosaic could not be imported."
-                                 "\nEither setup meas_mosaic or run with --config doApplyUberCal1=False "
-                                 "doApplyUberCal2=False")
 
 
 class CompareVisitAnalysisRunner(TaskRunner):
@@ -614,17 +647,6 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             raise TaskError("Lengths of comparison dataRefLists do not match!")
         commonZpDone = False
 
-        # Get a butler and dataId for each dataset.  Needed for feeding a butler and camera into the
-        # plotting functions (for labelling the camera and plotting ccd outlines) in addition to
-        # determining if the data were processed with the HSC stack.  We assume all processing in a
-        # given rerun is self-consistent, so only need one valid dataId per comparison rerun.
-        for dataRefListTract1, dataRefListTract2 in zip(dataRefListPerTract1, dataRefListPerTract2):
-            repoInfo1 = getRepoInfo(dataRefListTract1[0], doApplyUberCal=self.config.doApplyUberCal1)
-            repoInfo2 = getRepoInfo(dataRefListTract2[0], doApplyUberCal=self.config.doApplyUberCal2)
-            break
-
-        fullCcdList = getDataExistsRefList(dataRefList1, repoInfo1.dataset)
-
         i = -1
         for dataRefListTract1, dataRefListTract2 in zip(dataRefListPerTract1, dataRefListPerTract2):
             i += 1
@@ -634,6 +656,15 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             if not dataRefListTract2:
                 self.log.info("No data found in --rerun2 for tract: {:d}".format(tractList[i]))
                 continue
+            # Get a butler and dataId for each dataset.  Needed for feeding a butler and camera into the
+            # plotting functions (for labelling the camera and plotting ccd outlines) in addition to
+            # determining if the data were processed with the HSC stack.  We assume all processing in a
+            # given rerun is self-consistent, so only need one valid dataId per comparison rerun.
+            repoInfo1 = getRepoInfo(dataRefListTract1[0], doApplyUberCal=self.config.doApplyUberCal1)
+            repoInfo2 = getRepoInfo(dataRefListTract2[0], doApplyUberCal=self.config.doApplyUberCal2)
+
+            fullCameraCcdList1 = getCcdNameRefList(dataRefListTract1)
+
             ccdListPerTract1 = getDataExistsRefList(dataRefListTract1, repoInfo1.dataset)
             ccdListPerTract2 = getDataExistsRefList(dataRefListTract2, repoInfo2.dataset)
             if not ccdListPerTract1:
@@ -656,8 +687,12 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                     self.log.fatal("No data found for {:s} dataset...are you sure you ran meas_mosaic? If "
                                    "not, run with --config doApplyUberCal2=False".format(repoInfo2.dataset))
                 raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo2.dataset))
+            ccdIntersectList = list(set(ccdListPerTract1).intersection(set(ccdListPerTract2)))
             self.log.info("tract: {:d} ".format(repoInfo1.dataId["tract"]))
             self.log.info("ccdListPerTract1: {} ".format(ccdListPerTract1))
+            self.log.info("ccdListPerTract2: {} ".format(ccdListPerTract2))
+            self.log.info("ccdIntersectList: {}".format(ccdIntersectList))
+
             doReadFootprints = None
             if self.config.doPlotFootprintNpix:
                 doReadFootprints = "light"
@@ -688,15 +723,17 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
 
             self.log.info("\nNumber of sources in catalogs: first = {0:d} and second = {1:d}".format(
                           len(catalog1), len(catalog2)))
-            commonZpCat = self.matchCatalogs(commonZpCat1, commonZpCat2)
-            catalog = self.matchCatalogs(catalog1, catalog2)
+            commonZpCat = self.matchCatalogs(commonZpCat1, commonZpCat2, matchRadius=self.matchRadius,
+                                             matchControl=self.matchControl)
+            catalog = self.matchCatalogs(catalog1, catalog2, matchRadius=self.matchRadius,
+                                         matchControl=self.matchControl)
             # Set some aliases for differing schema naming conventions
-            if aliasDictList is not None:
+            if aliasDictList:
                 for cat in [commonZpCat, catalog]:
                     cat = setAliasMaps(cat, aliasDictList)
 
-            self.log.info("Number of matches (maxDist = {0:.2f} arcsec) = {1:d}".format(
-                          self.config.matchRadius, len(catalog)))
+            self.log.info("Number of matches (maxDist = {0:.2f} {1:s}) = {2:d}".format(
+                          self.matchRadius, self.matchRadiusUnitStr, len(catalog)))
 
             try:
                 self.zpLabel = self.zpLabel + " " + self.catLabel
@@ -704,11 +741,19 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 pass
 
             filenamer = Filenamer(repoInfo1.butler, "plotCompareVisit", repoInfo1.dataId)
-            hscRun = repoInfo1.hscRun if repoInfo1.hscRun is not None else repoInfo2.hscRun
+            hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
+
+            # Dict of all parameters common to plot* functions
+            tractInfo1 = repoInfo1.tractInfo if self.config.doApplyUberCal1 else None
+            tractInfo2 = repoInfo2.tractInfo if self.config.doApplyUberCal2 else None
+            tractInfo = tractInfo1 if (tractInfo1 or tractInfo2) else None
+            plotKwargs1 = dict(butler=repoInfo1.butler, camera=repoInfo1.camera, hscRun=hscRun,
+                               matchRadius=self.matchRadius, matchRadiusUnitStr=self.matchRadiusUnitStr,
+                               zpLabel=self.zpLabel, tractInfo=tractInfo)
+
             if self.config.doPlotFootprintNpix:
-                self.plotFootprint(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
-                                   camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=hscRun,
-                                   matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                self.plotFootprint(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
+                                   **plotKwargs1)
 
             # Create mag comparison plots using common ZP
             if not commonZpDone:
@@ -717,40 +762,29 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                     zpLabel = zpLabel + " " + self.catLabel
                 except Exception:
                     pass
-
-                self.plotMags(commonZpCat, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
-                              camera=repoInfo1.camera, ccdList=fullCcdList, hscRun=hscRun,
-                              matchRadius=self.config.matchRadius, zpLabel=zpLabel,
+                plotKwargs1.update(dict(zpLabel=zpLabel))
+                self.plotMags(commonZpCat, filenamer, repoInfo1.dataId, ccdList=fullCameraCcdList1,
                               fluxToPlotList=["base_GaussianFlux", "base_CircularApertureFlux_12_0"],
-                              postFix="_commonZp")
+                              postFix="_commonZp", **plotKwargs1)
                 commonZpDone = True
 
+            plotKwargs1.update(dict(zpLabel=self.zpLabel))
             if self.config.doPlotMags:
-                self.plotMags(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
-                              camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=hscRun,
-                              matchRadius=self.config.matchRadius, zpLabel=self.zpLabel,
-                              highlightList=[("first_calib_psf_used", 0, "yellow"),
-                                             ("second_calib_psf_used", 0, "green")])
+                self.plotMags(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList, **plotKwargs1)
             if self.config.doPlotSizes:
                 if ("first_base_SdssShape_psf_xx" in catalog.schema and
                         "second_base_SdssShape_psf_xx" in catalog.schema):
-                    self.plotSizes(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
-                                   camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=hscRun,
-                                   matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                    self.plotSizes(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
+                                   **plotKwargs1)
                 else:
                     self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
             if self.config.doApCorrs:
-                self.plotApCorrs(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
-                                 camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=hscRun,
-                                 matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                self.plotApCorrs(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList, **plotKwargs1)
             if self.config.doPlotCentroids:
-                self.plotCentroids(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
-                                   camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=hscRun,
-                                   matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                self.plotCentroids(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
+                                   **plotKwargs1)
             if self.config.doPlotStarGalaxy:
-                self.plotStarGal(catalog, filenamer, repoInfo1.dataId, butler=repoInfo1.butler,
-                                 camera=repoInfo1.camera, ccdList=ccdListPerTract1, hscRun=hscRun,
-                                 matchRadius=self.config.matchRadius, zpLabel=self.zpLabel)
+                self.plotStarGal(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList, **plotKwargs1)
 
     def readCatalogs(self, dataRefList1, dataRefList2, dataset, repoInfo1, repoInfo2,
                      doReadFootprints=None, aliasDictList=None):
@@ -793,86 +827,74 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         commonZpCatList1 = []
         catList2 = []
         commonZpCatList2 = []
-        for dataRef1, dataRef2 in zip(dataRefList1, dataRefList2):
-            if not dataRef1.datasetExists(dataset) or not dataRef2.datasetExists(dataset):
-                continue
-            if doReadFootprints is None:
-                srcCat1 = dataRef1.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-                srcCat2 = dataRef2.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-            elif doReadFootprints == "light":
-                srcCat1 = dataRef1.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
-                srcCat2 = dataRef2.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
-            elif doReadFootprints == "heavy":
-                srcCat1 = dataRef1.get(dataset, immediate=True)
-                srcCat2 = dataRef2.get(dataset, immediate=True)
-
-            # Set some aliases for differing src naming conventions
-            for cat, hscRun in ([srcCat1, repoInfo1.hscRun], [srcCat2, repoInfo2.hscRun]):
-                if aliasDictList is not None:
-                    cat = setAliasMaps(cat, aliasDictList)
-
-            if self.config.doBackoutApCorr:
-                srcCat1 = backoutApCorr(srcCat1)
-                srcCat2 = backoutApCorr(srcCat2)
-
-            calexp1 = repoInfo1.butler.get("calexp", dataRef1.dataId)
-            calexp2 = repoInfo2.butler.get("calexp", dataRef2.dataId)
-            nQuarter = calexp1.getDetector().getOrientation().getNQuarter()
-            # add footprint nPix column
-            if self.config.doPlotFootprintNpix:
-                srcCat1 = addFootprintNPix(srcCat1)
-                srcCat2 = addFootprintNPix(srcCat2)
-            # Add rotated point in LSST cat if comparing with HSC cat to compare centroid pixel positions
-            if repoInfo2.hscRun is not None and repoInfo1.hscRun is None:
-                srcCat1 = addRotPoint(srcCat1, calexp1.getWidth(), calexp1.getHeight(), nQuarter)
-            if repoInfo1.hscRun is not None and repoInfo2.hscRun is None:
-                srcCat2 = addRotPoint(srcCat2, calexp2.getWidth(), calexp2.getHeight(), nQuarter)
-
-            if repoInfo1.hscRun and self.config.doAddAperFluxHsc:
-                self.log.info("HSC run: adding aperture flux to schema1...")
-                srcCat1 = addApertureFluxesHSC(srcCat1, prefix="")
-            if repoInfo2.hscRun and self.config.doAddAperFluxHsc:
-                self.log.info("HSC run: adding aperture flux to schema2...")
-                srcCat2 = addApertureFluxesHSC(srcCat2, prefix="")
-
-            # Scale fluxes to common zeropoint to make basic comparison plots without calibrated ZP influence
-            commonZpCat1 = srcCat1.copy(True)
-            commonZpCat1 = calibrateSourceCatalog(commonZpCat1, self.config.analysis.commonZp)
-            commonZpCatList1.append(commonZpCat1)
-            commonZpCat2 = srcCat2.copy(True)
-            commonZpCat2 = calibrateSourceCatalog(commonZpCat2, self.config.analysis.commonZp)
-            commonZpCatList2.append(commonZpCat2)
-            if self.config.doApplyUberCal1:
-                if repoInfo1.hscRun is not None:
-                    if not dataRef1.datasetExists("wcs_hsc") or not dataRef1.datasetExists("fcr_hsc_md"):
-                        continue
-                # Check for both jointcal_wcs and wcs for compatibility with old datasets
-                elif (not (dataRef1.datasetExists("jointcal_wcs") or dataRef1.datasetExists("wcs")) or not
-                      dataRef1.datasetExists("fcr_md")):
+        self.zpLabel1 = None
+        self.zpLabel2 = None
+        for iCat, catList, commonZpCatList, dataRefList, repoInfo, doApplyUberCal, useMeasMosaic in [
+                [1, catList1, commonZpCatList1, dataRefList1, repoInfo1,
+                 self.config.doApplyUberCal1, self.config.useMeasMosaic1],
+                [2, catList2, commonZpCatList2, dataRefList2, repoInfo2,
+                 self.config.doApplyUberCal2, self.config.useMeasMosaic2]]:
+            for dataRef in dataRefList:
+                if not dataRef.datasetExists(dataset):
                     continue
-            if self.config.doApplyUberCal2:
-                if repoInfo2.hscRun is not None:
-                    if not dataRef2.datasetExists("wcs_hsc") or not dataRef2.datasetExists("fcr_hsc_md"):
-                        continue
-                elif (not (dataRef2.datasetExists("jointcal_wcs") or dataRef2.datasetExists("wcs")) or not
-                      dataRef2.datasetExists("fcr_md")):
-                    continue
-            srcCat1 = self.calibrateCatalogs(dataRef1, srcCat1, repoInfo1.metadata,
-                                             self.config.doApplyUberCal1)
-            catList1.append(srcCat1)
-            srcCat2 = self.calibrateCatalogs(dataRef2, srcCat2, repoInfo2.metadata,
-                                             self.config.doApplyUberCal2)
-            catList2.append(srcCat2)
+                if not doReadFootprints:
+                    srcCat = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+                elif doReadFootprints == "light":
+                    srcCat = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+                elif doReadFootprints == "heavy":
+                    srcCat = dataRef.get(dataset, immediate=True)
 
+                # Set some aliases for differing src naming conventions
+                if aliasDictList:
+                    srcCat = setAliasMaps(srcCat, aliasDictList)
+
+                if self.config.doBackoutApCorr:
+                    srcCat = backoutApCorr(srcCat)
+
+                calexp = repoInfo.butler.get("calexp", dataRef.dataId)
+                nQuarter = calexp.getDetector().getOrientation().getNQuarter()
+                # add footprint nPix column
+                if self.config.doPlotFootprintNpix:
+                    srcCat = addFootprintNPix(srcCat)
+                # Add rotated point in LSST cat if comparing with HSC cat to compare centroid pixel positions
+                if repoInfo.hscRun and not (repoInfo1.hscRun and repoInfo2.hscRun):
+                    srcCat = addRotPoint(srcCat, calexp.getWidth(), calexp.getHeight(), nQuarter)
+
+                if repoInfo.hscRun and self.config.doAddAperFluxHsc:
+                    self.log.info("HSC run: adding aperture flux to schema...")
+                    srcCat = addApertureFluxesHSC(srcCat, prefix="")
+
+                # Scale fluxes to common zeropoint to make basic comparison plots without calibration influence
+                commonZpCat = srcCat.copy(True)
+                commonZpCat = calibrateSourceCatalog(commonZpCat, self.config.analysis.commonZp)
+                commonZpCatList.append(commonZpCat)
+                if self.config.doApplyUberCal:
+                    if repoInfo.hscRun:
+                        if not dataRef.datasetExists("wcs_hsc") or not dataRef.datasetExists("fcr_hsc_md"):
+                            continue
+                    # Check for both jointcal_wcs and wcs for compatibility with old datasets
+                    elif (not (dataRef.datasetExists("jointcal_wcs") or dataRef.datasetExists("wcs")) or not
+                          (dataRef.datasetExists("jointcal_photoCalib") or dataRef.datasetExists("fcr_md"))):
+                        continue
+                srcCat, zpLabel = self.calibrateCatalogs(dataRef, srcCat, repoInfo.metadata, repoInfo.dataset,
+                                                         doApplyUberCal, useMeasMosaic)
+                self.zpLabel1 = zpLabel if iCat == 1 and not self.zpLabel1 else self.zpLabel1
+                self.zpLabel2 = zpLabel if iCat == 2 and not self.zpLabel2 else self.zpLabel2
+
+                catList.append(srcCat)
+
+        self.zpLabel = self.zpLabel1 + "_1 " + self.zpLabel2 + "_2"
+        self.log.info("Applying {:} calibration to catalogs".format(self.zpLabel))
         if not catList1:
             raise TaskError("No catalogs read: %s" % ([dataRefList1[0].dataId for dataRef1 in dataRefList1]))
         if not catList2:
             raise TaskError("No catalogs read: %s" % ([dataRefList2[0].dataId for dataRef2 in dataRefList2]))
+
         return (concatenateCatalogs(commonZpCatList1), concatenateCatalogs(catList1),
                 concatenateCatalogs(commonZpCatList2), concatenateCatalogs(catList2))
 
-    def calibrateCatalogs(self, dataRef, catalog, metadata, doApplyUberCal):
-        """Determine and apply appropriate flux calibration to the catalog
+    def calibrateCatalogs(self, dataRef, catalog, metadata, photoCalibDataset, doApplyUberCal, useMeasMosaic):
+        """Determine and apply appropriate flux calibration to the catalog.
 
         Parameters
         ----------
@@ -883,31 +905,52 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
            The catalog to which the calibration is applied in place
         metadata : `lsst.daf.base.propertyContainer.propertyList.PropertyList`
            The metadata associated with the catalog to obtain the FLUXMAG0 zeropoint
+        photoCalibDataset : `str`
+           Name of the dataSet to be used for the uber calibration (e.g.
+           "jointcal_photoCalib" or "fcr_md").
         doApplyUberCal : `bool`
-           If True: Apply the flux and wcs uber calibrations from meas_mosaic to the caltalog
-           If False: Apply the FLUXMAG0 flux calibration from single frame processing to the catalog
+           If True: Apply the flux and wcs uber calibrations from meas_mosaic to
+                    the caltalog.
+           If False: Apply the FLUXMAG0 flux calibration from single frame
+                     processing to the catalog.
+        useMeasMosaic : `bool`
+           Use meas_mosaic's applyMosaicResultsCatalog for the uber-calibration
+           (even if photoCalib object exists).  For testing implementations.
+
+        Returns
+        -------
+        calibrated : `lsst.afw.table.source.source.SourceCatalog`
+           The calibrated source catalog.
+        zpLabel : `str`
+           A label indicating the uberCalibration applied (currently either
+           jointcal or meas_mosaic).
         """
         self.zp = 0.0
-        try:
-            self.zpLabel = self.zpLabel
-        except Exception:
-            self.zpLabel = None
         if doApplyUberCal:
-            calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
-            if self.zpLabel is None:
-                self.log.info("Applying meas_mosaic calibration to catalog")
-                self.zpLabel = "MEAS_MOSAIC_1"
-            elif len(self.zpLabel) < 20:
-                self.zpLabel += " MEAS_MOSAIC_2"
+            if "jointcal" in photoCalibDataset and not useMeasMosaic:
+                # i.e. the processing was post-photoCalib output generation
+                # AND you want the photoCalib flux object used for the
+                # calibration (as opposed to meas_mosaic's fcr object).
+                zpLabel = "MMphotoCalib" if dataRef.datasetExists("fcr_md") else "JOINTCAL"
+                calibrated = calibrateSourceCatalogPhotoCalib(dataRef, catalog, zp=self.zp)
+            else:
+                # If here, the data were processed pre-photoCalib output
+                # generation, so must use old method OR old method was
+                # explicitly requested via useMeasMosaic.
+                try:
+                    import lsst.meas.mosaic  # noqa : F401
+                except ImportError:
+                    raise ValueError("Cannot apply uber calibrations because meas_mosaic "
+                                     "could not be imported."
+                                     "\nEither setup meas_mosaic or run with --config doApplyUberCal=False")
+                zpLabel = "MEAS_MOSAIC"
+                calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
         else:
             # Scale fluxes to measured zeropoint
             self.zp = 2.5*np.log10(metadata.getScalar("FLUXMAG0"))
-            if self.zpLabel is None:
-                self.log.info("Using 2.5*log10(FLUXMAG0) = {:.4f} from FITS header for zeropoint".format(
-                    self.zp))
-                self.zpLabel = "FLUXMAG0_1"
-            elif len(self.zpLabel) < 20:
-                self.zpLabel += " FLUXMAG0_2"
+            self.log.info("Using 2.5*log10(FLUXMAG0) = {:.4f} from FITS header for zeropoint".format(
+                self.zp))
+            zpLabel = "FLUXMAG0"
             calibrated = calibrateSourceCatalog(catalog, self.zp)
 
-        return calibrated
+        return calibrated, zpLabel

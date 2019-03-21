@@ -264,7 +264,7 @@ class ColorAnalysisConfig(Config):
         # of coefficients specified)
         if self.transforms:
             for col, transform in self.transforms.items():
-                if transform.plot and transform.x0 is not None and transform.y0 is not None:
+                if transform.plot and transform.x0 and transform.y0:
                     transformPerp = self.transforms[col]
                     transformPara = self.transforms[col[0] + "Para"]
                     p1p2Lines = linesFromP2P1Coeffs(list(transformPerp.coeffs.values()),
@@ -378,7 +378,7 @@ class ColorAnalysisTask(CmdLineTask):
         self.fluxColumn = self.config.analysis.fluxColumn
         self.classificationColumn = "base_ClassificationExtendedness_value"
         self.flags = self.config.flags
-        if repoInfo.hscRun is not None:
+        if repoInfo.hscRun:
             self.fluxColumn = self.config.srcSchemaMap[self.config.analysis.fluxColumn] + "_flux"
             self.classificationColumn = self.config.srcSchemaMap[self.classificationColumn]
             self.flags = [self.config.srcSchemaMap[flag] for flag in self.flags]
@@ -464,7 +464,7 @@ class ColorAnalysisTask(CmdLineTask):
         for patchRef in patchRefList:
             if patchRef.datasetExists(dataset):
                 cat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
-                if dataset is not "deepCoadd_meas":
+                if dataset != "deepCoadd_meas":
                     unforcedCat = patchRef.get("deepCoadd_meas", immediate=True,
                                                flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
                     cat = addColumnsToSchema(unforcedCat, cat, ["detect_isPatchInner", "detect_isTractInner",
@@ -845,13 +845,13 @@ class ColorAnalysisTask(CmdLineTask):
                 axes.text(xLoc + fdx*deltaX, yLoc, str(len(xColor[inPerpGood])) + " [" + self.fluxFilter +
                           " < " + str(self.config.analysis.magThreshold) + "]", ha="right", color="red",
                           **kwargs)
-                if camera is not None:
+                if camera:
                     labelCamera(camera, plt, axes, 0.5, 1.09)
-                if catLabel is not None:
-                    plotText(catLabel, plt, axes, 0.13, -0.09, color="green")
-                if geLabel is not None:
-                    plotText(geLabel, plt, axes, 0.09, -0.11, color="green")
-                if hscRun is not None:
+                if catLabel:
+                    plotText(catLabel, plt, axes, 0.13, -0.06, color="green")
+                if geLabel:
+                    plotText(geLabel, plt, axes, 0.10, -0.11, color="green")
+                if hscRun:
                     axes.set_title("HSC stack run: " + hscRun, color="#800080")
 
                 tractStr = "tract: {:d}".format(dataId["tract"])
@@ -962,7 +962,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
                                          unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
-            if fluxColumn is not "base_PsfFlux_instFlux":
+            if fluxColumn != "base_PsfFlux_instFlux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
                                catColors("HSC-G", "HSC-R", mags, decentStars),
@@ -1041,7 +1041,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
                                          unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
-            if fluxColumn is not "base_PsfFlux_instFlux":
+            if fluxColumn != "base_PsfFlux_instFlux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
                                catColors("HSC-R", "HSC-I", mags, decentStars),
@@ -1099,7 +1099,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
                                          unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
-            if fluxColumn is not "base_PsfFlux_instFlux":
+            if fluxColumn != "base_PsfFlux_instFlux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
                                catColors("HSC-I", "HSC-Z", mags, decentStars),
@@ -1158,7 +1158,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
                                          unitScale=self.unitScale)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
-            if fluxColumn is not "base_PsfFlux_instFlux":
+            if fluxColumn != "base_PsfFlux_instFlux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 colorColorPlot(dataId, filenamer(dataId, description=nameStr, style="noFit"), self.log,
                                catColors("HSC-Z", "NB0921", mags, decentStars),
@@ -1568,7 +1568,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         log.info("{0:s}".format("".join(x for x in paraStr if x not in "{}$")))
 
         # Compute fitted P2 for each object
-        if transform is not None:
+        if transform:
             fitP2 = np.ones(numGood)*pColCoeffs.p2Coeffs[3]
             for i, filterName in enumerate(transform.coeffs.keys()):
                 if filterName != "":
@@ -1655,13 +1655,13 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
 
     axes[1].set_ylim(axes[1].get_ylim()[0], axes[1].get_ylim()[1]*2.5)
 
-    if camera is not None:
+    if camera:
         labelCamera(camera, plt, axes[0], 0.5, 1.04)
-    if catLabel is not None:
+    if catLabel:
         plotText(catLabel, plt, axes[0], 0.85, -0.14, fontSize=9)
-    if geLabel is not None:
+    if geLabel:
         plotText(geLabel, plt, axes[0], 0.16, -0.15, fontSize=10, color="green")
-    if hscRun is not None:
+    if hscRun:
         axes[0].set_title("HSC stack run: " + hscRun, color="#800080")
 
     fig.savefig(filename, dpi=120)
@@ -1707,11 +1707,11 @@ def colorColorPlot(dataId, filename, log, xStars, yStars, xGalaxies, yGalaxies, 
     axes.text(xLoc, 0.94*yLoc, "Nstars =", ha="left", color="blue", **kwargs)
     axes.text(xLoc + fdx*deltaX, 0.94*yLoc, str(len(xStars)) +
               " [" + filterStr + " < " + str(magThreshold) + "]", ha="right", color="blue", **kwargs)
-    if camera is not None:
+    if camera:
         labelCamera(camera, plt, axes, 0.5, 1.09)
-    if geLabel is not None:
+    if geLabel:
         plotText(geLabel, plt, axes, 0.09, -0.11, color="green")
-    if hscRun is not None:
+    if hscRun:
         axes.set_title("HSC stack run: " + hscRun, color="#800080")
 
     tractStr = "tract: {:d}".format(dataId["tract"])
@@ -1742,9 +1742,9 @@ def colorColor4MagPlots(dataId, filename, log, xStars, yStars, xGalaxies, yGalax
     fig, axes = plt.subplots(nrows=2, ncols=2, sharex=True, sharey=True)
     fig.subplots_adjust(hspace=0, wspace=0, bottom=0.1, right=0.82, top=0.9)
 
-    xRange = ((xRange[0] + 0.01, xRange[1] - 0.01) if xRange is not None
+    xRange = ((xRange[0] + 0.01, xRange[1] - 0.01) if xRange
               else (0.9*xStars.min(), 1.1*xStars.max()))
-    yRange = ((yRange[0] + 0.01, yRange[1] - 0.01) if yRange is not None
+    yRange = ((yRange[0] + 0.01, yRange[1] - 0.01) if yRange
               else (0.9*yStars.min(), 1.1*yStars.max()))
     deltaX = abs(xRange[1] - xRange[0])
     deltaY = abs(yRange[1] - yRange[0])
@@ -1802,11 +1802,11 @@ def colorColor4MagPlots(dataId, filename, log, xStars, yStars, xGalaxies, yGalax
     cbGalaxies.set_ticks([])
     cbGalaxies.set_label(filterStr + " [" + fluxColStr + "]: galaxies", rotation=270, labelpad=-6, fontsize=9)
 
-    if camera is not None:
+    if camera:
         labelCamera(camera, plt, axes[0, 0], 1.05, 1.14)
-    if geLabel is not None:
-        plotText(geLabel, plt, axes[0, 0], 0.09, -0.11, color="green")
-    if hscRun is not None:
+    if geLabel:
+        plotText(geLabel, plt, axes[0, 0], 0.09, -1.22, color="green")
+    if hscRun:
         axes.set_title("HSC stack run: " + hscRun, color="#800080")
 
     tractStr = "tract: {:d}".format(dataId["tract"])
@@ -1842,10 +1842,10 @@ class ColorColorDistance(object):
         polyDeriv = np.polyder(self.poly)
         distance2 = np.ones_like(xx)*np.nan
         for i, (x, y) in enumerate(zip(xx, yy)):
-            if (not np.isfinite(x) or not np.isfinite(y) or (self.xMin is not None and x < self.xMin) or
-                (self.xMax is not None and x > self.xMax) or
-                (self.fitLineUpper is not None and y > self.fitLineUpper[0] + self.fitLineUpper[1]*x) or
-                    (self.fitLineLower is not None and y < self.fitLineLower[0] + self.fitLineLower[1]*x)):
+            if (not np.isfinite(x) or not np.isfinite(y) or (self.xMin and x < self.xMin) or
+                (self.xMax and x > self.xMax) or
+                (self.fitLineUpper and y > self.fitLineUpper[0] + self.fitLineUpper[1]*x) or
+                    (self.fitLineLower and y < self.fitLineLower[0] + self.fitLineLower[1]*x)):
                 distance2[i] = np.nan
                 continue
             roots = np.roots(np.poly1d((1, -x)) + (self.poly - y)*polyDeriv)
