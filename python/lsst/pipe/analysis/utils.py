@@ -931,6 +931,10 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
     -------
     catalog : `lsst.afw.table.SourceCatalog`
        The calibrated catalog.
+
+    Notes
+    -----
+    Adds magnitudes to the returned catalog.
     """
     wcs = dataRef.get("jointcal_wcs")
     for record in catalog:
@@ -942,6 +946,7 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
     if fluxKeys is None:
         fluxKeys, errKeys = getFluxKeys(catalog.schema)
 
+    magColsToAdd = []
     for fluxName, fluxKey in list(fluxKeys.items()):
         if len(catalog[fluxKey].shape) > 1:
             continue
@@ -954,6 +959,9 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
             calibratedFluxAndErrArray = photoCalib.instFluxToNanojansky(catalog, baseName)
             catalog[fluxKey] = calibratedFluxAndErrArray[:, 0]
             catalog[fluxErrKey] = calibratedFluxAndErrArray[:, 1]
+            if "Flux" in baseName:
+                magsAndErrArray = photoCalib.instFluxToMagnitude(catalog, baseName)
+                magColsToAdd.append((magsAndErrArray, baseName))
         else:
             # photoCalib requires an error for each flux, but some don't
             # have one in the schema (currently only certain deblender
@@ -975,7 +983,23 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
         catalog[fluxKey] /= factor
         if fluxErrKey:
             catalog[fluxErrKey] /= factor
-    return catalog
+
+    mapper = afwTable.SchemaMapper(catalog.schema, True)
+    mapper.addMinimalSchema(catalog.schema, True)
+    mapper.editOutputSchema().disconnectAliases()
+    for (values, colName) in magColsToAdd:
+        mapper.editOutputSchema().addField(colName + "_mag", type=float,
+                                           doc="Magnitude calculated from " + colName, units="mag")
+        mapper.editOutputSchema().addField(colName + "_magErr", type=float,
+                                           doc="Magnitude error calculated from " + colName, units="mag")
+    catWithMags = afwTable.SimpleCatalog(mapper.getOutputSchema())
+    catWithMags.extend(catalog, mapper=mapper)
+    for (i, src) in enumerate(catWithMags):
+        for (values, colName) in magColsToAdd:
+            src[colName + "_mag"] = values[i, 0]
+            src[colName + "_magErr"] = values[i, 1]
+
+    return catWithMags
 
 
 def calibrateSourceCatalog(catalog, zp):
@@ -1020,6 +1044,7 @@ def backoutApCorr(catalog):
 def matchNanojanskyToAB(matches):
     # LSST reads in catalogs with flux in "nanojanskys", so must convert to AB.
     # Using astropy units for conversion for consistency with PhotoCalib.
+    JANSKYS_PER_AB_FLUX = 3631.0*1e9
     schema = matches[0].first.schema
     keys = [schema[kk].asKey() for kk in schema.getNames() if "_flux" in kk]
 
