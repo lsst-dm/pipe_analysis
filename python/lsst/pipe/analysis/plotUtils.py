@@ -5,6 +5,7 @@ import numpy as np
 
 import lsst.afw.cameraGeom as cameraGeom
 import lsst.afw.geom as afwGeom
+import lsst.geom as lsstGeom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 from lsst.pipe.base import Struct
@@ -371,13 +372,13 @@ def plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=None, zpLabel=None, 
         decs = list()
         coords = list()
         for x, y in zip([0, w, w, 0, 0], [0, 0, h, h, 0]):
-            xy = afwGeom.Point2D(x, y)
+            xy = lsstGeom.Point2D(x, y)
             ra = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
             dec = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
             ras.append(ra)
             decs.append(dec)
-            coords.append(afwGeom.SpherePoint(ra, dec, afwGeom.degrees))
-        xy = afwGeom.Point2D(w/2, h/2)
+            coords.append(lsstGeom.SpherePoint(ra, dec, afwGeom.degrees))
+        xy = lsstGeom.Point2D(w/2, h/2)
         centerX = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
         centerY = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
         inTract = False

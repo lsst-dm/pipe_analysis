@@ -10,6 +10,7 @@ np.seterr(all="ignore")  # noqa 402
 from collections import defaultdict
 
 from lsst.daf.persistence.butler import Butler
+from lsst.daf.persistence.safeFileIo import safeMakeDir
 from lsst.pex.config import Field
 from lsst.pipe.base import ArgumentParser, TaskRunner, TaskError
 from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
@@ -23,6 +24,9 @@ from .utils import (Filenamer, AngularDistance, concatenateCatalogs, addAperture
                     getRepoInfo, getCcdNameRefList, getDataExistsRefList, setAliasMaps,
                     addPreComputedColumns)
 from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText
+from .fakesAnalysis import (addDegreePositions, matchCatalogs, addNearestNeighbor, fakesPositionCompare,
+                            getPlotInfo, fakesAreaDepth, fakesMagnitudeCompare, fakesMagnitudeNearestNeighbor,
+                            fakesMagnitudeBlendedness)
 
 import lsst.afw.table as afwTable
 
@@ -169,6 +173,32 @@ class VisitAnalysisConfig(CoaddAnalysisConfig):
                           "to apply meas_mosaic ubercal results to catalog (i.e. as opposed to using " +
                           "the photoCalib object)?")
 
+    hasFakes = Field(dtype=bool, default=False, doc="Include the analysis of the added fake sources?")
+
+    inputFakesRaCol = Field(
+        dtype=str,
+        doc="RA column name used in the fake source catalog.",
+        default="raJ2000"
+    )
+
+    inputFakesDecCol = Field(
+        dtype=str,
+        doc="Dec. column name used in the fake source catalog.",
+        default="decJ2000"
+    )
+
+    catalogRaCol = Field(
+        dtype=str,
+        doc="RA column name used in the source catalog.",
+        default="coord_ra",
+    )
+
+    catalogDecCol = Field(
+        dtype=str,
+        doc="Dec. column name used in the source catalog.",
+        default="coord_dec",
+    )
+
     def setDefaults(self):
         CoaddAnalysisConfig.setDefaults(self)
         self.analysis.fluxColumn = "base_PsfFlux_instFlux"
@@ -245,8 +275,12 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                          self.config.doPlotMags, self.config.doPlotSizes,
                                          self.config.doPlotCentroids, self.config.doPlotStarGalaxy,
                                          self.config.doWriteParquetTables]):
-                commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", repoInfo,
-                                                         aliasDictList=aliasDictList)
+                if self.config.hasFakes:
+                    commonZpCat, catalog, areaDict = self.readCatalogs(dataRefListTract, "fakes_src", repoInfo,
+                                                                       aliasDictList=aliasDictList)
+                else:
+                    commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", repoInfo,
+                                                             aliasDictList=aliasDictList)
 
                 # Set boolean arrays indicating sources deemed unsuitable for qa analyses
                 self.catLabel = "nChild = 0"
@@ -274,6 +308,33 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 # purge the catalogs of flagged sources
                 catalog = catalog[~bad].copy(deep=True)
                 commonZpCat = commonZpCat[~badCommonZp].copy(deep=True)
+
+                if self.config.hasFakes:
+                    inputFakes = repoInfo.butler.get("deepCoadd_fakeSourceCat", dataId=repoInfo.dataId)
+                    inputFakes = inputFakes.toDataFrame()
+                    processedFakes = catalog.asAstropy().to_pandas()
+                    inputFakes = addDegreePositions(inputFakes, self.config.inputFakesRaCol,
+                                                    self.config.inputFakesDecCol)
+                    processedFakes = addDegreePositions(processedFakes, self.config.catalogRaCol,
+                                                        self.config.catalogDecCol)
+                    processedFakes = addNearestNeighbor(processedFakes, self.config.catalogRaCol + "_deg",
+                                                         self.config.catalogDecCol + "_deg")
+                    plotInfoDict = getPlotInfo(repoInfo)
+                    inputFakesMatched, processedFakesMatched = matchCatalogs(inputFakes,
+                                                                    self.config.inputFakesRaCol + "_deg",
+                                                                    self.config.inputFakesDecCol + "_deg",
+                                                                    processedFakes,
+                                                                    self.config.catalogRaCol + "_deg",
+                                                                    self.config.catalogDecCol + "_deg")
+                    _, medMag100 = fakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict,
+                                                         areaDict, repoInfo)
+                    plotInfoDict["magLim"] = medMag100
+                    fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict, repoInfo)
+                    fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict, repoInfo)
+                    fakesMagnitudeNearestNeighbor(inputFakesMatched, processedFakesMatched, plotInfoDict,
+                                                  repoInfo)
+                    fakesMagnitudeBlendedness(inputFakesMatched, processedFakesMatched, plotInfoDict,
+                                              repoInfo)
 
                 try:
                     self.zpLabel = self.zpLabel + " " + self.catLabel
@@ -377,10 +438,14 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         Returns
         -------
         `list` of concatenated updated and calibrated `lsst.afw.table.source.source.SourceCatalog`s
+        If the config option hasFakes = True is set then an additional argument is returned, areaDict.
+        areaDict contains ccd number keys that index the area of each ccd that does not have the 2 bit (bad)
+        set in the mask.
         """
         catList = []
         commonZpCatList = []
         calexp = None
+        areaDict = {}
         self.haveFpCoords = True
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
@@ -396,6 +461,16 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                                  "Id of CCD on which source was detected")
 
             # Compute Focal Plane coordinates for each source if not already there
+            if self.config.hasFakes:
+                exp = repoInfo.butler.get("calexp", dataRef.dataId)
+                mask = exp.mask.array
+                maskBad = mask & 2**0
+                bad = len(np.where((maskBad == 1))[0])
+                good = len(np.where((maskBad == 0))[0])
+                pixScale = exp.getWcs().getPixelScale().asArcseconds()
+                area = pixScale**2 * good
+                areaDict[dataRef.dataId["ccd"]] = area
+
             if self.config.doPlotCentroids or self.config.analysis.doPlotFP and self.haveFpCoords:
                 if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
                     calexp = repoInfo.butler.get("calexp", dataRef.dataId)
@@ -436,7 +511,10 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         if not catList:
             raise TaskError("No catalogs read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
 
-        return concatenateCatalogs(commonZpCatList), concatenateCatalogs(catList)
+        if self.config.hasFakes:
+            return concatenateCatalogs(commonZpCatList), concatenateCatalogs(catList), areaDict
+        else:
+            return concatenateCatalogs(commonZpCatList), concatenateCatalogs(catList)
 
     def readSrcMatches(self, dataRefList, dataset, repoInfo, aliasDictList=None):
         catList = []

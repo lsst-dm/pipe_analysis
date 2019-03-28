@@ -16,6 +16,7 @@ from lsst.pipe.base import Struct, TaskError
 
 import lsst.afw.cameraGeom as cameraGeom
 import lsst.afw.geom as afwGeom
+import lsst.geom as lsstGeom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 import lsst.pex.config as pexConfig
@@ -691,11 +692,11 @@ def addFpPoint(det, catalog, prefix=""):
         row = newCatalog.addNew()
         row.assign(source, mapper)
         try:
-            center = afwGeom.Point2D(source[xCentroidKey], source[yCentroidKey])
+            center = lsstGeom.Point2D(source[xCentroidKey], source[yCentroidKey])
             pixelsToFocalPlane = det.getTransform(cameraGeom.PIXELS, cameraGeom.FOCAL_PLANE)
             fpPoint = pixelsToFocalPlane.applyForward(center)
         except Exception:
-            fpPoint = afwGeom.Point2D(np.nan, np.nan)
+            fpPoint = lsstGeom.Point2D(np.nan, np.nan)
             row.set(fpFlag, True)
         row.set(fpxKey, fpPoint[0])
         row.set(fpyKey, fpPoint[1])
@@ -767,7 +768,7 @@ def addRotPoint(catalog, width, height, nQuarter, prefix=""):
         try:
             rotPoint = rotatePixelCoord(source, width, height, nQuarter).getCentroid()
         except Exception:
-            rotPoint = afwGeom.Point2D(np.nan, np.nan)
+            rotPoint = lsstGeom.Point2D(np.nan, np.nan)
             row.set(rotFlag, True)
         row.set(rotxKey, rotPoint[0])
         row.set(rotyKey, rotPoint[1])
@@ -984,6 +985,11 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
     -------
     catalog : `lsst.afw.table.SourceCatalog`
        The calibrated catalog.
+
+    Notes
+    -----
+    Adds magnitudes to the returned catalog these are in the columns called <flux column>_mag and have
+    errors in the associated _magErr columns.
     """
     wcs = dataRef.get("jointcal_wcs")
     for record in catalog:
@@ -995,6 +1001,7 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
     if fluxKeys is None:
         fluxKeys, errKeys = getFluxKeys(catalog.schema)
 
+    magColsToAdd = []
     for fluxName, fluxKey in list(fluxKeys.items()):
         if len(catalog[fluxKey].shape) > 1:
             continue
@@ -1004,6 +1011,9 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
             fluxErrKey = None
         baseName = fluxName.replace("_instFlux", "")
         if fluxErrKey:
+            if "Flux" in baseName:
+                magsAndErrArray = photoCalib.instFluxToMagnitude(catalog, baseName)
+                magColsToAdd.append((magsAndErrArray, baseName))
             calibratedFluxAndErrArray = photoCalib.instFluxToNanojansky(catalog, baseName)
             catalog[fluxKey] = calibratedFluxAndErrArray[:, 0]
             catalog[fluxErrKey] = calibratedFluxAndErrArray[:, 1]
@@ -1028,7 +1038,23 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
         catalog[fluxKey] /= factor
         if fluxErrKey:
             catalog[fluxErrKey] /= factor
-    return catalog
+
+    mapper = afwTable.SchemaMapper(catalog.schema, True)
+    mapper.addMinimalSchema(catalog.schema, True)
+    mapper.editOutputSchema().disconnectAliases()
+    for (values, colName) in magColsToAdd:
+        mapper.editOutputSchema().addField(colName + "_mag", type=float,
+                                           doc="Magnitude calculated from " + colName, units="mag")
+        mapper.editOutputSchema().addField(colName + "_magErr", type=float,
+                                           doc="Magnitude error calculated from " + colName, units="mag")
+    catWithMags = afwTable.SimpleCatalog(mapper.getOutputSchema())
+    catWithMags.extend(catalog, mapper=mapper)
+    for (i, src) in enumerate(catWithMags):
+        for (values, colName) in magColsToAdd:
+            src[colName + "_mag"] = values[i, 0]
+            src[colName + "_magErr"] = values[i, 1]
+
+    return catWithMags
 
 
 def calibrateSourceCatalog(catalog, zp):
