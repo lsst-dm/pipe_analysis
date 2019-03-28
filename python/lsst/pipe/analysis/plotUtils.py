@@ -10,6 +10,8 @@ import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 from lsst.pipe.base import Struct
 
+import lsst.geom as lsstGeom
+
 from .utils import checkHscStack, findCcdKey
 
 try:
@@ -467,7 +469,7 @@ def bboxToXyCoordLists(bbox, wcs=None, wcsUnits="deg"):
     validWcsUnits = ["deg", "rad"]
     corners = []
     for corner in bbox.getCorners():
-        p = afwGeom.Point2D(corner.getX(), corner.getY())
+        p = lsstGeom.Point2D(corner.getX(), corner.getY())
         if wcs:
             if wcsUnits not in validWcsUnits:
                 raise RuntimeError("wcsUnits must be one of {:}".format(validWcsUnits))

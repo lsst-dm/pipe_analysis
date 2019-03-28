@@ -10,7 +10,6 @@ np.seterr(all="ignore")  # noqa 402
 from collections import defaultdict
 
 from lsst.daf.persistence.butler import Butler
-from lsst.daf.persistence.safeFileIo import safeMakeDir
 from lsst.pex.config import Field
 from lsst.pipe.base import ArgumentParser, TaskRunner, TaskError
 from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
@@ -26,9 +25,10 @@ from .utils import (Filenamer, AngularDistance, concatenateCatalogs, addAperture
 from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText
 from .fakesAnalysis import (addDegreePositions, matchCatalogs, addNearestNeighbor, fakesPositionCompare,
                             getPlotInfo, fakesAreaDepth, fakesMagnitudeCompare, fakesMagnitudeNearestNeighbor,
-                            fakesMagnitudeBlendedness)
+                            fakesMagnitudeBlendedness, fakesCompletenessPlot)
 
 import lsst.afw.table as afwTable
+import lsst.geom as lsstGeom
 
 
 class CcdAnalysis(Analysis):
@@ -276,8 +276,12 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                          self.config.doPlotCentroids, self.config.doPlotStarGalaxy,
                                          self.config.doWriteParquetTables]):
                 if self.config.hasFakes:
-                    commonZpCat, catalog, areaDict = self.readCatalogs(dataRefListTract, "fakes_src", repoInfo,
-                                                                       aliasDictList=aliasDictList)
+                    inputFakes = repoInfo.butler.get("deepCoadd_fakeSourceCat", dataId=repoInfo.dataId)
+                    inputFakes = inputFakes.toDataFrame()
+                    commonZpCat, catalog, areaDict, inputFakes = self.readCatalogs(
+                        dataRefListTract, "fakes_src", repoInfo,
+                        aliasDictList=aliasDictList,
+                        fakeCat=inputFakes)
                 else:
                     commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", repoInfo,
                                                              aliasDictList=aliasDictList)
@@ -294,7 +298,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     # Add pre-computed columns for parquet tables
                     catalog = addPreComputedColumns(catalog, fluxToPlotList=self.config.fluxToPlotList,
                                                     toMilli=self.config.toMilli)
-                    commonZpCat = addPreComputedColumns(commonZpCat, fluxToPlotList=self.config.fluxToPlotList,
+                    commonZpCat = addPreComputedColumns(commonZpCat,
+                                                        fluxToPlotList=self.config.fluxToPlotList,
                                                         toMilli=self.config.toMilli)
                     dataRef_catalog = repoInfo.butler.dataRef('analysisVisitTable', dataId=repoInfo.dataId)
                     writeParquet(dataRef_catalog, catalog, badArray=bad)
@@ -310,24 +315,20 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 commonZpCat = commonZpCat[~badCommonZp].copy(deep=True)
 
                 if self.config.hasFakes:
-                    inputFakes = repoInfo.butler.get("deepCoadd_fakeSourceCat", dataId=repoInfo.dataId)
-                    inputFakes = inputFakes.toDataFrame()
                     processedFakes = catalog.asAstropy().to_pandas()
                     inputFakes = addDegreePositions(inputFakes, self.config.inputFakesRaCol,
                                                     self.config.inputFakesDecCol)
                     processedFakes = addDegreePositions(processedFakes, self.config.catalogRaCol,
                                                         self.config.catalogDecCol)
                     processedFakes = addNearestNeighbor(processedFakes, self.config.catalogRaCol + "_deg",
-                                                         self.config.catalogDecCol + "_deg")
+                                                        self.config.catalogDecCol + "_deg")
                     plotInfoDict = getPlotInfo(repoInfo)
-                    inputFakesMatched, processedFakesMatched = matchCatalogs(inputFakes,
-                                                                    self.config.inputFakesRaCol + "_deg",
-                                                                    self.config.inputFakesDecCol + "_deg",
-                                                                    processedFakes,
-                                                                    self.config.catalogRaCol + "_deg",
-                                                                    self.config.catalogDecCol + "_deg")
+                    inputFakesMatched, processedFakesMatched, inputFakes = matchCatalogs(
+                        inputFakes, self.config.inputFakesRaCol + "_deg",
+                        self.config.inputFakesDecCol + "_deg", processedFakes,
+                        self.config.catalogRaCol + "_deg", self.config.catalogDecCol + "_deg")
                     _, medMag100 = fakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict,
-                                                         areaDict, repoInfo)
+                                                  areaDict, repoInfo)
                     plotInfoDict["magLim"] = medMag100
                     fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict, repoInfo)
                     fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict, repoInfo)
@@ -335,6 +336,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                                   repoInfo)
                     fakesMagnitudeBlendedness(inputFakesMatched, processedFakesMatched, plotInfoDict,
                                               repoInfo)
+                    fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, plotInfoDict,
+                                          areaDict, repoInfo)
 
                 try:
                     self.zpLabel = self.zpLabel + " " + self.catLabel
@@ -405,7 +408,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                          matchRadius=self.matchRadius,
                                          matchRadiusUnitStr=self.matchRadiusUnitStr, **plotKwargs)
 
-    def readCatalogs(self, dataRefList, dataset, repoInfo, aliasDictList=None):
+    def readCatalogs(self, dataRefList, dataset, repoInfo, aliasDictList=None, fakeCat=None,
+                     raFakesCol="raJ2000", decFakesCol="decJ2000"):
         """Read in and concatenate catalogs of type dataset in lists of data references
 
         If self.config.doWriteParquetTables is True, before appending each catalog to a single
@@ -429,6 +433,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
            study.  Elements used here include the key name associated with a
            ccd and wether the processing was done with an HSC stack (now
            obsolete, but processing runs still exist)
+        fakeCat : `pandas.core.frame.DataFrame`
+            Catalog of fake sources, used if hasFakes is True in which case a column (onCcd)
+            is added with the ccd number if the fake source overlaps a ccd and np.nan if it does not.
 
         Raises
         ------
@@ -463,13 +470,43 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             # Compute Focal Plane coordinates for each source if not already there
             if self.config.hasFakes:
                 exp = repoInfo.butler.get("calexp", dataRef.dataId)
+                wcs = exp.getWcs()
                 mask = exp.mask.array
                 maskBad = mask & 2**0
-                bad = len(np.where((maskBad == 1))[0])
                 good = len(np.where((maskBad == 0))[0])
                 pixScale = exp.getWcs().getPixelScale().asArcseconds()
                 area = pixScale**2 * good
                 areaDict[dataRef.dataId["ccd"]] = area
+
+                ccdWidth = exp.getWidth()
+                ccdHeight = exp.getHeight()
+
+                ccdCorners = wcs.pixelToSky([lsstGeom.Point2D(0, 0), lsstGeom.Point2D(ccdWidth, ccdHeight)])
+                areaDict["corners_" + str(dataRef.dataId["ccd"])] = ccdCorners
+
+                # Check which fake sources fall on the ccd
+                minRa = np.min(catalog["coord_ra"])
+                maxRa = np.max(catalog["coord_ra"])
+                minDec = np.min(catalog["coord_dec"])
+                maxDec = np.max(catalog["coord_dec"])
+                possOnCcd = np.where((fakeCat[raFakesCol].values > minRa) &
+                                     (fakeCat[raFakesCol].values < maxRa) &
+                                     (fakeCat[decFakesCol].values > minDec) &
+                                     (fakeCat[decFakesCol].values < maxDec))[0]
+
+                if "onCcd" not in fakeCat.columns:
+                    fakeCat["onCcd"] = [np.nan]*len(fakeCat)
+
+                validCcdPolygon = exp.getInfo().getValidPolygon()
+                onCcdList = []
+                for rowId in possOnCcd:
+                    skyCoord = lsstGeom.SpherePoint(fakeCat[raFakesCol].values[rowId],
+                                                    fakeCat[decFakesCol].values[rowId], lsstGeom.radians)
+                    pixCoord = wcs.skyToPixel(skyCoord)
+                    onCcd = validCcdPolygon.contains(pixCoord)
+                    if onCcd:
+                        onCcdList.append(rowId)
+                fakeCat["onCcd"].iloc[np.array(onCcdList)] = dataRef.dataId["ccd"]
 
             if self.config.doPlotCentroids or self.config.analysis.doPlotFP and self.haveFpCoords:
                 if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
@@ -499,7 +536,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 else:
                     # Check for both jointcal_wcs and wcs for compatibility with old datasets
                     if (not (dataRef.datasetExists("jointcal_wcs") or dataRef.datasetExists("wcs")) or not
-                        (dataRef.datasetExists("jointcal_photoCalib") or dataRef.datasetExists("fcr_md"))):
+                       (dataRef.datasetExists("jointcal_photoCalib") or dataRef.datasetExists("fcr_md"))):
                         continue
             fluxMag0 = None
             if not self.config.doApplyUberCal:
@@ -512,7 +549,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             raise TaskError("No catalogs read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
 
         if self.config.hasFakes:
-            return concatenateCatalogs(commonZpCatList), concatenateCatalogs(catList), areaDict
+            return concatenateCatalogs(commonZpCatList), concatenateCatalogs(catList), areaDict, fakeCat
         else:
             return concatenateCatalogs(commonZpCatList), concatenateCatalogs(catList)
 
@@ -529,7 +566,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 else:
                     # Check for both jointcal_wcs and wcs for compatibility with old datasets
                     if (not (dataRef.datasetExists("jointcal_wcs") or dataRef.datasetExists("wcs")) or not
-                        (dataRef.datasetExists("jointcal_photoCalib") or dataRef.datasetExists("fcr_md"))):
+                       (dataRef.datasetExists("jointcal_photoCalib") or dataRef.datasetExists("fcr_md"))):
                         continue
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
@@ -897,12 +934,14 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 else:
                     self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
             if self.config.doApCorrs:
-                self.plotApCorrs(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList, **plotKwargs1)
+                self.plotApCorrs(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
+                                 **plotKwargs1)
             if self.config.doPlotCentroids:
                 self.plotCentroids(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
                                    **plotKwargs1)
             if self.config.doPlotStarGalaxy:
-                self.plotStarGal(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList, **plotKwargs1)
+                self.plotStarGal(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
+                                 **plotKwargs1)
 
     def readCatalogs(self, dataRefList1, dataRefList2, dataset, repoInfo1, repoInfo2,
                      doReadFootprints=None, aliasDictList=None):
@@ -958,7 +997,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 if not doReadFootprints:
                     srcCat = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
                 elif doReadFootprints == "light":
-                    srcCat = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+                    srcCat = dataRef.get(dataset, immediate=True,
+                                         flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
                 elif doReadFootprints == "heavy":
                     srcCat = dataRef.get(dataset, immediate=True)
 
@@ -983,7 +1023,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                     self.log.info("HSC run: adding aperture flux to schema...")
                     srcCat = addApertureFluxesHSC(srcCat, prefix="")
 
-                # Scale fluxes to common zeropoint to make basic comparison plots without calibration influence
+                # Scale fluxes to common zeropoint to make basic comparison plots without calibration
+                # influence
                 commonZpCat = srcCat.copy(True)
                 commonZpCat = calibrateSourceCatalog(commonZpCat, self.config.analysis.commonZp)
                 commonZpCatList.append(commonZpCat)
