@@ -29,7 +29,7 @@ from .utils import (Filenamer, Enforcer, MagDiff, MagDiffMatches, MagDiffCompare
                     deconvMomStarGal, concatenateCatalogs, joinMatches, checkPatchOverlap,
                     addColumnsToSchema, addApertureFluxesHSC, addFpPoint,
                     addFootprintNPix, makeBadArray, addIntFloatOrStrColumn,
-                    calibrateCoaddSourceCatalog, backoutApCorr, matchJanskyToDn,
+                    calibrateCoaddSourceCatalog, backoutApCorr, matchNanojanskyToAB,
                     fluxToPlotString, andCatalog, writeParquet, getRepoInfo, setAliasMaps)
 from .plotUtils import (CosmosLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
                         MatchesStarGalaxyLabeller, determineUberCalLabel)
@@ -504,8 +504,8 @@ class CoaddAnalysisTask(CmdLineTask):
             if not hasattr(matches[0].first, "schema"):
                 raise RuntimeError("Unable to unpack matches.  "
                                    "Do you have the correct astrometry_net_data setup?")
-            # LSST reads in a_net catalogs with flux in "janskys", so must convert back to DN
-            matches = matchJanskyToDn(matches)
+            # LSST reads in a_net catalogs with flux in "nanojanskys", so must convert to AB
+            matches = matchNanojanskyToAB(matches)
             if hscRun and self.config.doAddAperFluxHsc:
                 addApertureFluxesHSC(matches, prefix="second_")
 
@@ -1063,7 +1063,7 @@ class CoaddAnalysisTask(CmdLineTask):
         filterName = afwImage.Filter(afwImage.Filter(filterName).getId()).getName()  # Get primary name
         refs = refObjLoader.loadSkyCircle(center, radius, filterName).refCat
         matches = afwTable.matchRaDec(refs, catalog, self.config.matchRadiusRaDec*afwGeom.arcseconds)
-        matches = matchJanskyToDn(matches)
+        matches = matchNanojanskyToAB(matches)
         return joinMatches(matches, "ref_", "src_")
 
     def plotQuiver(self, catalog, filenamer, dataId=None, butler=None, camera=None, ccdList=None,
