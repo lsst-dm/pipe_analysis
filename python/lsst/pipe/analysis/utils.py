@@ -327,18 +327,12 @@ class FootNpixDiffCompare(object):
 class MagDiffErr(object):
     """Functor to calculate magnitude difference error"""
     def __init__(self, column, unitScale=1.0):
-        zp = 27.0  # Exact value is not important, since we're differencing the magnitudes
         self.column = column
-        self.calib = afwImage.Calib()
-        self.calib.setFluxMag0(10.0**(0.4*zp))
-        self.calib.setThrowOnNegativeFlux(False)
         self.unitScale = unitScale
 
     def __call__(self, catalog):
-        mag1, err1 = self.calib.getMagnitude(catalog["first_" + self.column],
-                                             catalog["first_" + self.column + "Err"])
-        mag2, err2 = self.calib.getMagnitude(catalog["second_" + self.column],
-                                             catalog["second_" + self.column + "Err"])
+        err1 = 2.5*np.log10(np.e)*(catalog["first_" + self.column + "Err"]/catalog["first_" + self.column])
+        err2 = 2.5*np.log10(np.e)*(catalog["second_" + self.column + "Err"]/catalog["second_" + self.column])
         return np.sqrt(err1**2 + err2**2)*self.unitScale
 
 
