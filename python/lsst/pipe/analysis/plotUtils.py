@@ -285,7 +285,7 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
     xlim = xMin, xMax
     ylim = yMin, yMax
     axes.fill(tractRa, tractDec, fill=True, edgecolor='k', lw=1, linestyle='solid',
-              color="black", alpha=0.2)
+              color="black", alpha=0.05)
     prop_cycle = plt.rcParams['axes.prop_cycle']
     colors = prop_cycle.by_key()['color']
     colors.pop(colors.index('#7f7f7f'))  # get rid of the gray one as that's our no-data colour

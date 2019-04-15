@@ -19,7 +19,7 @@ from .coaddAnalysis import CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddA
 from .utils import (Filenamer, concatenateCatalogs, addApertureFluxesHSC, addFpPoint,
                     addFootprintNPix, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
                     calibrateSourceCatalogMosaic, calibrateSourceCatalogPhotoCalib,
-                    calibrateSourceCatalog, backoutApCorr, matchJanskyToDn, andCatalog, writeParquet,
+                    calibrateSourceCatalog, backoutApCorr, matchNanojanskyToAB, andCatalog, writeParquet,
                     getRepoInfo, getCcdNameRefList, getDataExistsRefList, setAliasMaps)
 from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText
 
@@ -466,9 +466,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                         noMatches = True
                         break
 
-            # LSST reads in a_net catalogs with flux in "janskys", so must convert back to DN
+            # LSST reads in a_net catalogs with flux in "nanojanskys", so must convert to AB
             if not noMatches:
-                matches = matchJanskyToDn(matches)
+                matches = matchNanojanskyToAB(matches)
                 if repoInfo.hscRun and self.config.doAddAperFluxHsc:
                     addApertureFluxesHSC(matches, prefix="second_")
 

@@ -3,6 +3,7 @@ from __future__ import print_function
 import os
 import re
 
+import astropy.units as units
 import numpy as np
 import scipy.odr as scipyOdr
 import scipy.optimize as scipyOptimize
@@ -33,11 +34,13 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "addFootprintNPix", "addRotPoint", "makeBadArray", "addFlag", "addIntFloatOrStrColumn",
            "calibrateSourceCatalogMosaic", "calibrateSourceCatalogPhotoCalib",
            "calibrateSourceCatalog", "calibrateCoaddSourceCatalog",
-           "backoutApCorr", "matchJanskyToDn", "checkHscStack", "fluxToPlotString", "andCatalog",
+           "backoutApCorr", "matchNanojanskyToAB", "checkHscStack", "fluxToPlotString", "andCatalog",
            "writeParquet", "getRepoInfo", "findCcdKey", "getCcdNameRefList", "getDataExistsRefList",
            "orthogonalRegression", "distanceSquaredToPoly", "p1CoeffsFromP2x0y0", "p2p1CoeffsFromLinearFit",
            "lineFromP2Coeffs", "linesFromP2P1Coeffs", "makeEqnStr", "catColors", "setAliasMaps"]
 
+
+NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
 
 def writeParquet(dataRef, table, badArray=None):
     """Write an afwTable to a desired ParquetTable butler dataset
@@ -327,18 +330,12 @@ class FootNpixDiffCompare(object):
 class MagDiffErr(object):
     """Functor to calculate magnitude difference error"""
     def __init__(self, column, unitScale=1.0):
-        zp = 27.0  # Exact value is not important, since we're differencing the magnitudes
         self.column = column
-        self.calib = afwImage.Calib()
-        self.calib.setFluxMag0(10.0**(0.4*zp))
-        self.calib.setThrowOnNegativeFlux(False)
         self.unitScale = unitScale
 
     def __call__(self, catalog):
-        mag1, err1 = self.calib.getMagnitude(catalog["first_" + self.column],
-                                             catalog["first_" + self.column + "Err"])
-        mag2, err2 = self.calib.getMagnitude(catalog["second_" + self.column],
-                                             catalog["second_" + self.column + "Err"])
+        err1 = 2.5*np.log10(np.e)*(catalog["first_" + self.column + "Err"]/catalog["first_" + self.column])
+        err2 = 2.5*np.log10(np.e)*(catalog["second_" + self.column + "Err"]/catalog["second_" + self.column])
         return np.sqrt(err1**2 + err2**2)*self.unitScale
 
 
@@ -923,11 +920,8 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
         record.updateCoord(wcs)
 
     photoCalib = dataRef.get("jointcal_photoCalib")
-    # TODO: need to scale these until DM-10153 is completed and PhotoCalib has
-    # replaced Calib entirely
-    referenceFlux = 1e23*10**(48.6/-2.5)*1e9
-    # Convert to constant zero point, as for the coadds
-    factor = referenceFlux/10.0**(0.4*zp)
+    # Scale to AB and convert to constant zero point, as for the coadds
+    factor = NANOJANSKYS_PER_AB_FLUX/10.0**(0.4*zp)
     if fluxKeys is None:
         fluxKeys, errKeys = getFluxKeys(catalog.schema)
 
@@ -1006,15 +1000,15 @@ def backoutApCorr(catalog):
     return catalog
 
 
-def matchJanskyToDn(matches):
-    # LSST reads in a_net catalogs with flux in "janskys", so must convert back to DN
-    JANSKYS_PER_AB_FLUX = 3631.0
+def matchNanojanskyToAB(matches):
+    # LSST reads in catalogs with flux in "nanojanskys", so must convert to AB.
+    # Using astropy units for conversion for consistency with PhotoCalib.
     schema = matches[0].first.schema
     keys = [schema[kk].asKey() for kk in schema.getNames() if "_flux" in kk]
 
     for m in matches:
         for k in keys:
-            m.first[k] /= JANSKYS_PER_AB_FLUX
+            m.first[k] /= NANOJANSKYS_PER_AB_FLUX
     return matches
 
 
