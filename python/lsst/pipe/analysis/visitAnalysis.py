@@ -161,7 +161,8 @@ class CcdAnalysis(Analysis):
 
 class VisitAnalysisConfig(CoaddAnalysisConfig):
     doApplyUberCal = Field(dtype=bool, default=True, doc="Apply uberCal (jointcal/meas_mosaic) results " +
-                           "to input?  FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
+                           "to input?  The instrumental flux corresponding to 0 magnitude, fluxMag0, " +
+                           "from SFM is applied if doApplyUberCal is False")
     useMeasMosaic = Field(dtype=bool, default=False, doc="Use meas_mosaic's applyMosaicResultsExposure " +
                           "to apply meas_mosaic ubercal results to catalog (i.e. as opposed to using " +
                           "the photoCalib object)?")
@@ -300,7 +301,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                   fluxToPlotList=["base_GaussianFlux", "base_CircularApertureFlux_12_0"],
                                   postFix="_commonZp", **plotKwargs)
                     commonZpDone = True
-                # Now source catalog calibrated to either FLUXMAG0 or meas_mosaic result for remainder of plots
+                # Now calibrate the source catalg to either the instrumental flux corresponding
+                # to 0 magnitude, fluxMag0, from SFM or the uber-calibration solution (from
+                # jointcal or meas_mosaic) for remainder of plots.
                 plotKwargs.update(dict(zpLabel=self.zpLabel))
                 if self.config.doPlotMags:
                     self.plotMags(catalog, filenamer, repoInfo.dataId, **plotKwargs)
@@ -343,8 +346,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         Also added to the catalog are columns with the focal plane coordinate (if not already
         present) and the number of pixels in the object's footprint.  Finally, the catalogs
         are calibrated according to the self.config.doApplyUberCal config parameter:
-        meas_mosaic wcs and flux calibrations if True, FLUXMAG0 zeropoint calibration from
-        processCcd.py if False.
+        - uber-calibration (jointcal or meas_mosaic) wcs and flux calibrations if True
+        - fluxMag0, the instrumental flux corresponding to 0 magnitude, from SFM if False
 
         Parameters
         ----------
@@ -369,6 +372,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         """
         catList = []
         commonZpCatList = []
+        calexp = None
         self.haveFpCoords = True
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
@@ -386,7 +390,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             # Compute Focal Plane coordinates for each source if not already there
             if self.config.doPlotCentroids or self.config.analysis.doPlotFP and self.haveFpCoords:
                 if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
-                    exp = repoInfo.butler.get("calexp", dataRef.dataId)
+                    calexp = repoInfo.butler.get("calexp", dataRef.dataId)
                     det = exp.getDetector()
                     catalog = addFpPoint(det, catalog)
                 xFp = catalog["base_FPPosition_x"]
@@ -414,7 +418,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     if (not (dataRef.datasetExists("jointcal_wcs") or dataRef.datasetExists("wcs")) or not
                         (dataRef.datasetExists("jointcal_photoCalib") or dataRef.datasetExists("fcr_md"))):
                         continue
-            catalog = self.calibrateCatalogs(dataRef, catalog, repoInfo.metadata, repoInfo.dataset)
+            fluxMag0 = None
+            if not self.config.doApplyUberCal:
+                calexp = repoInfo.butler.get("calexp", dataRef.dataId) if not calexp else calexp
+                fluxMag0 = calexp.getPhotoCalib().getInstFluxAtZeroMagnitude()
+            catalog = self.calibrateCatalogs(dataRef, catalog, fluxMag0, repoInfo.dataset)
             catList.append(catalog)
 
         if not catList:
@@ -443,7 +451,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             # Set some aliases for differing schema naming conventions
             if aliasDictList:
                 catalog = setAliasMaps(catalog, aliasDictList)
-            catalog = self.calibrateCatalogs(dataRef, catalog, repoInfo.metadata, repoInfo.dataset)
+            fluxMag0 = None
+            if not self.config.doApplyUberCal:
+                calexp = repoInfo.butler.get("calexp", dataRef.dataId)
+                fluxMag0 = calexp.getPhotoCalib().getInstFluxAtZeroMagnitude()
+            catalog = self.calibrateCatalogs(dataRef, catalog, fluxMag0, repoInfo.dataset)
             packedMatches = repoInfo.butler.get(dataset + "Match", dataRef.dataId)
             # The reference object loader grows the bbox by the config parameter pixelMargin.  This
             # is set to 50 by default but is not reflected by the radius parameter set in the
@@ -503,18 +515,22 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
         return concatenateCatalogs(catList)
 
-    def calibrateCatalogs(self, dataRef, catalog, metadata, photoCalibDataset):
+    def calibrateCatalogs(self, dataRef, catalog, fluxMag0, photoCalibDataset):
         """Determine and apply appropriate flux calibration to the catalog.
 
         Parameters
         ----------
         dataRef : `lsst.daf.persistence.butlerSubset.ButlerDataRef`
-           A dataRef is needed for call to meas_mosaic's applyMosaicResultsCatalog() in
-           utils' calibrateSourceCatalogMosaic()
+           If applying meas_mosaic calibrations, a dataRef is needed for call to
+           meas_mosaic's applyMosaicResultsCatalog() in in utils'
+           calibrateSourceCatalogMosaic().  It is also needed to distinguish
+           between jointcal vs. meas_mosaic uberCal when calibrating through
+           a PhotoCalib object.
         catalog : `lsst.afw.table.source.source.SourceCatalog`
-           The catalog to which the calibration is applied in place
-        metadata : `lsst.daf.base.propertyContainer.propertyList.PropertyList`
-           The metadata associated with the catalog to obtain the FLUXMAG0 zeropoint
+           The catalog to which the calibration is applied in place.
+        fluxMag0 : `float`
+           The instrumental flux corresponding to 0 magnitude from Single Frame
+           Measurement for the catalog.
         photoCalibDataset : `str`
            Name of the dataSet to be used for the uber calibration (e.g.
            "jointcal_photoCalib" or "fcr_md").
@@ -550,10 +566,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
         else:
             # Scale fluxes to measured zeropoint
-            self.zp = 2.5*np.log10(metadata.getScalar("FLUXMAG0"))
+            self.zp = 2.5*np.log10(fluxMag0)
             if not self.zpLabel:
-                self.log.info("Using 2.5*log10(FLUXMAG0) = {:.4f} from FITS header for zeropoint".format(
-                              self.zp))
+                self.log.info("Using 2.5*log10(fluxMag0) = {:.4f} from SFM for zeropoint".format(self.zp))
             self.zpLabel = "FLUXMAG0"
             calibrated = calibrateSourceCatalog(catalog, self.zp)
 
@@ -562,14 +577,14 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
 class CompareVisitAnalysisConfig(VisitAnalysisConfig):
     doApplyUberCal1 = Field(dtype=bool, default=True, doc="Apply uberCal (jointcal/meas_mosaic) results " +
-                            "to input1? FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
+                            "to input1? FLUXMAG0 zeropoint from SFM is applied if doApplyUberCal is False")
     useMeasMosaic1 = Field(dtype=bool, default=False, doc="Use meas_mosaic's applyMosaicResultsExposure " +
-                           "to apply meas_mosaice ubercal results to input1 (i.e. as opposed to using " +
+                           "to apply meas_mosaic ubercal results to input1 (i.e. as opposed to using " +
                            "the photoCalib object)?")
     doApplyUberCal2 = Field(dtype=bool, default=True, doc="Apply uberCal (jointcal/meas_mosaic) results " +
-                            "to input2? FLUXMAG0 zeropoint is applied if doApplyUberCal is False")
+                            "to input2? FLUXMAG0 zeropoint from SFM is applied if doApplyUberCal is False")
     useMeasMosaic2 = Field(dtype=bool, default=False, doc="Use meas_mosaic's applyMosaicResultsExposure " +
-                           "to apply meas_mosaice ubercal results to input2 (i.e. as opposed to using " +
+                           "to apply meas_mosaic ubercal results to input2 (i.e. as opposed to using " +
                            "the photoCalib object)?")
 
     def setDefaults(self):
@@ -583,6 +598,17 @@ class CompareVisitAnalysisConfig(VisitAnalysisConfig):
 
     def validate(self):
         super(CoaddAnalysisConfig, self).validate()
+        if not self.doApplyUberCal and (self.doApplyUberCal1 and self.doApplyUberCal2):
+            raise ValueError("doApplyUberCal is set to False, but doApplyUberCal1 and doApplyUberCal2, "
+                             "the appropriate settings for the compareVisitAnalysis.py scirpt, are both "
+                             "True, so uber-calibrations would be applied.  Try running without setting "
+                             "doApplyUberCal (which is only appropriate for the visitAnalysis.py script).")
+        if not self.useMeasMosaic and (self.useMeasMosaic1 and self.useMeasMosaic2):
+            raise ValueError("useMeasMosaic is set to False, but useMeasMosaic1 and useMeasMosaic2, "
+                             "the appropriate settings for the compareVisitAnalysis.py scirpt, are both "
+                             "True, so PhotoCalib-derived calibrations would be applied.  Try running "
+                             "without setting useMeasMosaic (which is only appropriate for the "
+                             "visitAnalysis.py script).")
 
 
 class CompareVisitAnalysisRunner(TaskRunner):
@@ -732,7 +758,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 for cat in [commonZpCat, catalog]:
                     cat = setAliasMaps(cat, aliasDictList)
 
-            self.log.info("Number of matches (maxDist = {0:.2f} {1:s}) = {2:d}".format(
+            self.log.info("Number of matches (maxDist = {0:.2f}{1:s}) = {2:d}".format(
                           self.matchRadius, self.matchRadiusUnitStr, len(catalog)))
 
             try:
@@ -852,6 +878,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                     srcCat = backoutApCorr(srcCat)
 
                 calexp = repoInfo.butler.get("calexp", dataRef.dataId)
+                fluxMag0 = calexp.getPhotoCalib().getInstFluxAtZeroMagnitude()
                 nQuarter = calexp.getDetector().getOrientation().getNQuarter()
                 # add footprint nPix column
                 if self.config.doPlotFootprintNpix:
@@ -876,7 +903,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                     elif (not (dataRef.datasetExists("jointcal_wcs") or dataRef.datasetExists("wcs")) or not
                           (dataRef.datasetExists("jointcal_photoCalib") or dataRef.datasetExists("fcr_md"))):
                         continue
-                srcCat, zpLabel = self.calibrateCatalogs(dataRef, srcCat, repoInfo.metadata, repoInfo.dataset,
+                srcCat, zpLabel = self.calibrateCatalogs(dataRef, srcCat, fluxMag0, repoInfo.dataset,
                                                          doApplyUberCal, useMeasMosaic)
                 self.zpLabel1 = zpLabel if iCat == 1 and not self.zpLabel1 else self.zpLabel1
                 self.zpLabel2 = zpLabel if iCat == 2 and not self.zpLabel2 else self.zpLabel2
@@ -893,7 +920,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         return (concatenateCatalogs(commonZpCatList1), concatenateCatalogs(catList1),
                 concatenateCatalogs(commonZpCatList2), concatenateCatalogs(catList2))
 
-    def calibrateCatalogs(self, dataRef, catalog, metadata, photoCalibDataset, doApplyUberCal, useMeasMosaic):
+    def calibrateCatalogs(self, dataRef, catalog, fluxMag0, photoCalibDataset, doApplyUberCal, useMeasMosaic):
         """Determine and apply appropriate flux calibration to the catalog.
 
         Parameters
@@ -903,15 +930,16 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
            utils' calibrateSourceCatalogMosaic()
         catalog : `lsst.afw.table.source.source.SourceCatalog`
            The catalog to which the calibration is applied in place
-        metadata : `lsst.daf.base.propertyContainer.propertyList.PropertyList`
-           The metadata associated with the catalog to obtain the FLUXMAG0 zeropoint
+        fluxMag0 : `float`
+           The instrumental flux corresponding to 0 magnitude from Single Frame
+           Measurement for the catalog.
         photoCalibDataset : `str`
            Name of the dataSet to be used for the uber calibration (e.g.
            "jointcal_photoCalib" or "fcr_md").
         doApplyUberCal : `bool`
            If True: Apply the flux and wcs uber calibrations from meas_mosaic to
                     the caltalog.
-           If False: Apply the FLUXMAG0 flux calibration from single frame
+           If False: Apply the ``fluxMag0`` flux calibration from single frame
                      processing to the catalog.
         useMeasMosaic : `bool`
            Use meas_mosaic's applyMosaicResultsCatalog for the uber-calibration
@@ -947,9 +975,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
         else:
             # Scale fluxes to measured zeropoint
-            self.zp = 2.5*np.log10(metadata.getScalar("FLUXMAG0"))
-            self.log.info("Using 2.5*log10(FLUXMAG0) = {:.4f} from FITS header for zeropoint".format(
-                self.zp))
+            self.zp = 2.5*np.log10(fluxMag0)
             zpLabel = "FLUXMAG0"
             calibrated = calibrateSourceCatalog(catalog, self.zp)
 
