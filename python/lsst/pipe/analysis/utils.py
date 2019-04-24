@@ -26,10 +26,11 @@ except ImportError:
     applyMosaicResultsCatalog = None
 
 __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCompare",
-           "AstrometryDiff", "TraceSize", "PsfTraceSizeDiff", "TraceSizeCompare", "PercentDiff",
-           "E1Resids", "E2Resids", "E1ResidsHsmRegauss", "E2ResidsHsmRegauss", "FootNpixDiffCompare",
-           "MagDiffErr", "MagDiffCompareErr", "ApCorrDiffErr", "CentroidDiff", "CentroidDiffErr", "deconvMom",
-           "deconvMomStarGal", "concatenateCatalogs", "joinMatches", "checkIdLists", "checkPatchOverlap",
+           "AstrometryDiff", "AngularDistance", "TraceSize", "PsfTraceSizeDiff", "TraceSizeCompare",
+           "PercentDiff", "E1Resids", "E2Resids", "E1ResidsHsmRegauss", "E2ResidsHsmRegauss",
+           "FootNpixDiffCompare", "MagDiffErr", "MagDiffCompareErr", "ApCorrDiffErr",
+           "CentroidDiff", "CentroidDiffErr", "deconvMom", "deconvMomStarGal",
+           "concatenateCatalogs", "joinMatches", "checkIdLists", "checkPatchOverlap",
            "joinCatalogs", "getFluxKeys", "addColumnsToSchema", "addApertureFluxesHSC", "addFpPoint",
            "addFootprintNPix", "addRotPoint", "makeBadArray", "addFlag", "addIntFloatOrStrColumn",
            "calibrateSourceCatalogMosaic", "calibrateSourceCatalogPhotoCalib",
@@ -221,6 +222,58 @@ class AstrometryDiff(object):
         cosDec1 = np.cos(catalog[self.declination1]) if self.declination1 is not None else 1.0
         cosDec2 = np.cos(catalog[self.declination2]) if self.declination2 is not None else 1.0
         return (first*cosDec1 - second*cosDec2)*(1.0*afwGeom.radians).asArcseconds()*self.unitScale
+
+class AngularDistance(object):
+    """Functor to calculate the Haversine angular distance between two points
+
+    The Haversine formula, which determines the great-circle distance between
+    two points on a sphere given their longitudes (ra) and latitudes (dec), is
+    given by:
+
+    distance =
+    2arcsin(sqrt(sin**2((dec2-dec1)/2) + cos(del1)cos(del2)sin**2((ra1-ra2)/2)))
+
+    Parameters
+    ----------
+    raStr1 : `str`
+       The name of the column for the ra (in radians) of the first point
+    decStr1 : `str`
+       The name of the column for the dec (in radians) of the first point
+    raStr2 : `str`
+       The name of the column for the ra (in radians) of the second point
+    decStr1 : `str`
+       The name of the column for the dec (in radians) of the second point
+    catalog : `lsst.afw.table.SourceCatalog`
+       The source catalog under consideration containing columns representing
+       the (ra, dec) coordinates for each object with names given by
+       ``raStr1``, ``decStr1``, ``raStr2``, and ``decStr2``.
+
+    Returns
+    -------
+    angularDistance : `numpy.ndarray`
+       An array containing the Haversine angular distance (in radians) between
+       the points:
+       (``catalog``[``ra1Str``], ``catalog``[``dec1Str``]) and
+       (``catalog``[``ra2Str``], ``catalog``[``dec2Str``]).
+    """
+    def __init__(self, raStr1, raStr2, decStr1, decStr2):
+        self.raStr1 = raStr1
+        self.raStr2 = raStr2
+        self.decStr1 = decStr1
+        self.decStr2 = decStr2
+
+    def __call__(self, catalog):
+        ra1 = catalog[self.raStr1]
+        ra2 = catalog[self.raStr2]
+        deltaRa = ra1 - ra2
+        dec1 = catalog[self.decStr1]
+        dec2 = catalog[self.decStr2]
+        deltaDec = dec1 - dec2
+        haverDeltaRa = np.sin(deltaRa/2.00)
+        haverDeltaDec = np.sin(deltaDec/2.00)
+        haverAlpha = np.sqrt(np.square(haverDeltaDec) + np.cos(dec1)*np.cos(dec2)*np.square(haverDeltaRa))
+        angularDistance = 2.0*np.arcsin(haverAlpha)
+        return angularDistance
 
 
 class TraceSize(object):
