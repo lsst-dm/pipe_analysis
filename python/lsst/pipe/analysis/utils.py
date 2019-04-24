@@ -28,7 +28,7 @@ except ImportError:
 __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCompare",
            "AstrometryDiff", "TraceSize", "PsfTraceSizeDiff", "TraceSizeCompare", "PercentDiff",
            "E1Resids", "E2Resids", "E1ResidsHsmRegauss", "E2ResidsHsmRegauss", "FootNpixDiffCompare",
-           "MagDiffErr", "ApCorrDiffErr", "CentroidDiff", "CentroidDiffErr", "deconvMom",
+           "MagDiffErr", "MagDiffCompareErr", "ApCorrDiffErr", "CentroidDiff", "CentroidDiffErr", "deconvMom",
            "deconvMomStarGal", "concatenateCatalogs", "joinMatches", "checkIdLists", "checkPatchOverlap",
            "joinCatalogs", "getFluxKeys", "addColumnsToSchema", "addApertureFluxesHSC", "addFpPoint",
            "addFootprintNPix", "addRotPoint", "makeBadArray", "addFlag", "addIntFloatOrStrColumn",
@@ -37,7 +37,8 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "backoutApCorr", "matchNanojanskyToAB", "checkHscStack", "fluxToPlotString", "andCatalog",
            "writeParquet", "getRepoInfo", "findCcdKey", "getCcdNameRefList", "getDataExistsRefList",
            "orthogonalRegression", "distanceSquaredToPoly", "p1CoeffsFromP2x0y0", "p2p1CoeffsFromLinearFit",
-           "lineFromP2Coeffs", "linesFromP2P1Coeffs", "makeEqnStr", "catColors", "setAliasMaps"]
+           "lineFromP2Coeffs", "linesFromP2P1Coeffs", "makeEqnStr", "catColors", "setAliasMaps",
+           "addPreComputedColumns"]
 
 
 NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
@@ -156,8 +157,22 @@ class MagDiff(object):
         self.col2 = col2
         self.unitScale = unitScale
 
+    def __call__(self, catalog1, catalog2=None):
+        catalog2 = catalog2 if catalog2 else catalog1
+        return -2.5*np.log10(catalog1[self.col1]/catalog2[self.col2])*self.unitScale
+
+
+class MagDiffErr(object):
+    """Functor to calculate magnitude difference error"""
+    def __init__(self, col1, col2, unitScale=1.0):
+        self.col1 = col1
+        self.col2 = col2
+        self.unitScale = unitScale
+
     def __call__(self, catalog):
-        return -2.5*np.log10(catalog[self.col1]/catalog[self.col2])*self.unitScale
+        err1 = 2.5*np.log10(np.e)*(catalog[self.col1 + "Err"]/catalog[self.col1])
+        err2 = 2.5*np.log10(np.e)*(catalog[self.col2 + "Err"]/catalog[self.col2])
+        return np.sqrt(err1**2 + err2**2)*self.unitScale
 
 
 class MagDiffMatches(object):
@@ -327,7 +342,7 @@ class FootNpixDiffCompare(object):
         return nPix1 - nPix2
 
 
-class MagDiffErr(object):
+class MagDiffCompareErr(object):
     """Functor to calculate magnitude difference error"""
     def __init__(self, column, unitScale=1.0):
         self.column = column
@@ -801,7 +816,7 @@ def addFlag(catalog, badArray, flagName, doc="General failure flag"):
     return newCatalog
 
 
-def addIntFloatOrStrColumn(catalog, values, fieldName, fieldDoc):
+def addIntFloatOrStrColumn(catalog, values, fieldName, fieldDoc, fieldUnits=""):
     """Add a column of values with name fieldName and doc fieldDoc to the catalog schema
 
     Parameters
@@ -815,6 +830,8 @@ def addIntFloatOrStrColumn(catalog, values, fieldName, fieldDoc):
        Name of the field to be added to the schema.
     fieldDoc : `str`
        Documentation string for the field to be added to the schema.
+    fieldUnits : `str`, optional
+       Units of the column to be added.
 
     Raises
     ------
@@ -858,7 +875,7 @@ def addIntFloatOrStrColumn(catalog, values, fieldName, fieldDoc):
                             "Also note, if you want to add a boolean flag column, use the addFlag "
                             "function.)").format(type(values[0])))
 
-    fieldKey = schema.addField(fieldName, type=fieldType, size=size, doc=fieldDoc)
+    fieldKey = schema.addField(fieldName, type=fieldType, size=size, doc=fieldDoc, units=fieldUnits)
 
     newCatalog = afwTable.SourceCatalog(schema)
     newCatalog.reserve(len(catalog))
@@ -1582,4 +1599,124 @@ def setAliasMaps(catalog, aliasDictList, prefix=""):
         for newName, oldName in aliasDict.items():
             if prefix + oldName in catalog.schema:
                 aliasMap.set(prefix + newName, prefix + oldName)
+    return catalog
+
+
+def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=None):
+    """Add column entries for a set of pre-computed values
+
+    This is for the parquet tables to facilitate the interactive
+    drilldown analyses.
+
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.SourceCatalog`
+       The source catalog to which the columns will be added.
+    fluxToPlotList : `list`
+       List of flux field names to make mag(fluxName) - mag(PsfFlux) columns.
+    toMilli : `bool`, optional
+       Whether to use units of "milli" (e.g. mmag, mas).
+    unforcedCat : `lsst.afw.table.SourceCatalog`, optional
+       If `catalog` is a coadd forced catalog, this is its associated unforced
+       catalog for direct comparison of forced vs. unforced parameters.
+
+    Returns
+    -------
+    catalog : `lsst.afw.table.SourceCatalog`
+       The source catalog with the columns of pre-computed values added.
+    """
+    unitScale = 1000.0 if toMilli else 1.0
+    fieldUnits = " (mmag)" if toMilli else " (mag)"
+    for col in fluxToPlotList:
+        colStr = fluxToPlotString(col)
+        if col + "_instFlux" in catalog.schema:
+            compCol = "base_PsfFlux"
+            compColStr = fluxToPlotString(compCol)
+            fieldName = colStr + "-" + compColStr + "_magDiff_" + fieldUnits.strip(" ()")
+            fieldDoc = "Magnitude difference: " + colStr + "-" + compCol + fieldUnits
+            parameterFunc = MagDiff(col + "_instFlux", compCol + "_instFlux", unitScale=unitScale)
+            magDiff = parameterFunc(catalog)
+            parameterFunc = MagDiffErr(col + "_instFlux", compCol + "_instFlux", unitScale=unitScale)
+            magDiffErr = parameterFunc(catalog)
+            catalog = addIntFloatOrStrColumn(catalog, magDiff, fieldName, fieldDoc,
+                                             fieldUnits=fieldUnits.strip(" ()"))
+            fieldErrName = colStr + "-" + compColStr + "_magDiffErr_" + fieldUnits.strip(" ()")
+            fieldErrDoc = "Error of: " + fieldDoc
+            catalog = addIntFloatOrStrColumn(catalog, magDiffErr, fieldErrName, fieldErrDoc,
+                                             fieldUnits=fieldUnits.strip(" ()"))
+
+
+    for compareCol, psfCompareCol, compareStr in [["base_SdssShape", "base_SdssShape_psf", "Sdss"],
+                                                  ["ext_shapeHSM_HsmSourceMoments",
+                                                   "ext_shapeHSM_HsmPsfMoments", "Hsm"]]:
+        if compareCol + "_xx" in catalog.schema:
+            # Source Trace
+            fieldUnits = " (pixel)"
+            fieldName = "trace" + compareStr + "_" + fieldUnits.strip(" ()")
+            fieldDoc = fieldName + " = sqrt(0.5*(Ixx + Iyy))" + fieldUnits
+            parameterFunc = TraceSize(compareCol)
+            traceSize = parameterFunc(catalog)
+            catalog = addIntFloatOrStrColumn(catalog, traceSize, fieldName, fieldDoc,
+                                             fieldUnits=fieldUnits.strip(" ()"))
+            fieldName = "trace" + compareStr + "_fwhm_" + fieldUnits.strip(" ()")
+            fieldDoc = fieldName + " = 2.0*np.sqrt(2.0*np.log(2.0))*Trace" + fieldUnits
+            fwhmSize = 2.0*np.sqrt(2.0*np.log(2.0))*traceSize
+            catalog = addIntFloatOrStrColumn(catalog, fwhmSize, fieldName, fieldDoc,
+                                             fieldUnits=fieldUnits.strip(" ()"))
+
+            # Source Trace - PSF model Trace
+            fieldUnits = " (%)"
+            fieldName =  "psfTrace" + compareStr + "Diff_percent"
+            fieldDoc = fieldName + " = srcTrace" + compareStr + " - psfModelTrace" + compareStr + fieldUnits
+            parameterFunc = PsfTraceSizeDiff(compareCol, psfCompareCol)
+            psfTraceSizeDiff = parameterFunc(catalog)
+            catalog = addIntFloatOrStrColumn(catalog, psfTraceSizeDiff, fieldName, fieldDoc,
+                                             fieldUnits=fieldUnits.strip(" ()"))
+
+            # Source - PSF model E1/E2 Residuals
+            fieldUnits = " (milli)" if toMilli else ""
+            fieldName = "e1Resids" + compareStr + "_" + fieldUnits.strip(" ()")
+            fieldDoc = fieldName + " = src(e1) - psfModel(e1), e1 = (Ixx - Iyy)/(Ixx + Iyy)" + fieldUnits
+            parameterFunc = E1Resids(compareCol, psfCompareCol, unitScale)
+            e1Resids = parameterFunc(catalog)
+            catalog = addIntFloatOrStrColumn(catalog, e1Resids, fieldName, fieldDoc)
+            fieldName = "e2Resids" + compareStr + "_" + fieldUnits.strip(" ()")
+            fieldDoc = fieldName + " = src(e2) - psfModel(e2), e2 = 2*Ixy/(Ixx + Iyy)" + fieldUnits
+            parameterFunc = E2Resids(compareCol, psfCompareCol, unitScale)
+            e2Resids = parameterFunc(catalog)
+            catalog = addIntFloatOrStrColumn(catalog, e2Resids, fieldName, fieldDoc)
+
+
+    # HSM Regauss E1/E2 resids
+    fieldUnits = " (milli)" if toMilli else ""
+    if "ext_shapeHSM_HsmShapeRegauss_e1" in catalog.schema:
+        fieldName = "e1ResidsHsmRegauss_" + fieldUnits.strip(" ()")
+        fieldDoc = fieldName + " = src(e1) - hsmPsfMoments(e1), e1 = (Ixx - Iyy)/(Ixx + Iyy)" + fieldUnits
+        parameterFunc = E1ResidsHsmRegauss(unitScale=unitScale)
+        e1ResidsHsmRegauss = parameterFunc(catalog)
+        catalog = addIntFloatOrStrColumn(catalog, e1ResidsHsmRegauss, fieldName, fieldDoc)
+    if "ext_shapeHSM_HsmShapeRegauss_e2" in catalog.schema:
+        fieldName = "e2ResidsHsmRegauss_" + fieldUnits.strip(" ()")
+        fieldDoc = fieldName + " = src(e2) - hsmPsfMoments(e2), e2 = (Ixx - Iyy)/(Ixx + Iyy)" + fieldUnits
+        parameterFunc = E2ResidsHsmRegauss(unitScale=unitScale)
+        e2ResidsHsmRegauss = parameterFunc(catalog)
+        catalog = addIntFloatOrStrColumn(catalog, e2ResidsHsmRegauss, fieldName, fieldDoc)
+
+    if "base_SdssShape_xx" in catalog.schema:
+        fieldName = "deconvMoments"
+        fieldDoc = "Deconvolved moments"
+        deconvMoments = deconvMom(catalog)
+        catalog = addIntFloatOrStrColumn(catalog, deconvMoments, fieldName, fieldDoc)
+
+    if unforcedCat:
+        fieldUnits = " (mmag)" if toMilli else " (mag)"
+        for col in fluxToPlotList:
+            colStr = fluxToPlotString(col)
+            fieldName = "compareUnforced_" + colStr + "_magDiff_" + fieldUnits.strip(" ()")
+            fieldDoc = "Compare forced - unforced" + colStr + " (mmag)"
+            parameterFunc = MagDiff(col + "_instFlux", col + "_instFlux", unitScale=unitScale)
+            magDiff = parameterFunc(catalog, unforcedCat)
+            catalog = addIntFloatOrStrColumn(catalog, magDiff, fieldName, fieldDoc,
+                                             fieldUnits=fieldUnits.strip(" ()"))
+
     return catalog

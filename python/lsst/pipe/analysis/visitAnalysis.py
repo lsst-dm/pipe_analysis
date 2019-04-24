@@ -20,7 +20,8 @@ from .utils import (Filenamer, concatenateCatalogs, addApertureFluxesHSC, addFpP
                     addFootprintNPix, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
                     calibrateSourceCatalogMosaic, calibrateSourceCatalogPhotoCalib,
                     calibrateSourceCatalog, backoutApCorr, matchNanojanskyToAB, andCatalog, writeParquet,
-                    getRepoInfo, getCcdNameRefList, getDataExistsRefList, setAliasMaps)
+                    getRepoInfo, getCcdNameRefList, getDataExistsRefList, setAliasMaps,
+                    addPreComputedColumns)
 from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText
 
 import lsst.afw.table as afwTable
@@ -255,6 +256,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
                 # Create and write parquet tables
                 if self.config.doWriteParquetTables:
+                    # Add pre-computed columns for parquet tables
+                    catalog = addPreComputedColumns(catalog, fluxToPlotList=self.config.fluxToPlotList,
+                                                    toMilli=self.config.toMilli)
+                    commonZpCat = addPreComputedColumns(commonZpCat, fluxToPlotList=self.config.fluxToPlotList,
+                                                        toMilli=self.config.toMilli)
                     dataRef_catalog = repoInfo.butler.dataRef('analysisVisitTable', dataId=repoInfo.dataId)
                     writeParquet(dataRef_catalog, catalog, badArray=bad)
                     dataRef_commonZp = repoInfo.butler.dataRef('analysisVisitTable_commonZp',
