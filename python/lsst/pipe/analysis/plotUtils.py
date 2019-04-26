@@ -141,41 +141,55 @@ def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", fontSize=9, color="k", c
              color=color, **kwargs)
 
 
-def annotateAxes(filename, plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff=0.05,
-                 fontSize=8, ha="left", va="top", color="blue", isHist=False, hscRun=None, matchRadius=None,
-                 matchRadiusUnitStr="\"", writeMinMax=None, unitScale=1.0, doPrintMedian=False):
-    xOffFact = 0.67*len(" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]))
-    axes.annotate(dataSet+r" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]),
-                  xy=(x0, y0), xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize, color=color)
-    axes.annotate(r" [mag<{0:.1f}]".format(magThreshold), xy=(x0*xOffFact, y0), xycoords="axes fraction",
-                  ha=ha, va=va, fontsize=fontSize, color="k", alpha=0.55)
-    meanStr = "{0.mean:.4f}".format(stats[dataSet])
-    medianStr = "{0.median:.4f}".format(stats[dataSet])
-    stdevStr = "{0.stdev:.4f}".format(stats[dataSet])
-    statsUnitStr = None
-    if unitScale == 1000.0:
-        meanStr = "{0.mean:.2f}".format(stats[dataSet])
-        medianStr = "{0.median:.2f}".format(stats[dataSet])
-        stdevStr = "{0.stdev:.2f}".format(stats[dataSet])
-        statsUnitStr = " (milli)"
-        if any(ss in filename for ss in ["_ra", "_dec", "distance"]):
-            statsUnitStr = " (mas)"
-        if any(ss in filename for ss in ["Flux", "_photometry", "matches_mag"]):
-            statsUnitStr = " (mmag)"
-    lenStr = 0.12 + 0.017*(max(len(meanStr), len(stdevStr)))
-    strKwargs = dict(xycoords="axes fraction", va=va, fontsize=fontSize, color="k")
-    yOffMult = 1
-    axes.annotate("mean = ", xy=(x0 + 0.12, y0 - yOffMult*yOff), ha="right", **strKwargs)
-    axes.annotate(meanStr, xy=(x0 + lenStr, y0 - yOffMult*yOff), ha="right", **strKwargs)
-    if statsUnitStr is not None:
-        axes.annotate(statsUnitStr, xy=(x0 + lenStr + 0.006, y0 - yOffMult*yOff), ha="left", **strKwargs)
-    yOffMult += 1
-    axes.annotate("stdev = ", xy=(x0 + 0.12, y0 - yOffMult*yOff), ha="right", **strKwargs)
-    axes.annotate(stdevStr, xy=(x0 + lenStr, y0 - yOffMult*yOff), ha="right", **strKwargs)
-    if doPrintMedian:
+def annotateAxes(filename, plt, axes, statsConf, dataSet, magThresholdConf, signalToNoiseStrConf=None,
+                 statsHigh=None, magThresholdHigh=None, signalToNoiseHighStr=None,
+                 x0=0.03, y0=0.96, yOff=0.05, fontSize=8, ha="left", va="top", color="blue",
+                 isHist=False, hscRun=None, matchRadius=None, matchRadiusUnitStr="\"",
+                 writeMinMax=None, unitScale=1.0, doPrintMedian=False):
+    xThresh = axes.get_xlim()[0] + 0.58*(axes.get_xlim()[1] - axes.get_xlim()[0])
+    for stats, magThreshold, signalToNoiseStr, y00 in [[statsConf, magThresholdConf, signalToNoiseStrConf, y0],
+                                                       [statsHigh, magThresholdHigh, signalToNoiseHighStr,
+                                                        0.18]]:
+        axes.annotate(dataSet+r" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]),
+                      xy=(x0, y00), xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize, color=color)
+        if signalToNoiseStr:
+            axes.annotate(signalToNoiseStr, xy=(xThresh, y00), xycoords=("data", "axes fraction"),
+                          ha="right", va=va, fontsize=fontSize, color="k", alpha=0.8)
+            axes.annotate(r" [mag$\lesssim${0:.1f}]".format(magThreshold), xy=(xThresh, y00 - yOff),
+                          xycoords=("data", "axes fraction"),
+                          ha="right", va=va, fontsize=fontSize, color="k", alpha=0.8)
+        else:
+            axes.annotate(r" [mag$\leqslant${0:.1f}]".format(magThreshold), xy=(xThresh, y00),
+                          xycoords=("data", "axes fraction"),
+                          ha="right", va=va, fontsize=fontSize, color="k", alpha=0.8)
+        meanStr = "{0.mean:.4f}".format(stats[dataSet])
+        medianStr = "{0.median:.4f}".format(stats[dataSet])
+        stdevStr = "{0.stdev:.4f}".format(stats[dataSet])
+        statsUnitStr = None
+        if unitScale == 1000.0:
+            meanStr = "{0.mean:.2f}".format(stats[dataSet])
+            medianStr = "{0.median:.2f}".format(stats[dataSet])
+            stdevStr = "{0.stdev:.2f}".format(stats[dataSet])
+            statsUnitStr = " (milli)"
+            if any(ss in filename for ss in ["_ra", "_dec", "distance"]):
+                statsUnitStr = " (mas)"
+            if any(ss in filename for ss in ["Flux", "_photometry", "_mag"]):
+                statsUnitStr = " (mmag)"
+        lenStr = 0.12 + 0.017*(max(len(meanStr), len(stdevStr)))
+        strKwargs = dict(xycoords="axes fraction", va=va, fontsize=fontSize, color="k")
+        yOffMult = 1
+        axes.annotate("mean = ", xy=(x0 + 0.12, y00 - yOffMult*yOff), ha="right", **strKwargs)
+        axes.annotate(meanStr, xy=(x0 + lenStr, y00 - yOffMult*yOff), ha="right", **strKwargs)
+        if statsUnitStr is not None:
+            axes.annotate(statsUnitStr, xy=(x0 + lenStr + 0.006, y00 - yOffMult*yOff), ha="left", **strKwargs)
         yOffMult += 1
-        axes.annotate("med = ", xy=(x0 + 0.12, y0 - yOffMult*yOff), ha="right", **strKwargs)
-        axes.annotate(medianStr, xy=(x0 + lenStr, y0 - yOffMult*yOff), ha="right", **strKwargs)
+        axes.annotate("stdev = ", xy=(x0 + 0.12, y00 - yOffMult*yOff), ha="right", **strKwargs)
+        axes.annotate(stdevStr, xy=(x0 + lenStr, y00 - yOffMult*yOff), ha="right", **strKwargs)
+        if doPrintMedian:
+            yOffMult += 1
+            axes.annotate("med = ", xy=(x0 + 0.12, y00 - yOffMult*yOff), ha="right", **strKwargs)
+            axes.annotate(medianStr, xy=(x0 + lenStr, y00 - yOffMult*yOff), ha="right", **strKwargs)
+
     if writeMinMax is not None:
         yOffMult += 1
         axes.annotate("Min, Max (all stars) = ({0:.2f}, {1:.2f})\"".format(), xy=(x0, y0 - yOffMult*yOff),
@@ -242,19 +256,43 @@ def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
     camRadius = np.round(camRadius, -2)
     camLimits = np.round(1.25*camRadius, -2)
     intCcdList = [int(ccd) for ccd in ccdList]
+    prop_cycle = plt.rcParams['axes.prop_cycle']
+    colors = prop_cycle.by_key()['color']
+    colors.pop(colors.index('#7f7f7f'))  # get rid of the gray one as is doesn't contrast well with white
+    colors.append("gold")
+    hasRotatedCcds = False
     for ccd in camera:
+        if ccd.getOrientation().getNQuarter() != 0:
+            hasRotatedCcds = True
+            break
+    for ic, ccd in enumerate(camera):
+        ccdCorners = ccd.getCorners(cameraGeom.FOCAL_PLANE)
+        if ccd.getType() == cameraGeom.SCIENCE:
+            plt.gca().add_patch(patches.Rectangle(ccdCorners[0], *list(ccdCorners[2] - ccdCorners[0]),
+                                                  facecolor="none", edgecolor="k", ls="solid", lw=0.5,
+                                                  alpha=0.5))
         if ccd.getId() in intCcdList:
+            if hasRotatedCcds:
+                nQuarter = ccd.getOrientation().getNQuarter()
+                fillColor = colors[nQuarter%len(colors)]
+            elif ccd.getName()[0] == "R":
+                try:
+                    fillColor = colors[(int(ccd.getName()[1]) + int(ccd.getName()[2]))%len(colors)]
+                except:
+                    fillColor = colors[ic%len(colors)]
+            else:
+                fillColor = colors[ic%len(colors)]
             ccdCorners = ccd.getCorners(cameraGeom.FOCAL_PLANE)
             plt.gca().add_patch(patches.Rectangle(ccdCorners[0], *list(ccdCorners[2] - ccdCorners[0]),
-                                                  fill=True, facecolor="y", edgecolor="k", ls="solid"))
+                                                  fill=True, facecolor=fillColor, edgecolor="k",
+                                                  ls="solid", lw=1.0, alpha=0.7))
     axes.set_xlim(-camLimits, camLimits)
     axes.set_ylim(-camLimits, camLimits)
-    axes.add_patch(patches.Circle((0, 0), radius=camRadius, color="k", alpha=0.2))
     if camera.getName() == "HSC":
         for x, y, t in ([-1, 0, "N"], [0, 1, "W"], [1, 0, "S"], [0, -1, "E"]):
             axes.text(1.085*camRadius*x, 1.085*camRadius*y, t, ha="center", va="center",
                       fontsize=fontSize - 1)
-    axes.text(-0.82*camRadius, 0.95*camRadius, "%s" % camera.getName(), ha="center", fontsize=fontSize,
+    axes.text(-0.82*camRadius, 1.04*camRadius, "%s" % camera.getName(), ha="center", fontsize=fontSize,
               color=color)
 
 
@@ -291,8 +329,7 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
     yMax = min(max(tractDec), patchBoundary.decMax) + buff
     xlim = xMin, xMax
     ylim = yMin, yMax
-    axes.fill(tractRa, tractDec, fill=True, edgecolor='k', lw=1, linestyle='solid',
-              color="black", alpha=0.05)
+    axes.fill(tractRa, tractDec, fill=False, edgecolor='k', lw=0.5, linestyle='solid', color="k", alpha=0.3)
     prop_cycle = plt.rcParams['axes.prop_cycle']
     colors = prop_cycle.by_key()['color']
     colors.pop(colors.index('#7f7f7f'))  # get rid of the gray one as that's our no-data colour
@@ -310,7 +347,7 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
         centerDec = min(dec) + 0.5*deltaDec
         if (centerRa < xMin + pBuff and centerRa > xMax - pBuff and
                 centerDec > yMin - pBuff and centerDec < yMax + pBuff):
-            axes.fill(ra, dec, fill=True, color=color, lw=1, linestyle="solid", alpha=alpha)
+            axes.fill(ra, dec, fill=True, color=color, lw=0.5, linestyle="solid", alpha=alpha)
             if patchIndexStr in patchList or (centerRa < xMin - 0.2*pBuff and
                                               centerRa > xMax + 0.2*pBuff and
                                               centerDec > yMin + 0.2*pBuff and
@@ -534,7 +571,7 @@ def percent(values, p=0.5):
 def setPtSize(num, ptSize=12):
     """Set the point size according to the size of the catalog"""
     if num > 10:
-        ptSize = min(12, max(4, int(20/np.log10(num))))
+        ptSize = min(12, max(3, int(20/np.log10(num))))
     return ptSize
 
 

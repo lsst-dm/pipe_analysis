@@ -667,6 +667,8 @@ class ColorAnalysisTask(CmdLineTask):
         schema.addField("numStarFlags", type=np.int32, doc="Number of times source was flagged as star")
         badKey = schema.addField("qaBad_flag", type="Flag", doc="Is this a bad source for color qa analyses?")
         schema.addField(fluxColumn, type=np.float64, doc="Flux from filter " + self.fluxFilter)
+        schema.addField(fluxColumn + "Err", type=np.float64, doc="Flux error for flux from filter " +
+                        self.fluxFilter)
 
         # Copy basics (id, RA, Dec)
         new = afwTable.SourceCatalog(schema)
@@ -701,6 +703,7 @@ class ColorAnalysisTask(CmdLineTask):
         new["numStarFlags"][:] = numStarFlags
 
         new[fluxColumn][:] = catalogs[self.fluxFilter][fluxColumn]
+        new[fluxColumn + "Err"][:] = catalogs[self.fluxFilter][fluxColumn + "Err"]
 
         return new
 

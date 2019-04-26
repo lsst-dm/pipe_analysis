@@ -109,20 +109,23 @@ class Filenamer(object):
 
 
 class Data(Struct):
-    def __init__(self, catalog, quantity, mag, selection, color, error=None, plot=True):
+    def __init__(self, catalog, quantity, mag, signalToNoise, selection, color, error=None, plot=True):
         Struct.__init__(self, catalog=catalog[selection].copy(deep=True), quantity=quantity[selection],
-                        mag=mag[selection], selection=selection, color=color, plot=plot,
-                        error=error[selection] if error is not None else None)
+                        mag=mag[selection], signalToNoise=signalToNoise[selection], selection=selection,
+                        color=color, plot=plot, error=error[selection] if error is not None else None)
 
 
 class Stats(Struct):
-    def __init__(self, dataUsed, num, total, mean, stdev, forcedMean, median, clip):
+    def __init__(self, dataUsed, num, total, mean, stdev, forcedMean, median, clip, thresholdType,
+                 thresholdValue):
         Struct.__init__(self, dataUsed=dataUsed, num=num, total=total, mean=mean, stdev=stdev,
-                        forcedMean=forcedMean, median=median, clip=clip)
+                        forcedMean=forcedMean, median=median, clip=clip, thresholdType=thresholdType,
+                        thresholdValue=thresholdValue)
 
     def __repr__(self):
-        return "Stats(mean={0.mean:.4f}; stdev={0.stdev:.4f}; num={0.num:d}; total={0.total:d}; " \
-            "median={0.median:.4f}; clip={0.clip:.4f}; forcedMean={0.forcedMean:})".format(self)
+        return ("Stats(mean={0.mean:.4f}; stdev={0.stdev:.4f}; num={0.num:d}; total={0.total:d}; "
+                "median={0.median:.4f}; clip={0.clip:.4f}; forcedMean={0.forcedMean:}; "
+                "thresholdType={0.thresholdType:s}; thresholdValue={0.thresholdValue:})".format(self))
 
 
 class Enforcer(object):

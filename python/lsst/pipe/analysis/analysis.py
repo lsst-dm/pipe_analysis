@@ -11,7 +11,7 @@ import lsst.afw.geom as afwGeom
 from lsst.display.matplotlib.matplotlib import AsinhNormalize
 from lsst.pex.config import Config, Field, ListField, DictField
 
-from .utils import Data, Stats, E1Resids, E2Resids, checkIdLists, fluxToPlotString
+from .utils import Data, Stats, E1Resids, E2Resids, checkIdLists, fluxToPlotString, computeMeanOfFrac
 from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotText, plotCameraOutline,
                         plotTractOutline, plotPatchOutline, plotCcdOutline, labelCamera, getQuiver,
                         getRaDecMinMaxPatchList, bboxToXyCoordLists, makeAlphaCmap, buildTractImage)
@@ -27,9 +27,20 @@ class AnalysisConfig(Config):
                                "base_PixelFlags_flag_saturatedCenter",
                                "base_ClassificationExtendedness_flag"])
     clip = Field(dtype=float, default=4.0, doc="Rejection threshold (stdev)")
+    useSignalToNoiseThreshold = Field(dtype=bool, default=True, doc="Use a Signal-to-Noise threshold "
+                                      "to set the magnitude limit for the statistics computation?  "
+                                      "If False, the value in magThreshold is used.")
+    signalToNoiseThreshold = Field(dtype=float, default=100.0, doc="Signal-to-Noise threshold to apply")
+    signalToNoiseHighThreshold = Field(dtype=float, default=500.0, doc="Signal-to-Noise threshold to apply "
+                                       "as representative of a \"high\" S/N sample that is always computed "
+                                       "(i.e. regardless of useSignalToNoiseThreshold)")
+    minHighSampleN = Field(dtype=int, default=20, doc="Minimum number of stars for the "
+                           "signalToNoiseHighThreshold sample.  If too few objects classified as stars "
+                           "exist with the configured value, decrease the S/N threshold by 10 until a "
+                           "sample with N > minHighSampleN is achieved.")
     magThreshold = Field(dtype=float, default=21.0, doc="Magnitude threshold to apply")
-    magPlotMin = Field(dtype=float, default=14.5, doc="Minimum magnitude to plot")
-    magPlotMax = Field(dtype=float, default=25.99, doc="Maximum magnitude to plot")
+    magPlotMin = Field(dtype=float, default=14.5, doc="Fallback minimum magnitude to plot")
+    magPlotMax = Field(dtype=float, default=25.99, doc="Fallback maximum magnitude to plot")
     magPlotStarMin = DictField(
         keytype=str,
         itemtype=float,
@@ -64,7 +75,7 @@ class Analysis(object):
 
     def __init__(self, catalog, func, quantityName, shortName, config, qMin=-0.2, qMax=0.2,
                  prefix="", flags=[], goodKeys=[], errFunc=None, labeller=AllLabeller(), flagsCat=None,
-                 magThreshold=21, forcedMean=None, unitScale=1.0, compareCat=None):
+                 magThreshold=None, forcedMean=None, unitScale=1.0, compareCat=None):
         self.catalog = catalog
         self.func = func
         self.quantityName = quantityName
@@ -83,9 +94,6 @@ class Analysis(object):
             self.qMax /= 2.0
         self.goodKeys = goodKeys  # include if goodKey = True
         self.calibUsedOnly = len([key for key in self.goodKeys if "used" in key])
-        if self.calibUsedOnly > 0:
-            self.magThreshold = 99  # Want to plot all calib_used
-
         self.prefix = prefix
         self.errFunc = errFunc
         if func is not None:
@@ -120,15 +128,80 @@ class Analysis(object):
         for kk in goodKeys:
             self.good &= flagsCat[prefix + kk]
 
+        # If the input catalog is a coadd, scale the S/N threshold by roughly
+        # the sqrt of the number of input visits (actually the mean of the
+        # upper 10% of the base_InputCount_value distribution)
+        if prefix + "base_InputCount_value" in catalog.schema:
+            inputCounts = catalog[prefix + "base_InputCount_value"]
+            scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=10)
+            self.signalToNoiseThreshold = np.floor(
+                np.sqrt(scaleFactor)*self.config.signalToNoiseThreshold/100 + 0.49)*100
+            self.signalToNoiseHighThreshold = np.floor(
+                np.sqrt(scaleFactor)*self.config.signalToNoiseHighThreshold/100 + 0.49)*100
+        else:
+            self.signalToNoiseThreshold = self.config.signalToNoiseThreshold
+            self.signalToNoiseHighThreshold = self.config.signalToNoiseHighThreshold
+        if "galacticExtinction" in self.shortName and self.magThreshold > 90.0:
+            self.signalToNoiseThreshold = 0.0
+            self.signalToNoiseHighThreshold = 0.0
+
+        self.signalToNoise = catalog[prefix + self.fluxColumn]/catalog[prefix + self.fluxColumn + "Err"]
+        self.signalToNoiseStr = None
+        goodSn0 = np.isfinite(self.signalToNoise)
+        if self.good is not None:
+            goodSn0 = np.logical_and(self.good, goodSn0)
+        if self.config.useSignalToNoiseThreshold:
+            self.signalToNoiseStr = r"[S/N$\geqslant${0:}]".format(int(self.signalToNoiseThreshold))
+            goodSn = np.logical_and(goodSn0, self.signalToNoise >= self.signalToNoiseThreshold)
+            # Set self.magThreshold to represent approximately that which corresponds to the S/N threshold
+            # Computed as the mean magnitude of the lower 5% of the S/N > signalToNoiseThreshold subsample
+            self.magThreshold = computeMeanOfFrac(self.mag[goodSn], tailStr="upper", fraction=0.05,
+                                                  floorFactor=0.1)
+
+        # Always compute stats for S/N > self.config.signalToNoiseHighThreshold.  If too few
+        # objects classified as stars exist with the configured value, decrease the S/N threshold
+        # by 10 until a sample with N > self.config.minHighSampleN is achieved.
+        goodSnHigh = np.logical_and(goodSn0, self.signalToNoise >= self.signalToNoiseHighThreshold)
+        if prefix + "base_ClassificationExtendedness_value" in catalog.schema:
+            isStar = catalog[prefix + "base_ClassificationExtendedness_value"] < 0.5
+        elif "numStarFlags" in catalog.schema:
+            isStar = catalog["numStarFlags"] >= 3
+        else:
+            isStar = np.ones(len(self.mag), dtype=bool)
+            print("Warning: No star/gal flag found")
+        goodSnHighStars = np.logical_and(goodSnHigh, isStar)
+        while(len(self.mag[goodSnHighStars]) < self.config.minHighSampleN and
+              self.signalToNoiseHighThreshold > 0.0):
+            self.signalToNoiseHighThreshold -= 10.0
+            goodSnHigh = np.logical_and(goodSn0, self.signalToNoise >= self.signalToNoiseHighThreshold)
+            goodSnHighStars = np.logical_and(goodSnHigh, isStar)
+        self.magThresholdHigh = computeMeanOfFrac(self.mag[goodSnHigh], tailStr="upper", fraction=0.1,
+                                                  floorFactor=0.1)
+        self.signalToNoiseHighStr = r"[S/N$\geqslant${0:}]".format(int(self.signalToNoiseHighThreshold))
+
+        # Select a sample for setting plot limits: "good" based on flags, S/N is finite and >= 2.0
+        # Limits are the means of the bottom 1% and top 5% of this sample with a 0.5 mag buffer on either side
+        goodSn0 &= self.signalToNoise >= 2.0
+        self.magMin = (computeMeanOfFrac(self.mag[goodSn0], tailStr="lower", fraction=0.005, floorFactor=1) -
+                       1.5)
+        self.magMax = computeMeanOfFrac(self.mag[goodSn0], tailStr="upper", fraction=0.05, floorFactor=1) + 0.5
+
         if labeller is not None:
             labels = labeller(catalog, compareCat) if compareCat else labeller(catalog)
-            self.data = {name: Data(catalog, self.quantity, self.mag, self.good & (labels == value),
+            self.data = {name: Data(catalog, self.quantity, self.mag, self.signalToNoise,
+                                    self.good & (labels == value),
                                     colorList[value], self.quantityError, name in labeller.plot) for
                          name, value in labeller.labels.items()}
             # Sort data dict by number of points in each data type.
             self.data = {k: self.data[k] for _, k in sorted(((len(v.mag), k) for (k, v) in self.data.items()),
                                                             reverse=True)}
-            self.stats = self.statistics(forcedMean=forcedMean)
+            if self.config.useSignalToNoiseThreshold:
+                self.stats = self.statistics(signalToNoiseThreshold=self.signalToNoiseThreshold,
+                                             forcedMean=forcedMean)
+            else:
+                self.stats = self.statistics(magThreshold=self.magThreshold, forcedMean=forcedMean)
+            self.statsHigh = self.statistics(signalToNoiseThreshold=self.signalToNoiseHighThreshold,
+                                             forcedMean=forcedMean)
             # Make sure you have some good data to plot: only check first dataset in labeller.plot
             # list as it is the most important one (and the only available in many cases where
             # StarGalaxyLabeller is used.
@@ -164,7 +237,10 @@ class Analysis(object):
         """Plot quantity against magnitude"""
         fig, axes = plt.subplots(1, 1)
         plt.axhline(0, linestyle="--", color="0.4")
-        magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
+        if self.magThreshold > 90.0:
+            magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
+        else:
+            magMin, magMax = self.magMin, self.magMax
         dataPoints = []
         ptSize = None
         for name, data in self.data.items():
@@ -179,7 +255,10 @@ class Analysis(object):
         axes.set_ylim(self.qMin, self.qMax)
         axes.set_xlim(magMin, magMax)
         if stats is not None:
-            annotateAxes(filename, plt, axes, stats, "star", self.magThreshold, hscRun=hscRun,
+            annotateAxes(filename, plt, axes, stats, "star", self.magThreshold,
+                         signalToNoiseStr=self.signalToNoiseStr, statsHigh=self.statsHigh,
+                         magThresholdHigh=self.magThresholdHigh,
+                         signalToNoiseHighStr=self.signalToNoiseHighStr, hscRun=hscRun,
                          matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
                          unitScale=self.unitScale, doPrintMedian=doPrintMedian)
         axes.legend(handles=dataPoints, loc=1, fontsize=8)
@@ -263,17 +342,11 @@ class Analysis(object):
                 galMin = np.round(2.5*np.log10(self.config.coaddClassFluxRatio) - 0.08, 2)*self.unitScale
                 deltaMin = max(0.0, self.qMin - galMin)
 
-        magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
-        if self.calibUsedOnly > 0 or "color" in filename or "visit" not in filename or "matches" in filename:
-            if filterStr in self.config.magPlotStarMin.keys():
-                magMin = self.config.magPlotStarMin[filterStr]
-                if self.calibUsedOnly == 0 and ("plot-t" in filename or "compare-t" in filename):
-                    magMin -= 1.5  # CModel flux for coadds can have brighter mags than the PSF equivalent
-                    if "matches" in filename:  # But reference catalogs won't go quite so bright
-                        magMin += 1.0
-        if self.calibUsedOnly > 0 or "color" in filename or "matches" in filename:
-            if filterStr in self.config.magPlotStarMax.keys():
-                magMax = self.config.magPlotStarMax[filterStr]
+        if self.magThreshold > 90.0:
+            magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
+        else:
+            magMin, magMax = self.magMin, self.magMax
+
         axScatter.set_xlim(magMin, magMax)
         yDelta = 0.01*(self.qMax - (self.qMin - deltaMin))
         axScatter.set_ylim((self.qMin - deltaMin) + yDelta, self.qMax - yDelta)
@@ -338,7 +411,9 @@ class Analysis(object):
                 histColor = royalBlue
                 # shade the portion of the plot fainter that self.magThreshold
                 axScatter.axvspan(self.magThreshold, axScatter.get_xlim()[1], facecolor="k",
-                                  edgecolor="none", alpha=0.15)
+                                  edgecolor="none", alpha=0.10)
+                axScatter.axvspan(self.magThresholdHigh, axScatter.get_xlim()[1], facecolor="k",
+                                  edgecolor="none", alpha=0.10)
                 # compute running stats (just for plotting)
                 if self.calibUsedOnly == 0 and plotRunStats:
                     belowThresh = data.mag < magMax  # set lower if you want to truncate plotted running stats
@@ -374,18 +449,39 @@ class Analysis(object):
 
             # Plot data.  Appending in dataPoints for the sake of the legend
             dataPoints.append(axScatter.scatter(data.mag, data.quantity, s=ptSize, marker="o",
-                                                facecolors=data.color, edgecolors="none", label=name,
-                                                alpha=alpha))
+                                                facecolors=data.color, edgecolors="face",
+                                                label=name, alpha=alpha, linewidth=0.5))
+
+            if stats is not None and (name == "star" or name == "all") and "foot" not in filename:
+                labelStr = self.signalToNoiseStr if self.signalToNoiseStr else "stats"
+                dataPoints.append(axScatter.scatter(data.mag[stats[name].dataUsed],
+                                                    data.quantity[stats[name].dataUsed], s=ptSize,
+                                                    marker="o",  facecolors="none", edgecolors=data.color,
+                                                    label=labelStr, alpha=1, linewidth=0.5))
+
+            if self.statsHigh is not None and (name == "star" or name == "all") and "foot" not in filename:
+                dataPoints.append(axScatter.scatter(data.mag[self.statsHigh[name].dataUsed],
+                                                    data.quantity[self.statsHigh[name].dataUsed], s=ptSize,
+                                                    marker="o", facecolors=data.color, edgecolors="face",
+                                                    label=self.signalToNoiseHighStr, alpha=1, linewidth=0.5))
 
             axHistx.hist(data.mag, bins=xBins, color=histColor, alpha=0.6, label=name)
             axHisty.hist(data.quantity, bins=yBins, color=histColor, alpha=0.6, orientation="horizontal",
                          label=name)
         # Make sure stars used histogram is plotted last
         for name, data in self.data.items():
-            if stats is not None and (name == "star" or name == "all"):
-                dataUsed = data.quantity[stats[name].dataUsed]
-                axHisty.hist(dataUsed, bins=yBins, color=data.color, orientation="horizontal", alpha=1.0,
-                             label="used in Stats")
+            if (name == "star" or name == "all") and "foot" not in filename:
+                if stats is not None:
+                    labelStr = self.signalToNoiseStr if self.signalToNoiseStr else "stats"
+                    axHisty.hist(data.quantity[stats[name].dataUsed], bins=yBins, facecolor="none",
+                                 edgecolor=data.color, linewidth=0.5, orientation="horizontal", label=labelStr)
+                    axHistx.hist(data.mag[stats[name].dataUsed], bins=xBins, facecolor="none",
+                                 edgecolor=data.color, linewidth=0.5, label=labelStr)
+                if self.statsHigh is not None and (name == "star" or name == "all"):
+                    axHisty.hist(data.quantity[self.statsHigh[name].dataUsed], bins=yBins,
+                                 color=data.color, orientation="horizontal", label=self.signalToNoiseHighStr)
+                    axHistx.hist(data.mag[self.statsHigh[name].dataUsed], bins=xBins,
+                                 color=data.color, linewidth=0.5, label=self.signalToNoiseHighStr)
         axHistx.tick_params(axis="x", which="major", direction="in", length=5)
         axHistx.xaxis.set_minor_locator(AutoMinorLocator(2))
         axHisty.tick_params(axis="y", which="major", direction="in", length=5)
@@ -401,14 +497,16 @@ class Analysis(object):
         axScatter.set_xlabel("%s mag [%s]" % (fluxToPlotString(self.fluxColumn), filterStr), fontSize=11)
         axScatter.set_ylabel(yLabel, fontsize=fontSize)
 
-        if stats is not None:
+        if stats is not None and "foot" not in filename:
             l1, l2 = annotateAxes(filename, plt, axScatter, stats, dataType, self.magThreshold,
-                                  hscRun=hscRun, matchRadius=matchRadius,
-                                  matchRadiusUnitStr=matchRadiusUnitStr, unitScale=self.unitScale,
-                                  doPrintMedian=doPrintMedian)
-        dataPoints = dataPoints + runStats + [l1, l2]
+                                  signalToNoiseStrConf=self.signalToNoiseStr, statsHigh=self.statsHigh,
+                                  magThresholdHigh=self.magThresholdHigh,
+                                  signalToNoiseHighStr=self.signalToNoiseHighStr, hscRun=hscRun,
+                                  matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                                  unitScale=self.unitScale, doPrintMedian=doPrintMedian)
+            dataPoints = dataPoints + runStats + [l1, l2]
         axScatter.legend(handles=dataPoints, loc=1, fontsize=8)
-        axHistx.legend(fontsize=7, loc=2)
+        axHistx.legend(fontsize=7, loc=2, edgecolor="w")
         axHisty.legend(fontsize=7)
         # Add an axis with units of FWHM = 2*sqrt(2*ln(2))*Trace for Trace plots
         if "race" in self.shortName and "iff" not in self.shortName:
@@ -481,7 +579,8 @@ class Analysis(object):
         if self.qMin == 0.0:
             x0, y0 = 0.68, 0.81
         if stats is not None:
-            annotateAxes(filename, plt, axes, stats, "star", self.magThreshold, x0=x0, y0=y0,
+            annotateAxes(filename, plt, axes, stats, "star", self.magThreshold,
+                         signalToNoiseStr=self.signalToNoiseStr, x0=x0, y0=y0,
                          isHist=True, hscRun=hscRun, matchRadius=matchRadius,
                          matchRadiusUnitStr=matchRadiusUnitStr, unitScale=self.unitScale,
                          doPrintMedian=doPrintMedian)
@@ -708,10 +807,12 @@ class Analysis(object):
 
         axes[0].legend()
         if stats is not None:
-            annotateAxes(filename, plt, axes[0], stats, "star", self.magThreshold, x0=0.03, yOff=0.07,
+            annotateAxes(filename, plt, axes[0], stats, "star", self.magThreshold,
+                         signalToNoiseStr=self.signalToNoiseStr, x0=0.03, yOff=0.07,
                          hscRun=hscRun, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
                          unitScale=self.unitScale, doPrintMedian=doPrintMedian)
-            annotateAxes(filename, plt, axes[1], stats, "star", self.magThreshold, x0=0.03, yOff=0.07,
+            annotateAxes(filename, plt, axes[1], stats, "star", self.magThreshold,
+                         signalToNoiseStr=self.signalToNoiseStr, x0=0.03, yOff=0.07,
                          hscRun=hscRun, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
                          unitScale=self.unitScale, doPrintMedian=doPrintMedian)
         labelVisit(filename, plt, axes[0], 0.5, 1.1)
@@ -752,10 +853,14 @@ class Analysis(object):
         if "calib_psf_used" in catalog.schema:
             bad |= ~catalog["calib_psf_used"]
             catStr = "psf_used"
+            thresholdType = "calib_psf_used"
+            thresholdValue = None
         elif "base_ClassificationExtendedness_value" in catalog.schema:
             bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
             bad |= -2.5*np.log10(catalog[self.fluxColumn]) > self.magThreshold
             catStr = "ClassExtendedness"
+            thresholdType = "mag"
+            thresholdValue = self.magThreshold
         else:
             raise RuntimeError("Neither calib_psf_used nor base_ClassificationExtendedness_value in schema. "
                                "Skip quiver plot.")
@@ -815,7 +920,7 @@ class Analysis(object):
         axes.set_ylim(decMin, decMax)
 
         good = np.ones(len(e), dtype=bool)
-        stats0 = self.calculateStats(e, good)
+        stats0 = self.calculateStats(e, good, thresholdType=thresholdType, thresholdValue=thresholdValue)
         log.info("Statistics from %s of %s: %s" % (dataId, self.quantityName, stats0))
         meanStr = "{0.mean:.4f}".format(stats0)
         stdevStr = "{0.stdev:.4f}".format(stats0)
@@ -1058,12 +1163,42 @@ class Analysis(object):
             enforcer(stats, dataId, log, self.quantityName)
         return stats
 
-    def statistics(self, forcedMean=None):
-        """Calculate statistics on quantity"""
+    def statistics(self, magThreshold=None, signalToNoiseThreshold=None, forcedMean=None):
+        """Calculate statistics on quantity
+
+        Parameters:
+        ----------
+        magThreshold : `float` or `None`
+           Subsample for computing stats only includes objects brighter than
+           ``magThreshold``.
+        signalToNoiseThreshold : `float` or `None`
+           Subsample for computing stats only includes objects with S/N greater
+           than ``signalToNoiseThreshold``.
+
+        Raises
+        ------
+        `RuntimeError`
+           If both ``magThreshold`` and ``signalToNoiseThreshold`` are -- or
+           are not -- `None`.
+
+        """
+        thresholdList = [magThreshold, signalToNoiseThreshold]
+        if (all(threshold is not None for threshold in thresholdList) or
+            all(threshold is None for threshold in thresholdList)):
+            raise RuntimeError("Must specify one AND ONLY one of magThreshold and signalToNoiseThreshold. "
+                               "They are currently set to {0:} and {1:}, respectively".
+                               format(magThreshold, signalToNoiseThreshold))
+        thresholdType = "S/N" if signalToNoiseThreshold else "mag"
+        thresholdValue = signalToNoiseThreshold if signalToNoiseThreshold else magThreshold
         stats = {}
         for name, data in self.data.items():
-            good = data.mag < self.magThreshold
-            stats[name] = self.calculateStats(data.quantity, good, forcedMean=forcedMean)
+            good = np.ones(len(data.mag), dtype=bool)
+            if signalToNoiseThreshold:
+                good &= data.signalToNoise >= signalToNoiseThreshold
+            if magThreshold:
+                good &= data.mag <= magThreshold
+            stats[name] = self.calculateStats(data.quantity, good, forcedMean=forcedMean,
+                                              thresholdType=thresholdType, thresholdValue=thresholdValue)
             if self.quantityError is not None:
                 stats[name].sysErr = self.calculateSysError(data.quantity, data.error,
                                                             good, forcedMean=forcedMean)
@@ -1071,11 +1206,12 @@ class Analysis(object):
                 stats = None
         return stats
 
-    def calculateStats(self, quantity, selection, forcedMean=None):
+    def calculateStats(self, quantity, selection, forcedMean=None, thresholdType="", thresholdValue=None):
         total = selection.sum()  # Total number we're considering
         if total == 0:
             return Stats(dataUsed=0, num=0, total=0, mean=np.nan, stdev=np.nan, forcedMean=np.nan,
-                         median=np.nan, clip=np.nan)
+                         median=np.nan, clip=np.nan, thresholdType=thresholdType,
+                         thresholdValue=thresholdValue)
         quartiles = np.percentile(quantity[selection], [25, 50, 75])
         assert len(quartiles) == 3
         median = quartiles[1]
@@ -1085,7 +1221,8 @@ class Analysis(object):
         mean = actualMean if forcedMean is None else forcedMean
         stdev = np.sqrt(((quantity[good].astype(np.float64) - mean)**2).mean())
         return Stats(dataUsed=good, num=good.sum(), total=total, mean=actualMean, stdev=stdev,
-                     forcedMean=forcedMean, median=median, clip=clip)
+                     forcedMean=forcedMean, median=median, clip=clip, thresholdType=thresholdType,
+                     thresholdValue=thresholdValue)
 
     def calculateSysError(self, quantity, error, selection, forcedMean=None, tol=1.0e-3):
         import scipy.optimize
