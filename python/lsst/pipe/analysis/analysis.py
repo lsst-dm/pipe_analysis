@@ -264,7 +264,7 @@ class Analysis(object):
         axes.legend(handles=dataPoints, loc=1, fontsize=8)
         labelVisit(filename, plt, axes, 0.5, 1.05)
         if zpLabel is not None:
-            prefix = "" if "GE applied" in zpLabel else "zp: "
+            prefix = "" if "GalExt" in zpLabel else "zp: "
             plotText(zpLabel, plt, axes, 0.13, -0.09, prefix=prefix, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
@@ -280,6 +280,10 @@ class Analysis(object):
             filterStr = ""
             filterLabelStr = ""
         else:
+            if camera is not None:
+                # Add camera name to filter string
+                if len(filterStr) < len(camera.getName()):
+                    filterStr = camera.getName() + "-" + filterStr
             filterLabelStr = "[" + filterStr + "]" if "/color/" not in filename else ""
 
         nullfmt = NullFormatter()  # no labels for histograms
@@ -494,7 +498,7 @@ class Analysis(object):
         yLabel = r"%s %s" % (self.quantityName, filterLabelStr)
         fontSize = min(11, max(6, 11 - int(np.log(max(1, len(yLabel) - 45)))))
 
-        axScatter.set_xlabel("%s mag [%s]" % (fluxToPlotString(self.fluxColumn), filterStr), fontSize=11)
+        axScatter.set_xlabel("%s mag %s" % (fluxToPlotString(self.fluxColumn), filterLabelStr), fontSize=11)
         axScatter.set_ylabel(yLabel, fontsize=fontSize)
 
         if stats is not None and "foot" not in filename:
@@ -537,7 +541,7 @@ class Analysis(object):
 
         labelVisit(filename, plt, axScatter, 1.18, -0.11, color="green")
         if zpLabel is not None:
-            prefix = "" if "GE applied" in zpLabel else "zp: "
+            prefix = "" if "GalExt" in zpLabel else "zp: "
             plotText(zpLabel, plt, axScatter, 0.09, -0.1, prefix=prefix, color="green")
         if uberCalLabel:
             plotText(uberCalLabel, plt, axScatter, 0.09, -0.14, prefix="uberCal: ", fontSize=8, color="green")
@@ -545,7 +549,7 @@ class Analysis(object):
             plotText(forcedStr, plt, axScatter, 0.87, -0.11, prefix="cat: ", color="green")
         if extraLabels is not None:
             for i, extraLabel in enumerate(extraLabels):
-                plotText(extraLabel, plt, axScatter, 0.29, 0.06 + i*0.05, fontSize=10, color="black")
+                plotText(extraLabel, plt, axScatter, 0.3, 0.21 + i*0.05, fontSize=10, color="tab:orange")
         plt.savefig(filename, dpi=120)
         plt.close()
 
@@ -589,7 +593,7 @@ class Analysis(object):
             labelCamera(camera, plt, axes, 0.5, 1.09)
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
-            prefix = "" if "GE applied" in zpLabel else "zp: "
+            prefix = "" if "GalExt" in zpLabel else "zp: "
             plotText(zpLabel, plt, axes, 0.13, -0.08, prefix=prefix, color="green")
         if uberCalLabel:
             plotText(uberCalLabel, plt, axes, 0.13, -0.12, prefix="uberCal: ", fontSize=8, color="green")
@@ -706,7 +710,11 @@ class Analysis(object):
 
         if stats0 is None:  # No data to plot
             return
-        filterStr = dataId['filter'] if dataId is not None else ""
+        filterStr = dataId["filter"] if dataId is not None else ""
+        if filterStr and camera is not None:
+            # Add camera name to filter string
+            if len(filterStr) < len(camera.getName()):
+                filterStr = camera.getName() + "-" + filterStr
         filterLabelStr = "[" + filterStr + "]" if (filterStr and "/color/" not in filename) else ""
         axes.set_xlabel("RA (deg) {0:s}".format(filterLabelStr))
         axes.set_ylabel("Dec (deg) {0:s}".format(filterLabelStr))
@@ -727,7 +735,7 @@ class Analysis(object):
             labelCamera(camera, plt, axes, 0.5, 1.09)
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
-            prefix = "" if "GE applied" in zpLabel else "zp: "
+            prefix = "" if "GalExt" in zpLabel else "zp: "
             plotText(zpLabel, plt, axes, 0.13, -0.07, prefix=prefix, color="green")
         if uberCalLabel:
             plotText(uberCalLabel, plt, axes, 0.13, -0.11, prefix="uberCal: ", fontSize=8, color="green")
@@ -817,7 +825,7 @@ class Analysis(object):
                          unitScale=self.unitScale, doPrintMedian=doPrintMedian)
         labelVisit(filename, plt, axes[0], 0.5, 1.1)
         if zpLabel is not None:
-            prefix = "" if "GE applied" in zpLabel else "zp: "
+            prefix = "" if "GalExt" in zpLabel else "zp: "
             plotText(zpLabel, plt, axes[0], 0.13, -0.09, prefix=prefix, color="green")
         if uberCalLabel:
             plotText(uberCalLabel, plt, axes[0], 0.13, -0.14, prefix="uberCal: ", fontSize=8, color="green")
@@ -911,7 +919,11 @@ class Analysis(object):
 
         getQuiver(ra, dec, e1, e2, axes, color=plt.cm.jet(nz(e)), scale=scale, width=0.002, label=catStr)
 
-        filterStr = dataId['filter'] if dataId is not None else ''
+        filterStr = dataId["filter"] if dataId is not None else ""
+        if filterStr and camera is not None:
+            # Add camera name to filter string
+            if len(filterStr) < len(camera.getName()):
+                filterStr = camera.getName() + "-" + filterStr
         filterLabelStr = "[" + filterStr + "]"
         axes.set_xlabel("RA (deg) {0:s}".format(filterLabelStr))
         axes.set_ylabel("Dec (deg) {0:s}".format(filterLabelStr))
@@ -1073,6 +1085,10 @@ class Analysis(object):
         axes.set_ylim(tractBbox.getMinY(), tractBbox.getMaxY())
 
         filterStr = dataId["filter"]
+        if filterStr and camera is not None:
+            # Add camera name to filter string
+            if len(filterStr) < len(camera.getName()):
+                filterStr = camera.getName() + "-" + filterStr
         filterLabelStr = "[" + filterStr + "]"
         axes.set_xlabel("xTract (pixels) {0:s}".format(filterLabelStr), size=9)
         axes.set_ylabel("yTract (pixels) {0:s}".format(filterLabelStr), size=9)

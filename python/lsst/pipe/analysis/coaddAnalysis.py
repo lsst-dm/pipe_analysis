@@ -279,7 +279,6 @@ class CoaddAnalysisTask(CmdLineTask):
                 if not overlappingPatches:
                     self.log.info("No overlapping patches...skipping overlap plots")
                 else:
-                    self.catLabel = "nChild = 0"
                     if haveForced:
                         forcedOverlaps = self.overlaps(forced)
                         if forcedOverlaps:
@@ -301,7 +300,6 @@ class CoaddAnalysisTask(CmdLineTask):
                                       format(len(unforcedOverlaps)))
 
             # Set boolean array indicating sources deemed unsuitable for qa analyses
-            self.catLabel = "noDuplicates"
             bad = makeBadArray(unforced, flagList=self.config.analysis.flags,
                                onlyReadStars=self.config.onlyReadStars)
             if haveForced:
@@ -333,7 +331,8 @@ class CoaddAnalysisTask(CmdLineTask):
                 forced = forced[~bad].copy(deep=True)
             else:
                 forced = unforced
-            self.zpLabel = self.zpLabel + " " + self.catLabel
+            self.catLabel = "nChild = 0"
+            forcedStr = forcedStr + " " + self.catLabel
             if haveForced:
                 self.log.info("\nNumber of sources in catalogs: unforced = {0:d} and forced = {1:d}".format(
                     len(unforced), len(forced)))
@@ -352,17 +351,18 @@ class CoaddAnalysisTask(CmdLineTask):
             if self.config.doPlotQuiver:
                 self.plotQuiver(unforced,
                                 filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
-                                dataId=repoInfo.dataId, forcedStr="unforced", scale=2, **plotKwargs)
+                                dataId=repoInfo.dataId, forcedStr="unforced " + self.catLabel, scale=2,
+                                **plotKwargs)
 
             if self.config.doPlotInputCounts:
                 self.plotInputCounts(unforced, filenamer(repoInfo.dataId, description="inputCounts",
                                                          style="tract"), dataId=repoInfo.dataId,
-                                     forcedStr="unforced", alpha=0.5,
+                                     forcedStr="unforced " + self.catLabel, alpha=0.5,
                                      doPlotTractImage=True, doPlotPatchOutline=True, sizeFactor=5.0,
                                      maxDiamPix=1000, **plotKwargs)
 
             if self.config.doPlotMags:
-                self.plotMags(unforced, filenamer, repoInfo.dataId, forcedStr="unforced",
+                self.plotMags(unforced, filenamer, repoInfo.dataId, forcedStr="unforced " + self.catLabel,
                               postFix="_unforced", flagsCat=flagsCat, **plotKwargs)
                 if haveForced:
                     self.plotMags(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr, postFix="_forced",
@@ -371,14 +371,15 @@ class CoaddAnalysisTask(CmdLineTask):
                                                   "yellow"), ], **plotKwargs)
             if self.config.doPlotStarGalaxy:
                 if "ext_shapeHSM_HsmSourceMoments_xx" in unforced.schema:
-                    self.plotStarGal(unforced, filenamer, repoInfo.dataId, forcedStr="unforced", **plotKwargs)
+                    self.plotStarGal(unforced, filenamer, repoInfo.dataId,
+                                     forcedStr="unforced " + self.catLabel, **plotKwargs)
                 else:
                     self.log.warn("Cannot run plotStarGal: ext_shapeHSM_HsmSourceMoments_xx not "
                                   "in forced.schema")
 
             if self.config.doPlotSizes:
                 if all(ss in unforced.schema for ss in ["base_SdssShape_psf_xx", "calib_psf_used"]):
-                    self.plotSizes(unforced, filenamer, repoInfo.dataId, forcedStr="unforced",
+                    self.plotSizes(unforced, filenamer, repoInfo.dataId, forcedStr="unforced " + self.catLabel,
                                    postFix="_unforced", **plotKwargs)
                 else:
                     self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx and/or calib_psf_used "
@@ -493,8 +494,7 @@ class CoaddAnalysisTask(CmdLineTask):
             for iMat, iMatch in enumerate(packedMatches):
                 if iMatch["second"] in badIds:
                     badMatch[iMat] = True
-            self.catLabel = "noDuplicates"
-            self.zpLabel = self.zpLabel + " " + self.catLabel
+            self.zpLabel = self.zpLabel
             packedMatches = packedMatches[~badMatch].copy(deep=True)
             if not packedMatches:
                 self.log.warn("No good matches for %s" % (dataRef.dataId,))
@@ -573,7 +573,8 @@ class CoaddAnalysisTask(CmdLineTask):
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in fluxToPlotList:
-            if col + "_instFlux" in catalog.schema and not (forcedStr == "forced" and "CircularAper" in col):
+            isForced = False if forcedStr is None else ("forced" in forcedStr)
+            if col + "_instFlux" in catalog.schema and not (isForced and "CircularAper" in col):
                 shortName = "mag_" + col + postFix
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog,
@@ -1229,7 +1230,6 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                 catalog = setAliasMaps(catalog, aliasDictList)
 
         # Set boolean array indicating sources deemed unsuitable for qa analyses
-        self.catLabel = "noDuplicates"
         bad1 = makeBadArray(unforced1, flagList=self.config.analysis.flags,
                             onlyReadStars=self.config.onlyReadStars)
         bad2 = makeBadArray(unforced2, flagList=self.config.analysis.flags,
@@ -1251,6 +1251,9 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             forced2 = unforced2
         unforced = self.matchCatalogs(unforced1, unforced2)
         forced = self.matchCatalogs(forced1, forced2)
+
+        self.catLabel = "nChild = 0"
+        forcedStr = forcedStr + " " + self.catLabel
 
         aliasDictList = aliasDictList0
         if hscRun and self.config.srcSchemaMap is not None:
@@ -1281,7 +1284,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                 self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
 
         if self.config.doApCorrs:
-            self.plotApCorrs(unforced, filenamer, repoInfo1.dataId, forcedStr="unforced", **plotKwargs1)
+            self.plotApCorrs(unforced, filenamer, repoInfo1.dataId, forcedStr="unforced " + self.catLabel,
+                             **plotKwargs1)
         if self.config.doPlotCentroids:
             self.plotCentroids(forced, filenamer, repoInfo1.dataId, forcedStr=forcedStr,
                                hscRun1=repoInfo1.hscRun, hscRun2=repoInfo2.hscRun, **plotKwargs1)

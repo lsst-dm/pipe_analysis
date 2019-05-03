@@ -22,7 +22,8 @@ from .utils import (Filenamer, Enforcer, concatenateCatalogs, getFluxKeys, addCo
                     fluxToPlotString, writeParquet, getRepoInfo, orthogonalRegression,
                     distanceSquaredToPoly, p2p1CoeffsFromLinearFit, linesFromP2P1Coeffs,
                     makeEqnStr, catColors, addMetricMeasurement, updateVerifyJob)
-from .plotUtils import AllLabeller, OverlapsStarGalaxyLabeller, plotText, labelCamera, setPtSize
+from .plotUtils import (AllLabeller, OverlapsStarGalaxyLabeller, plotText, labelCamera, setPtSize,
+                        determineUberCalLabel)
 
 import lsst.afw.geom as afwGeom
 import lsst.afw.table as afwTable
@@ -378,6 +379,8 @@ class ColorAnalysisTask(CmdLineTask):
                         repoInfo = getRepoInfo(dataRef, coaddName=self.config.coaddName,
                                                coaddDataset="Coadd_forced_src")
         self.log.info("Size of patchList with full color coverage: {:d}".format(len(patchList)))
+        uberCalLabel = determineUberCalLabel(repoInfo, patchList[0], coaddName=self.config.coaddName)
+        self.log.info("Uber-calibration used: {:}".format(uberCalLabel))
 
         # Only adjust the schema names necessary here (rather than attaching the full alias schema map)
         self.fluxColumn = self.config.analysis.fluxColumn
@@ -412,7 +415,7 @@ class ColorAnalysisTask(CmdLineTask):
                                                                             repoInfo.tractInfo)
                 geLabel = "Per Field"
 
-        geLabel = "GE applied: " + geLabel
+        geLabel = "GalExt: " + geLabel
         if self.config.doPlotGalacticExtinction and doPlotGalacticExtinction:
             self.plotGalacticExtinction(byFilterForcedCats, filenamer, repoInfo.dataId,
                                         camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
@@ -436,7 +439,8 @@ class ColorAnalysisTask(CmdLineTask):
             self.plotStarPrincipalColors(principalColCats, byFilterForcedCats, filenamer,
                                          NumStarLabeller(3), repoInfo.dataId, camera=repoInfo.camera,
                                          tractInfo=repoInfo.tractInfo, patchList=patchList,
-                                         hscRun=repoInfo.hscRun, geLabel=geLabel)
+                                         hscRun=repoInfo.hscRun, geLabel=geLabel,
+                                         uberCalLabel=uberCalLabel)
 
         for fluxColumn in ["base_PsfFlux_instFlux", "modelfit_CModel_instFlux"]:
             if fluxColumn == "base_PsfFlux_instFlux":
@@ -449,7 +453,7 @@ class ColorAnalysisTask(CmdLineTask):
             self.plotStarColorColor(principalColCats, byFilterForcedCats, filenamer, repoInfo.dataId,
                                     fluxColumn, camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
                                     patchList=patchList, hscRun=repoInfo.hscRun, forcedStr=self.forcedStr,
-                                    geLabel=geLabel)
+                                    geLabel=geLabel, uberCalLabel=uberCalLabel)
 
         # Update the verifyJob with relevant metadata
         metaDict = {}
@@ -751,7 +755,7 @@ class ColorAnalysisTask(CmdLineTask):
 
     def plotStarPrincipalColors(self, principalColCats, byFilterCats, filenamer, labeller, dataId,
                                 butler=None, camera=None, tractInfo=None, patchList=None, hscRun=None,
-                                geLabel=None):
+                                geLabel=None, uberCalLabel=None):
         mags = {filterName: -2.5*np.log10(byFilterCats[filterName]["base_PsfFlux_instFlux"]) for
                 filterName in byFilterCats}
         unitStr = "mmag" if self.config.toMilli else "mag"
@@ -805,7 +809,7 @@ class ColorAnalysisTask(CmdLineTask):
                                ).plotAll(dataId, filenamer, self.log, butler=butler, camera=camera,
                                          tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
                                          zpLabel=geLabel, forcedStr=forcedStr, plotRunStats=False,
-                                         extraLabels=principalColorStrs)
+                                         extraLabels=principalColorStrs, uberCalLabel=uberCalLabel)
 
             # Plot selections of stars for different criteria
             if self.config.transforms == ivezicTransformsHSC:
@@ -877,9 +881,9 @@ class ColorAnalysisTask(CmdLineTask):
                 if camera:
                     labelCamera(camera, plt, axes, 0.5, 1.09)
                 if catLabel:
-                    plotText(catLabel, plt, axes, 0.13, -0.06, color="green")
+                    plotText(catLabel, plt, axes, 0.91, -0.09, color="green", fontSize=10)
                 if geLabel:
-                    plotText(geLabel, plt, axes, 0.10, -0.11, color="green")
+                    plotText(geLabel, plt, axes, 0.11, -0.09, color="green", fontSize=10)
                 if hscRun:
                     axes.set_title("HSC stack run: " + hscRun, color="#800080")
 
@@ -892,7 +896,7 @@ class ColorAnalysisTask(CmdLineTask):
 
     def plotStarColorColor(self, principalColCats, byFilterCats, filenamer, dataId, fluxColumn, butler=None,
                            camera=None, tractInfo=None, patchList=None, hscRun=None, forcedStr=None,
-                           geLabel=None):
+                           geLabel=None, uberCalLabel=None):
         num = len(list(byFilterCats.values())[0])
         zp = 0.0
         mags = {filterName: zp - 2.5*np.log10(byFilterCats[filterName][fluxColumn]) for
@@ -1033,7 +1037,8 @@ class ColorAnalysisTask(CmdLineTask):
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.03*self.unitScale}}),
                                          camera=camera, tractInfo=tractInfo, patchList=patchList,
-                                         hscRun=hscRun, forcedStr=forcedStr, zpLabel=geLabel)
+                                         hscRun=hscRun, forcedStr=forcedStr, zpLabel=geLabel,
+                                         uberCalLabel=uberCalLabel)
         if filters.issuperset(set(("HSC-R", "HSC-I", "HSC-Z"))):
             # Do a linear fit to regions defined in Ivezic transforms
             transformPerp = self.config.transforms["yPerp"]
@@ -1111,7 +1116,8 @@ class ColorAnalysisTask(CmdLineTask):
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.03*self.unitScale}}),
                                          camera=camera, tractInfo=tractInfo, patchList=patchList,
-                                         hscRun=hscRun, forcedStr=forcedStr, zpLabel=geLabel)
+                                         hscRun=hscRun, forcedStr=forcedStr, zpLabel=geLabel,
+                                         uberCalLabel=uberCalLabel)
         if filters.issuperset(set(("HSC-I", "HSC-Z", "HSC-Y"))):
             filtersStr = "izy"
             nameStr = filtersStr + fluxColStr
@@ -1169,7 +1175,8 @@ class ColorAnalysisTask(CmdLineTask):
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.03*self.unitScale}}),
                                          camera=camera, tractInfo=tractInfo, patchList=patchList,
-                                         hscRun=hscRun, forcedStr=forcedStr, zpLabel=geLabel)
+                                         hscRun=hscRun, forcedStr=forcedStr, zpLabel=geLabel,
+                                         uberCalLabel=uberCalLabel)
 
         if filters.issuperset(set(("HSC-Z", "NB0921", "HSC-Y"))):
             filtersStr = "z9y"
@@ -1228,7 +1235,8 @@ class ColorAnalysisTask(CmdLineTask):
                                ).plotAll(dataId, filenamer, self.log,
                                          Enforcer(requireLess={"star": {"stdev": 0.03*self.unitScale}}),
                                          camera=camera, tractInfo=tractInfo, patchList=patchList,
-                                         hscRun=hscRun, forcedStr=forcedStr, zpLabel=geLabel)
+                                         hscRun=hscRun, forcedStr=forcedStr, zpLabel=geLabel,
+                                         uberCalLabel=uberCalLabel)
 
     def _getConfigName(self):
         return None
@@ -1502,7 +1510,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
 
     # Label orthogonal polynomial fit parameters to 2 decimal places
     xLoc = xRange[0] + 0.045*deltaX
-    polyColor = "magenta"
+    polyColor = "tab:pink"
     polyFit = orthRegCoeffs
     polyStr = "odr"
     kept = keepOdr
@@ -1519,7 +1527,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
             polyStr += plusMinus + coeffStr
     yLoc -= 0.05*deltaY
     kwargs = dict(ha="left", va="center", color=polyColor)
-    axes[0].text(xLoc, yLoc, polyStr, fontsize=8, **kwargs)
+    axes[0].text(xLoc, yLoc, polyStr, fontsize=7, **kwargs)
 
     if "odr" in polyStr and order == 1:
         m, b = polyFit[0], polyFit[1]
@@ -1680,7 +1688,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
                                              density=True, color="green", alpha=0.6)
         axes[1].plot(bins, 1/(fitP2stdDev*np.sqrt(2*np.pi))*np.exp(-(bins-fitP2mean)**2/(2*fitP2stdDev**2)),
                      color="green")
-        axes[1].axvline(x=fitP2mean, color="magenta", linestyle=":")
+        axes[1].axvline(x=fitP2mean, color="tab:pink", linestyle=":")
         fitP2meanStr = "{0:s}{1:s} = {2:5.2f}".format(perpStr[0:5], "$_{fit}$", fitP2mean)
         fitP2stdStr = "  std = {0:5.2f}".format(fitP2stdDev)
         kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=7, color="green")
@@ -1714,9 +1722,9 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     if camera:
         labelCamera(camera, plt, axes[0], 0.5, 1.04)
     if catLabel:
-        plotText(catLabel, plt, axes[0], 0.85, -0.14, fontSize=9)
+        plotText(catLabel, plt, axes[0], 0.88, -0.11, fontSize=9, color="green")
     if geLabel:
-        plotText(geLabel, plt, axes[0], 0.16, -0.15, fontSize=10, color="green")
+        plotText(geLabel, plt, axes[0], 0.13, -0.11, fontSize=9, color="green")
     if hscRun:
         axes[0].set_title("HSC stack run: " + hscRun, color="#800080")
 
