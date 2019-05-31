@@ -86,7 +86,7 @@ class CosmosLabeller(StarGalaxyLabeller):
         return np.array([0 if ii in good else 1 for ii in catalog["id"]])
 
 
-def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", fontSize=9, color="k", coordSys="axes", **kwargs):
+def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", fontSize=None, color="k", coordSys="axes", **kwargs):
     """Label the plot with the string provided at a given location
 
     Parameters
@@ -102,9 +102,10 @@ def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", fontSize=9, color="k", c
        The string will be centered both horizontally and vertically at this position.
     prefix : `str`, optional
        Optional prefix to add to ``textStr``.
-    fontSize : `int` or `str`, optional
+    fontSize : `int` or `str` or `None`, optional
        Size of font for plotting of ``textStr``.  May be either an absolute font size in points, or a
-       size string, relative to the default font size.  Default is 9 points.
+       size string, relative to the default font size.  Default is `None`, in which case an automatic
+       scaling based on the length of ``textStr`` will be used.
     color : `str`, optional
        Color to plot ``textStr``.  Can be any matplotlib color str.  Default is k (for black).
     coordSys : `str`, optional
@@ -136,7 +137,8 @@ def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", fontSize=9, color="k", c
         transform = axis.transFigure
     else:
         raise ValueError("Unrecognized coordSys: {}.  Must be one of axes, data, figure".format(coordSys))
-    fontSize = int(fontSize - min(3, len(textStr)/10))
+    if not fontSize:
+        fontSize = int(9 - min(3, len(textStr)/10))
     plt.text(xLoc, yLoc, prefix + textStr, ha="center", va="center", fontsize=fontSize, transform=transform,
              color=color, **kwargs)
 
