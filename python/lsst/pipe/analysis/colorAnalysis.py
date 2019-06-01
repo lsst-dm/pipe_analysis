@@ -241,10 +241,10 @@ class ColorAnalysisConfig(Config):
                                       "\nNOTE: if True but fastparquet package is unavailable, a warning "
                                       "is issued and table writing is skipped."))
     plotRanges = DictField(keytype=str, itemtype=float,
-                           default={"griX0": -0.6, "griX1": 2.0, "griY0": -0.6, "griY1": 3.0,
-                                    "rizX0": -0.4, "rizX1": 3.0, "rizY0": -0.2, "rizY1": 1.5,
+                           default={"griX0": -0.7, "griX1": 2.0, "griY0": -0.8, "griY1": 3.0,
+                                    "rizX0": -0.6, "rizX1": 3.0, "rizY0": -1.0, "rizY1": 1.5,
                                     "izyX0": -0.5, "izyX1": 1.3, "izyY0": -0.4, "izyY1": 0.8,
-                                    "z9yX0": -0.3, "z9yX1": 0.45, "z9yY0": -0.2, "z9yY1": 0.5},
+                                    "z9yX0": -0.4, "z9yX1": 0.45, "z9yY0": -0.4, "z9yY1": 0.6},
                            doc="Plot Ranges for various color-color combinations")
 
     def setDefaults(self):
@@ -1063,19 +1063,19 @@ class ColorAnalysisTask(CmdLineTask):
                                "g - r  [{0:s}]".format(fluxColStr),
                                "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
                                xRange=(xRange[0], xRange[1] + 0.6), yRange=yRange,
-                               magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
-                               geLabel=geLabel, unitScale=self.unitScale)
-                colorColor4MagPlots(dataId, filenamer(dataId, description=nameStr, style="noFitMagBins"),
-                                    self.log, catColors("HSC-G", "HSC-R", mags, decentStars),
-                                    catColors("HSC-R", "HSC-I", mags, decentStars),
-                                    catColors("HSC-G", "HSC-R", mags, decentGalaxies),
-                                    catColors("HSC-R", "HSC-I", mags, decentGalaxies),
-                                    decentStarsMag, decentGalaxiesMag,
-                                    "g - r  [{0:s}]".format(fluxColStr),
-                                    "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
-                                    xRange=(xRange[0], xRange[1] + 0.6), yRange=yRange,
-                                    magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
-                                    geLabel=geLabel, unitScale=self.unitScale)
+                               magThreshold=self.config.analysis.magThreshold, camera=camera, hscRun=hscRun,
+                               geLabel=geLabel, uberCalLabel=uberCalLabel, unitScale=self.unitScale)
+                colorColorMagBinsPlots(dataId, filenamer(dataId, description=nameStr, style="noFitMagBins"),
+                                       self.log, catColors("HSC-G", "HSC-R", mags, decentStars),
+                                       catColors("HSC-R", "HSC-I", mags, decentStars),
+                                       catColors("HSC-G", "HSC-R", mags, decentGalaxies),
+                                       catColors("HSC-R", "HSC-I", mags, decentGalaxies),
+                                       decentStarsMag, decentGalaxiesMag,
+                                       "g - r  [{0:s}]".format(fluxColStr),
+                                       "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
+                                       xRange=(xRange[0], xRange[1] + 0.6), yRange=yRange,
+                                       camera=camera, hscRun=hscRun,
+                                       geLabel=geLabel, uberCalLabel=uberCalLabel, unitScale=self.unitScale)
 
             shortName = filtersStr + "Distance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
@@ -1139,19 +1139,19 @@ class ColorAnalysisTask(CmdLineTask):
                                "r - i  [{0:s}]".format(fluxColStr),
                                "i - z  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
                                xRange=xRange, yRange=(yRange[0], yRange[1] + 0.2),
-                               magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
-                               geLabel=geLabel, unitScale=self.unitScale)
-                colorColor4MagPlots(dataId, filenamer(dataId, description=nameStr, style="noFitMagBins"),
-                                    self.log, catColors("HSC-R", "HSC-I", mags, decentStars),
-                                    catColors("HSC-I", "HSC-Z", mags, decentStars),
-                                    catColors("HSC-R", "HSC-I", mags, decentGalaxies),
-                                    catColors("HSC-I", "HSC-Z", mags, decentGalaxies),
-                                    decentStarsMag, decentGalaxiesMag,
-                                    "r - i  [{0:s}]".format(fluxColStr),
-                                    "i - z  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
-                                    xRange=xRange, yRange=(yRange[0], yRange[1] + 0.2),
-                                    magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
-                                    geLabel=geLabel, unitScale=self.unitScale)
+                               magThreshold=self.config.analysis.magThreshold, camera=camera, hscRun=hscRun,
+                               geLabel=geLabel, uberCalLabel=uberCalLabel, unitScale=self.unitScale)
+                colorColorMagBinsPlots(dataId, filenamer(dataId, description=nameStr, style="noFitMagBins"),
+                                       self.log, catColors("HSC-R", "HSC-I", mags, decentStars),
+                                       catColors("HSC-I", "HSC-Z", mags, decentStars),
+                                       catColors("HSC-R", "HSC-I", mags, decentGalaxies),
+                                       catColors("HSC-I", "HSC-Z", mags, decentGalaxies),
+                                       decentStarsMag, decentGalaxiesMag,
+                                       "r - i  [{0:s}]".format(fluxColStr),
+                                       "i - z  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
+                                       xRange=xRange, yRange=(yRange[0], yRange[1] + 0.2),
+                                       camera=camera, hscRun=hscRun,
+                                       geLabel=geLabel, uberCalLabel=uberCalLabel, unitScale=self.unitScale)
             shortName = filtersStr + "Distance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly, unitScale=self.unitScale,
@@ -1196,19 +1196,19 @@ class ColorAnalysisTask(CmdLineTask):
                                "i - z  [{0:s}]".format(fluxColStr),
                                "z - y  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
                                xRange=xRange, yRange=(yRange[0], yRange[1] + 0.2),
-                               magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
-                               geLabel=geLabel, unitScale=self.unitScale)
-                colorColor4MagPlots(dataId, filenamer(dataId, description=nameStr, style="noFitMagBins"),
-                                    self.log, catColors("HSC-I", "HSC-Z", mags, decentStars),
-                                    catColors("HSC-Z", "HSC-Y", mags, decentStars),
-                                    catColors("HSC-I", "HSC-Z", mags, decentGalaxies),
-                                    catColors("HSC-Z", "HSC-Y", mags, decentGalaxies),
-                                    decentStarsMag, decentGalaxiesMag,
-                                    "i - z  [{0:s}]".format(fluxColStr),
-                                    "z - y  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
-                                    xRange=xRange, yRange=(yRange[0], yRange[1] + 0.2),
-                                    magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
-                                    geLabel=geLabel, unitScale=self.unitScale)
+                               magThreshold=self.config.analysis.magThreshold, camera=camera, hscRun=hscRun,
+                               geLabel=geLabel, uberCalLabel=uberCalLabel, unitScale=self.unitScale)
+                colorColorMagBinsPlots(dataId, filenamer(dataId, description=nameStr, style="noFitMagBins"),
+                                       self.log, catColors("HSC-I", "HSC-Z", mags, decentStars),
+                                       catColors("HSC-Z", "HSC-Y", mags, decentStars),
+                                       catColors("HSC-I", "HSC-Z", mags, decentGalaxies),
+                                       catColors("HSC-Z", "HSC-Y", mags, decentGalaxies),
+                                       decentStarsMag, decentGalaxiesMag,
+                                       "i - z  [{0:s}]".format(fluxColStr),
+                                       "z - y  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
+                                       xRange=xRange, yRange=(yRange[0], yRange[1] + 0.2),
+                                       camera=camera, hscRun=hscRun,
+                                       geLabel=geLabel, uberCalLabel=uberCalLabel, unitScale=self.unitScale)
             shortName = filtersStr + "Distance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("i", "z", "y", poly, unitScale=self.unitScale,
@@ -1254,19 +1254,19 @@ class ColorAnalysisTask(CmdLineTask):
                                "z-n921  [{0:s}]".format(fluxColStr),
                                "n921-y  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
                                xRange=xRange, yRange=(yRange[0] - 0.05, yRange[1] + 0.05),
-                               magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
-                               geLabel=geLabel, unitScale=self.unitScale)
-                colorColor4MagPlots(dataId, filenamer(dataId, description=nameStr, style="noFitMagBins"),
-                                    self.log, catColors("HSC-Z", "NB0921", mags, decentStars),
-                                    catColors("NB0921", "HSC-Y", mags, decentStars),
-                                    catColors("HSC-Z", "NB0921", mags, decentGalaxies),
-                                    catColors("NB0921", "HSC-Y", mags, decentGalaxies),
-                                    decentStarsMag, decentGalaxiesMag,
-                                    "z-n921  [{0:s}]".format(fluxColStr),
-                                    "n921-y  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
-                                    xRange=xRange, yRange=(yRange[0] - 0.05, yRange[1] + 0.05),
-                                    magThreshold=prettyBrightThreshold, camera=camera, hscRun=hscRun,
-                                    geLabel=geLabel, unitScale=self.unitScale)
+                               magThreshold=self.config.analysis.magThreshold, camera=camera, hscRun=hscRun,
+                               geLabel=geLabel, uberCalLabel=uberCalLabel, unitScale=self.unitScale)
+                colorColorMagBinsPlots(dataId, filenamer(dataId, description=nameStr, style="noFitMagBins"),
+                                       self.log, catColors("HSC-Z", "NB0921", mags, decentStars),
+                                       catColors("NB0921", "HSC-Y", mags, decentStars),
+                                       catColors("HSC-Z", "NB0921", mags, decentGalaxies),
+                                       catColors("NB0921", "HSC-Y", mags, decentGalaxies),
+                                       decentStarsMag, decentGalaxiesMag,
+                                       "z-n921  [{0:s}]".format(fluxColStr),
+                                       "n921-y  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
+                                       xRange=xRange, yRange=(yRange[0] - 0.05, yRange[1] + 0.05),
+                                       camera=camera, hscRun=hscRun,
+                                       geLabel=geLabel, uberCalLabel=uberCalLabel, unitScale=self.unitScale)
             shortName = filtersStr + "Distance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(combined, ColorColorDistance("z", "n921", "y", poly, unitScale=self.unitScale,
@@ -1859,12 +1859,13 @@ def colorColorPlot(dataId, filename, log, xStars, yStars, xGalaxies, yGalaxies, 
     return None
 
 
-def colorColor4MagPlots(dataId, filename, log, xStars, yStars, xGalaxies, yGalaxies, magStars, magGalaxies,
-                        xLabel, yLabel, filterStr, fluxColStr, xRange=None, yRange=None, hscRun=None,
-                        geLabel=None, logger=None, magThreshold=99.9, camera=None, unitScale=1.0):
+def colorColorMagBinsPlots(dataId, filename, log, xStars, yStars, xGalaxies, yGalaxies, magStars, magGalaxies,
+                           xLabel, yLabel, filterStr, fluxColStr, xRange=None, yRange=None, hscRun=None,
+                           geLabel=None, uberCalLabel=None, logger=None, magMinBin1=19.0, camera=None,
+                           unitScale=1.0):
 
-    fig, axes = plt.subplots(nrows=2, ncols=2, sharex=True, sharey=True)
-    fig.subplots_adjust(hspace=0, wspace=0, bottom=0.1, right=0.82, top=0.9)
+    fig, axes = plt.subplots(nrows=2, ncols=3, sharex=True, sharey=True)
+    fig.subplots_adjust(hspace=0, wspace=0, left=0.06, right=0.90, bottom=0.14, top=0.89)
 
     xRange = ((xRange[0] + 0.01, xRange[1] - 0.01) if xRange
               else (0.9*xStars.min(), 1.1*xStars.max()))
@@ -1872,70 +1873,84 @@ def colorColor4MagPlots(dataId, filename, log, xStars, yStars, xGalaxies, yGalax
               else (0.9*yStars.min(), 1.1*yStars.max()))
     deltaX = abs(xRange[1] - xRange[0])
     deltaY = abs(yRange[1] - yRange[0])
+    # Want to plot equal aspect ratio, so set dynamic range for both axes to be the
+    # largest of the requestes xRange/yRange
+    if deltaX > deltaY:
+        yRange = (yRange[0] - 0.5*(deltaX - deltaY), yRange[1] + 0.5*(deltaX - deltaY))
+    if deltaY > deltaX:
+        xRange = (xRange[0] - 0.5*(deltaY - deltaX), xRange[1] + 0.5*(deltaY - deltaX))
+    deltaX = abs(xRange[1] - xRange[0])
+    deltaY = abs(yRange[1] - yRange[0])
+
     vMin = round(min(magStars.min(), magGalaxies.min()) - 0.05, 1)
     vMax = round(max(magStars.max(), magGalaxies.max()) + 0.05, 1)
-
     ptSize = max(1, setPtSize(len(xGalaxies)) - 2)
-
-    # Divide stars and galaxies into 4 magnitude bins
-    binEdges = np.hstack((vMin, np.arange(magThreshold - 3, magThreshold, 1)))
+    while vMin >= magMinBin1:
+        magMinBin1 += 0.5
+    # Divide stars and galaxies into 6 magnitude bins
+    binEdges = np.hstack((vMin, np.arange(magMinBin1, magMinBin1 + 5, 1)))
     binIdxStars = np.digitize(magStars, binEdges)
     binIdxGalaxies = np.digitize(magGalaxies, binEdges)
     # The following is for ease of printing the bin ranges in the following loop
     binEdges = [bin for bin in binEdges]
-    binEdges.append(magThreshold)
+    binEdges.append(magMinBin1 + 6)
 
     for i, ax in enumerate(axes.flat[:]):
-        index = 4 - i
+        index = 6 - i
         ax.tick_params(which="both", direction="in", labelsize=7)
+        ax.xaxis.set_major_formatter(FormatStrFormatter("%.1f"))
+        ax.yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
         ax.set_xlim(*xRange)
         ax.set_ylim(*yRange)
+        ax.set_aspect("equal")
 
         kwargs = dict(s=ptSize, marker="o", lw=0, vmin=vMin, vmax=vMax)
         ax.scatter(xGalaxies[binIdxGalaxies == index], yGalaxies[binIdxGalaxies == index],
                    c=magGalaxies[binIdxGalaxies == index], cmap="autumn", label="galaxies", **kwargs)
         ax.scatter(xStars[binIdxStars == index], yStars[binIdxStars == index],
                    c=magStars[binIdxStars == index], cmap="winter", label="stars", **kwargs)
-        if i in (2, 3):
-            ax.set_xlabel(xLabel)
-        if i in (0, 2):
-            ax.set_ylabel(yLabel)
+        if i in (3, 4, 5):
+            ax.set_xlabel(xLabel, fontsize=8, labelpad=1)
+        if i in (0, 3):
+            ax.set_ylabel(yLabel, fontsize=8, labelpad=-1)
 
         # Label total number of objects of each data type
         xLoc, yLoc = xRange[0] + 0.05*deltaX, yRange[1] - 0.06*deltaY
-        kwargs = dict(va="center", fontsize=7)
-        ax.text(xLoc, yLoc, "Ngals  =", ha="left", color="red", **kwargs)
-        ax.text(xRange[1] - 0.03*deltaX, yLoc, str(len(xGalaxies[binIdxGalaxies == index])) +
-                " [" + str(binEdges[index - 1]) + " <= " + filterStr + " < " + str(binEdges[index]) + "]",
+        kwargs = dict(va="center", fontsize=6)
+        ax.text(xLoc, yLoc, "Ngal  =", ha="left", color="red", **kwargs)
+        ax.text(xRange[1] - 0.03*deltaX, yLoc, str(len(xGalaxies[binIdxGalaxies == index])) + " [" +
+                str(binEdges[index - 1]) + "$\leqslant$" + filterStr + "$<$" + str(binEdges[index]) + "]",
                 ha="right", color="red", **kwargs)
-        ax.text(xLoc, 0.92*yLoc, "Nstars =", ha="left", va="center", fontsize=7, color="blue")
-        ax.text(xRange[1] - 0.03*deltaX, 0.92*yLoc, str(len(xStars[binIdxStars == index])) +
-                " [" + str(binEdges[index - 1]) + " <= " + filterStr + " < " + str(binEdges[index]) + "]",
+        ax.text(xLoc, 0.90*yLoc, "Nstar =", ha="left", va="center", fontsize=6, color="blue")
+        ax.text(xRange[1] - 0.03*deltaX, 0.90*yLoc, str(len(xStars[binIdxStars == index])) + " [" +
+                str(binEdges[index - 1]) + "$\leqslant$" + filterStr + "$<$" + str(binEdges[index]) + "]",
                 ha="right", color="blue", **kwargs)
 
-    mappableStars = plt.cm.ScalarMappable(cmap="winter_r", norm=plt.Normalize(vmin=vMin, vmax=vMax))
+    mappableStars = plt.cm.ScalarMappable(cmap="winter", norm=plt.Normalize(vmin=vMin, vmax=vMax))
     mappableStars._A = []        # fake up the array of the scalar mappable. Urgh...
-    caxStars = plt.axes([0.88, 0.1, 0.04, 0.8])
-    caxGalaxies = plt.axes([0.84, 0.1, 0.04, 0.8])
+    caxStars = plt.axes([0.93, 0.14, 0.03, 0.75])
+    caxGalaxies = plt.axes([0.90, 0.14, 0.03, 0.75])
     cbStars = plt.colorbar(mappableStars, cax=caxStars)
-    cbStars.ax.tick_params(labelsize=8)
-    cbStars.set_label(filterStr + "[" + fluxColStr + "] :stars", rotation=270, labelpad=-24, fontsize=9)
-    mappableGalaxies = plt.cm.ScalarMappable(cmap="autumn_r", norm=plt.Normalize(vmin=vMin, vmax=vMax))
+    cbStars.ax.tick_params(labelsize=7, length=1, pad=0)
+    cbStars.set_label(filterStr + "[" + fluxColStr + "] :stars", rotation=270, labelpad=-15, fontsize=8)
+    mappableGalaxies = plt.cm.ScalarMappable(cmap="autumn", norm=plt.Normalize(vmin=vMin, vmax=vMax))
     mappableGalaxies._A = []      # fake up the array of the scalar mappable. Urgh...
     cbGalaxies = plt.colorbar(mappableGalaxies, cax=caxGalaxies)
     cbGalaxies.set_ticks([])
-    cbGalaxies.set_label(filterStr + " [" + fluxColStr + "]: galaxies", rotation=270, labelpad=-6, fontsize=9)
+    cbGalaxies.set_label(filterStr + " [" + fluxColStr + "]: galaxies", rotation=270, labelpad=-4, fontsize=8)
 
     if camera:
-        labelCamera(camera, plt, axes[0, 0], 1.05, 1.14)
+        labelCamera(camera, plt, axes[0, 1], 0.5, 1.14, fontSize=8)
     if geLabel:
-        plotText(geLabel, plt, axes[0, 0], 0.09, -1.22, color="green")
+        plotText(geLabel, plt, axes[0, 0], 0.19, -1.24, fontSize=7, color="green")
+    if uberCalLabel:
+        plotText(uberCalLabel, plt, axes[0, 2], 0.67, -1.24, prefix="uberCal: ", fontSize=7, color="green")
     if hscRun:
         axes.set_title("HSC stack run: " + hscRun, color="#800080")
 
     tractStr = "tract: {:d}".format(dataId["tract"])
-    axes[0, 0].annotate(tractStr, xy=(1.05, 1.06), xycoords="axes fraction", ha="center", va="center",
-                        fontsize=9, color="green")
+    axes[0, 1].annotate(tractStr, xy=(0.5, 1.06), xycoords="axes fraction", ha="center", va="center",
+                        fontsize=8, color="green")
 
     fig.savefig(filename, dpi=120)
     plt.close(fig)
