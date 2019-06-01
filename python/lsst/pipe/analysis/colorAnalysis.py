@@ -3,6 +3,7 @@
 import matplotlib
 matplotlib.use("Agg")  # noqa #402
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FormatStrFormatter
 import numpy as np
 np.seterr(all="ignore")  # noqa #402
 import functools
@@ -21,7 +22,7 @@ from .utils import (Filenamer, Enforcer, concatenateCatalogs, getFluxKeys, addCo
                     makeBadArray, addFlag, addIntFloatOrStrColumn, calibrateCoaddSourceCatalog,
                     fluxToPlotString, writeParquet, getRepoInfo, orthogonalRegression,
                     distanceSquaredToPoly, p2p1CoeffsFromLinearFit, linesFromP2P1Coeffs,
-                    makeEqnStr, catColors, addMetricMeasurement, updateVerifyJob)
+                    makeEqnStr, catColors, addMetricMeasurement, updateVerifyJob, computeMeanOfFrac)
 from .plotUtils import (AllLabeller, OverlapsStarGalaxyLabeller, plotText, labelCamera, setPtSize,
                         determineUberCalLabel)
 
@@ -673,6 +674,7 @@ class ColorAnalysisTask(CmdLineTask):
         schema.addField(fluxColumn, type=np.float64, doc="Flux from filter " + self.fluxFilter)
         schema.addField(fluxColumn + "Err", type=np.float64, doc="Flux error for flux from filter " +
                         self.fluxFilter)
+        schema.addField("base_InputCount_value", type=np.int32, doc="Input visit count for " + self.fluxFilter)
 
         # Copy basics (id, RA, Dec)
         new = afwTable.SourceCatalog(schema)
@@ -708,6 +710,7 @@ class ColorAnalysisTask(CmdLineTask):
 
         new[fluxColumn][:] = catalogs[self.fluxFilter][fluxColumn]
         new[fluxColumn + "Err"][:] = catalogs[self.fluxFilter][fluxColumn + "Err"]
+        new["base_InputCount_value"][:] = catalogs[self.fluxFilter]["base_InputCount_value"]
 
         return new
 
@@ -758,6 +761,11 @@ class ColorAnalysisTask(CmdLineTask):
                                 geLabel=None, uberCalLabel=None):
         mags = {filterName: -2.5*np.log10(byFilterCats[filterName]["base_PsfFlux_instFlux"]) for
                 filterName in byFilterCats}
+        fluxColumn = ("base_PsfFlux_instFlux" if "base_PsfFlux_instFlux" in principalColCats.schema else
+                      "modelfit_CModel_instFlux")
+        signalToNoise = {filterName: byFilterCats[filterName][fluxColumn]/
+                         byFilterCats[filterName][fluxColumn + "Err"] for
+                         filterName in byFilterCats}
         unitStr = "mmag" if self.config.toMilli else "mag"
         for col, transform in self.config.transforms.items():
             if not transform.plot or col not in principalColCats.schema:
@@ -818,7 +826,29 @@ class ColorAnalysisTask(CmdLineTask):
                                      style=col + "Selections")
                 qaGood = np.logical_and(np.logical_not(principalColCats["qaBad_flag"]),
                                         principalColCats["numStarFlags"] >= 3)
-                qaGood = np.logical_and(qaGood, mags[self.fluxFilter] < self.config.analysis.magThreshold)
+                if self.config.analysis.useSignalToNoiseThreshold:
+                    if "base_InputCount_value" in byFilterCats[self.fluxFilter].schema:
+                        inputCounts = byFilterCats[self.fluxFilter]["base_InputCount_value"]
+                        scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1,
+                                                        floorFactor=10)
+                        signalToNoiseThreshold = np.floor(
+                            np.sqrt(scaleFactor)*self.config.analysis.signalToNoiseThreshold/100 + 0.49)*100
+                        signalToNoiseHighThreshold = (np.floor(
+                            np.sqrt(scaleFactor)*
+                            self.config.analysis.signalToNoiseHighThreshold/100 + 0.49)*100)
+                    qaGood = np.logical_and(qaGood, signalToNoise[self.fluxFilter] >= signalToNoiseThreshold)
+                    # Set self.magThreshold to represent approximately that which corresponds to the
+                    # S/N threshold.  Computed as the mean magnitude of the lower 5% of the
+                    # S/N > signalToNoiseThreshold subsample
+                    ptFrac = max(2, int(0.05*len(mags[self.fluxFilter][qaGood])))
+                    magThreshold = np.floor(mags[self.fluxFilter][qaGood][
+                        mags[self.fluxFilter][qaGood].argsort()[-ptFrac:]].mean()*10 + 0.5)/10
+                    thresholdStr = [" [S/N$\geqslant$" + str(signalToNoiseHighThreshold) + "]",
+                                    " [" + self.fluxFilter+ "$\lesssim$" + str(magThreshold) + "]"]
+                else:
+                    qaGood = np.logical_and(qaGood, mags[self.fluxFilter] < self.config.analysis.magThreshold)
+                    thresholdStr = [" [" + self.fluxFilter + " < " +
+                                    str(self.config.analysis.magThreshold) + "]", ]
                 inFitGood = np.logical_and(np.isfinite(colorsInFitRange(principalColCats)), qaGood)
                 inPerpGood = np.logical_and(np.isfinite(colorsInPerpRange(principalColCats)), qaGood)
                 xColor = catColors(colStr1, colStr2, mags)
@@ -861,22 +891,21 @@ class ColorAnalysisTask(CmdLineTask):
                 # Label total number of objects of each data type
                 lenNumObj = max(len(str(len(xColor[qaGood]))), len(str(len(xColor[inFitGood]))),
                                 len(str(len(xColor[inPerpGood]))))
-                fdx = max((min(0.09*lenNumObj, 0.9), 0.42))
+                fdx = max((min(0.07*lenNumObj, 0.8), 0.28))
                 xLoc, yLoc = xRange[0] + 0.03*deltaX, yRange[1] - 0.038*deltaY
                 kwargs = dict(va="center", fontsize=8)
                 axes.text(xLoc, yLoc, "NqaGood  =", ha="left", color="black", **kwargs)
-                axes.text(xLoc + fdx*deltaX, yLoc, str(len(xColor[qaGood])) + " [" + self.fluxFilter +
-                          " < " + str(self.config.analysis.magThreshold) + "]", ha="right", color="black",
+                axes.text(xLoc + fdx*deltaX, yLoc, str(len(xColor[qaGood])), ha="right", color="black",
                           **kwargs)
-                yLoc -= 0.05*deltaY
+                for threshStr in list(thresholdStr):
+                    axes.text(xLoc + 1.54*fdx*deltaX, yLoc, threshStr, ha="right", color="black", **kwargs)
+                    yLoc -= 0.05*deltaY
                 axes.text(xLoc, yLoc, "NinFitGood =", ha="left", color="blue", **kwargs)
-                axes.text(xLoc + fdx*deltaX, yLoc, str(len(xColor[inFitGood])) + " [" + self.fluxFilter +
-                          " < " + str(self.config.analysis.magThreshold) + "]", ha="right", color="blue",
+                axes.text(xLoc + fdx*deltaX, yLoc, str(len(xColor[inFitGood])), ha="right", color="blue",
                           **kwargs)
                 yLoc -= 0.05*deltaY
                 axes.text(xLoc, yLoc, "NinPerpGood =", ha="left", color="red", **kwargs)
-                axes.text(xLoc + fdx*deltaX, yLoc, str(len(xColor[inPerpGood])) + " [" + self.fluxFilter +
-                          " < " + str(self.config.analysis.magThreshold) + "]", ha="right", color="red",
+                axes.text(xLoc + fdx*deltaX, yLoc, str(len(xColor[inPerpGood])), ha="right", color="red",
                           **kwargs)
                 if camera:
                     labelCamera(camera, plt, axes, 0.5, 1.09)
@@ -901,14 +930,38 @@ class ColorAnalysisTask(CmdLineTask):
         zp = 0.0
         mags = {filterName: zp - 2.5*np.log10(byFilterCats[filterName][fluxColumn]) for
                 filterName in byFilterCats}
+        signalToNoise = {filterName: byFilterCats[filterName][fluxColumn]/
+                         byFilterCats[filterName][fluxColumn + "Err"] for
+                         filterName in byFilterCats}
 
         bad = np.zeros(num, dtype=bool)
         for cat in byFilterCats.values():
             bad |= makeBadArray(cat, flagList=self.flags)
         catLabel = "noDuplicates"
 
-        bright = mags[self.fluxFilter] < self.config.analysis.magThreshold
-        prettyBrightThreshold = self.config.analysis.magThreshold
+        if self.config.analysis.useSignalToNoiseThreshold:
+            if "base_InputCount_value" in byFilterCats[self.fluxFilter].schema:
+                inputCounts = byFilterCats[self.fluxFilter]["base_InputCount_value"]
+                scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=10)
+                signalToNoiseThreshold = np.floor(
+                    np.sqrt(scaleFactor)*self.config.analysis.signalToNoiseThreshold/100 + 0.49)*100
+                signalToNoiseHighThreshold = (np.floor(
+                    np.sqrt(scaleFactor)*
+                    self.config.analysis.signalToNoiseHighThreshold/100 + 0.49)*100)
+            bright = signalToNoise[self.fluxFilter] >= signalToNoiseThreshold
+            ptFrac = max(2, int(0.05*len(mags[self.fluxFilter][bright])))
+            # Set self.magThreshold to represent approximately that which corresponds to the
+            # S/N threshold.  Computed as the mean magnitude of the lower 5% of the
+            # S/N > signalToNoiseThreshold subsample
+            magThreshold = np.floor(mags[self.fluxFilter][bright][
+                mags[self.fluxFilter][bright].argsort()[-ptFrac:]].mean()*10 + 0.5)/10
+            thresholdStr = [" [S/N$\geqslant$" + str(signalToNoiseHighThreshold) + "]",
+                            " [" + self.fluxFilter + "$\lesssim$" + str(magThreshold) + "]"]
+        else:
+            magThreshold = self.config.analysis.magThreshold
+            bright = mags[self.fluxFilter] < magThreshold
+            thresholdStr = [" [" + self.fluxFilter + " < " + str(self.config.analysis.magThreshold) + "]", ]
+        prettyBrightThreshold = self.config.analysis.magThreshold + 4
         prettyBright = mags[self.fluxFilter] < prettyBrightThreshold
 
         # Determine number of filters object is classified as a star
@@ -933,6 +986,10 @@ class ColorAnalysisTask(CmdLineTask):
         decentGalaxiesMag = mags[self.fluxFilter][decentGalaxies]
         unitStr = "mmag" if self.config.toMilli else "mag"
         fluxColStr = fluxToPlotString(fluxColumn)
+
+        polyFitKwargs = dict(thresholdStr=thresholdStr, camera=camera, hscRun=hscRun, catLabel=catLabel,
+                             geLabel=geLabel, uberCalLabel=uberCalLabel, unitScale=self.unitScale)
+
         if filters.issuperset(set(("HSC-G", "HSC-R", "HSC-I"))):
             # Do a linear fit to regions defined in Ivezic transforms
             transformPerp = self.config.transforms["wPerp"]
@@ -960,9 +1017,7 @@ class ColorAnalysisTask(CmdLineTask):
                                              xRange=xRange, yRange=yRange, order=1,
                                              xFitRange=(0.28, 1.0), yFitRange=(0.02, 0.48),
                                              fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
-                                             magThreshold=self.config.analysis.magThreshold, camera=camera,
-                                             hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
-                                             unitScale=self.unitScale, **verifyKwargs)
+                                             **verifyKwargs, **polyFitKwargs)
             transformPerp = self.config.transforms["xPerp"]
             transformPara = self.config.transforms["xPara"]
             fitLineUpper = [transformPerp.fitLineUpperIncpt, transformPerp.fitLineSlope]
@@ -981,9 +1036,7 @@ class ColorAnalysisTask(CmdLineTask):
                                              xRange=xRange, yRange=yRange, order=1,
                                              xFitRange=(1.05, 1.45), yFitRange=(0.78, 1.62),
                                              fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
-                                             magThreshold=self.config.analysis.magThreshold, camera=camera,
-                                             hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
-                                             unitScale=self.unitScale, closeToVertical=True, **verifyKwargs)
+                                             closeToVertical=True, **verifyKwargs, **polyFitKwargs)
             # Lower branch only; upper branch is noisy due to astrophysics
             nameStr = filtersStr + fluxColStr
             self.log.info("nameStr = {:s}".format(nameStr))
@@ -997,9 +1050,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          xRange=xRange, yRange=yRange, order=3,
                                          xFitRange=(0.23, 1.2), yFitRange=(0.05, 0.6),
                                          fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
-                                         magThreshold=self.config.analysis.magThreshold, camera=camera,
-                                         hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
-                                         unitScale=self.unitScale)
+                                         **polyFitKwargs)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
             if fluxColumn != "base_PsfFlux_instFlux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
@@ -1062,9 +1113,7 @@ class ColorAnalysisTask(CmdLineTask):
                                              xRange=xRange, yRange=yRange, order=1,
                                              xFitRange=(0.82, 2.01), yFitRange=(0.37, 0.81),
                                              fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
-                                             magThreshold=self.config.analysis.magThreshold, camera=camera,
-                                             hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
-                                             unitScale=self.unitScale)
+                                             **polyFitKwargs)
             nameStr = filtersStr + fluxColStr
             fitLineUpper = [5.9, -3.05]
             fitLineLower = [0.11, -2.07]
@@ -1077,9 +1126,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          xRange=xRange, yRange=yRange, order=2,
                                          xFitRange=(-0.01, 1.75), yFitRange=(-0.01, 0.72),
                                          fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
-                                         magThreshold=self.config.analysis.magThreshold, camera=camera,
-                                         hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
-                                         unitScale=self.unitScale)
+                                         **polyFitKwargs)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
             if fluxColumn != "base_PsfFlux_instFlux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
@@ -1136,9 +1183,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          xRange=xRange, yRange=yRange, order=2,
                                          xFitRange=(-0.05, 0.8), yFitRange=(-0.03, 0.32),
                                          fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
-                                         magThreshold=self.config.analysis.magThreshold, camera=camera,
-                                         hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
-                                         unitScale=self.unitScale)
+                                         **polyFitKwargs)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
             if fluxColumn != "base_PsfFlux_instFlux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
@@ -1196,9 +1241,7 @@ class ColorAnalysisTask(CmdLineTask):
                                          xRange=xRange, yRange=yRange,
                                          order=2, xFitRange=(-0.08, 0.2), yFitRange=(0.006, 0.19),
                                          fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
-                                         magThreshold=self.config.analysis.magThreshold, camera=camera,
-                                         hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
-                                         unitScale=self.unitScale)
+                                         **polyFitKwargs)
             # Make a color-color plot with both stars and galaxies, less pruning, and no fit
             if fluxColumn != "base_PsfFlux_instFlux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
@@ -1252,8 +1295,8 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
                           transformPara=None, mags=None, principalCol=None, xRange=None, yRange=None,
                           order=1, iterations=3, rej=3.0, xFitRange=None, yFitRange=None,
                           fitLineUpper=None, fitLineLower=None, numBins="auto", hscRun=None, catLabel=None,
-                          geLabel=None, logger=None, magThreshold=99.9, camera=None, unitScale=1.0,
-                          closeToVertical=False, verifyJob=None, verifyMetricName=None):
+                          geLabel=None, uberCalLabel=None, logger=None, thresholdStr=None, camera=None,
+                          unitScale=1.0, closeToVertical=False, verifyJob=None, verifyMetricName=None):
     fig, axes = plt.subplots(nrows=1, ncols=2, sharex=False, sharey=False)
     fig.subplots_adjust(wspace=0.46, bottom=0.15, left=0.11, right=0.96, top=0.9)
     axes[0].tick_params(which="both", direction="in", labelsize=9)
@@ -1433,8 +1476,9 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     mappableKeep = plt.cm.ScalarMappable(cmap="jet", norm=plt.Normalize(vmin=zKeep.min(), vmax=zKeep.max()))
     mappableKeep._A = []        # fake up the array of the scalar mappable. Urgh...
     caxKeep = plt.axes([0.46, 0.15, 0.022, 0.75])
+    caxKeep.yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
     cbKeep = plt.colorbar(mappableKeep, cax=caxKeep)
-    cbKeep.ax.tick_params(labelsize=6)
+    cbKeep.ax.tick_params(labelsize=6, length=1)
     labelPadShift = len(str(zKeep.max()//10)) if zKeep.max()//10 > 0 else 0
     cbKeep.set_label("Number Density", rotation=270, labelpad=-15 - labelPadShift, fontsize=7)
 
@@ -1495,13 +1539,16 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     lenNumObj = max(len(str(len(xx[keepOdr]))), len(str(len(xx))))
     fdx = max((min(0.08*lenNumObj, 0.6), 0.32))
     xLoc, yLoc = xRange[0] + 0.05*deltaX, yRange[1] - 0.036*deltaY
-    axes[0].text(xLoc, yLoc, "N$_{used }$ =", ha="left", color="blue", **kwargs)
-    axes[0].text(xLoc + fdx*deltaX, yLoc, str(len(xx[keepOdr])), ha="right", color="blue", **kwargs)
-    axes[0].text(xRange[1] - 0.03*deltaX, yLoc, " [" + filterStr + " < " + str(magThreshold) + "]",
-                 ha="right", color="blue", **kwargs)
-    yLoc -= 0.044*(yRange[1] - yRange[0])
     axes[0].text(xLoc, yLoc, "N$_{total}$ =", ha="left", color="black", **kwargs)
     axes[0].text(xLoc + fdx*deltaX, yLoc, str(len(xx)), ha="right", color="black", **kwargs)
+    yLoc -= 0.044*(yRange[1] - yRange[0])
+    axes[0].text(xLoc, yLoc, "N$_{used }$ =", ha="left", color="blue", **kwargs)
+    axes[0].text(xLoc + fdx*deltaX, yLoc, str(len(xx[keepOdr])), ha="right", color="blue", **kwargs)
+    yLoc += 2*0.044*(yRange[1] - yRange[0])
+    for threshStr in list(thresholdStr):
+        yLoc -= 0.044*(yRange[1] - yRange[0])
+        axes[0].text(xRange[1] - 0.03*deltaX, yLoc, threshStr, ha="right", color="black", **kwargs)
+    yLoc = yLoc - 0.044*(yRange[1] - yRange[0]) if len(list(thresholdStr)) == 1 else yLoc
 
     unitStr = "mmag" if unitScale == 1000 else "mag"
     axes[1].set_xlabel("Dist to poly fit or Pincp Color ({:s})".format(unitStr))
@@ -1549,9 +1596,9 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         xP2Line = xLine[idxHd - deltaIdxP2:idxHd + deltaIdxP2]
         yP2Line = yP2Line[idxHd - deltaIdxP2:idxHd + deltaIdxP2]
         axes[0].plot(xP2Line, yP2Line, "g--", lw=0.75)
-        plotText("P2$^{fit}$", plt, axes[0], xP2Line[0] - 0.022*deltaX, yP2Line[0] + 0.04*deltaY,
+        plotText("P2$^{fit}$", plt, axes[0], xP2Line[0] - 0.022*deltaX, yP2Line[0] + 0.045*deltaY,
                  fontSize=8, color="green", coordSys="data")
-        plotText("P1$^{fit}$", plt, axes[0], xP1Line[0] - 0.07*deltaX, yP1Line[0] + 0.03*deltaY,
+        plotText("P1$^{fit}$", plt, axes[0], xP1Line[0] - 0.07*deltaX, yP1Line[0] + 0.035*deltaY,
                  fontSize=8, color="green", coordSys="data")
 
         # Also plot the effective hard wired lines
@@ -1722,9 +1769,11 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     if camera:
         labelCamera(camera, plt, axes[0], 0.5, 1.04)
     if catLabel:
-        plotText(catLabel, plt, axes[0], 0.88, -0.11, fontSize=9, color="green")
+        plotText(catLabel, plt, axes[0], 0.88, -0.12, fontSize=7, color="green")
     if geLabel:
-        plotText(geLabel, plt, axes[0], 0.13, -0.11, fontSize=9, color="green")
+        plotText(geLabel, plt, axes[0], 0.11, -0.12, fontSize=7, color="green")
+    if uberCalLabel:
+        plotText(uberCalLabel, plt, axes[0], 0.11, -0.16, prefix="uberCal: ", fontSize=7, color="green")
     if hscRun:
         axes[0].set_title("HSC stack run: " + hscRun, color="#800080")
 
@@ -1736,45 +1785,56 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
 
 def colorColorPlot(dataId, filename, log, xStars, yStars, xGalaxies, yGalaxies, magStars, magGalaxies,
                    xLabel, yLabel, filterStr, fluxColStr, xRange=None, yRange=None, hscRun=None,
-                   geLabel=None, logger=None, magThreshold=99.9, camera=None, unitScale=1.0):
+                   geLabel=None, uberCalLabel=None, logger=None, magThreshold=99.9, camera=None,
+                   unitScale=1.0):
     fig, axes = plt.subplots(1, 1)
     axes.tick_params(which="both", direction="in", labelsize=9)
+
+    goodStars = np.ones(len(magStars), dtype=bool)
+    goodGalaxies = np.ones(len(magGalaxies), dtype=bool)
+    if magThreshold < 90.0:
+        goodStars = np.logical_and(goodStars, magStars < magThreshold)
+        goodGalaxies = np.logical_and(goodGalaxies, magGalaxies < magThreshold)
 
     if xRange:
         axes.set_xlim(*xRange)
     else:
-        xRange = (0.9*xStars.min(), 1.1*xStars.max())
+        xRange = (0.9*xStars[goodStars].min(), 1.1*xStars[goodStars].max())
     if yRange:
         axes.set_ylim(*yRange)
 
-    vMin = min(magStars.min(), magGalaxies.min())
-    vMax = min(magStars.max(), magGalaxies.max())
+    vMin = min(magStars[goodStars].min(), magGalaxies[goodGalaxies].min())
+    vMax = min(magStars[goodStars].max(), magGalaxies[goodGalaxies].max())
 
-    ptSize = max(1, setPtSize(len(xGalaxies)) - 2)
+    ptSize = max(1, setPtSize(len(xGalaxies[goodGalaxies])) - 2)
 
     kwargs = dict(s=ptSize, marker="o", lw=0, vmin=vMin, vmax=vMax)
-    axes.scatter(xGalaxies, yGalaxies, c=magGalaxies, cmap="autumn", label="galaxies", **kwargs)
-    axes.scatter(xStars, yStars, c=magStars, cmap="winter", label="stars", **kwargs)
+    axes.scatter(xGalaxies[goodGalaxies], yGalaxies[goodGalaxies], c=magGalaxies[goodGalaxies],
+                 cmap="autumn", label="galaxies", **kwargs)
+    axes.scatter(xStars[goodStars], yStars[goodStars], c=magStars[goodStars],
+                 cmap="winter", label="stars", **kwargs)
     axes.set_xlabel(xLabel)
     axes.set_ylabel(yLabel, labelpad=-1)
 
     # Label total number of objects of each data type
     deltaX = abs(xRange[1] - xRange[0])
     deltaY = abs(yRange[1] - yRange[0])
-    lenNumObj = max(len(str(len(xStars))), len(str(len(xGalaxies))))
+    lenNumObj = max(len(str(len(xStars[goodStars]))), len(str(len(xGalaxies[goodGalaxies]))))
     fdx = max((min(0.095*lenNumObj, 0.9), 0.42))
     xLoc, yLoc = xRange[0] + 0.03*deltaX, yRange[1] - 0.038*deltaY
     kwargs = dict(va="center", fontsize=8)
     axes.text(xLoc, yLoc, "Ngals  =", ha="left", color="red", **kwargs)
-    axes.text(xLoc + fdx*deltaX, yLoc, str(len(xGalaxies)) +
-              " [" + filterStr + " < " + str(magThreshold) + "]", ha="right", color="red", **kwargs)
+    axes.text(xLoc + fdx*deltaX, yLoc, str(len(xGalaxies[goodGalaxies])) +
+              " [" + filterStr + "$<$" + str(magThreshold) + "]", ha="right", color="red", **kwargs)
     axes.text(xLoc, 0.94*yLoc, "Nstars =", ha="left", color="blue", **kwargs)
-    axes.text(xLoc + fdx*deltaX, 0.94*yLoc, str(len(xStars)) +
-              " [" + filterStr + " < " + str(magThreshold) + "]", ha="right", color="blue", **kwargs)
+    axes.text(xLoc + fdx*deltaX, 0.94*yLoc, str(len(xStars[goodStars])) +
+              " [" + filterStr + "$<$" + str(magThreshold) + "]", ha="right", color="blue", **kwargs)
     if camera:
         labelCamera(camera, plt, axes, 0.5, 1.09)
     if geLabel:
-        plotText(geLabel, plt, axes, 0.09, -0.11, color="green")
+        plotText(geLabel, plt, axes, 0.13, -0.09, fontSize=7, color="green")
+    if uberCalLabel:
+        plotText(uberCalLabel, plt, axes, 0.83, -0.09, prefix="uberCal: ", fontSize=7, color="green")
     if hscRun:
         axes.set_title("HSC stack run: " + hscRun, color="#800080")
 
@@ -1782,12 +1842,12 @@ def colorColorPlot(dataId, filename, log, xStars, yStars, xGalaxies, yGalaxies, 
     axes.annotate(tractStr, xy=(0.5, 1.04), xycoords="axes fraction", ha="center", va="center",
                   fontsize=10, color="green")
 
-    mappableStars = plt.cm.ScalarMappable(cmap="winter_r", norm=plt.Normalize(vmin=vMin, vmax=vMax))
+    mappableStars = plt.cm.ScalarMappable(cmap="winter", norm=plt.Normalize(vmin=vMin, vmax=vMax))
     mappableStars._A = []        # fake up the array of the scalar mappable. Urgh...
     cbStars = plt.colorbar(mappableStars, aspect=14, pad=-0.09)
     cbStars.ax.tick_params(labelsize=8)
     cbStars.set_label(filterStr + " [" + fluxColStr + "]: stars", rotation=270, labelpad=-24, fontsize=9)
-    mappableGalaxies = plt.cm.ScalarMappable(cmap="autumn_r", norm=plt.Normalize(vmin=vMin, vmax=vMax))
+    mappableGalaxies = plt.cm.ScalarMappable(cmap="autumn", norm=plt.Normalize(vmin=vMin, vmax=vMax))
     mappableGalaxies._A = []      # fake up the array of the scalar mappable. Urgh...
     cbGalaxies = plt.colorbar(mappableGalaxies, aspect=14)
     cbGalaxies.set_ticks([])
