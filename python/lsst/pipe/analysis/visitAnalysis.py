@@ -31,7 +31,7 @@ class CcdAnalysis(Analysis):
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
                 tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
                 zpLabel=None, forcedStr=None, uberCalLabel=None, postFix="", plotRunStats=True,
-                highlightList=None, haveFpCoords=None):
+                highlightList=None, haveFpCoords=None, doPrintMedian=False):
         stats = self.stats
         if self.config.doPlotCcdXy:
             self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix),
@@ -46,7 +46,8 @@ class CcdAnalysis(Analysis):
         return Analysis.plotAll(self, dataId, filenamer, log, enforcer=enforcer, butler=butler, camera=camera,
                                 ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
                                 matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, postFix=postFix,
-                                plotRunStats=plotRunStats, highlightList=highlightList)
+                                plotRunStats=plotRunStats, highlightList=highlightList,
+                                doPrintMedian=doPrintMedian)
 
     def plotFP(self, dataId, filenamer, log, enforcer=None, camera=None, ccdList=None, hscRun=None,
                matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None):
@@ -56,7 +57,7 @@ class CcdAnalysis(Analysis):
 
     def plotCcd(self, filename, centroid="base_SdssCentroid", cmap=plt.cm.nipy_spectral, idBits=32,
                 visitMultiplier=200, stats=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
-                zpLabel=None):
+                zpLabel=None, doPrintMedian=False):
         """Plot quantity as a function of CCD x,y"""
         xx = self.catalog[self.prefix + centroid + "_x"]
         yy = self.catalog[self.prefix + centroid + "_y"]
@@ -92,10 +93,10 @@ class CcdAnalysis(Analysis):
         if stats is not None:
             annotateAxes(filename, plt, axes[0], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
                          hscRun=hscRun, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
-                         unitScale=self.unitScale)
+                         unitScale=self.unitScale, doPrintMedian=doPrintMedian)
             annotateAxes(filename, plt, axes[1], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
                          hscRun=hscRun, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
-                         unitScale=self.unitScale)
+                         unitScale=self.unitScale, doPrintMedian=doPrintMedian)
         axes[0].set_xlim(-100, 2150)
         axes[1].set_xlim(-100, 4300)
         axes[0].set_ylim(self.qMin, self.qMax)

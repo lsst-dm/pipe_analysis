@@ -898,7 +898,8 @@ class CoaddAnalysisTask(CmdLineTask):
                            "Distance (%s)" % unitStr, shortName, self.config.analysis, prefix="first_",
                            qMin=-0.01, qMax=0.11, labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat,
                            forcedMean=0.0, unitScale=self.unitScale,
-                           ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, **plotAllKwargs)
+                           ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, doPrintMedian=True,
+                                     **plotAllKwargs)
 
     def plotMatches(self, matches, filterName, filenamer, dataId, description="matches", butler=None,
                     camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None,
@@ -969,7 +970,8 @@ class CoaddAnalysisTask(CmdLineTask):
                                qMin=-0.01*qMatchScale, qMax=0.5*qMatchScale,
                                labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
                                unitScale=self.unitScale,
-                               ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+                               ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, doPrintMedian=True,
+                                         **plotAllKwargs)
         shortName = description + "_distance"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches,
@@ -980,7 +982,7 @@ class CoaddAnalysisTask(CmdLineTask):
                            unitScale=self.unitScale,
                            ).plotAll(dataId, filenamer, self.log,
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
-                                     **plotAllKwargs)
+                                     doPrintMedian=True, **plotAllKwargs)
         if "src_calib_astrometry_used" in matches.schema:
             shortName = description + "_raCosDec_calib_astrometry_used"
             self.log.info("shortName = {:s}".format(shortName))
