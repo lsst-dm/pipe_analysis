@@ -411,7 +411,8 @@ class CoaddAnalysisTask(CmdLineTask):
             with andCatalog(cat):
                 matches = self.matchCatalog(forced, repoInfo.filterName, self.config.externalCatalogs[cat])
                 self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
-                                 forcedStr=forcedStr, matchRadius=self.matchRadius, **plotKwargs)
+                                 forcedStr=forcedStr, matchRadius=self.matchRadius,
+                                 matchRadiusUnitStr=self.matchRadiusUnitStr, **plotKwargs)
 
     def readCatalogs(self, patchRefList, dataset):
         """Read in and concatenate catalogs of type dataset in lists of data references
@@ -902,9 +903,6 @@ class CoaddAnalysisTask(CmdLineTask):
     def plotMatches(self, matches, filterName, filenamer, dataId, description="matches", butler=None,
                     camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None,
                     matchRadiusUnitStr=None, zpLabel=None, forcedStr=None, flagsCat=None, uberCalLabel=None):
-
-        matchRadius = matchRadius if matchRadius else self.matchRadius
-        matchRadiusUnitStr = matchRadiusUnitStr if matchRadiusUnitStr else self.matchRadiusUnitStr
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.030*self.unitScale}}),
         fluxToPlotList = ["base_PsfFlux_instFlux", "base_CircularApertureFlux_12_0_instFlux"]
@@ -924,6 +922,8 @@ class CoaddAnalysisTask(CmdLineTask):
             ct = Colorterm(primary=refFilterName, secondary=refFilterName)
             self.log.warn("Note: no colorterms loaded for {:s}, thus no colorterms will be applied to "
                           "the reference catalog".format(self.config.refObjLoader.ref_dataset_name))
+
+        # Magnitude difference plots
         for fluxName in fluxToPlotList:
             if "src_calib_psf_used" in matches.schema:
                 shortName = description + "_" + fluxToPlotString(fluxName) + "_mag_calib_psf_used"
@@ -955,7 +955,9 @@ class CoaddAnalysisTask(CmdLineTask):
                                unitScale=self.unitScale,
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
 
+        # Astrometry (positional) difference plots
         unitStr = "mas" if self.config.toMilli else "arcsec"
+        qMatchScale = matchRadius if matchRadius else self.matchRadius
         if "src_calib_astrometry_used" in matches.schema:
             shortName = description + "_distance_calib_astrometry_used"
             self.log.info("shortName = {:s}".format(shortName))
@@ -964,7 +966,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                    cat["distance"]*(1.0*afwGeom.radians).asArcseconds()*self.unitScale,
                                "Distance (%s) (calib_astrom_used)" % unitStr, shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
-                               qMin=-0.01*matchRadius, qMax=0.5*matchRadius,
+                               qMin=-0.01*qMatchScale, qMax=0.5*qMatchScale,
                                labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
                                unitScale=self.unitScale,
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
@@ -973,7 +975,7 @@ class CoaddAnalysisTask(CmdLineTask):
         self.AnalysisClass(matches,
                            lambda cat: cat["distance"]*(1.0*afwGeom.radians).asArcseconds()*self.unitScale,
                            "Distance (%s)" % unitStr, shortName, self.config.analysisMatches, prefix="src_",
-                           qMin=-0.05*matchRadius, qMax=0.3*matchRadius,
+                           qMin=-0.05*qMatchScale, qMax=0.3*qMatchScale,
                            labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat, forcedMean=0.0,
                            unitScale=self.unitScale,
                            ).plotAll(dataId, filenamer, self.log,
@@ -988,8 +990,8 @@ class CoaddAnalysisTask(CmdLineTask):
                                                        unitScale=self.unitScale),
                                "      $\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s) (calib_astrom_used)" % unitStr,
                                shortName, self.config.analysisMatches, prefix="src_",
-                               goodKeys=["calib_astrometry_used"], qMin=-0.2*matchRadius,
-                               qMax=0.2*matchRadius, labeller=MatchesStarGalaxyLabeller(),
+                               goodKeys=["calib_astrometry_used"], qMin=-0.2*qMatchScale,
+                               qMax=0.2*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
                                flagsCat=flagsCat, unitScale=self.unitScale,
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
         shortName = description + "_raCosDec"
@@ -998,8 +1000,8 @@ class CoaddAnalysisTask(CmdLineTask):
                                                    declination1="src_coord_dec", declination2="ref_coord_dec",
                                                    unitScale=self.unitScale),
                            "$\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr, shortName,
-                           self.config.analysisMatches, prefix="src_", qMin=-0.2*matchRadius,
-                           qMax=0.2*matchRadius, labeller=MatchesStarGalaxyLabeller(),
+                           self.config.analysisMatches, prefix="src_", qMin=-0.2*qMatchScale,
+                           qMax=0.2*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
                            flagsCat=flagsCat, unitScale=self.unitScale,
                            ).plotAll(dataId, filenamer, self.log,
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
@@ -1011,7 +1013,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                AstrometryDiff("src_coord_ra", "ref_coord_ra", unitScale=self.unitScale),
                                "$\Delta$RA (%s) (calib_astrom_used)" % unitStr, shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
-                               qMin=-0.25*matchRadius, qMax=0.25*matchRadius,
+                               qMin=-0.25*qMatchScale, qMax=0.25*qMatchScale,
                                labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
                                unitScale=self.unitScale,
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
@@ -1019,7 +1021,7 @@ class CoaddAnalysisTask(CmdLineTask):
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra", unitScale=self.unitScale),
                            "$\Delta$RA (%s)" % unitStr, shortName, self.config.analysisMatches,
-                           prefix="src_", qMin=-0.25*matchRadius, qMax=0.25*matchRadius,
+                           prefix="src_", qMin=-0.25*qMatchScale, qMax=0.25*qMatchScale,
                            labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat, unitScale=self.unitScale,
                            ).plotAll(dataId, filenamer, self.log,
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
@@ -1031,7 +1033,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                AstrometryDiff("src_coord_dec", "ref_coord_dec", unitScale=self.unitScale),
                                "$\delta_{Dec}$ (%s) (calib_astrom_used)" % unitStr, shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
-                               qMin=-0.25*matchRadius, qMax=0.25*matchRadius,
+                               qMin=-0.25*qMatchScale, qMax=0.25*qMatchScale,
                                labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
                                unitScale=self.unitScale,
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
@@ -1040,7 +1042,7 @@ class CoaddAnalysisTask(CmdLineTask):
         self.AnalysisClass(matches,
                            AstrometryDiff("src_coord_dec", "ref_coord_dec", unitScale=self.unitScale),
                            "$\delta_{Dec}$ (%s)" % unitStr, shortName, self.config.analysisMatches,
-                           prefix="src_", qMin=-0.3*matchRadius, qMax=0.3*matchRadius,
+                           prefix="src_", qMin=-0.3*qMatchScale, qMax=0.3*qMatchScale,
                            labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat, unitScale=self.unitScale,
                            ).plotAll(dataId, filenamer, self.log,
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),

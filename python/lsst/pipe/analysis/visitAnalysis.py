@@ -16,7 +16,7 @@ from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
 from .analysis import Analysis
 from .coaddAnalysis import CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisTask
-from .utils import (Filenamer, concatenateCatalogs, addApertureFluxesHSC, addFpPoint,
+from .utils import (Filenamer, AngularDistance, concatenateCatalogs, addApertureFluxesHSC, addFpPoint,
                     addFootprintNPix, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
                     calibrateSourceCatalogMosaic, calibrateSourceCatalogPhotoCalib,
                     calibrateSourceCatalog, backoutApCorr, matchNanojanskyToAB, andCatalog, writeParquet,
@@ -340,7 +340,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                         matches = self.matchCatalog(catalog, repoInfo.filterName,
                                                     self.config.externalCatalogs[cat])
                         self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
-                                         **plotKwargs)
+                                         matchRadius=self.matchRadius,
+                                         matchRadiusUnitStr=self.matchRadiusUnitStr, **plotKwargs)
 
     def readCatalogs(self, dataRefList, dataset, repoInfo, aliasDictList=None):
         """Read in and concatenate catalogs of type dataset in lists of data references
@@ -397,7 +398,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if self.config.doPlotCentroids or self.config.analysis.doPlotFP and self.haveFpCoords:
                 if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
                     calexp = repoInfo.butler.get("calexp", dataRef.dataId)
-                    det = exp.getDetector()
+                    det = calexp.getDetector()
                     catalog = addFpPoint(det, catalog)
                 xFp = catalog["base_FPPosition_x"]
                 if len(xFp[np.where(np.isfinite(xFp))]) <= 0:
@@ -497,6 +498,12 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             matchMeta = repoInfo.butler.get(dataset, dataRef.dataId,
                                             flags=afwTable.SOURCE_IO_NO_FOOTPRINTS).getTable().getMetadata()
             catalog = matchesToCatalog(matches, matchMeta)
+            if self.config.doApplyUberCal:
+                # Update "distance" between reference and source matches based on uber-calibration positions
+                angularDist = AngularDistance("ref_coord_ra", "src_coord_ra",
+                                              "ref_coord_dec", "src_coord_dec")
+                catalog["distance"] = angularDist(catalog)
+
             # Compute Focal Plane coordinates for each source if not already there
             if self.config.analysisMatches.doPlotFP:
                 if "src_base_FPPosition_x" not in catalog.schema and "src_focalplane_x" not in catalog.schema:
