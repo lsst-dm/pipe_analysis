@@ -140,17 +140,19 @@ def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", fontSize=9, color="k", c
 
 def annotateAxes(filename, plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff=0.05,
                  fontSize=8, ha="left", va="top", color="blue", isHist=False, hscRun=None, matchRadius=None,
-                 matchRadiusUnitStr="\"", writeMinMax=None, unitScale=1.0):
+                 matchRadiusUnitStr="\"", writeMinMax=None, unitScale=1.0, doPrintMedian=False):
     xOffFact = 0.67*len(" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]))
     axes.annotate(dataSet+r" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]),
                   xy=(x0, y0), xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize, color=color)
     axes.annotate(r" [mag<{0:.1f}]".format(magThreshold), xy=(x0*xOffFact, y0), xycoords="axes fraction",
                   ha=ha, va=va, fontsize=fontSize, color="k", alpha=0.55)
     meanStr = "{0.mean:.4f}".format(stats[dataSet])
+    medianStr = "{0.median:.4f}".format(stats[dataSet])
     stdevStr = "{0.stdev:.4f}".format(stats[dataSet])
     statsUnitStr = None
     if unitScale == 1000.0:
         meanStr = "{0.mean:.2f}".format(stats[dataSet])
+        medianStr = "{0.median:.2f}".format(stats[dataSet])
         stdevStr = "{0.stdev:.2f}".format(stats[dataSet])
         statsUnitStr = " (milli)"
         if any(ss in filename for ss in ["_ra", "_dec", "distance"]):
@@ -158,28 +160,29 @@ def annotateAxes(filename, plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=
         if any(ss in filename for ss in ["Flux", "_photometry", "matches_mag"]):
             statsUnitStr = " (mmag)"
     lenStr = 0.12 + 0.017*(max(len(meanStr), len(stdevStr)))
-
-    axes.annotate("mean = ", xy=(x0 + 0.12, y0 - yOff),
-                  xycoords="axes fraction", ha="right", va=va, fontsize=fontSize, color="k")
-    axes.annotate(meanStr, xy=(x0 + lenStr, y0 - yOff),
-                  xycoords="axes fraction", ha="right", va=va, fontsize=fontSize, color="k")
+    strKwargs = dict(xycoords="axes fraction", va=va, fontsize=fontSize, color="k")
+    yOffMult = 1
+    axes.annotate("mean = ", xy=(x0 + 0.12, y0 - yOffMult*yOff), ha="right", **strKwargs)
+    axes.annotate(meanStr, xy=(x0 + lenStr, y0 - yOffMult*yOff), ha="right", **strKwargs)
     if statsUnitStr is not None:
-        axes.annotate(statsUnitStr, xy=(x0 + lenStr + 0.006, y0 - yOff),
-                      xycoords="axes fraction", ha="left", va=va, fontsize=fontSize, color="k")
-    axes.annotate("stdev = ", xy=(x0 + 0.12, y0 - 2*yOff),
-                  xycoords="axes fraction", ha="right", va=va, fontsize=fontSize, color="k")
-    axes.annotate(stdevStr, xy=(x0 + lenStr, y0 - 2*yOff),
-                  xycoords="axes fraction", ha="right", va=va, fontsize=fontSize, color="k")
-    yOffMult = 3
+        axes.annotate(statsUnitStr, xy=(x0 + lenStr + 0.006, y0 - yOffMult*yOff), ha="left", **strKwargs)
+    yOffMult += 1
+    axes.annotate("stdev = ", xy=(x0 + 0.12, y0 - yOffMult*yOff), ha="right", **strKwargs)
+    axes.annotate(stdevStr, xy=(x0 + lenStr, y0 - yOffMult*yOff), ha="right", **strKwargs)
+    if doPrintMedian:
+        yOffMult += 1
+        axes.annotate("med = ", xy=(x0 + 0.12, y0 - yOffMult*yOff), ha="right", **strKwargs)
+        axes.annotate(medianStr, xy=(x0 + lenStr, y0 - yOffMult*yOff), ha="right", **strKwargs)
     if writeMinMax is not None:
+        yOffMult += 1
         axes.annotate("Min, Max (all stars) = ({0:.2f}, {1:.2f})\"".format(), xy=(x0, y0 - yOffMult*yOff),
-                      xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize)
-        yOffMult += 1
+                      ha=ha, **strKwargs)
     if matchRadius is not None:
-        axes.annotate("Match radius = {0:.2f}{1:s}".format(matchRadius, matchRadiusUnitStr),
-                      xy=(x0, y0 - yOffMult*yOff), xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize)
         yOffMult += 1
+        axes.annotate("Match radius = {0:.2f}{1:s}".format(matchRadius, matchRadiusUnitStr),
+                      xy=(x0, y0 - yOffMult*yOff), ha=ha, **strKwargs)
     if hscRun is not None:
+        yOffMult += 1
         axes.annotate("HSC stack run: {0:s}".format(hscRun), xy=(x0, y0 - yOffMult*yOff),
                       xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize, color="#800080")
     if isHist:

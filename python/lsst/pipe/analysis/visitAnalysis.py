@@ -16,7 +16,7 @@ from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
 from .analysis import Analysis
 from .coaddAnalysis import CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisTask
-from .utils import (Filenamer, concatenateCatalogs, addApertureFluxesHSC, addFpPoint,
+from .utils import (Filenamer, AngularDistance, concatenateCatalogs, addApertureFluxesHSC, addFpPoint,
                     addFootprintNPix, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
                     calibrateSourceCatalogMosaic, calibrateSourceCatalogPhotoCalib,
                     calibrateSourceCatalog, backoutApCorr, matchNanojanskyToAB, andCatalog, writeParquet,
@@ -31,7 +31,7 @@ class CcdAnalysis(Analysis):
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
                 tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
                 zpLabel=None, forcedStr=None, uberCalLabel=None, postFix="", plotRunStats=True,
-                highlightList=None, haveFpCoords=None):
+                highlightList=None, haveFpCoords=None, doPrintMedian=False):
         stats = self.stats
         if self.config.doPlotCcdXy:
             self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix),
@@ -46,7 +46,8 @@ class CcdAnalysis(Analysis):
         return Analysis.plotAll(self, dataId, filenamer, log, enforcer=enforcer, butler=butler, camera=camera,
                                 ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
                                 matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, postFix=postFix,
-                                plotRunStats=plotRunStats, highlightList=highlightList)
+                                plotRunStats=plotRunStats, highlightList=highlightList,
+                                doPrintMedian=doPrintMedian)
 
     def plotFP(self, dataId, filenamer, log, enforcer=None, camera=None, ccdList=None, hscRun=None,
                matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None):
@@ -56,7 +57,7 @@ class CcdAnalysis(Analysis):
 
     def plotCcd(self, filename, centroid="base_SdssCentroid", cmap=plt.cm.nipy_spectral, idBits=32,
                 visitMultiplier=200, stats=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
-                zpLabel=None):
+                zpLabel=None, doPrintMedian=False):
         """Plot quantity as a function of CCD x,y"""
         xx = self.catalog[self.prefix + centroid + "_x"]
         yy = self.catalog[self.prefix + centroid + "_y"]
@@ -92,10 +93,10 @@ class CcdAnalysis(Analysis):
         if stats is not None:
             annotateAxes(filename, plt, axes[0], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
                          hscRun=hscRun, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
-                         unitScale=self.unitScale)
+                         unitScale=self.unitScale, doPrintMedian=doPrintMedian)
             annotateAxes(filename, plt, axes[1], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
                          hscRun=hscRun, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
-                         unitScale=self.unitScale)
+                         unitScale=self.unitScale, doPrintMedian=doPrintMedian)
         axes[0].set_xlim(-100, 2150)
         axes[1].set_xlim(-100, 4300)
         axes[0].set_ylim(self.qMin, self.qMax)
@@ -340,7 +341,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                         matches = self.matchCatalog(catalog, repoInfo.filterName,
                                                     self.config.externalCatalogs[cat])
                         self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
-                                         **plotKwargs)
+                                         matchRadius=self.matchRadius,
+                                         matchRadiusUnitStr=self.matchRadiusUnitStr, **plotKwargs)
 
     def readCatalogs(self, dataRefList, dataset, repoInfo, aliasDictList=None):
         """Read in and concatenate catalogs of type dataset in lists of data references
@@ -397,7 +399,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if self.config.doPlotCentroids or self.config.analysis.doPlotFP and self.haveFpCoords:
                 if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
                     calexp = repoInfo.butler.get("calexp", dataRef.dataId)
-                    det = exp.getDetector()
+                    det = calexp.getDetector()
                     catalog = addFpPoint(det, catalog)
                 xFp = catalog["base_FPPosition_x"]
                 if len(xFp[np.where(np.isfinite(xFp))]) <= 0:
@@ -497,6 +499,12 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             matchMeta = repoInfo.butler.get(dataset, dataRef.dataId,
                                             flags=afwTable.SOURCE_IO_NO_FOOTPRINTS).getTable().getMetadata()
             catalog = matchesToCatalog(matches, matchMeta)
+            if self.config.doApplyUberCal:
+                # Update "distance" between reference and source matches based on uber-calibration positions
+                angularDist = AngularDistance("ref_coord_ra", "src_coord_ra",
+                                              "ref_coord_dec", "src_coord_dec")
+                catalog["distance"] = angularDist(catalog)
+
             # Compute Focal Plane coordinates for each source if not already there
             if self.config.analysisMatches.doPlotFP:
                 if "src_base_FPPosition_x" not in catalog.schema and "src_focalplane_x" not in catalog.schema:

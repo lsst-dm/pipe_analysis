@@ -159,7 +159,8 @@ class Analysis(object):
                     self.qMax = minmax if minmax > 0 else self.qMax
 
     def plotAgainstMag(self, filename, stats=None, camera=None, ccdList=None, tractInfo=None, patchList=None,
-                       hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None):
+                       hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None,
+                       doPrintMedian=False):
         """Plot quantity against magnitude"""
         fig, axes = plt.subplots(1, 1)
         plt.axhline(0, linestyle="--", color="0.4")
@@ -180,7 +181,7 @@ class Analysis(object):
         if stats is not None:
             annotateAxes(filename, plt, axes, stats, "star", self.magThreshold, hscRun=hscRun,
                          matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
-                         unitScale=self.unitScale)
+                         unitScale=self.unitScale, doPrintMedian=doPrintMedian)
         axes.legend(handles=dataPoints, loc=1, fontsize=8)
         labelVisit(filename, plt, axes, 0.5, 1.05)
         if zpLabel is not None:
@@ -194,7 +195,7 @@ class Analysis(object):
     def plotAgainstMagAndHist(self, log, filename, stats=None, camera=None, ccdList=None, tractInfo=None,
                               patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
                               zpLabel=None, forcedStr=None, plotRunStats=True, highlightList=None,
-                              filterStr=None, extraLabels=None, uberCalLabel=None):
+                              filterStr=None, extraLabels=None, uberCalLabel=None, doPrintMedian=False):
         """Plot quantity against magnitude with side histogram"""
         if filterStr is None:
             filterStr = ""
@@ -403,7 +404,8 @@ class Analysis(object):
         if stats is not None:
             l1, l2 = annotateAxes(filename, plt, axScatter, stats, dataType, self.magThreshold,
                                   hscRun=hscRun, matchRadius=matchRadius,
-                                  matchRadiusUnitStr=matchRadiusUnitStr, unitScale=self.unitScale)
+                                  matchRadiusUnitStr=matchRadiusUnitStr, unitScale=self.unitScale,
+                                  doPrintMedian=doPrintMedian)
         dataPoints = dataPoints + runStats + [l1, l2]
         axScatter.legend(handles=dataPoints, loc=1, fontsize=8)
         axHistx.legend(fontsize=7, loc=2)
@@ -451,7 +453,7 @@ class Analysis(object):
 
     def plotHistogram(self, filename, numBins=51, stats=None, hscRun=None, matchRadius=None,
                       matchRadiusUnitStr=None, zpLabel=None, forcedStr=None, camera=None, filterStr=None,
-                      uberCalLabel=None):
+                      uberCalLabel=None, doPrintMedian=False):
         """Plot histogram of quantity"""
         fig, axes = plt.subplots(1, 1)
         axes.axvline(0, linestyle="--", color="0.6")
@@ -481,7 +483,8 @@ class Analysis(object):
         if stats is not None:
             annotateAxes(filename, plt, axes, stats, "star", self.magThreshold, x0=x0, y0=y0,
                          isHist=True, hscRun=hscRun, matchRadius=matchRadius,
-                         matchRadiusUnitStr=matchRadiusUnitStr, unitScale=self.unitScale)
+                         matchRadiusUnitStr=matchRadiusUnitStr, unitScale=self.unitScale,
+                         doPrintMedian=doPrintMedian)
         axes.legend()
         if camera is not None:
             labelCamera(camera, plt, axes, 0.5, 1.09)
@@ -499,7 +502,7 @@ class Analysis(object):
     def plotSkyPosition(self, filename, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
                         camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
                         matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, highlightList=None,
-                        forcedStr=None, dataName="star", uberCalLabel=None):
+                        forcedStr=None, dataName="star", uberCalLabel=None, doPrintMedian=False):
         """Plot quantity as a function of position"""
         pad = 0.02  # Number of degrees to pad the axis ranges
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
@@ -631,14 +634,15 @@ class Analysis(object):
             plotText(uberCalLabel, plt, axes, 0.13, -0.11, prefix="uberCal: ", fontSize=8, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
+        strKwargs = dict(loc='upper left', fancybox=True, markerscale=1.2, scatterpoints=3, framealpha=0.35,
+                         facecolor="k")
         if highlightList is not None:
-            axes.legend(loc='upper left', bbox_to_anchor=(-0.05, 1.15), fancybox=True, fontsize=7,
-                        markerscale=1.2, scatterpoints=3, framealpha=0.35, facecolor="k")
+            axes.legend(bbox_to_anchor=(-0.05, 1.15), fontsize=7, **strKwargs)
         else:
-            axes.legend(loc='upper left', bbox_to_anchor=(-0.01, 1.12), fancybox=True, fontsize=8,
-                        markerscale=1.2, scatterpoints=3, framealpha=0.35, facecolor="k")
+            axes.legend(bbox_to_anchor=(-0.01, 1.12), fontsize=8, **strKwargs)
 
         meanStr = "{0.mean:.4f}".format(stats0)
+        medianStr = "{0.median:.4f}".format(stats0)
         stdevStr = "{0.stdev:.4f}".format(stats0)
         statsUnitStr = None
         if "(milli)" in self.quantityName:
@@ -649,30 +653,32 @@ class Analysis(object):
             statsUnitStr = " (mas)"
         if statsUnitStr is not None:
             meanStr = "{0.mean:.2f}".format(stats0)
+            medianStr = "{0.median:.2f}".format(stats0)
             stdevStr = "{0.stdev:.2f}".format(stats0)
 
         x0 = 0.86
-        lenStr = 0.017*(max(len(meanStr), len(stdevStr)))
-        axes.annotate("mean = ", xy=(x0, 1.08),
-                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
-        axes.annotate(meanStr, xy=(x0 + lenStr, 1.08),
-                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
+        deltaX = 0.004
+        lenStr = 0.016*(max(len(meanStr), len(stdevStr)))
+        strKwargs = dict(xycoords="axes fraction", va="center", fontsize=8)
+        axes.annotate("mean = ", xy=(x0, 1.08), ha="right", **strKwargs)
+        axes.annotate(meanStr, xy=(x0 + lenStr, 1.08), ha="right", **strKwargs)
+        if doPrintMedian:
+            deltaX += (0.155 + lenStr)
+            axes.annotate("median = ", xy=(x0 + deltaX, 1.08), ha="right", **strKwargs)
+            axes.annotate(medianStr, xy=(x0 + lenStr + deltaX, 1.08), ha="right", **strKwargs)
+            deltaX += 0.004
         if statsUnitStr is not None:
-            axes.annotate(statsUnitStr, xy=(x0 + lenStr + 0.006, 1.08),
-                          xycoords="axes fraction", ha="left", va="center", fontsize=8)
-        axes.annotate("stdev = ", xy=(x0, 1.035),
-                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
-        axes.annotate(stdevStr, xy=(x0 + lenStr, 1.035),
-                      xycoords="axes fraction", ha="right", va="center", fontsize=8)
+            axes.annotate(statsUnitStr, xy=(x0 + lenStr + deltaX, 1.08), ha="left", **strKwargs)
+        axes.annotate("stdev = ", xy=(x0, 1.035), ha="right", **strKwargs)
+        axes.annotate(stdevStr, xy=(x0 + lenStr, 1.035), ha="right", **strKwargs)
         axes.annotate(r"N = {0} [mag<{1:.1f}]".format(stats0.num, magThreshold),
-                      xy=(x0 + lenStr + 0.012, 1.035),
-                      xycoords="axes fraction", ha="left", va="center", fontsize=8)
+                      xy=(x0 + lenStr + 0.012, 1.035), ha="left", **strKwargs)
 
         fig.savefig(filename, dpi=150)
         plt.close(fig)
 
     def plotRaDec(self, filename, stats=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
-                  zpLabel=None, forcedStr=None, uberCalLabel=None):
+                  zpLabel=None, forcedStr=None, uberCalLabel=None, doPrintMedian=False):
         """Plot quantity as a function of RA, Dec"""
 
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
@@ -704,10 +710,10 @@ class Analysis(object):
         if stats is not None:
             annotateAxes(filename, plt, axes[0], stats, "star", self.magThreshold, x0=0.03, yOff=0.07,
                          hscRun=hscRun, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
-                         unitScale=self.unitScale)
+                         unitScale=self.unitScale, doPrintMedian=doPrintMedian)
             annotateAxes(filename, plt, axes[1], stats, "star", self.magThreshold, x0=0.03, yOff=0.07,
                          hscRun=hscRun, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
-                         unitScale=self.unitScale)
+                         unitScale=self.unitScale, doPrintMedian=doPrintMedian)
         labelVisit(filename, plt, axes[0], 0.5, 1.1)
         if zpLabel is not None:
             prefix = "" if "GE applied" in zpLabel else "zp: "
@@ -999,14 +1005,14 @@ class Analysis(object):
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
                 tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
                 zpLabel=None, forcedStr=None, postFix="", plotRunStats=True, highlightList=None,
-                extraLabels=None, uberCalLabel=None):
+                extraLabels=None, uberCalLabel=None, doPrintMedian=False):
         """Make all plots"""
         stats = self.stats
         # Dict of all parameters common to plot* functions
         plotKwargs = dict(stats=stats, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                           patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                           matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel,
-                          forcedStr=forcedStr, uberCalLabel=uberCalLabel)
+                          forcedStr=forcedStr, uberCalLabel=uberCalLabel, doPrintMedian=doPrintMedian)
         if "galacticExtinction" not in self.shortName:
             self.plotAgainstMagAndHist(log, filenamer(dataId, description=self.shortName,
                                                       style="psfMagHist" + postFix),
