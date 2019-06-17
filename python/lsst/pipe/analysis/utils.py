@@ -1236,9 +1236,14 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
     butler = dataRef.getButler()
     camera = butler.get("camera")
     dataId = dataRef.dataId
-    filterName = dataId["filter"]
-    genericFilterName = afwImage.Filter(afwImage.Filter(filterName).getId()).getName()
     isCoadd = True if "patch" in dataId else False
+    try:
+        filterName = dataId["filter"]
+    except Exception:
+        exp = butler.get("calexp", dataId) if not isCoadd else butler.get(coaddName + "Coadd_calexp", dataId)
+        filterName = exp.getFilter().getFilterProperty().getName()
+        dataId.update(dict(filter=filterName))
+    genericFilterName = afwImage.Filter(afwImage.Filter(filterName).getId()).getName()
     ccdKey = None if isCoadd else findCcdKey(dataId)
     # Check metadata to see if stack used was HSC
     metaStr = coaddName + coaddDataset + "_md" if coaddName else "calexp_md"
@@ -1295,7 +1300,7 @@ def findCcdKey(dataId):
        The string associated with the "ccd" key.
     """
     ccdKey = None
-    ccdKeyList = ["ccd", "sensor", "camcol", "detector"]
+    ccdKeyList = ["ccd", "sensor", "camcol", "detector", "ccdnum"]
     for ss in ccdKeyList:
         if ss in dataId:
             ccdKey = ss

@@ -255,8 +255,8 @@ def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
     axes.locator_params(nbins=6)
     axes.ticklabel_format(useOffset=False)
     camRadius = max(camera.getFpBBox().getWidth(), camera.getFpBBox().getHeight())/2
-    camRadius = np.round(camRadius, -2)
-    camLimits = np.round(1.25*camRadius, -2)
+    camRadius = np.round(camRadius, -1)
+    camLimits = np.round(1.25*camRadius, -1)
     intCcdList = [int(ccd) for ccd in ccdList]
     prop_cycle = plt.rcParams['axes.prop_cycle']
     colors = prop_cycle.by_key()['color']
@@ -294,8 +294,11 @@ def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
         for x, y, t in ([-1, 0, "N"], [0, 1, "W"], [1, 0, "S"], [0, -1, "E"]):
             axes.text(1.085*camRadius*x, 1.085*camRadius*y, t, ha="center", va="center",
                       fontsize=fontSize - 1)
-    axes.text(-0.82*camRadius, 1.04*camRadius, "%s" % camera.getName(), ha="center", fontsize=fontSize,
-              color=color)
+            axes.text(-0.82*camRadius, 1.04*camRadius, "%s" % camera.getName(), ha="center",
+                      fontsize=fontSize, color=color)
+    else:
+        axes.text(0.0, 1.04*camRadius, "%s" % camera.getName(), ha="center", fontsize=fontSize,
+                  color=color)
 
 
 def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1.5):
@@ -372,8 +375,13 @@ def plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=None, zpLabel=None, 
     if "raftName" in dataId:  # Pop these (if present) so that the ccd is looked up by just the detector field
         dataIdCopy.pop("raftName", None)
         dataIdCopy.pop("detectorName", None)
+    ccdKey = findCcdKey(dataId)
+    # Pop (if present) so that the ccd is looked up by just the ccdKey field
+    for keyName in ["extension", ]:
+        if keyName != ccdKey and keyName in dataIdCopy:
+            print("Popping:", keyName)
+            dataIdCopy.pop(keyName, None)
     for ccd in ccdList:
-        ccdKey = findCcdKey(dataId)
         ccdLabelStr = str(ccd)
         if "raft" in dataId:
             if len(ccd) != 4:
