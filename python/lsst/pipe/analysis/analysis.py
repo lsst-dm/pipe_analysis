@@ -567,6 +567,8 @@ class Analysis(object):
                       addDataList=None, addDataLabelList=None):
         """Plot histogram of quantity"""
         fig, axes = plt.subplots(1, 1)
+        axes2 = None
+        fluxBins = None
         axes.axvline(0, linestyle="--", color="0.6")
         if vertLineList:
             for xLine in vertLineList:
@@ -595,13 +597,13 @@ class Analysis(object):
                            label=name + "_cum", histtype="step", cumulative=cumulative)
             # yaxis limit for non-normalized histograms
             numMax = max(numMax, num.max()*1.1) if not density else numMax
-        if cumulative:
+        if cumulative and axes2:
             axes2.set_ylim(0, 1.05)
             axes2.tick_params(axis="y", which="both", direction="in")
             axes2.set_ylabel("Cumulative Fraction", rotation=270, labelpad=12, color=color, fontsize=9)
             axes2.legend(loc="right", fontsize=8)
             axes2.grid(True, "both", color="black", alpha=0.3)
-        if addDataList is not None:
+        if addDataList is not None and fluxBins is not None:
             hatches = ["\\\\", "//", "*", "+"]
             cmap = plt.cm.Spectral
             addColors = [cmap(i) for i in np.linspace(0, 1, len(addDataList))]
@@ -658,9 +660,9 @@ class Analysis(object):
     def plotSkyPosition(self, filename, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
                         camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
                         matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, highlightList=None,
-                        forcedStr=None, dataName="star", uberCalLabel=None, doPrintMedian=False):
+                        forcedStr=None, dataName="star", uberCalLabel=None, doPrintMedian=False, pad=0.02,
+                        tractImage=None):
         """Plot quantity as a function of position"""
-        pad = 0.02  # Number of degrees to pad the axis ranges
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
         dec = np.rad2deg(self.catalog[self.prefix + "coord_dec"])
         raMin, raMax = np.round(ra.min() - pad, 2), np.round(ra.max() + pad, 2)
@@ -723,9 +725,9 @@ class Analysis(object):
 
         if dataId is not None and butler is not None and ccdList is not None:
             if any(ss in filename for ss in ["commonZp", "_raw"]):
-                plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=None, zpLabel=zpLabel)
+                plotCcdOutline(axes, butler, dataId, camera, ccdList, tractInfo=None, zpLabel=zpLabel)
             else:
-                plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=tractInfo, zpLabel=zpLabel)
+                plotCcdOutline(axes, butler, dataId, camera, ccdList, tractInfo=tractInfo, zpLabel=zpLabel)
             if tractInfo is not None:
                 tractRa, tractDec = bboxToXyCoordLists(tractInfo.getBBox(), wcs=tractInfo.getWcs())
                 axes.plot(tractRa, tractDec, "w--", linewidth=1, alpha=0.7, label=str(tractInfo.getId()))
@@ -738,6 +740,16 @@ class Analysis(object):
             decMin = patchBoundary.decMin
             decMax = patchBoundary.decMax
             plotPatchOutline(axes, tractInfo, patchList)
+
+            if tractImage:
+                med = np.nanmedian(tractImage.array)
+                mad = np.nanmedian(abs(tractImage.array - med))
+                imMin = med - 3.0*1.4826*mad
+                imMax = med + 10.0*1.4826*mad
+                norm = AsinhNormalize(minimum=imMin, dataRange=imMax - imMin, Q=8)
+                tractRa, tractDec = bboxToXyCoordLists(tractInfo.getBBox(), wcs=tractInfo.getWcs())
+                extent = tractRa[0], tractRa[2], tractDec[0], tractDec[2]
+                axes.imshow(tractImage.array, extent=extent, cmap="gray_r", norm=norm)
 
         stats0 = None
         for name, data in self.data.items():
@@ -759,7 +771,7 @@ class Analysis(object):
                                  marker="o", facecolors="none", edgecolors="white", label=label)
 
             axes.scatter(ra[selection], dec[selection], s=ptSize, marker="o", lw=0, label=name,
-                         c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax)
+                         c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax, alpha=0.6)
 
         if stats0 is None:  # No data to plot
             return
@@ -794,12 +806,12 @@ class Analysis(object):
             plotText(uberCalLabel, plt, axes, 0.13, -0.11, prefix="uberCal: ", fontSize=8, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
-        strKwargs = dict(loc='upper left', fancybox=True, markerscale=1.2, scatterpoints=3, framealpha=0.35,
+        strKwargs = dict(loc="center left", fancybox=True, markerscale=1.2, scatterpoints=3, framealpha=0.35,
                          facecolor="k")
         if highlightList is not None:
-            axes.legend(bbox_to_anchor=(-0.05, 1.15), fontsize=7, **strKwargs)
+            axes.legend(bbox_to_anchor=(-0.05, 1.08), fontsize=4, mode="expand", **strKwargs)
         else:
-            axes.legend(bbox_to_anchor=(-0.01, 1.12), fontsize=8, **strKwargs)
+            axes.legend(bbox_to_anchor=(-0.01, 1.08), fontsize=5, **strKwargs)
 
         meanStr = "{0.mean:.4f}".format(stats0)
         medianStr = "{0.median:.4f}".format(stats0)
@@ -834,7 +846,8 @@ class Analysis(object):
         axes.annotate(r"N = {0} [mag<{1:.1f}]".format(stats0.num, magThreshold),
                       xy=(x0 + lenStr + 0.012, 1.035), ha="left", **strKwargs)
 
-        fig.savefig(filename, dpi=150)
+        dpi = 350 if tractImage else 150
+        fig.savefig(filename, dpi=dpi)
         plt.close(fig)
 
     def plotRaDec(self, filename, stats=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
@@ -890,7 +903,7 @@ class Analysis(object):
     def plotQuiver(self, catalog, filename, log, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
                    camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
                    matchRadius=None, zpLabel=None, forcedStr=None, dataName="star", uberCalLabel=None,
-                   scale=1):
+                   scale=1, tractImage=None):
         """Plot ellipticity residuals quiver plot"""
 
         # Use HSM algorithm results if present, if not, use SDSS Shape
@@ -945,7 +958,7 @@ class Analysis(object):
         axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=8)
 
         if dataId is not None and butler is not None and ccdList is not None:
-            plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=tractInfo, zpLabel=zpLabel)
+            plotCcdOutline(axes, butler, dataId, camera, ccdList, tractInfo=tractInfo, zpLabel=zpLabel)
 
         if tractInfo is not None and patchList is not None:
             for ip, patch in enumerate(tractInfo):
@@ -956,6 +969,16 @@ class Analysis(object):
                     decMin = min(np.round(min(decPatch) - pad, 2), decMin)
                     decMax = max(np.round(max(decPatch) + pad, 2), decMax)
             plotPatchOutline(axes, tractInfo, patchList)
+
+            if tractImage:
+                med = np.nanmedian(tractImage.array)
+                mad = np.nanmedian(abs(tractImage.array - med))
+                imMin = med - 3.0*1.4826*mad
+                imMax = med + 10.0*1.4826*mad
+                norm = AsinhNormalize(minimum=imMin, dataRange=imMax - imMin, Q=8)
+                patchBoundary = getRaDecMinMaxPatchList(patchList, tractInfo, pad=0)
+                extent = patchBoundary.raMin, patchBoundary.raMax, patchBoundary.decMin, patchBoundary.decMax
+                axes.imshow(tractImage.array, extent=extent, cmap="gray_r", norm=norm)
 
         e1 = E1Resids(compareCol, psfCompareCol)
         e1 = e1(catalog)
@@ -1015,14 +1038,16 @@ class Analysis(object):
         plotText(shapeAlgorithm, plt, axes, 0.85, -0.08, prefix="Shape Alg: ", fontSize=8, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
-        axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
+        axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.15), fancybox=True, fontsize=5)
 
-        fig.savefig(filename, dpi=150)
+        dpi = 350 if tractImage else 150
+        fig.savefig(filename, dpi=dpi)
         plt.close(fig)
 
     def plotInputCounts(self, catalog, filename, log, dataId, butler, tractInfo, patchList=None, camera=None,
                         forcedStr=None, uberCalLabel=None, cmap=plt.cm.viridis, alpha=0.5,
-                        doPlotTractImage=True, doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000):
+                        tractImage=None, doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000,
+                        coaddName="deep"):
         """Plot grayscale image of tract with base_InputCounts_value overplotted
 
         Parameters
@@ -1050,7 +1075,7 @@ class Analysis(object):
            String to label the catalog type (forced vs. unforced) on the plot.
         cmap : `matplotlib.colors.ListedColormap`, optional
            The matplotlib colormap to use.  It will be given transparency level
-           set by ``alpha``.  Default is `None`.
+           set by ``alpha``.  Default is `matplotlib.pyplot.cm.viridis`.
         alpha : `float`, optional
            The matplotlib blending value, between 0 (transparent) and 1 (opaque)
            Default is 0.5.
@@ -1073,18 +1098,35 @@ class Analysis(object):
         """
         tractBbox = tractInfo.getBBox()
         tractWcs = tractInfo.getWcs()
+        if patchList:
+            minPatchX = tractBbox.getMaxX()
+            maxPatchX = tractBbox.getMinX()
+            minPatchY = tractBbox.getMaxY()
+            maxPatchY = tractBbox.getMinY()
+            for patch in patchList:
+                patchId = dataId.copy()
+                patchId["patch"] = patch
+                bbox = butler.get(coaddName + "Coadd_calexp_bbox", patchId, immediate=True)
+                minPatchX = bbox.getMinX() if bbox.getMinX() < minPatchX else minPatchX
+                maxPatchX = bbox.getMaxX() if bbox.getMaxX() > maxPatchX else maxPatchX
+                minPatchY = bbox.getMinY() if bbox.getMinY() < minPatchY else minPatchY
+                maxPatchY = bbox.getMaxY() if bbox.getMaxY() > maxPatchY else maxPatchY
+        else:
+            minPatchX = tractBbox.getMinX()
+            maxPatchX = tractBbox.getMaxX()
+            minPatchY = tractBbox.getMinY()
+            maxPatchY = tractBbox.getMaxY()
 
         fig, axes = plt.subplots(1, 1)
         axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=7)
-        if doPlotTractImage:
-            image = buildTractImage(butler, dataId, tractInfo, patchList=patchList)
-            med = np.nanmedian(image.array)
-            mad = np.nanmedian(abs(image.array - med))
+        if tractImage:
+            med = np.nanmedian(tractImage.array)
+            mad = np.nanmedian(abs(tractImage.array - med))
             imMin = med - 3.0*1.4826*mad
             imMax = med + 10.0*1.4826*mad
             norm = AsinhNormalize(minimum=imMin, dataRange=imMax - imMin, Q=8)
             extent = tractBbox.getMinX(), tractBbox.getMaxX(), tractBbox.getMinY(), tractBbox.getMaxY()
-            axes.imshow(image.array, extent=extent, cmap="gray_r", norm=norm)
+            axes.imshow(tractImage.array, extent=extent, cmap="gray_r", norm=norm)
 
         centStr = "slot_Centroid"
         shapeStr = "slot_Shape"
@@ -1134,8 +1176,8 @@ class Analysis(object):
                        format(sizeFactor, maxDiamPix), fontsize=7)
         cbar.ax.tick_params(direction="in", labelsize=7)
 
-        axes.set_xlim(tractBbox.getMinX(), tractBbox.getMaxX())
-        axes.set_ylim(tractBbox.getMinY(), tractBbox.getMaxY())
+        axes.set_xlim(minPatchX, maxPatchX)
+        axes.set_ylim(minPatchY, maxPatchY)
 
         filterStr = dataId["filter"]
         if filterStr and camera is not None:
@@ -1147,12 +1189,9 @@ class Analysis(object):
         axes.set_ylabel("yTract (pixels) {0:s}".format(filterLabelStr), size=9)
 
         # Get Ra and DEC tract limits to add to plot axis labels
-        tract00 = tractWcs.pixelToSky(tractBbox.getMinX(),
-                                      tractBbox.getMinY()).getPosition(units=afwGeom.degrees)
-        tract0N = tractWcs.pixelToSky(tractBbox.getMinX(),
-                                      tractBbox.getMaxY()).getPosition(units=afwGeom.degrees)
-        tractN0 = tractWcs.pixelToSky(tractBbox.getMaxX(),
-                                      tractBbox.getMinY()).getPosition(units=afwGeom.degrees)
+        tract00 = tractWcs.pixelToSky(minPatchX, minPatchY).getPosition(units=afwGeom.degrees)
+        tract0N = tractWcs.pixelToSky(minPatchX, maxPatchY).getPosition(units=afwGeom.degrees)
+        tractN0 = tractWcs.pixelToSky(maxPatchX, minPatchY).getPosition(units=afwGeom.degrees)
 
         textKwargs = dict(ha="left", va="center", transform=axes.transAxes, fontsize=7, color="blue")
         plt.text(-0.05, -0.07, str("{:.2f}".format(tract00.getX())), **textKwargs)
@@ -1179,7 +1218,7 @@ class Analysis(object):
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
                 tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
                 zpLabel=None, forcedStr=None, postFix="", plotRunStats=True, highlightList=None,
-                extraLabels=None, uberCalLabel=None, doPrintMedian=False):
+                extraLabels=None, uberCalLabel=None, doPrintMedian=False, tractImage=None):
         """Make all plots"""
         stats = self.stats
         # Dict of all parameters common to plot* functions
@@ -1199,7 +1238,8 @@ class Analysis(object):
             self.plotHistogram(filenamer(dataId, description=self.shortName, style="hist" + postFix),
                                **plotKwargs)
 
-        skyPositionKwargs = dict(dataId=dataId, butler=butler, highlightList=highlightList)
+        skyPositionKwargs = dict(dataId=dataId, butler=butler, highlightList=highlightList,
+                                 tractImage=tractImage)
         skyPositionKwargs.update(plotKwargs)
         if "all" in self.data:
             styleStr = "sky-all"

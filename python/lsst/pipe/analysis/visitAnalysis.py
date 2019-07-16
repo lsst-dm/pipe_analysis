@@ -35,7 +35,7 @@ class CcdAnalysis(Analysis):
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
                 tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
                 zpLabel=None, forcedStr=None, uberCalLabel=None, postFix="", plotRunStats=True,
-                highlightList=None, haveFpCoords=None, doPrintMedian=False):
+                highlightList=None, haveFpCoords=None, doPrintMedian=False, tractImage=None):
         stats = self.stats
         if self.config.doPlotCcdXy:
             self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix),
