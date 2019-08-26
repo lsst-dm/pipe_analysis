@@ -4,14 +4,11 @@ import matplotlib.patches as patches
 import numpy as np
 
 import lsst.afw.cameraGeom as cameraGeom
-import lsst.afw.geom as afwGeom
-import lsst.geom as lsstGeom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 import lsst.daf.persistence as dafPersist
+import lsst.geom as geom
 from lsst.pipe.base import Struct
-
-import lsst.geom as lsstGeom
 
 from .utils import checkHscStack, findCcdKey
 
@@ -75,8 +72,8 @@ class CosmosLabeller(StarGalaxyLabeller):
         for ii in range(num):
             cosmos.addNew()
         cosmos["id"][:] = original["NUMBER"][good]
-        cosmos["coord_ra"][:] = original["ALPHA.J2000"][good]*(1.0*afwGeom.degrees).asRadians()
-        cosmos["coord_dec"][:] = original["DELTA.J2000"][good]*(1.0*afwGeom.degrees).asRadians()
+        cosmos["coord_ra"][:] = original["ALPHA.J2000"][good]*(1.0*geom.degrees).asRadians()
+        cosmos["coord_dec"][:] = original["DELTA.J2000"][good]*(1.0*geom.degrees).asRadians()
         self.cosmos = cosmos
         self.radius = radius
 
@@ -540,13 +537,13 @@ def plotCcdOutline(axes, butler, dataId, camera, ccdList, tractInfo=None, zpLabe
                 decs = list()
                 coords = list()
                 for x, y in zip([0, w, w, 0, 0], [0, 0, h, h, 0]):
-                    xy = lsstGeom.Point2D(x, y)
+                    xy = geom.Point2D(x, y)
                     ra = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
                     dec = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
                     ras.append(ra)
                     decs.append(dec)
-                    coords.append(lsstGeom.SpherePoint(ra, dec, afwGeom.degrees))
-                xy = lsstGeom.Point2D(w/2, h/2)
+                    coords.append(geom.SpherePoint(ra, dec, afwGeom.degrees))
+                xy = geom.Point2D(w/2, h/2)
                 centerX = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
                 centerY = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
                 inTract = False
@@ -646,7 +643,7 @@ def bboxToXyCoordLists(bbox, wcs=None, wcsUnits="deg"):
     validWcsUnits = ["deg", "rad"]
     corners = []
     for corner in bbox.getCorners():
-        p = lsstGeom.Point2D(corner.getX(), corner.getY())
+        p = geom.Point2D(corner.getX(), corner.getY())
         if wcs:
             if wcsUnits not in validWcsUnits:
                 raise RuntimeError("wcsUnits must be one of {:}".format(validWcsUnits))
@@ -934,7 +931,7 @@ def buildTractImage(butler, dataId, tractInfo, patchList=None, coaddName="deep")
     if nPatches == 0:
         raise RuntimeError("No data found for tract {:}".format(tractInfo.getId()))
     tractArray = np.flipud(tractArray)
-    image = afwImage.ImageF(afwGeom.ExtentI(tractBbox.getMaxX() + 1, tractBbox.getMaxY() + 1))
+    image = afwImage.ImageF(geom.ExtentI(tractBbox.getMaxX() + 1, tractBbox.getMaxY() + 1))
     image.array[:] = tractArray
     return image
 
