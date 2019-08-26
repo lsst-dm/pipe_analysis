@@ -8,6 +8,7 @@ import numpy as np
 np.seterr(all="ignore")  # noqa E402
 
 import lsst.afw.geom as afwGeom
+import lsst.geom as geom
 from lsst.display.matplotlib.matplotlib import AsinhNormalize
 from lsst.pex.config import Config, Field, ListField, DictField
 
