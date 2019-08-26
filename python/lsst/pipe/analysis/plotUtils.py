@@ -23,7 +23,7 @@ except ImportError:
 __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "MatchesStarGalaxyLabeller",
            "CosmosLabeller", "plotText", "annotateAxes", "labelVisit", "labelCamera",
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
-           "plotCcdOutline", "rotatePixelCoords", "bboxToXyCoordLists", "getRaDecMinMaxPatchList",
+           "plotCcdOutline", "rotatePixelCoords", "bboxToXyCoordLists", "getMinMaxPatchList",
            "percent", "setPtSize", "getQuiver", "makeAlphaCmap", "buildTractImage",
            "determineUberCalLabel"]
 
@@ -405,8 +405,12 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
     axes.ticklabel_format(useOffset=False)
 
     tractRa, tractDec = bboxToXyCoordLists(tractInfo.getBBox(), wcs=tractInfo.getWcs())
-    patchBoundary = getRaDecMinMaxPatchList(patchList, tractInfo, pad=maxDegBeyondPatch)
-
+    patchBoundary = getMinMaxPatchList(patchList, tractInfo)
+    if maxDegBeyondPatch > 0 :
+        patchBoundary.raMin -= maxDegBeyondPatch
+        patchBoundary.raMax += maxDegBeyondPatch
+        patchBoundary.decMin -= maxDegBeyondPatch
+        patchBoundary.decMax += maxDegBeyondPatch
     xMin = min(max(tractRa), patchBoundary.raMax) + buff
     xMax = max(min(tractRa), patchBoundary.raMin) - buff
     yMin = max(min(tractDec), patchBoundary.decMin) - buff
@@ -590,7 +594,7 @@ def plotPatchOutline(axes, tractInfo, patchList, plotUnits="deg", idFontSize=Non
                 xCoord, yCoord = bboxToXyCoordLists(patch.getInnerBBox(), wcs=None)
             xCoords = xCoord + (xCoord[0], )
             yCoords = yCoord + (yCoord[0], )
-            axes.plot(xCoords, yCoords, color="black", lw=0.8, linestyle="dashed")
+            axes.plot(xCoords, yCoords, color="black", lw=0.6, linestyle=(0, (5, 4)))
             axes.text(percent(xCoords), percent(yCoords, 0.5), str(patch.getIndex()),
                       fontsize=idFontSize, horizontalalignment="center", verticalalignment="center")
 
@@ -658,38 +662,58 @@ def bboxToXyCoordLists(bbox, wcs=None, wcsUnits="deg"):
     return xCoords, yCorrds
 
 
-def getRaDecMinMaxPatchList(patchList, tractInfo, pad=0.0, nDecimals=4, raMin=360.0, raMax=0.0,
-                            decMin=90.0, decMax=-90.0):
-    """Find the max and min RA and DEC (deg) boundaries encompased in the patchList
+def getMinMaxPatchList(patchList, tractInfo, nDecimals=None, raMin=360.0, raMax=0.0, decMin=90.0,
+                       decMax=-90.0, xMin=1e15, xMax=-1e15, yMin=1e15, yMax=-1e15):
+    """Find the min/max boundaries encompased in the patchList
+
+    Results are provided in RA/Dec (deg) and tract x/y (pixels)
 
     Parameters
     ----------
     patchList : `list` of `str`
        List of patch IDs.
     tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
-       Tract information associated with the patches in patchList
-    pad : `float`
-       Pad the boundary by pad degrees
-    nDecimals : `int`
-       Round coordinates to this number of decimal places
-    raMin, raMax : `float`
-       Initiate minimum[maximum] RA determination at raMin[raMax] (deg)
-    decMin, decMax : `float`
-       Initiate minimum[maximum] DEC determination at decMin[decMax] (deg)
+       Tract information associated with the patches in ``patchList``.
+    nDecimals : `int`, optional
+       Round coordinates to this number of decimal places.
+    raMin, raMax : `float`, optional
+       Initiate minimum[maximum] RA determination in degrees at
+       ``raMin``[``raMax``].
+    decMin, decMax : `float`, optional
+       Initiate minimum[maximum] Dec determination in degrees at
+       ``decMin``[``decMax``].
+    xMin, xMax : `float`, optional
+       Initiate minimum[maximum] x determination in pixels at
+       ``xMin``[``xMax``].
+    yMin, yMax : `float`, optional
+       Initiate minimum[maximum] y determination in pixels at
+       ``yMin``[``yMax]``.
 
     Returns
     -------
     `lsst.pipe.base.Struct`
-       Contains the ra and dec min and max values for the patchList provided
+       Contains the min and max values for the patch list provided in
+       RA/Dec (degrees) and tract x/y (pixels).
     """
-    for ip, patch in enumerate(tractInfo):
-        if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
+    for patch in tractInfo:
+        if str(patch.getIndex()[0]) + "," + str(patch.getIndex()[1]) in patchList:
+            xPatch, yPatch = bboxToXyCoordLists(patch.getOuterBBox(), wcs=None)
+            xMin, xMax = min(min(xPatch), xMin), max(max(xPatch), xMax)
+            yMin, yMax = min(min(yPatch), yMin), max(max(yPatch), yMax)
             raPatch, decPatch = bboxToXyCoordLists(patch.getOuterBBox(), wcs=tractInfo.getWcs())
-            raMin = min(np.round(min(raPatch) - pad, nDecimals), raMin)
-            raMax = max(np.round(max(raPatch) + pad, nDecimals), raMax)
-            decMin = min(np.round(min(decPatch) - pad, nDecimals), decMin)
-            decMax = max(np.round(max(decPatch) + pad, nDecimals), decMax)
+            raMin, raMax = min(min(raPatch), raMin), max(max(raPatch), raMax)
+            decMin, decMax = min(min(decPatch), decMin), max(max(decPatch), decMax)
+        if nDecimals:
+            raMin = np.round(raMin, nDecimals)
+            raMax = np.round(raMax, nDecimals)
+            decMin = np.round(decMin, nDecimals)
+            decMax = np.round(decMax, nDecimals)
+
     return Struct(
+        xMin=xMin,
+        xMax=xMax,
+        yMin=yMin,
+        yMax=yMax,
         raMin=raMin,
         raMax=raMax,
         decMin=decMin,
