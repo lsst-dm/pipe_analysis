@@ -8,6 +8,7 @@ import numpy as np
 np.seterr(all="ignore")  # noqa E402
 
 import lsst.afw.geom as afwGeom
+import lsst.geom as geom
 from lsst.display.matplotlib.matplotlib import AsinhNormalize
 from lsst.pex.config import Config, Field, ListField, DictField
 
@@ -1196,11 +1197,11 @@ class Analysis(object):
 
         # Get Ra and DEC tract limits to add to plot axis labels
         tract00 = tractWcs.pixelToSky(tractBbox.getMinX(),
-                                      tractBbox.getMinY()).getPosition(units=afwGeom.degrees)
+                                      tractBbox.getMinY()).getPosition(units=geom.degrees)
         tract0N = tractWcs.pixelToSky(tractBbox.getMinX(),
-                                      tractBbox.getMaxY()).getPosition(units=afwGeom.degrees)
+                                      tractBbox.getMaxY()).getPosition(units=geom.degrees)
         tractN0 = tractWcs.pixelToSky(tractBbox.getMaxX(),
-                                      tractBbox.getMinY()).getPosition(units=afwGeom.degrees)
+                                      tractBbox.getMinY()).getPosition(units=geom.degrees)
 
         textKwargs = dict(ha="left", va="center", transform=axes.transAxes, fontsize=7, color="blue")
         plt.text(-0.05, -0.07, str("{:.2f}".format(tract00.getX())), **textKwargs)

@@ -26,8 +26,8 @@ from .utils import (Filenamer, Enforcer, concatenateCatalogs, getFluxKeys, addCo
 from .plotUtils import (AllLabeller, OverlapsStarGalaxyLabeller, plotText, labelCamera, setPtSize,
                         determineExternalCalLabel)
 
-import lsst.afw.geom as afwGeom
 import lsst.afw.table as afwTable
+import lsst.geom as geom
 import lsst.verify as verify
 
 __all__ = ["ColorTransform", "ivezicTransformsSDSS", "ivezicTransformsHSC", "straightTransforms",
@@ -593,15 +593,15 @@ class ColorAnalysisTask(CmdLineTask):
         Note that the only fields included are the 5 tracts in the RC + RC2 datasets.
         This is just a placeholder until a per-object implementation is added in DM-13519
         """
-        ebvValues = {"UD_COSMOS_9813": {"centerCoord": afwGeom.SpherePoint(150.25, 2.23, afwGeom.degrees),
+        ebvValues = {"UD_COSMOS_9813": {"centerCoord": geom.SpherePoint(150.25, 2.23, geom.degrees),
                                         "EBmV": 0.0165},
-                     "WIDE_VVDS_9796": {"centerCoord": afwGeom.SpherePoint(337.78, 0.74, afwGeom.degrees),
+                     "WIDE_VVDS_9796": {"centerCoord": geom.SpherePoint(337.78, 0.74, geom.degrees),
                                         "EBmV": 0.0748},
-                     "WIDE_GAMMA15H_9615": {"centerCoord": afwGeom.SpherePoint(216.3, 0.74, afwGeom.degrees),
+                     "WIDE_GAMMA15H_9615": {"centerCoord": geom.SpherePoint(216.3, 0.74, geom.degrees),
                                             "EBmV": 0.0281},
-                     "WIDE_8766": {"centerCoord": afwGeom.SpherePoint(35.70, -3.72, afwGeom.degrees),
+                     "WIDE_8766": {"centerCoord": geom.SpherePoint(35.70, -3.72, geom.degrees),
                                    "EBmV": 0.0246},
-                     "WIDE_8767": {"centerCoord": afwGeom.SpherePoint(37.19, -3.72, afwGeom.degrees),
+                     "WIDE_8767": {"centerCoord": geom.SpherePoint(37.19, -3.72, geom.degrees),
                                    "EBmV": 0.0268}}
 
         geFound = False

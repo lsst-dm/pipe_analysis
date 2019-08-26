@@ -35,9 +35,9 @@ from .utils import (Filenamer, Enforcer, MagDiff, MagDiffMatches, MagDiffCompare
 from .plotUtils import (CosmosLabeller, AllLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
                         MatchesStarGalaxyLabeller, determineExternalCalLabel)
 
-import lsst.afw.geom as afwGeom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
+import lsst.geom as geom
 
 __all__ = ["CoaddAnalysisConfig", "CoaddAnalysisRunner", "CoaddAnalysisTask", "CompareCoaddAnalysisConfig",
            "CompareCoaddAnalysisRunner", "CompareCoaddAnalysisTask"]
@@ -1020,7 +1020,7 @@ class CoaddAnalysisTask(CmdLineTask):
         badForOverlap = makeBadArray(catalog, flagList=self.config.analysis.flags,
                                      onlyReadStars=self.config.onlyReadStars, patchInnerOnly=False)
         goodCat = catalog[~badForOverlap]
-        matches = afwTable.matchRaDec(goodCat, self.config.matchOverlapRadius*afwGeom.arcseconds)
+        matches = afwTable.matchRaDec(goodCat, self.config.matchOverlapRadius*geom.arcseconds)
         if not matches:
             self.log.info("Did not find any overlapping matches")
         return joinMatches(matches, "first_", "second_")
@@ -1055,7 +1055,7 @@ class CoaddAnalysisTask(CmdLineTask):
         shortName = "overlap_distance" + postFix
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(overlaps,
-                           lambda cat: cat["distance"]*(1.0*afwGeom.radians).asArcseconds()*self.unitScale,
+                           lambda cat: cat["distance"]*(1.0*geom.radians).asArcseconds()*self.unitScale,
                            "Distance (%s)" % unitStr, shortName, self.config.analysis, prefix="first_",
                            qMin=-0.01, qMax=0.11, labeller=OverlapsStarGalaxyLabeller(), forcedMean=0.0,
                            unitScale=self.unitScale,
@@ -1131,7 +1131,7 @@ class CoaddAnalysisTask(CmdLineTask):
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(matches,
                                lambda cat:
-                                   cat["distance"]*(1.0*afwGeom.radians).asArcseconds()*self.unitScale,
+                                   cat["distance"]*(1.0*geom.radians).asArcseconds()*self.unitScale,
                                "Distance (%s) (calib_astrom_used)" % unitStr, shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
                                qMin=-0.01*qMatchScale, qMax=0.5*qMatchScale,
@@ -1141,7 +1141,7 @@ class CoaddAnalysisTask(CmdLineTask):
         shortName = description + "_distance"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches,
-                           lambda cat: cat["distance"]*(1.0*afwGeom.radians).asArcseconds()*self.unitScale,
+                           lambda cat: cat["distance"]*(1.0*geom.radians).asArcseconds()*self.unitScale,
                            "Distance (%s)" % unitStr, shortName, self.config.analysisMatches, prefix="src_",
                            qMin=-0.05*qMatchScale, qMax=0.3*qMatchScale,
                            labeller=MatchesStarGalaxyLabeller(), forcedMean=0.0, unitScale=self.unitScale,
@@ -1214,7 +1214,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                      **plotAllKwargs)
 
     def plotCosmos(self, catalog, filenamer, cosmos, dataId):
-        labeller = CosmosLabeller(cosmos, self.config.matchRadiusRaDec*afwGeom.arcseconds)
+        labeller = CosmosLabeller(cosmos, self.config.matchRadiusRaDec*geom.arcseconds)
         self.AnalysisClass(catalog, deconvMom, "Deconvolved moments", "cosmos", self.config.analysis,
                            qMin=-1.0, qMax=6.0, labeller=labeller,
                            ).plotAll(dataId, filenamer, self.log,
@@ -1226,11 +1226,11 @@ class CoaddAnalysisTask(CmdLineTask):
         except ImportError:
             return None
         refObjLoader = LoadAstrometryNetObjectsTask(self.config.refObjLoaderConfig)
-        center = afwGeom.averageSpherePoint([src.getCoord() for src in catalog])
+        center = geom.averageSpherePoint([src.getCoord() for src in catalog])
         radius = max(center.separation(src.getCoord()) for src in catalog)
         filterName = afwImage.Filter(afwImage.Filter(filterName).getId()).getName()  # Get primary name
         refs = refObjLoader.loadSkyCircle(center, radius, filterName).refCat
-        matches = afwTable.matchRaDec(refs, catalog, self.config.matchRadiusRaDec*afwGeom.arcseconds)
+        matches = afwTable.matchRaDec(refs, catalog, self.config.matchRadiusRaDec*geom.arcseconds)
         matches = matchNanojanskyToAB(matches)
         return joinMatches(matches, "ref_", "src_")
 
@@ -1494,7 +1494,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         if self.config.matchXy:
             matches = afwTable.matchXy(catalog1, catalog2, matchRadius, matchControl)
         else:
-            matches = afwTable.matchRaDec(catalog1, catalog2, matchRadius*afwGeom.arcseconds, matchControl)
+            matches = afwTable.matchRaDec(catalog1, catalog2, matchRadius*geom.arcseconds, matchControl)
         if not matches:
             raise TaskError("No matches found")
         return joinMatches(matches, "first_", "second_")

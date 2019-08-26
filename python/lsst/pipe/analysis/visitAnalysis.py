@@ -29,7 +29,7 @@ from .fakesAnalysis import (addDegreePositions, matchCatalogs, addNearestNeighbo
 
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
-import lsst.geom as lsstGeom
+import lsst.geom as geom
 
 
 class CcdAnalysis(Analysis):
@@ -569,7 +569,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 ccdWidth = mask.getWidth()
                 ccdHeight = mask.getHeight()
 
-                ccdCorners = wcs.pixelToSky([lsstGeom.Point2D(0, 0), lsstGeom.Point2D(ccdWidth, ccdHeight)])
+                ccdCorners = wcs.pixelToSky([geom.Point2D(0, 0), geom.Point2D(ccdWidth, ccdHeight)])
                 areaDict["corners_" + str(dataRef.dataId["ccd"])] = ccdCorners
 
                 # Check which fake sources fall on the ccd
@@ -590,8 +590,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 validCcdPolygon = reader.readExposureInfo().getValidPolygon()
                 onCcdList = []
                 for rowId in possOnCcd:
-                    skyCoord = lsstGeom.SpherePoint(fakeCat[raFakesCol].values[rowId],
-                                                    fakeCat[decFakesCol].values[rowId], lsstGeom.radians)
+                    skyCoord = geom.SpherePoint(fakeCat[raFakesCol].values[rowId],
+                                                fakeCat[decFakesCol].values[rowId], geom.radians)
                     pixCoord = wcs.skyToPixel(skyCoord)
                     onCcd = validCcdPolygon.contains(pixCoord)
                     if onCcd:
