@@ -7,16 +7,17 @@ from matplotlib.ticker import NullFormatter, AutoMinorLocator, FormatStrFormatte
 import numpy as np
 np.seterr(all="ignore")  # noqa E402
 
+import lsst.afw.cameraGeom as cameraGeom
 import lsst.afw.geom as afwGeom
 import lsst.geom as geom
 from lsst.display.matplotlib.matplotlib import AsinhNormalize
-from lsst.pex.config import Config, Field, ListField, DictField
+from lsst.pex.config import Config, Field, ListField, DictField, ChoiceField
 
 from .utils import Data, Stats, E1Resids, E2Resids, checkIdLists, fluxToPlotString, computeMeanOfFrac
 from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotText, plotCameraOutline,
-                        plotTractOutline, plotPatchOutline, plotCcdOutline, labelCamera, getQuiver,
-                        getMinMaxPatchList, computeEqualAspectLimits, bboxToXyCoordLists, makeAlphaCmap,
-                        buildTractImage)
+                        plotTractOutline, plotPatchOutline, plotCcdOutline, rotatePoint, labelCamera,
+                        getQuiver, getMinMaxPatchList, getMinMaxCcdList, computeEqualAspectLimits,
+                        bboxToXyCoordLists, makeAlphaCmap, buildTractImage)
 
 __all__ = ["AnalysisConfig", "Analysis"]
 
@@ -63,6 +64,16 @@ class AnalysisConfig(Config):
         default={"HSC-G": 23.75, "HSC-R": 24.25, "HSC-I": 23.75, "HSC-Z": 23.0, "HSC-Y": 22.0,
                  "NB0921": 22.25, "u": 21.5, "g": 22.5, "r": 22.0, "i": 21.5, "z": 21.0, "y": 20.0},
         doc="Maximum magnitude to plot",
+    )
+    skyProjection = ChoiceField(
+        dtype=str,
+        allowed={
+            "RaDec": "Plot sky plots with RA/Dec projections",
+            "Pixels": "Plot sky plots with \"pixel\" (Focal Plane or tract) projection",
+            "both": "Make plots with both RA/Dec and \"pixel\" projections"
+        },
+        default="RaDec",
+        doc="Plot sky plots in \"RaDec\" projection, x/y Tract or Visit \"Pixels\" projection, or \"both\"?",
     )
     fluxColumn = Field(dtype=str, default="modelfit_CModel_instFlux",
                        doc="Column to use for flux/mag plotting")
@@ -663,22 +674,46 @@ class Analysis(object):
     def plotSkyPosition(self, filename, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
                         camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
                         matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, highlightList=None,
-                        forcedStr=None, dataName="star", uberCalLabel=None, doPrintMedian=False, pad=0.02,
-                        tractImage=None):
+                        forcedStr=None, dataName="star", uberCalLabel=None, doPrintMedian=False,
+                        tractImage=None, raDecProj=True):
         """Plot quantity as a function of position"""
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
         dec = np.rad2deg(self.catalog[self.prefix + "coord_dec"])
-        raMin, raMax = np.round(ra.min() - pad, 2), np.round(ra.max() + pad, 2)
-        decMin, decMax = np.round(dec.min() - pad, 2), np.round(dec.max() + pad, 2)
+        centStr = "slot_Centroid"
+        if self.prefix + "base_FPPosition_Pixels_x" in self.catalog.schema:
+            xFpPix = self.catalog[self.prefix + "base_FPPosition_Pixels_x"]
+            yFpPix = self.catalog[self.prefix + "base_FPPosition_Pixels_y"]
+        else:
+            xFpPix = self.catalog[self.prefix + centStr + "_x"]
+            yFpPix = self.catalog[self.prefix + centStr + "_y"]
+        if raDecProj:
+            xPlot, yPlot = ra, dec
+            if ccdList is not None:
+                ccdBoundary = getMinMaxCcdList(ccdList, dataId, butler, nDecimals=3, zpLabel=zpLabel)
+                plotLimits = computeEqualAspectLimits(ccdBoundary.raMin, ccdBoundary.raMax,
+                                                      ccdBoundary.decMin, ccdBoundary.decMax, percentPad=5.0)
+                # plot in same +x: E->W direction of image projection
+                xPlotMin, xPlotMax = plotLimits.xPlotMax, plotLimits.xPlotMin
+                yPlotMin, yPlotMax = plotLimits.yPlotMin, plotLimits.yPlotMax
+        else:
+            xPlot, yPlot = xFpPix, yFpPix
 
-        deltaRa = raMax - raMin
-        deltaDec = decMax - decMin
-        deltaDeg = max((deltaRa, deltaDec))
-        raMin = (raMin + deltaRa/2.0) - deltaDeg/2.0
-        raMax = raMin + deltaDeg
-        decMin = (decMin + deltaDec/2.0) - deltaDeg/2.0
-        decMax = decMin + deltaDeg
-
+        if ccdList is not None and not raDecProj:
+            xs = list()
+            ys = list()
+            for ccd in ccdList:
+                detector = camera[ccd]
+                ccdCorners = detector.getCorners(cameraGeom.FOCAL_PLANE)
+                pixelSizeX = detector.getPixelSize()[0]
+                pixelSizeY = detector.getPixelSize()[1]
+                for corner in ccdCorners:
+                    xs.append(corner[0]/pixelSizeX)
+                    ys.append(corner[1]/pixelSizeY)
+            xMin, xMax = min(xs), max(xs)
+            yMin, yMax = min(ys), max(ys)
+            plotLimits = computeEqualAspectLimits(xMin, xMax, yMin, yMax, percentPad=5.0)
+            xPlotMin, xPlotMax = plotLimits.xPlotMin, plotLimits.xPlotMax
+            yPlotMin, yPlotMax = plotLimits.yPlotMin, plotLimits.yPlotMax
         magThreshold = self.magThreshold
         if dataName == "galaxy" and magThreshold < 99.0:
             magThreshold += 1.0  # plot to fainter mags for galaxies
@@ -722,36 +757,59 @@ class Analysis(object):
                 "compare" not in filename and "overlap" not in filename):
             vMin, vMax = 4.0*self.qMin, 1.0*self.qMax
 
-        fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.35"))
-        axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=8)
+        fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.6"))
+        axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=6)
         ptSize = None
+
+        if tractInfo is not None:
+            tractRas, tractDecs = bboxToXyCoordLists(tractInfo.getBBox(), wcs=tractInfo.getWcs())
+            tractRas.append(tractRas[0]), tractDecs.append(tractDecs[0])  # to close the box for plotting
 
         if dataId is not None and butler is not None and ccdList is not None:
             if any(ss in filename for ss in ["commonZp", "_raw"]):
-                plotCcdOutline(axes, butler, dataId, camera, ccdList, tractInfo=None, zpLabel=zpLabel)
+                plotCcdOutline(axes, butler, dataId, camera, ccdList, tractInfo=None, zpLabel=zpLabel,
+                               raDecProj=raDecProj)
             else:
-                plotCcdOutline(axes, butler, dataId, camera, ccdList, tractInfo=tractInfo, zpLabel=zpLabel)
+                plotCcdOutline(axes, butler, dataId, camera, ccdList, tractInfo=tractInfo, zpLabel=zpLabel,
+                               raDecProj=raDecProj)
             if tractInfo is not None:
-                tractRa, tractDec = bboxToXyCoordLists(tractInfo.getBBox(), wcs=tractInfo.getWcs())
-                axes.plot(tractRa, tractDec, "w--", linewidth=1, alpha=0.7, label=str(tractInfo.getId()))
+                if raDecProj:
+                    axes.fill(tractRas, tractDecs, color="black", alpha=0.1, label=str(tractInfo.getId()))
 
         if tractInfo is not None and patchList is not None:
-            patchBoundary = getRaDecMinMaxPatchList(patchList, tractInfo, pad=pad, nDecimals=2, raMin=raMin,
-                                                    raMax=raMax, decMin=decMin, decMax=decMax)
-            raMin = patchBoundary.raMin
-            raMax = patchBoundary.raMax
-            decMin = patchBoundary.decMin
-            decMax = patchBoundary.decMax
-            plotPatchOutline(axes, tractInfo, patchList)
+            patchBoundary = getMinMaxPatchList(patchList, tractInfo)
+            if raDecProj:
+                plotLimits = computeEqualAspectLimits(patchBoundary.raMin, patchBoundary.raMax,
+                                                      patchBoundary.decMin, patchBoundary.decMax)
+                # plot in same +x: E->W direction of tract projection
+                xPlotMin, xPlotMax = plotLimits.xPlotMax, plotLimits.xPlotMin
+                yPlotMin, yPlotMax = plotLimits.yPlotMin, plotLimits.yPlotMax
+                plotPatchOutline(axes, tractInfo, patchList)
+            else:
+                plotLimits = computeEqualAspectLimits(patchBoundary.xMin, patchBoundary.xMax,
+                                                      patchBoundary.yMin, patchBoundary.yMax)
+                xPlotMin, xPlotMax = plotLimits.xPlotMin, plotLimits.xPlotMax
+                yPlotMin, yPlotMax = plotLimits.yPlotMin, plotLimits.yPlotMax
+                plotPatchOutline(axes, tractInfo, patchList, plotUnits="pixels")
 
-            if tractImage:
+            if tractImage is not None:
                 med = np.nanmedian(tractImage.array)
                 mad = np.nanmedian(abs(tractImage.array - med))
                 imMin = med - 3.0*1.4826*mad
-                imMax = med + 10.0*1.4826*mad
+                imMax = med + 20.0*1.4826*mad
                 norm = AsinhNormalize(minimum=imMin, dataRange=imMax - imMin, Q=8)
-                tractRa, tractDec = bboxToXyCoordLists(tractInfo.getBBox(), wcs=tractInfo.getWcs())
-                extent = tractRa[0], tractRa[2], tractDec[0], tractDec[2]
+                tractXs, tractYs = bboxToXyCoordLists(tractInfo.getBBox(), wcs=None)
+                tractRas, tractDecs = bboxToXyCoordLists(tractInfo.getBBox(), wcs=tractInfo.getWcs())
+                if ccdList is not None:
+                    calexp = butler.get("calexp", dataId)
+                    calexpWcs = calexp.getWcs()
+                    for i, (tractRa, tractDec) in enumerate(zip(tractRas, tractDecs)):
+                        tractXY = calexpWcs.skyToPixel(geom.SpherePoint(tractRa, tractDec, geom.degrees))
+                        tractXs[i], tractYs[i] = tractXY[0], tractXY[1]
+                if raDecProj:
+                    extent = tractRas[0], tractRas[2], tractDecs[0], tractDecs[2]
+                else:
+                    extent = tractXs[0], tractXs[2], tractYs[0], tractYs[2]
                 axes.imshow(tractImage.array, extent=extent, cmap="gray_r", norm=norm)
 
         stats0 = None
@@ -770,11 +828,11 @@ class Analysis(object):
                     label = flag.replace("merge_measurement", "ref")
                     # Only a white "halo" really shows up here, so ignore color
                     highlightSelection = (self.catalog[flag] > threshValue) & selection
-                    axes.scatter(ra[highlightSelection], dec[highlightSelection], s=1.4*ptSize,
+                    axes.scatter(xPlot[highlightSelection], yPlot[highlightSelection], s=1.4*ptSize,
                                  marker="o", facecolors="none", edgecolors="white", label=label)
 
-            axes.scatter(ra[selection], dec[selection], s=ptSize, marker="o", lw=0, label=name,
-                         c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax, alpha=0.6)
+            axes.scatter(xPlot[selection], yPlot[selection], s=ptSize, marker="o", lw=0, label=name,
+                         c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax, alpha=0.7)
 
         if stats0 is None:  # No data to plot
             return
@@ -784,11 +842,95 @@ class Analysis(object):
             if len(filterStr) < len(camera.getName()):
                 filterStr = camera.getName() + "-" + filterStr
         filterLabelStr = "[" + filterStr + "]" if (filterStr and "/color/" not in filename) else ""
-        axes.set_xlabel("RA (deg) {0:s}".format(filterLabelStr))
-        axes.set_ylabel("Dec (deg) {0:s}".format(filterLabelStr))
+        if raDecProj:
+            axes.set_xlabel("RA (deg) {0:s}".format(filterLabelStr))
+            axes.set_ylabel("Dec (deg) {0:s}".format(filterLabelStr))
+        else:
+            axes.set_xlabel("x (pixels) {0:s}".format(filterLabelStr), size=7, labelpad=10)
+            axes.set_ylabel("y (pixels) {0:s}".format(filterLabelStr), size=7)
+            # Get RA and Dec tract/visit limits to add to plot axis labels
+            textKwargs = dict(ha="center", va="center", transform=axes.transAxes, fontsize=6, color="blue")
+            if tractInfo is not None and ccdList is None:
+                tract00 = tractInfo.getWcs().pixelToSky(xPlotMin, yPlotMin).getPosition(units=geom.degrees)
+                tract0N = tractInfo.getWcs().pixelToSky(xPlotMin, yPlotMax).getPosition(units=geom.degrees)
+                tractN0 = tractInfo.getWcs().pixelToSky(xPlotMax, yPlotMin).getPosition(units=geom.degrees)
+                plot00 = (tract00.getX(), tract00.getY())
+                plot0N = (tract0N.getX(), tract0N.getY())
+                plotN0 = (tractN0.getX(), tractN0.getY())
+                plt.text(-0.05, -0.05, str("{:.2f}".format(plot00[0])), **textKwargs)
+                plt.text(-0.16, 0.00, str("{:.2f}".format(plot00[1])), **textKwargs)
+                plt.text(0.97, -0.05, str("{:.2f}".format(plotN0[0])), **textKwargs)
+                plt.text(-0.16, 0.99, str("{:.2f}".format(plot0N[1])), **textKwargs)
 
-        axes.set_xlim(raMax, raMin)
-        axes.set_ylim(decMin, decMax)
+            xCoordStr = "RA (deg)"
+            yCoordStr = "Dec (deg)"
+            if ccdList is not None:
+                # Plot direction arrows according to the boresight rotation angle
+                # assuming FP projected as:
+                #       +x: E->W (-ve RA), +y: S->N (+ve Dec)
+                # at a boresight rotation angle of 0.
+                calexp = butler.get("calexp", dataId)
+                boresightRotAng = calexp.getInfo().getVisitInfo().getBoresightRotAngle().asRadians()
+                dPix = int(0.08*max((xPlotMax - xPlotMin), (yPlotMax - yPlotMin)))
+                xy0 = (xPlotMin + 1.5*dPix, yPlotMax - 1.5*dPix)
+                # The following just moves the arrows to be as close to the upper left
+                # corner as possible based on the boresight rotation angel.
+                xy0 = (xy0[0] - abs(np.sin(boresightRotAng)*np.cos(boresightRotAng/3.0))*dPix,
+                       xy0[1] + abs(np.sin(boresightRotAng/6.0)*np.cos(np.pi/2.0 - boresightRotAng))*dPix)
+                xyNorth = (xy0[0], xy0[1] + dPix)
+                xyEast = (xy0[0] - dPix, xy0[1])
+                rotatedNorth = (rotatePoint(xy0[0], xy0[1], xyNorth[0], xyNorth[1], boresightRotAng))
+                rotatedEast = (rotatePoint(xy0[0], xy0[1], xyEast[0], xyEast[1], boresightRotAng))
+                deltaNx, deltaNy = rotatedNorth[0] - xy0[0], rotatedNorth[1] - xy0[1]
+                deltaEx, deltaEy = rotatedEast[0] - xy0[0], rotatedEast[1] - xy0[1]
+                deltaFrac = 0.06
+                axes.plot(xy0[0], xy0[1], markersize=3, marker="o", color="black")
+                arrowKwargs = dict(xycoords="data", textcoords="data", ha="center", va="center",
+                                   arrowprops=dict(arrowstyle="<|-", facecolor="springgreen"))
+                axes.annotate("", xy=xy0, xytext=rotatedNorth, **arrowKwargs)
+                # DECam has flipX = True, but can't access this info until RFC-605 is implemented
+                # on DM-20746
+                if camera.getName() == "DECam":
+                    axes.annotate("S", xy=(rotatedNorth[0] + deltaFrac*deltaNx,
+                                           rotatedNorth[1] + deltaFrac*deltaNy), fontsize=7, **arrowKwargs)
+                else:
+                    axes.annotate("N", xy=(rotatedNorth[0] + deltaFrac*deltaNx,
+                                           rotatedNorth[1] + deltaFrac*deltaNy), fontsize=7, **arrowKwargs)
+                axes.annotate("", xy=xy0, xytext=rotatedEast, **arrowKwargs)
+                axes.annotate("E", xy=(rotatedEast[0] + deltaFrac*deltaEx,
+                                       rotatedEast[1] + deltaFrac*deltaEy), fontsize=7, **arrowKwargs)
+                # If boresight is rotated a factor of 90 deg, print the RA and Dec
+                # at the min/max positions of the data
+                if np.degrees(boresightRotAng)%90 == 0:
+                    if np.degrees(boresightRotAng)%180 != 0:
+                        xCoordStr = "Dec (deg)"
+                        yCoordStr = "RA (deg)"
+                        xRaDecDataMin = dec[(np.where(xFpPix == xFpPix.min()))][0]
+                        xRaDecDataMax = dec[(np.where(xFpPix == xFpPix.max()))][0]
+                        yRaDecDataMin = ra[(np.where(yFpPix == yFpPix.min()))][0]
+                        yRaDecDataMax = ra[(np.where(yFpPix == yFpPix.max()))][0]
+                    else:
+                        xRaDecDataMin = ra[(np.where(xFpPix == xFpPix.min()))][0]
+                        xRaDecDataMax = ra[(np.where(xFpPix == xFpPix.max()))][0]
+                        yRaDecDataMin = dec[(np.where(yFpPix == yFpPix.min()))][0]
+                        yRaDecDataMax = dec[(np.where(yFpPix == yFpPix.max()))][0]
+                    xMinForRaDecLabel = xPlotMin - 0.13*(xPlotMax - xPlotMin)
+                    yMinForRaDecLabel = yPlotMin - 0.06*(yPlotMax - yPlotMin)
+                    textKwargs.update(dict(transform=axes.transData))
+                    plt.text(xFpPix.min(), yMinForRaDecLabel, str("{:.2f}".format(xRaDecDataMin)),
+                             **textKwargs)
+                    plt.text(xFpPix.max(), yMinForRaDecLabel, str("{:.2f}".format(xRaDecDataMax)),
+                             **textKwargs)
+                    plt.text(xMinForRaDecLabel, yFpPix.min(), str("{:.2f}".format(yRaDecDataMin)),
+                             **textKwargs)
+                    plt.text(xMinForRaDecLabel, yFpPix.max(), str("{:.2f}".format(yRaDecDataMax)),
+                             **textKwargs)
+                    textKwargs.update(dict(transform=axes.transAxes))
+                    plt.text(0.5, -0.12, xCoordStr, **textKwargs)
+                    plt.text(-0.16, 0.5, yCoordStr, rotation=90, **textKwargs)
+
+        axes.set_xlim(xPlotMin, xPlotMax)
+        axes.set_ylim(yPlotMin, yPlotMax)
 
         mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vMin, vmax=vMax))
         mappable._A = []        # fake up the array of the scalar mappable. Urgh...
@@ -804,11 +946,11 @@ class Analysis(object):
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
             prefix = "" if "GalExt" in zpLabel else "zp: "
-            plotText(zpLabel, plt, axes, 0.13, -0.07, prefix=prefix, color="green")
+            plotText(zpLabel, plt, axes, 0.13, -0.09, prefix=prefix, fontSize=7, color="green")
         if uberCalLabel:
-            plotText(uberCalLabel, plt, axes, 0.13, -0.11, prefix="uberCal: ", fontSize=8, color="green")
+            plotText(uberCalLabel, plt, axes, 0.13, -0.12, prefix="uberCal: ", fontSize=7, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
+            plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", fontSize=7, color="green")
         strKwargs = dict(loc="center left", fancybox=True, markerscale=1.2, scatterpoints=3, framealpha=0.35,
                          facecolor="k")
         if highlightList is not None:
@@ -906,7 +1048,7 @@ class Analysis(object):
     def plotQuiver(self, catalog, filename, log, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
                    camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
                    matchRadius=None, zpLabel=None, forcedStr=None, dataName="star", uberCalLabel=None,
-                   scale=1, tractImage=None):
+                   scale=1, tractImage=None, raDecProj=True):
         """Plot ellipticity residuals quiver plot"""
 
         # Use HSM algorithm results if present, if not, use SDSS Shape
@@ -943,44 +1085,80 @@ class Analysis(object):
                                "Skip quiver plot.")
         catalog = catalog[~bad].copy(deep=True)
 
-        pad = 0.02  # Number of degrees to pad the axis ranges
-        ra = np.rad2deg(catalog["coord_ra"])
-        dec = np.rad2deg(catalog["coord_dec"])
-        raMin, raMax = np.round(ra.min() - pad, 2), np.round(ra.max() + pad, 2)
-        decMin, decMax = np.round(dec.min() - pad, 2), np.round(dec.max() + pad, 2)
+        ra = np.rad2deg(catalog[self.prefix + "coord_ra"])
+        dec = np.rad2deg(catalog[self.prefix + "coord_dec"])
+        centStr = "slot_Centroid"
+        if self.prefix + "base_FPPosition_Pixels_x" in catalog.schema:
+            xFpPix = catalog[self.prefix + "base_FPPosition_Pixels_x"]
+            yFpPix = catalog[self.prefix + "base_FPPosition_Pixels_y"]
+        else:
+            xFpPix = catalog[self.prefix + centStr + "_x"]
+            yFpPix = catalog[self.prefix + centStr + "_y"]
+        if raDecProj:
+            xPlot, yPlot = ra, dec
+            if ccdList is not None:
+                ccdBoundary = getMinMaxCcdList(ccdList, dataId, butler, nDecimals=3, zpLabel=zpLabel)
+                plotLimits = computeEqualAspectLimits(ccdBoundary.raMin, ccdBoundary.raMax,
+                                                      ccdBoundary.decMin, ccdBoundary.decMax, percentPad=5.0)
+                # plot in same +x: E->W direction of image projection
+                xPlotMin, xPlotMax = plotLimits.xPlotMax, plotLimits.xPlotMin
+                yPlotMin, yPlotMax = plotLimits.yPlotMin, plotLimits.yPlotMax
+        else:
+            xPlot, yPlot = xFpPix, yFpPix
 
-        deltaRa = raMax - raMin
-        deltaDec = decMax - decMin
-        deltaDeg = max((deltaRa, deltaDec))
-        raMin = (raMin + deltaRa/2.0) - deltaDeg/2.0
-        raMax = raMin + deltaDeg
-        decMin = (decMin + deltaDec/2.0) - deltaDeg/2.0
-        decMax = decMin + deltaDeg
+        if ccdList is not None and not raDecProj:
+            xs = list()
+            ys = list()
+            for ccd in ccdList:
+                detector = camera[ccd]
+                ccdCorners = detector.getCorners(cameraGeom.FOCAL_PLANE)
+                pixelSizeX = detector.getPixelSize()[0]
+                pixelSizeY = detector.getPixelSize()[1]
+                for corner in ccdCorners:
+                    xs.append(corner[0]/pixelSizeX)
+                    ys.append(corner[1]/pixelSizeY)
+            xMin, xMax = min(xs), max(xs)
+            yMin, yMax = min(ys), max(ys)
+            plotLimits = computeEqualAspectLimits(xMin, xMax, yMin, yMax, percentPad=5.0)
+            xPlotMin, xPlotMax = plotLimits.xPlotMin, plotLimits.xPlotMax
+            yPlotMin, yPlotMax = plotLimits.yPlotMin, plotLimits.yPlotMax
 
-        fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.7"))
-        axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=8)
+        fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.6"))
+        axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=6)
+        axes.ticklabel_format(axis="both", style="plain", useOffset=False)
 
         if dataId is not None and butler is not None and ccdList is not None:
-            plotCcdOutline(axes, butler, dataId, camera, ccdList, tractInfo=tractInfo, zpLabel=zpLabel)
+            plotCcdOutline(axes, butler, dataId, camera, ccdList, tractInfo=tractInfo, zpLabel=zpLabel,
+                           raDecProj=raDecProj)
 
         if tractInfo is not None and patchList is not None:
-            for ip, patch in enumerate(tractInfo):
-                if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
-                    raPatch, decPatch = bboxToXyCoordLists(patch.getOuterBBox(), wcs=tractInfo.getWcs())
-                    raMin = min(np.round(min(raPatch) - pad, 2), raMin)
-                    raMax = max(np.round(max(raPatch) + pad, 2), raMax)
-                    decMin = min(np.round(min(decPatch) - pad, 2), decMin)
-                    decMax = max(np.round(max(decPatch) + pad, 2), decMax)
-            plotPatchOutline(axes, tractInfo, patchList)
+            patchBoundary = getMinMaxPatchList(patchList, tractInfo)
+            if raDecProj:
+                plotLimits = computeEqualAspectLimits(patchBoundary.raMin, patchBoundary.raMax,
+                                                      patchBoundary.decMin, patchBoundary.decMax)
+                # plot in same +x: E->W direction of tract projection
+                xPlotMin, xPlotMax = plotLimits.xPlotMax, plotLimits.xPlotMin
+                yPlotMin, yPlotMax = plotLimits.yPlotMin, plotLimits.yPlotMax
+                plotPatchOutline(axes, tractInfo, patchList)
+            else:
+                plotLimits = computeEqualAspectLimits(patchBoundary.xMin, patchBoundary.xMax,
+                                                      patchBoundary.yMin, patchBoundary.yMax)
+                xPlotMin, xPlotMax = plotLimits.xPlotMin, plotLimits.xPlotMax
+                yPlotMin, yPlotMax = plotLimits.yPlotMin, plotLimits.yPlotMax
+                plotPatchOutline(axes, tractInfo, patchList, plotUnits="pixels")
 
-            if tractImage:
+            if tractImage is not None:
                 med = np.nanmedian(tractImage.array)
                 mad = np.nanmedian(abs(tractImage.array - med))
                 imMin = med - 3.0*1.4826*mad
                 imMax = med + 10.0*1.4826*mad
                 norm = AsinhNormalize(minimum=imMin, dataRange=imMax - imMin, Q=8)
-                patchBoundary = getRaDecMinMaxPatchList(patchList, tractInfo, pad=0)
-                extent = patchBoundary.raMin, patchBoundary.raMax, patchBoundary.decMin, patchBoundary.decMax
+                tractXs, tractYs = bboxToXyCoordLists(tractInfo.getBBox(), wcs=None)
+                tractRas, tractDecs = bboxToXyCoordLists(tractInfo.getBBox(), wcs=tractInfo.getWcs())
+                if raDecProj:
+                    extent = tractRas[0], tractRas[2], tractDecs[0], tractDecs[2]
+                else:
+                    extent = tractXs[0], tractXs[2], tractYs[0], tractYs[2]
                 axes.imshow(tractImage.array, extent=extent, cmap="gray_r", norm=norm)
 
         e1 = E1Resids(compareCol, psfCompareCol)
@@ -996,7 +1174,7 @@ class Analysis(object):
         cb.set_label(
             r"ellipticity residual: $\delta_e$ = $\sqrt{(e1_{src}-e1_{psf})^2 + (e2_{src}-e2_{psf})^2}$")
 
-        getQuiver(ra, dec, e1, e2, axes, color=plt.cm.jet(nz(e)), scale=scale, width=0.002, label=catStr)
+        getQuiver(xPlot, yPlot, e1, e2, axes, color=plt.cm.jet(nz(e)), scale=scale, width=0.002, label=catStr)
 
         filterStr = dataId["filter"] if dataId is not None else ""
         if filterStr and camera is not None:
@@ -1004,11 +1182,86 @@ class Analysis(object):
             if len(filterStr) < len(camera.getName()):
                 filterStr = camera.getName() + "-" + filterStr
         filterLabelStr = "[" + filterStr + "]"
-        axes.set_xlabel("RA (deg) {0:s}".format(filterLabelStr))
-        axes.set_ylabel("Dec (deg) {0:s}".format(filterLabelStr))
+        if raDecProj:
+            axes.set_xlabel("RA (deg) {0:s}".format(filterLabelStr))
+            axes.set_ylabel("Dec (deg) {0:s}".format(filterLabelStr))
+        else:
+            axes.set_xlabel("x (pixels) {0:s}".format(filterLabelStr), size=7, labelpad=10)
+            axes.set_ylabel("y (pixels) {0:s}".format(filterLabelStr), size=7)
+            # Get RA and Dec tract/visit limits to add to plot axis labels
+            textKwargs = dict(ha="left", va="center", transform=axes.transAxes, fontsize=6, color="blue")
+            if tractInfo is not None and ccdList is None:
+                tract00 = tractInfo.getWcs().pixelToSky(xPlotMin, yPlotMin).getPosition(units=geom.degrees)
+                tract0N = tractInfo.getWcs().pixelToSky(xPlotMin, yPlotMax).getPosition(units=geom.degrees)
+                tractN0 = tractInfo.getWcs().pixelToSky(xPlotMax, yPlotMin).getPosition(units=geom.degrees)
+                plot00 = (tract00.getX(), tract00.getY())
+                plot0N = (tract0N.getX(), tract0N.getY())
+                plotN0 = (tractN0.getX(), tractN0.getY())
+                plt.text(-0.05, -0.05, str("{:.2f}".format(plot00[0])), **textKwargs)
+                plt.text(-0.16, 0.00, str("{:.2f}".format(plot00[1])), **textKwargs)
+                plt.text(0.97, -0.05, str("{:.2f}".format(plotN0[0])), **textKwargs)
+                plt.text(-0.16, 0.99, str("{:.2f}".format(plot0N[1])), **textKwargs)
 
-        axes.set_xlim(raMax, raMin)
-        axes.set_ylim(decMin, decMax)
+            xCoordStr = "RA (deg)"
+            yCoordStr = "Dec (deg)"
+            if ccdList is not None:
+                # Plot direction arrows according to the boresight rotation angle
+                # assuming FP projected as:
+                #       +x: E->W (-ve RA), +y: S->N (+ve Dec)
+                # at a boresight rotation angle of 0.
+                calexp = butler.get("calexp", dataId)
+                boresightRotAng = calexp.getInfo().getVisitInfo().getBoresightRotAngle().asRadians()
+                dPix = int(0.08*max((xPlotMax - xPlotMin), (yPlotMax - yPlotMin)))
+                xy0 = (xPlotMin + 1.5*dPix, yPlotMax - 1.5*dPix)
+                # The following just moves the arrows to be as close to the upper left
+                # corner as possible based on the boresight rotation angel.
+                xy0 = (xy0[0] - abs(np.sin(boresightRotAng)*np.cos(boresightRotAng/3.0))*dPix,
+                       xy0[1] + abs(np.sin(boresightRotAng/6.0)*np.cos(np.pi/2.0 - boresightRotAng))*dPix)
+                xyNorth = (xy0[0], xy0[1] + dPix)
+                xyEast = (xy0[0] - dPix, xy0[1])
+                rotatedNorth = (rotatePoint(xy0[0], xy0[1], xyNorth[0], xyNorth[1], boresightRotAng))
+                rotatedEast = (rotatePoint(xy0[0], xy0[1], xyEast[0], xyEast[1], boresightRotAng))
+                deltaNx, deltaNy = rotatedNorth[0] - xy0[0], rotatedNorth[1] - xy0[1]
+                deltaEx, deltaEy = rotatedEast[0] - xy0[0], rotatedEast[1] - xy0[1]
+                deltaFrac = 0.06
+                axes.plot(xy0[0], xy0[1], markersize=3, marker="o", color="black")
+                arrowKwargs = dict(xycoords="data", textcoords="data", ha="center", va="center",
+                                   arrowprops=dict(arrowstyle="<|-", facecolor="springgreen"))
+                axes.annotate("", xy=xy0, xytext=rotatedNorth, **arrowKwargs)
+                # DECam has flipX = True, but can't access this info until RFC-605 is implemented
+                # on DM-20746
+                if camera.getName() == "DECam":
+                    axes.annotate("S", xy=(rotatedNorth[0] + deltaFrac*deltaNx,
+                                           rotatedNorth[1] + deltaFrac*deltaNy), fontsize=7, **arrowKwargs)
+                else:
+                    axes.annotate("N", xy=(rotatedNorth[0] + deltaFrac*deltaNx,
+                                           rotatedNorth[1] + deltaFrac*deltaNy), fontsize=7, **arrowKwargs)
+                axes.annotate("", xy=xy0, xytext=rotatedEast, **arrowKwargs)
+                axes.annotate("E", xy=(rotatedEast[0] + deltaFrac*deltaEx,
+                                       rotatedEast[1] + deltaFrac*deltaEy), fontsize=7, **arrowKwargs)
+                # If boresight is rotated a factor of 90 deg, print the RA and Dec
+                # at the min/max positions of the data
+                if np.degrees(boresightRotAng)%90 == 0:
+                    xMinForRa = xPlotMin - 0.15*(xPlotMax - xPlotMin)
+                    yMinForDec = yPlotMin - 0.06*(yPlotMax - yPlotMin)
+                    decDataMin = dec[(np.where(xFpPix == xFpPix.min()))][0]
+                    decDataMax = dec[(np.where(xFpPix == xFpPix.max()))][0]
+                    raDataMin = ra[(np.where(yFpPix == yFpPix.min()))][0]
+                    raDataMax = ra[(np.where(yFpPix == yFpPix.max()))][0]
+                    textKwargs.update(dict(transform=axes.transData))
+                    plt.text(xFpPix.min(), yMinForDec, str("{:.2f}".format(decDataMin)), **textKwargs)
+                    plt.text(xFpPix.max(), yMinForDec, str("{:.2f}".format(decDataMax)), **textKwargs)
+                    plt.text(xMinForRa, yFpPix.min(), str("{:.2f}".format(raDataMin)), **textKwargs)
+                    plt.text(xMinForRa, yFpPix.max(), str("{:.2f}".format(raDataMax)), **textKwargs)
+                    if np.degrees(boresightRotAng)%180 != 0:
+                        xCoordStr = "Dec (deg)"
+                        yCoordStr = "RA (deg)"
+                    textKwargs.update(dict(transform=axes.transAxes))
+                    plt.text(0.45, -0.12, xCoordStr, **textKwargs)
+                    plt.text(-0.16, 0.5, yCoordStr, rotation=90, **textKwargs)
+
+        axes.set_xlim(xPlotMin, xPlotMax)
+        axes.set_ylim(yPlotMin, yPlotMax)
 
         good = np.ones(len(e), dtype=bool)
         stats0 = self.calculateStats(e, good, thresholdType=thresholdType, thresholdValue=thresholdValue)
@@ -1035,12 +1288,12 @@ class Analysis(object):
             labelCamera(camera, plt, axes, 0.5, 1.09)
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
-            plotText(zpLabel, plt, axes, 0.13, -0.08, prefix="zp: ", color="green")
+            plotText(zpLabel, plt, axes, 0.13, -0.09, prefix="zp: ", fontSize=7, color="green")
         if uberCalLabel:
-            plotText(uberCalLabel, plt, axes, 0.13, -0.12, prefix="uberCal: ", fontSize=8, color="green")
-        plotText(shapeAlgorithm, plt, axes, 0.85, -0.08, prefix="Shape Alg: ", fontSize=8, color="green")
+            plotText(uberCalLabel, plt, axes, 0.13, -0.12, prefix="uberCal: ", fontSize=7, color="green")
+        plotText(shapeAlgorithm, plt, axes, 0.85, -0.09, prefix="Shape Alg: ", fontSize=7, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
+            plotText(forcedStr, plt, axes, 0.85, -0.12, prefix="cat: ", fontSize=7, color="green")
         axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.15), fancybox=True, fontsize=5)
 
         dpi = 350 if tractImage else 150
@@ -1102,18 +1355,11 @@ class Analysis(object):
         tractBbox = tractInfo.getBBox()
         tractWcs = tractInfo.getWcs()
         if patchList:
-            minPatchX = tractBbox.getMaxX()
-            maxPatchX = tractBbox.getMinX()
-            minPatchY = tractBbox.getMaxY()
-            maxPatchY = tractBbox.getMinY()
-            for patch in patchList:
-                patchId = dataId.copy()
-                patchId["patch"] = patch
-                bbox = butler.get(coaddName + "Coadd_calexp_bbox", patchId, immediate=True)
-                minPatchX = bbox.getMinX() if bbox.getMinX() < minPatchX else minPatchX
-                maxPatchX = bbox.getMaxX() if bbox.getMaxX() > maxPatchX else maxPatchX
-                minPatchY = bbox.getMinY() if bbox.getMinY() < minPatchY else minPatchY
-                maxPatchY = bbox.getMaxY() if bbox.getMaxY() > maxPatchY else maxPatchY
+            patchBoundary = getMinMaxPatchList(patchList, tractInfo)
+            plotLimits = computeEqualAspectLimits(patchBoundary.xMin, patchBoundary.xMax,
+                                                  patchBoundary.yMin, patchBoundary.yMax)
+            minPatchX, maxPatchX = plotLimits.xPlotMin, plotLimits.xPlotMax
+            minPatchY, maxPatchY = plotLimits.yPlotMin, plotLimits.yPlotMax
         else:
             minPatchX = tractBbox.getMinX()
             maxPatchX = tractBbox.getMaxX()
@@ -1192,9 +1438,9 @@ class Analysis(object):
         axes.set_ylabel("yTract (pixels) {0:s}".format(filterLabelStr), size=9)
 
         # Get Ra and DEC tract limits to add to plot axis labels
-        tract00 = tractWcs.pixelToSky(minPatchX, minPatchY).getPosition(units=afwGeom.degrees)
-        tract0N = tractWcs.pixelToSky(minPatchX, maxPatchY).getPosition(units=afwGeom.degrees)
-        tractN0 = tractWcs.pixelToSky(maxPatchX, minPatchY).getPosition(units=afwGeom.degrees)
+        tract00 = tractWcs.pixelToSky(minPatchX, minPatchY).getPosition(units=geom.degrees)
+        tract0N = tractWcs.pixelToSky(minPatchX, maxPatchY).getPosition(units=geom.degrees)
+        tractN0 = tractWcs.pixelToSky(maxPatchX, minPatchY).getPosition(units=geom.degrees)
 
         textKwargs = dict(ha="left", va="center", transform=axes.transAxes, fontsize=7, color="blue")
         plt.text(-0.05, -0.07, str("{:.2f}".format(tract00.getX())), **textKwargs)
@@ -1203,7 +1449,7 @@ class Analysis(object):
         plt.text(-0.17, 0.97, str("{:.2f}".format(tract0N.getY())), **textKwargs)
         textKwargs["fontsize"] = 8
         plt.text(0.45, -0.11, "RA (deg)", **textKwargs)
-        plt.text(-0.19, 0.5, "DEC (deg)", rotation=90, **textKwargs)
+        plt.text(-0.19, 0.5, "Dec (deg)", rotation=90, **textKwargs)
 
         if doPlotPatchOutline:
             plotPatchOutline(axes, tractInfo, patchList, plotUnits="pixel", idFontSize=5)
@@ -1293,9 +1539,9 @@ class Analysis(object):
         axes.set_ylabel("yTract (pixels) {0:s}".format(filterLabelStr), size=9)
 
         # Get Ra and DEC tract limits to add to plot axis labels
-        tract00 = tractWcs.pixelToSky(minPatchX, minPatchY).getPosition(units=afwGeom.degrees)
-        tract0N = tractWcs.pixelToSky(minPatchX, maxPatchY).getPosition(units=afwGeom.degrees)
-        tractN0 = tractWcs.pixelToSky(maxPatchX, minPatchY).getPosition(units=afwGeom.degrees)
+        tract00 = tractWcs.pixelToSky(minPatchX, minPatchY).getPosition(units=geom.degrees)
+        tract0N = tractWcs.pixelToSky(minPatchX, maxPatchY).getPosition(units=geom.degrees)
+        tractN0 = tractWcs.pixelToSky(maxPatchX, minPatchY).getPosition(units=geom.degrees)
 
         textKwargs = dict(ha="left", va="center", transform=axes.transAxes, fontsize=7, color="blue")
         plt.text(-0.05, -0.07, str("{:.2f}".format(tract00.getX())), **textKwargs)
@@ -1340,31 +1586,36 @@ class Analysis(object):
             self.plotHistogram(filenamer(dataId, description=self.shortName, style="hist" + postFix),
                                **plotKwargs)
 
-        skyPositionKwargs = dict(dataId=dataId, butler=butler, highlightList=highlightList,
-                                 tractImage=tractImage)
-        skyPositionKwargs.update(plotKwargs)
-        if "all" in self.data:
-            styleStr = "sky-all"
-            dataName = "all"
-            self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
-                                 dataName=dataName, **skyPositionKwargs)
-        if "star" in self.data:
-            styleStr = "sky-stars"
-            dataName = "star"
-            self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
-                                 dataName=dataName, **skyPositionKwargs)
-        if "galaxy" in self.data and (not any(ss in self.shortName for ss in
-                                              ["pStar", "race", "Xx", "Yy", "Resids", "psf_used",
-                                               "photometry_used", "gri", "riz", "izy", "z9y", "color_"])):
-            styleStr = "sky-gals"
-            dataName = "galaxy"
-            self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
-                                 dataName=dataName, **skyPositionKwargs)
-        if "diff_" in self.shortName and stats["split"].num > 0:
-            styleStr = "sky-split"
-            dataName = "split"
-            self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
-                                 dataName=dataName, **skyPositionKwargs)
+        skyProjectionList = (["RaDec", "Pixels"] if self.config.skyProjection == "both" else
+                             [self.config.skyProjection,])
+        for projStr in skyProjectionList:
+            raDecProj = (projStr == "RaDec")
+            plotTractImage = None if raDecProj else tractImage  # only plot image if pixels projection
+            skyPositionKwargs = dict(dataId=dataId, butler=butler, highlightList=highlightList,
+                                     tractImage=plotTractImage, raDecProj=raDecProj)
+            skyPositionKwargs.update(plotKwargs)
+            if "all" in self.data:
+                styleStr = "sky" + projStr + "-all"
+                dataName = "all"
+                self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
+                                     dataName=dataName, **skyPositionKwargs)
+            if "star" in self.data:
+                styleStr = "sky" + projStr + "-stars"
+                dataName = "star"
+                self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
+                                     dataName=dataName, **skyPositionKwargs)
+            if "galaxy" in self.data and (not any(ss in self.shortName for ss in
+                                                  ["pStar", "race", "Xx", "Yy", "Resids", "psf_used",
+                                                   "photometry_used", "gri", "riz", "izy", "z9y", "color_"])):
+                styleStr = "sky" + projStr + "-gals"
+                dataName = "galaxy"
+                self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
+                                     dataName=dataName, **skyPositionKwargs)
+            if "diff_" in self.shortName and stats["split"].num > 0:
+                styleStr = "sky" + projStr + "-split"
+                dataName = "split"
+                self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
+                                     dataName=dataName, **skyPositionKwargs)
 
         if self.config.doPlotRaDec:
             self.plotRaDec(filenamer(dataId, description=self.shortName, style="radec" + postFix),

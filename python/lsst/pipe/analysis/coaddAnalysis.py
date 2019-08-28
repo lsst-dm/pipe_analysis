@@ -889,16 +889,22 @@ class CoaddAnalysisTask(CmdLineTask):
                                            addDataLabelList=["Flux>{:.1f}".format(lowFlux),
                                                              "Flux>{:.1f}".format(highFlux), "psf_used"])
 
-        skyplotKwargs = dict(dataId=dataId, butler=butler, stats=stats, camera=camera, ccdList=ccdList,
-                             tractInfo=tractInfo, patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                             matchRadiusUnitStr=None, zpLabel=zpLabel, tractImage=self.tractImage)
-        filenamer = filenamer.replace("hist", "sky-all")
+        skyProjectionList = (["RaDec", "Pixels"] if self.config.analysis.skyProjection == "both" else
+                             [self.config.analysis.skyProjection,])
+        for raDecProjStr in skyProjectionList:
+            raDecProj = (raDecProjStr == "RaDec")
+            plotTractImage = None if raDecProj else tractImage  # only plot image if pixels projection
+            skyplotKwargs = dict(dataId=dataId, butler=butler, stats=stats, camera=camera, ccdList=ccdList,
+                                 tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
+                                 matchRadius=matchRadius, matchRadiusUnitStr=None, zpLabel=zpLabel,
+                                 tractImage=plotTractImage, raDecProj=raDecProj)
+            filenamer = filenamer.replace("hist", "sky" + raDecProjStr + "-all")
 
-        self.AnalysisClass(catalog, psfSn, "%s" % "S/N = " + shortName, shortName,
-                           self.config.analysis, flags=["base_PsfFlux_flag"], qMin=0,
-                           qMax = 1.25*highSn, labeller=AllLabeller(), flagsCat=flagsCat,
-                           ).plotSkyPosition(filenamer, dataName="all", **skyplotKwargs)
-
+            self.AnalysisClass(catalog, psfSn, "%s" % "S/N = " + shortName, shortName,
+                               self.config.analysis, flags=["base_PsfFlux_flag"], qMin=0,
+                               qMax = 1.25*highSn, labeller=AllLabeller(), flagsCat=flagsCat,
+                              ).plotSkyPosition(filenamer, dataName="all", **skyplotKwargs)
+            filenamer = filenamer.replace("sky" + raDecProjStr + "-all", "hist")
 
     def plotStarGal(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                     patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
