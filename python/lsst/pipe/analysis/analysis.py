@@ -130,7 +130,8 @@ class Analysis(object):
                 "Catalog being used for flags does not have the same object list as the data catalog")
         # Don't have flags in match and overlap catalogs (already removed in the latter)
         if ("matches" not in self.shortName and "overlap" not in self.shortName and
-                "quiver" not in self.shortName and "inputCounts" not in self.shortName):
+                "quiver" not in self.shortName and "inputCounts" not in self.shortName and
+                 "imageOnly" not in self.shortName):
             for ff in set(list(self.config.flags) + flags):
                 if prefix + ff in flagsCat.schema:
                     self.good &= ~flagsCat[prefix + ff]
@@ -1213,6 +1214,105 @@ class Analysis(object):
             plotText(forcedStr, plt, axes, 0.99, -0.11, prefix="cat: ", fontSize=8, color="green")
         if uberCalLabel:
             plotText(uberCalLabel, plt, axes, 0.01, -0.11, prefix="uberCal: ", fontSize=8, color="green")
+
+        fig.savefig(filename, dpi=1200)  # Needs to be fairly hi-res to see enough detail
+        plt.close(fig)
+
+    def plotImageOnly(self, filename, log, dataId, butler, tractImage, tractInfo, patchList=None, camera=None,
+                      uberCalLabel=None, cmap="gray_r", doPlotPatchOutline=True, coaddName="deep"):
+        """Plot grayscale image of tract or list of patches
+
+        Parameters
+        ----------
+        filename : `str`
+           Full path and name of the file to which the plot will be written.
+        log : `lsst.log.Log`
+           Logger object for logging messages.
+        dataId : `lsst.daf.persistence.DataId`
+           An instance of `lsst.daf.persistence.DataId` from which to extract
+           the filter name.
+        butler : `lsst.daf.persistence.Butler`
+        tractImage : `numpy.ndarray` of `float`
+           The array comprising the tract image to be plotted.
+        tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
+           Tract information object.
+        patchList : `list` of `str`, optional
+           List of patch IDs with data to be plotted.
+        camera : `lsst.afw.cameraGeom.Camera`, optional
+           The base name of the coadd (e.g. deep or goodSeeing).
+           Default is `None`.
+        cmap : `matplotlib.colors.ListedColormap`, optional
+           The matplotlib colormap to use.  Default is gray_r.
+        doPlotPatchOutline : `bool`, optional
+           A boolean indicating whether to overplot the patch outlines and
+           index labels.  Default is `True`.
+        """
+        tractBbox = tractInfo.getBBox()
+        tractWcs = tractInfo.getWcs()
+        if patchList:
+            patchBoundary = getMinMaxPatchList(patchList, tractInfo)
+            plotLimits = computeEqualAspectLimits(patchBoundary.xMin, patchBoundary.xMax,
+                                                 patchBoundary.yMin, patchBoundary.yMax)
+            minPatchX, maxPatchX = plotLimits.xPlotMin, plotLimits.xPlotMax
+            minPatchY, maxPatchY = plotLimits.yPlotMin, plotLimits.yPlotMax
+        else:
+            minPatchX = tractBbox.getMinX()
+            maxPatchX = tractBbox.getMaxX()
+            minPatchY = tractBbox.getMinY()
+            maxPatchY = tractBbox.getMaxY()
+
+        fig, axes = plt.subplots(1, 1)
+        axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=7)
+        if tractImage:
+            med = np.nanmedian(tractImage.array)
+            mad = np.nanmedian(abs(tractImage.array - med))
+            imMin = med - 3.0*1.4826*mad
+            imMax = med + 10.0*1.4826*mad
+            norm = AsinhNormalize(minimum=imMin, dataRange=imMax - imMin, Q=8)
+            extent = tractBbox.getMinX(), tractBbox.getMaxX(), tractBbox.getMinY(), tractBbox.getMaxY()
+            axes.imshow(tractImage.array, extent=extent, cmap=cmap, norm=norm)
+
+        filterStr = dataId["filter"]
+        filterLabelStr = "[" + filterStr + "]"
+
+        mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=imMin, vmax=imMax))
+        mappable._A = []        # fake up the array of the scalar mappable. Urgh...
+        cb = plt.colorbar(mappable)
+        unitStr = "(\"counts\") "
+        if "compare" in filename:
+            unitStr = "difference (%) " if "ercent" in filename else "difference " + unitStr
+        colorbarLabel =  "Image " + unitStr + filterLabelStr
+        fontSize = min(10, max(6, 10 - int(np.log(max(1, len(colorbarLabel) - 55)))))
+        cb.ax.tick_params(labelsize=max(6, fontSize - 1))
+        cb.set_label(colorbarLabel, fontsize=fontSize, rotation=270, labelpad=15)
+
+        axes.set_xlim(minPatchX, maxPatchX)
+        axes.set_ylim(minPatchY, maxPatchY)
+
+        axes.set_xlabel("xTract (pixels) {0:s}".format(filterLabelStr), size=9)
+        axes.set_ylabel("yTract (pixels) {0:s}".format(filterLabelStr), size=9)
+
+        # Get Ra and DEC tract limits to add to plot axis labels
+        tract00 = tractWcs.pixelToSky(minPatchX, minPatchY).getPosition(units=afwGeom.degrees)
+        tract0N = tractWcs.pixelToSky(minPatchX, maxPatchY).getPosition(units=afwGeom.degrees)
+        tractN0 = tractWcs.pixelToSky(maxPatchX, minPatchY).getPosition(units=afwGeom.degrees)
+
+        textKwargs = dict(ha="left", va="center", transform=axes.transAxes, fontsize=7, color="blue")
+        plt.text(-0.05, -0.07, str("{:.2f}".format(tract00.getX())), **textKwargs)
+        plt.text(-0.17, 0.00, str("{:.2f}".format(tract00.getY())), **textKwargs)
+        plt.text(0.96, -0.07, str("{:.2f}".format(tractN0.getX())), **textKwargs)
+        plt.text(-0.17, 0.97, str("{:.2f}".format(tract0N.getY())), **textKwargs)
+        textKwargs["fontsize"] = 8
+        plt.text(0.45, -0.11, "RA (deg)", **textKwargs)
+        plt.text(-0.19, 0.5, "Dec (deg)", rotation=90, **textKwargs)
+
+        if doPlotPatchOutline:
+            plotPatchOutline(axes, tractInfo, patchList, plotUnits="pixel", idFontSize=5)
+        if camera is not None:
+            labelCamera(camera, plt, axes, 0.5, 1.09)
+        labelVisit(filename, plt, axes, 0.5, 1.04)
+        if uberCalLabel:
+            plotText(uberCalLabel, plt, axes, 0.01, -0.11, prefix="uberCal: ", fontSize=7, color="green")
 
         fig.savefig(filename, dpi=1200)  # Needs to be fairly hi-res to see enough detail
         plt.close(fig)

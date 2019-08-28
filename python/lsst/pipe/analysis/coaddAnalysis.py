@@ -357,7 +357,8 @@ class CoaddAnalysisTask(CmdLineTask):
                 self.plotPsfFluxSnHists(unforced,
                                         filenamer(repoInfo.dataId, description="base_PsfFlux_cal",
                                                   style="hist"),
-                                        repoInfo.dataId, forcedStr="unforced " + self.catLabel, **plotKwargs)
+                                        repoInfo.dataId, tractImage=self.tractImage,
+                                        forcedStr="unforced" + self.catLabel, **plotKwargs)
             if self.config.doPlotFootprintNpix:
                 self.plotFootprintHist(forced,
                                        filenamer(repoInfo.dataId, description="footNpix", style="hist"),
@@ -369,7 +370,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 self.plotQuiver(unforced,
                                 filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
                                 dataId=repoInfo.dataId, forcedStr="unforced" + self.catLabel, scale=2,
-                                tractImage=None, **plotKwargs)
+                                **plotKwargs)
 
             if self.config.doPlotInputCounts:
                 self.plotInputCounts(unforced, filenamer(repoInfo.dataId, description="inputCounts",
@@ -377,6 +378,9 @@ class CoaddAnalysisTask(CmdLineTask):
                                      forcedStr="unforced" + self.catLabel, alpha=0.5,
                                      tractImage=self.tractImage, doPlotPatchOutline=True, sizeFactor=5.0,
                                      maxDiamPix=1000, **plotKwargs)
+                self.plotImageOnly(unforced, filenamer(repoInfo.dataId, description="imageOnly",
+                                                       style="tract"), dataId=repoInfo.dataId,
+                                   tractImage=self.tractImage, doPlotPatchOutline=True, **plotKwargs)
 
             if self.config.doPlotMags:
                 self.plotMags(unforced, filenamer, repoInfo.dataId, forcedStr="unforced " + self.catLabel,
@@ -1209,16 +1213,17 @@ class CoaddAnalysisTask(CmdLineTask):
                                              uberCalLabel=uberCalLabel, alpha=alpha, tractImage=tractImage,
                                              doPlotPatchOutline=doPlotPatchOutline, sizeFactor=sizeFactor,
                                              maxDiamPix=maxDiamPix)
-    def plotImageOnly(self, catalog, filenamer, dataId, butler=None, tractInfo=None, patchList=None,
-                      camera=None, hscRun=None, zpLabel=None, forcedStr=None, uberCalLabel=None,
-                      tractImage=None, doPlotPatchOutline=True):
+
+    def plotImageOnly(self, catalog, filenamer, dataId=None, butler=None, tractImage=None, tractInfo=None,
+                      patchList=None, camera=None, hscRun=None, zpLabel=None, forcedStr=None,
+                      uberCalLabel=None, doPlotPatchOutline=True):
         shortName = "imageOnly"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(catalog, None, "%s" % shortName, shortName,
                            self.config.analysis, labeller=None,
-                           ).plotImageOnly(filenamer, self.log, dataId, butler, tractInfo,
+                           ).plotImageOnly(filenamer, self.log, dataId, butler, tractImage, tractInfo,
                                            patchList=patchList, camera=camera, uberCalLabel=uberCalLabel,
-                                           tractImage=tractImage, doPlotPatchOutline=doPlotPatchOutline)
+                                           doPlotPatchOutline=doPlotPatchOutline)
 
     def _getConfigName(self):
         return None
@@ -1413,7 +1418,17 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         plotKwargs1 = dict(butler=repoInfo1.butler, camera=repoInfo1.camera, tractInfo=repoInfo1.tractInfo,
                            patchList=patchList1, hscRun=hscRun, matchRadius=self.matchRadius,
                            matchRadiusUnitStr=self.matchRadiusUnitStr,
-                           zpLabel=self.zpLabel, uberCalLabel=self.uberCalLabel, tractImage=self.tractImage1)
+                           zpLabel=self.zpLabel, uberCalLabel=self.uberCalLabel)
+
+        self.plotImageOnly(unforced, filenamer(repoInfo1.dataId, description="imageOnlyDiff", style="tract"),
+                           repoInfo1.dataId, butler=repoInfo1.butler, tractImage=self.tractImageDiff,
+                           tractInfo=repoInfo1.tractInfo, patchList=patchList1, camera=repoInfo1.camera,
+                           cmap="viridis", uberCalLabel=self.uberCalLabel)
+        self.plotImageOnly(unforced, filenamer(repoInfo1.dataId, description="imageOnlyPercentDiff",
+                                               style="tract"),
+                           repoInfo1.dataId, butler=repoInfo1.butler, tractImage=self.tractImagePercDiff,
+                           tractInfo=repoInfo1.tractInfo, patchList=patchList1, camera=repoInfo1.camera,
+                           cmap="viridis", uberCalLabel=self.uberCalLabel)
 
         if self.config.doPlotMags:
             self.plotMags(forced, filenamer, repoInfo1.dataId, forcedStr=forcedStr, **plotKwargs1)
@@ -1720,6 +1735,16 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                        forcedStr=forcedStr, uberCalLabel=uberCalLabel)
                 else:
                     self.log.warn("No valid data points for shortName = {:s}.  Skipping...".format(shortName))
+
+    def plotImageOnly(self, catalog, filenamer, dataId=None, butler=None, tractImage=None, tractInfo=None,
+                      patchList=None, camera=None, uberCalLabel=None, cmap="viridis", doPlotPatchOutline=True):
+        shortName = "imageOnly"
+        self.log.info("shortName = {:s}".format(shortName))
+
+        Analysis(catalog, None, "%s" % shortName, shortName, self.config.analysis, prefix="first_",
+                 labeller=None).plotImageOnly(filenamer, self.log, dataId, butler, tractImage, tractInfo,
+                                              patchList=patchList, camera=camera, uberCalLabel=uberCalLabel,
+                                              cmap=cmap, doPlotPatchOutline=doPlotPatchOutline)
 
     def _getConfigName(self):
         return None
