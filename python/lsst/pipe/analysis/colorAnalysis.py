@@ -675,6 +675,8 @@ class ColorAnalysisTask(CmdLineTask):
         schema.addField(fluxColumn + "Err", type=np.float64, doc="Flux error for flux from filter " +
                         self.fluxFilter)
         schema.addField("base_InputCount_value", type=np.int32, doc="Input visit count for " + self.fluxFilter)
+        schema.addField("slot_Centroid_x", type=np.int32, doc="Centroid x Slot for " + self.fluxFilter)
+        schema.addField("slot_Centroid_y", type=np.int32, doc="Centroid y Slot for " + self.fluxFilter)
 
         # Copy basics (id, RA, Dec)
         new = afwTable.SourceCatalog(schema)
@@ -711,6 +713,8 @@ class ColorAnalysisTask(CmdLineTask):
         new[fluxColumn][:] = catalogs[self.fluxFilter][fluxColumn]
         new[fluxColumn + "Err"][:] = catalogs[self.fluxFilter][fluxColumn + "Err"]
         new["base_InputCount_value"][:] = catalogs[self.fluxFilter]["base_InputCount_value"]
+        new["slot_Centroid_x"][:] = catalogs[self.fluxFilter]["slot_Centroid_x"]
+        new["slot_Centroid_y"][:] = catalogs[self.fluxFilter]["slot_Centroid_y"]
 
         return new
 

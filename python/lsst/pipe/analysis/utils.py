@@ -33,11 +33,11 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "CentroidDiff", "CentroidDiffErr", "deconvMom", "deconvMomStarGal",
            "concatenateCatalogs", "joinMatches", "checkIdLists", "checkPatchOverlap",
            "joinCatalogs", "getFluxKeys", "addColumnsToSchema", "addApertureFluxesHSC", "addFpPoint",
-           "addFootprintNPix", "addRotPoint", "makeBadArray", "addFlag", "addIntFloatOrStrColumn",
-           "calibrateSourceCatalogMosaic", "calibrateSourceCatalogPhotoCalib",
-           "calibrateSourceCatalog", "calibrateCoaddSourceCatalog",
-           "backoutApCorr", "matchNanojanskyToAB", "checkHscStack", "fluxToPlotString", "andCatalog",
-           "writeParquet", "getRepoInfo", "findCcdKey", "getCcdNameRefList", "getDataExistsRefList",
+           "addFpPointPix", "addFootprintNPix", "addRotPoint", "makeBadArray", "addFlag",
+           "addIntFloatOrStrColumn", "calibrateSourceCatalogMosaic", "calibrateSourceCatalogPhotoCalib",
+           "calibrateSourceCatalog", "calibrateCoaddSourceCatalog", "backoutApCorr", "matchNanojanskyToAB",
+           "checkHscStack", "fluxToPlotString", "andCatalog", "writeParquet", "getRepoInfo",
+           "findCcdKey", "popIdAndCcdKeys", "getCcdNameRefList", "getDataExistsRefList",
            "orthogonalRegression", "distanceSquaredToPoly", "p1CoeffsFromP2x0y0", "p2p1CoeffsFromLinearFit",
            "lineFromP2Coeffs", "linesFromP2P1Coeffs", "makeEqnStr", "catColors", "setAliasMaps",
            "addPreComputedColumns", "addMetricMeasurement", "updateVerifyJob", "computeMeanOfFrac"]
@@ -682,13 +682,14 @@ def addApertureFluxesHSC(catalog, prefix=""):
 
 
 def addFpPoint(det, catalog, prefix=""):
-    # Compute Focal Plane coordinates for SdssCentroid of each source and add to schema
+    # Compute Focal Plane coordinates (in mm) for SdssCentroid of each source and add to schema
     mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
     schema = mapper.getOutputSchema()
+
     fpName = prefix + "base_FPPosition"
-    fpxKey = schema.addField(fpName + "_x", type="D", doc="Position on the focal plane (in FP pixels)")
-    fpyKey = schema.addField(fpName + "_y", type="D", doc="Position on the focal plane (in FP pixels)")
+    fpxKey = schema.addField(fpName + "_x", type="D", doc="Position on the focal plane (in FP mm)")
+    fpyKey = schema.addField(fpName + "_y", type="D", doc="Position on the focal plane (in FP mm)")
     fpFlag = schema.addField(fpName + "_flag", type="Flag", doc="Set to True for any fatal failure")
 
     newCatalog = afwTable.SourceCatalog(schema)
@@ -707,6 +708,37 @@ def addFpPoint(det, catalog, prefix=""):
             row.set(fpFlag, True)
         row.set(fpxKey, fpPoint[0])
         row.set(fpyKey, fpPoint[1])
+    return newCatalog
+
+
+def addFpPointPix(det, catalog, prefix=""):
+    # Compute Focal Plane coordinates (in "pixels") for SdssCentroid of each source and add to schema
+    fpMmCol = prefix + "base_FPPosition"
+    if not all([fpMmCol + "_x" in catalog.schema, fpMmCol + "_y" in catalog.schema]):
+        raise RuntimeError("Columns " + prefix + "base_FPPosition_x/y must be in catalog schema.")
+    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
+    mapper.addMinimalSchema(catalog[0].schema)
+    schema = mapper.getOutputSchema()
+
+    fpNamePix = prefix + "base_FPPosition_Pixels"
+    fpxKeyPix = schema.addField(fpNamePix + "_x", type="D", doc="Position on the focal plane (in FP pixels)")
+    fpyKeyPix = schema.addField(fpNamePix + "_y", type="D", doc="Position on the focal plane (in FP pixels)")
+    fpFlagPix = schema.addField(fpNamePix + "_flag", type="Flag", doc="Set to True for any fatal failure")
+
+    newCatalog = afwTable.SourceCatalog(schema)
+    newCatalog.reserve(len(catalog))
+    for source in catalog:
+        row = newCatalog.addNew()
+        row.assign(source, mapper)
+        try:
+            pixelSizeX = det.getPixelSize()[0]
+            pixelSizeY = det.getPixelSize()[1]
+            fpPointPix = geom.Point2D(source[fpMmCol + "_x"]/pixelSizeX, source[fpMmCol + "_y"]/pixelSizeY)
+        except Exception:
+            fpPointPix = geom.Point2D(np.nan, np.nan)
+            row.set(fpFlagPix, True)
+        row.set(fpxKeyPix, fpPointPix[0])
+        row.set(fpyKeyPix, fpPointPix[1])
     return newCatalog
 
 
@@ -1308,6 +1340,45 @@ def findCcdKey(dataId):
         raise RuntimeError("Could not identify ccd key for dataId: %s: \nNot in list of known keys: %s" %
                            (dataId, ccdKeyList))
     return ccdKey
+
+
+def popIdAndCcdKeys(dataId, ccdKeyNames=["raftName", "detectorName", "extension"]):
+    """Pop certain dataId keys for "detector" lookup
+
+    Occasionally, a dataId is passed to a function, but said function would
+    like to loop through a list of "detectors".  The detectors in some
+    cameras are uniquely identified by the "ccd" key, in which case they
+    can be looped through by simply making a copy of the dataId and updating
+    the "ccd" key on each iteration.  However, there are cameras that have
+    redundant keys in the dataId for specifying the "detector".  For example,
+    an lsstCam can be identified by a "raftName"/"detectorName" key combination
+    OR by the single "detector" key.  Looping through the former is much more
+    painful than the latter, but when doind the latter, if only the "detector"
+    key is updated, the "raftName"/"detectorName" will now be inconsistent
+    and one may end up with a different detector than expected from the
+    updated "detector" key.  To ensure the detector look-up is based on
+    just the single detector key, here we pop the superfluous keys from the
+    dataId.
+
+    Parameters
+    ----------
+    dataId : `instance` of `lsst.daf.persistence.DataId`
+       The dataId from which to pop the keys listed in ``ccdKeyNames``.
+    ccdKeyNames : `list` of `str`, optional
+       List of keys to pop from ``dataId``
+
+    Returns
+    -------
+    dataId : `instance` of `lsst.daf.persistence.DataId`
+       The dataId with the keys listed in ``ccdKeyNames`` removed.
+    """
+    ccdKey = findCcdKey(dataId)
+    # Pop (if present) so that the "ccd" is looked up by just the ccdKey field
+    for ccdKeyName in ccdKeyNames:
+        if ccdKeyName != ccdKey and ccdKeyName in dataId:
+            print("Popping key from dataId:", ccdKeyName)
+            dataId.pop(ccdKeyName, None)
+    return dataId
 
 
 def getCcdNameRefList(dataRefList):

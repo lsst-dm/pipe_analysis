@@ -10,7 +10,7 @@ import lsst.daf.persistence as dafPersist
 import lsst.geom as geom
 from lsst.pipe.base import Struct
 
-from .utils import checkHscStack, findCcdKey
+from .utils import checkHscStack, findCcdKey, popIdAndCcdKeys
 
 try:
     from lsst.meas.mosaic.updateExposure import applyMosaicResultsExposure
@@ -449,7 +449,7 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
 
 
 def plotCcdOutline(axes, butler, dataId, camera, ccdList, tractInfo=None, zpLabel=None, fontSize=8,
-                   wcsKeysList=None):
+                   wcsKeysList=None, raDecProj=True):
     """!Plot outlines of CCDs in ccdList
     """
     wcsKeysList = (wcsKeysList if wcsKeysList is not None else
@@ -462,16 +462,11 @@ def plotCcdOutline(axes, butler, dataId, camera, ccdList, tractInfo=None, zpLabe
     lineColorDict = {"initialWcs": "yellow", "rawWcs": "hotpink", "calexpWcs": "lightgrey",
                      "uberWcs": "black"}
 
+    # Pop some ccd keys (if present) from a copy of the dataId so that the ccd
+    # is looked up by just the detector field.
     dataIdCopy = dataId.copy()
-    if "raftName" in dataId:  # Pop these (if present) so that the ccd is looked up by just the detector field
-        dataIdCopy.pop("raftName", None)
-        dataIdCopy.pop("detectorName", None)
+    dataIdCopy = popIdAndCcdKeys(dataIdCopy)
     ccdKey = findCcdKey(dataId)
-    # Pop (if present) so that the ccd is looked up by just the ccdKey field
-    for keyName in ["extension", ]:
-        if keyName != ccdKey and keyName in dataIdCopy:
-            print("Popping:", keyName)
-            dataIdCopy.pop(keyName, None)
     for ccd in ccdList:
         ccdLabelStr = str(ccd)
         if "raft" in dataId:
@@ -489,6 +484,7 @@ def plotCcdOutline(axes, butler, dataId, camera, ccdList, tractInfo=None, zpLabe
         dataIdCopy[ccdKey] = ccd
         calexp = butler.get("calexp", dataIdCopy)
         dataRef = butler.dataRef("raw", dataId=dataIdCopy)
+        detector = camera[ccd]
         # Check metadata to see if stack used was HSC
         metadata = butler.get("calexp_md", dataIdCopy)
         hscRun = checkHscStack(metadata)
@@ -530,42 +526,60 @@ def plotCcdOutline(axes, butler, dataId, camera, ccdList, tractInfo=None, zpLabe
                     h = calexp.getWidth()
 
         lineWidth = 0.5
-        for wcsKey in wcsKeysList:
-            wcs = wcsDict[wcsKey]
-            if wcs:
-                ras = list()
-                decs = list()
-                coords = list()
-                for x, y in zip([0, w, w, 0, 0], [0, 0, h, h, 0]):
-                    xy = geom.Point2D(x, y)
-                    ra = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
-                    dec = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
-                    ras.append(ra)
-                    decs.append(dec)
-                    coords.append(geom.SpherePoint(ra, dec, afwGeom.degrees))
-                xy = geom.Point2D(w/2, h/2)
-                centerX = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
-                centerY = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
-                inTract = False
-                if tractInfo is not None:
-                    for coord in coords:
-                        if tractInfo.contains(coord):
-                            inTract = True
-                            break
-                if not tractInfo or inTract:
-                    if not legendAddedDict[wcsKey]:
-                        axes.plot(ras, decs, color=lineColorDict[wcsKey], linestyle=lineStyleDict[wcsKey],
-                                  linewidth=lineWidth, label=wcsKey)
-                        legendAddedDict[wcsKey] = True
-                    else:
-                        axes.plot(ras, decs, color=lineColorDict[wcsKey], linestyle=lineStyleDict[wcsKey],
-                                  linewidth=lineWidth)
+        if not raDecProj:
+            xs = list()
+            ys = list()
+            ccdCorners = detector.getCorners(cameraGeom.FOCAL_PLANE)
+            ccdCenter = detector.getCenter(cameraGeom.FOCAL_PLANE)
+            pixelSizeX = detector.getPixelSize()[0]
+            pixelSizeY = detector.getPixelSize()[1]
+            for corner in ccdCorners:
+                xs.append(corner[0]/pixelSizeX)
+                ys.append(corner[1]/pixelSizeY)
+            xs.append(xs[0])  # to close the box for plotting
+            ys.append(ys[0])
+            centerX = ccdCenter[0]/pixelSizeX
+            centerY = ccdCenter[1]/pixelSizeY
+            axes.plot(xs, ys, color="black", linewidth=1)
+            axes.text(centerX, centerY, "%s" % str(ccdLabelStr), ha="center", va="center",
+                      fontsize=fontSize, color="black")
+        else:
+            for wcsKey in wcsKeysList:
+                wcs = wcsDict[wcsKey]
+                if wcs:
+                    ras = list()
+                    decs = list()
+                    coords = list()
+                    for x, y in zip([0, w, w, 0, 0], [0, 0, h, h, 0]):
+                        xy = geom.Point2D(x, y)
+                        ra = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
+                        dec = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
+                        ras.append(ra)
+                        decs.append(dec)
+                        coords.append(geom.SpherePoint(ra, dec, geom.degrees))
+                    xy = geom.Point2D(w/2, h/2)
+                    centerX = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
+                    centerY = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
+                    inTract = False
+                    if tractInfo is not None:
+                        for coord in coords:
+                            if tractInfo.contains(coord):
+                                inTract = True
+                                break
+                    if not tractInfo or inTract:
+                        if not legendAddedDict[wcsKey]:
+                            axes.plot(ras, decs, color=lineColorDict[wcsKey],
+                                      linestyle=lineStyleDict[wcsKey], linewidth=lineWidth, label=wcsKey)
+                            legendAddedDict[wcsKey] = True
+                        else:
+                            axes.plot(ras, decs, color=lineColorDict[wcsKey],
+                                      linestyle=lineStyleDict[wcsKey], linewidth=lineWidth)
 
-                    lineWidth += 1/sum(x is not False for x in wcsDict.values())
+                        lineWidth += 1/sum(x is not False for x in wcsDict.values())
 
-                    if (wcsKey == "calexpWcs" and not wcsDict["uberWcs"]) or wcsKey == "uberWcs":
-                        axes.text(centerX, centerY, "%s" % str(ccdLabelStr), ha="center", va="center",
-                                  fontsize=fontSize, color="black")
+                        if (wcsKey == "calexpWcs" and not wcsDict["uberWcs"]) or wcsKey == "uberWcs":
+                            axes.text(centerX, centerY, "%s" % str(ccdLabelStr), ha="center", va="center",
+                                      fontsize=fontSize, color="black")
 
 
 def plotPatchOutline(axes, tractInfo, patchList, plotUnits="deg", idFontSize=None):

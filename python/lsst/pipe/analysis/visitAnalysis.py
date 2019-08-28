@@ -17,7 +17,7 @@ from lsst.afw.table.catalogMatches import matchesToCatalog
 from .analysis import Analysis
 from .coaddAnalysis import CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisTask
 from .utils import (Filenamer, AngularDistance, concatenateCatalogs, addApertureFluxesHSC, addFpPoint,
-                    addFootprintNPix, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
+                    addFpPointPix, addFootprintNPix, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
                     calibrateSourceCatalogMosaic, calibrateSourceCatalogPhotoCalib,
                     calibrateSourceCatalog, backoutApCorr, matchNanojanskyToAB, andCatalog, writeParquet,
                     getRepoInfo, getCcdNameRefList, getDataExistsRefList, setAliasMaps,
@@ -145,8 +145,8 @@ class CcdAnalysis(Analysis):
             selection = data.selection & good
             axes.scatter(xFp[selection], yFp[selection], s=2, marker="o", lw=0,
                          c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax)
-        axes.set_xlabel("x_fpa (pixels)")
-        axes.set_ylabel("y_fpa (pixels)")
+        axes.set_xlabel("x_fpa (mm)")
+        axes.set_ylabel("y_fpa (mm)")
 
         mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vMin, vmax=vMax))
         mappable._A = []        # fake up the array of the scalar mappable. Urgh...
@@ -466,7 +466,6 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         """
         catList = []
         commonZpCatList = []
-        calexp = None
         areaDict = {}
         self.haveFpCoords = True
         for dataRef in dataRefList:
@@ -482,7 +481,6 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 catalog = addIntFloatOrStrColumn(catalog, dataRef.dataId[repoInfo.ccdKey], "ccdId",
                                                  "Id of CCD on which source was detected")
 
-            # Compute Focal Plane coordinates for each source if not already there
             if self.config.hasFakes:
                 exp = repoInfo.butler.get("calexp", dataRef.dataId)
                 wcs = exp.getWcs()
@@ -523,14 +521,17 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                         onCcdList.append(rowId)
                 fakeCat["onCcd"].iloc[np.array(onCcdList)] = dataRef.dataId["ccd"]
 
-            if self.config.doPlotCentroids or self.config.analysis.doPlotFP and self.haveFpCoords:
-                if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
-                    calexp = repoInfo.butler.get("calexp", dataRef.dataId)
-                    det = calexp.getDetector()
-                    catalog = addFpPoint(det, catalog)
-                xFp = catalog["base_FPPosition_x"]
-                if len(xFp[np.where(np.isfinite(xFp))]) <= 0:
-                    self.haveFpCoords = False
+            # Compute Focal Plane coordinates for each source if not already there
+            calexp = repoInfo.butler.get("calexp", dataRef.dataId)
+            det = calexp.getDetector()
+            if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
+                catalog = addFpPoint(det, catalog)
+            if "base_FPPosition_Pixels_x" not in catalog.schema:
+                catalog = addFpPointPix(det, catalog)
+            xFp = catalog["base_FPPosition_x"]
+            if len(xFp[np.where(np.isfinite(xFp))]) <= 0:
+                self.haveFpCoords = False
+
             if self.config.doPlotFootprintNpix:
                 catalog = addFootprintNPix(catalog)
             if repoInfo.hscRun and self.config.doAddAperFluxHsc:
@@ -555,7 +556,6 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                         continue
             fluxMag0 = None
             if not self.config.doApplyUberCal:
-                calexp = repoInfo.butler.get("calexp", dataRef.dataId) if not calexp else calexp
                 fluxMag0 = calexp.getPhotoCalib().getInstFluxAtZeroMagnitude()
             catalog = self.calibrateCatalogs(dataRef, catalog, fluxMag0, repoInfo.dataset)
             catList.append(catalog)
@@ -590,8 +590,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if aliasDictList:
                 catalog = setAliasMaps(catalog, aliasDictList)
             fluxMag0 = None
+            calexp = repoInfo.butler.get("calexp", dataRef.dataId)
             if not self.config.doApplyUberCal:
-                calexp = repoInfo.butler.get("calexp", dataRef.dataId)
                 fluxMag0 = calexp.getPhotoCalib().getInstFluxAtZeroMagnitude()
             catalog = self.calibrateCatalogs(dataRef, catalog, fluxMag0, repoInfo.dataset)
             packedMatches = repoInfo.butler.get(dataset + "Match", dataRef.dataId)
@@ -636,11 +636,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 catalog["distance"] = angularDist(catalog)
 
             # Compute Focal Plane coordinates for each source if not already there
-            if self.config.analysisMatches.doPlotFP:
-                if "src_base_FPPosition_x" not in catalog.schema and "src_focalplane_x" not in catalog.schema:
-                    exp = repoInfo.butler.get("calexp", dataRef.dataId)
-                    det = exp.getDetector()
-                    catalog = addFpPoint(det, catalog, prefix="src_")
+            det = calexp.getDetector()
+            if "src_base_FPPosition_x" not in catalog.schema and "src_focalplane_x" not in catalog.schema:
+                catalog = addFpPoint(det, catalog, prefix="src_")
+            if "src_FPPosition_Pixels_x" not in catalog.schema:
+                catalog = addFpPointPix(det, catalog, prefix="src_")
             # Optionally backout aperture corrections
             if self.config.doBackoutApCorr:
                 catalog = backoutApCorr(catalog)
@@ -1005,8 +1005,9 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         commonZpCatList1 = []
         catList2 = []
         commonZpCatList2 = []
-        self.zpLabel1 = None
-        self.zpLabel2 = None
+        self.haveFpCoords = True
+        self.zpLabel1 = "FLUXMAG0"
+        self.zpLabel2 = "FLUXMAG0"
         for iCat, catList, commonZpCatList, dataRefList, repoInfo, doApplyUberCal, useMeasMosaic in [
                 [1, catList1, commonZpCatList1, dataRefList1, repoInfo1,
                  self.config.doApplyUberCal1, self.config.useMeasMosaic1],
@@ -1027,10 +1028,20 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 if aliasDictList:
                     srcCat = setAliasMaps(srcCat, aliasDictList)
 
+                # Compute Focal Plane coordinates for each source if not already there
+                calexp = repoInfo.butler.get("calexp", dataRef.dataId)
+                det = calexp.getDetector()
+                if "base_FPPosition_x" not in srcCat.schema and "focalplane_x" not in srcCat.schema:
+                    srcCat = addFpPoint(det, srcCat)
+                if "base_FPPosition_Pixels_x" not in srcCat.schema:
+                    srcCat = addFpPointPix(det, srcCat)
+                xFp = srcCat["base_FPPosition_x"]
+                if len(xFp[np.where(np.isfinite(xFp))]) <= 0:
+                    self.haveFpCoords = False
+
                 if self.config.doBackoutApCorr:
                     srcCat = backoutApCorr(srcCat)
 
-                calexp = repoInfo.butler.get("calexp", dataRef.dataId)
                 fluxMag0 = calexp.getPhotoCalib().getInstFluxAtZeroMagnitude()
                 nQuarter = calexp.getDetector().getOrientation().getNQuarter()
                 # add footprint nPix column
@@ -1049,7 +1060,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 commonZpCat = srcCat.copy(True)
                 commonZpCat = calibrateSourceCatalog(commonZpCat, self.config.analysis.commonZp)
                 commonZpCatList.append(commonZpCat)
-                if self.config.doApplyUberCal:
+                if doApplyUberCal:
                     if repoInfo.hscRun:
                         if not dataRef.datasetExists("wcs_hsc") or not dataRef.datasetExists("fcr_hsc_md"):
                             continue
