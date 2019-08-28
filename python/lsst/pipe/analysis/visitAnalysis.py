@@ -25,7 +25,8 @@ from .utils import (AngularDistance, concatenateCatalogs, addApertureFluxesHSC, 
 from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText
 from .fakesAnalysis import (addDegreePositions, matchCatalogs, addNearestNeighbor, fakesPositionCompare,
                             getPlotInfo, calcFakesAreaDepth, plotFakesAreaDepth, fakesMagnitudeCompare,
-                            fakesMagnitudeNearestNeighbor, fakesMagnitudeBlendedness, fakesCompletenessPlot)
+                            fakesMagnitudeNearestNeighbor, fakesMagnitudeBlendedness, fakesCompletenessPlot,
+                            fakesMagnitudePositionError)
 
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
@@ -429,6 +430,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                                               plotInfoDict))
                     plotList.append(fakesCompletenessPlot(inputFakes, inputFakesMatched,
                                                           processedFakesMatched, plotInfoDict, areaDict))
+                    plotList.append(fakesMagnitudePositionError(inputFakesMatched, processedFakesMatched,
+                                                                plotInfoDict, areaDict))
 
                 # Dict of all parameters common to plot* functions
                 plotInfoDict.update(dict(cameraObj=repoInfo.camera, ccdList=ccdListPerTract,
