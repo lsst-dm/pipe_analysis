@@ -24,8 +24,8 @@ __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "M
            "CosmosLabeller", "plotText", "annotateAxes", "labelVisit", "labelCamera",
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
            "plotCcdOutline", "rotatePixelCoords", "bboxToXyCoordLists", "getMinMaxPatchList",
-           "percent", "setPtSize", "getQuiver", "makeAlphaCmap", "buildTractImage",
-           "determineUberCalLabel"]
+           "computeEqualAspectLimits", "percent", "setPtSize", "getQuiver", "makeAlphaCmap",
+           "buildTractImage", "determineUberCalLabel"]
 
 
 class AllLabeller(object):
@@ -718,6 +718,44 @@ def getMinMaxPatchList(patchList, tractInfo, nDecimals=None, raMin=360.0, raMax=
         raMax=raMax,
         decMin=decMin,
         decMax=decMax,
+    )
+
+
+def computeEqualAspectLimits(xMin, xMax, yMin, yMax, percentPad=0.0):
+    """Compute equal aspect plotting limits given xMin, xMax, yMin, yMax values
+
+    Also allow for a padding of a fractional percent of the maximum deltaX/deltaY
+    range to to be applied to the limits.
+
+    Parameters
+    ----------
+    xMin, xMax : `float`
+       Minimum and maximum \"y\" coordinate.
+    yMin, yMax : `float`
+       Minimum and maximum \"y\" coordinate.
+    percentPad : `float`, optional
+       A percentage amount by which to pad the axis limits on all four sides
+       (5.0% by default).
+
+    Returns
+    -------
+    `lsst.pipe.base.Struct`
+       Contains the min and max values that provide equal aspect limits
+       for the two axes based on the maximum range of the coordinate limits
+       provided by ``xMin``, ``xMax``, ``yMin``, ``yMax``.  These values are
+       padded by the percentage of the plot range provided by ``percentPad``.
+    """
+    deltaX, deltaY = xMax - xMin, yMax - yMin
+    deltaPix = (1.0 + percentPad/100.0)*max(deltaX, deltaY)
+    xPlotMin = (xMin + deltaX/2.0) - deltaPix/2.0
+    xPlotMax = (xMin + deltaX/2.0) + deltaPix/2.0
+    yPlotMin = (yMin + deltaY/2.0) - deltaPix/2.0
+    yPlotMax = (yMin + deltaY/2.0) + deltaPix/2.0
+    return Struct(
+        xPlotMin=xPlotMin,
+        xPlotMax=xPlotMax,
+        yPlotMin=yPlotMin,
+        yPlotMax=yPlotMax,
     )
 
 

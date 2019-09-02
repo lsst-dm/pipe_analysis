@@ -14,7 +14,8 @@ from lsst.pex.config import Config, Field, ListField, DictField
 from .utils import Data, Stats, E1Resids, E2Resids, checkIdLists, fluxToPlotString, computeMeanOfFrac
 from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotText, plotCameraOutline,
                         plotTractOutline, plotPatchOutline, plotCcdOutline, labelCamera, getQuiver,
-                        getMinMaxPatchList, bboxToXyCoordLists, makeAlphaCmap, buildTractImage)
+                        getMinMaxPatchList, computeEqualAspectLimits, bboxToXyCoordLists, makeAlphaCmap,
+                        buildTractImage)
 
 __all__ = ["AnalysisConfig", "Analysis"]
 
