@@ -20,7 +20,7 @@ except ImportError:
 __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "MatchesStarGalaxyLabeller",
            "CosmosLabeller", "plotText", "annotateAxes", "labelVisit", "labelCamera",
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
-           "plotCcdOutline", "rotatePixelCoords", "bboxToXyCoordLists", "getMinMaxPatchList",
+           "plotCcdOutline", "rotatePixelCoords", "rotatePoint", "bboxToXyCoordLists", "getMinMaxPatchList",
            "getMinMaxCcdList", "computeEqualAspectLimits", "percent", "setPtSize", "getQuiver",
            "makeAlphaCmap", "buildTractImage", "determineUberCalLabel"]
 
@@ -595,16 +595,16 @@ def plotPatchOutline(axes, tractInfo, patchList, plotUnits="deg", idFontSize=Non
                                                         wcsUnits=plotUnits)
                 else:
                     xCoord, yCoord = bboxToXyCoordLists(patch.getOuterBBox(), wcs=None)
-                xCoords = xCoord + (xCoord[0], )
-                yCoords = yCoord + (yCoord[0], )
+                xCoords = xCoord + [xCoord[0], ]
+                yCoords = yCoord + [yCoord[0], ]
                 axes.plot(xCoords, yCoords, color="black", lw=0.5, linestyle="solid")
             if plotUnits in validWcsUnits:
                 xCoord, yCoord = bboxToXyCoordLists(patch.getInnerBBox(), tractInfo.getWcs(),
                                                     wcsUnits=plotUnits)
             else:
                 xCoord, yCoord = bboxToXyCoordLists(patch.getInnerBBox(), wcs=None)
-            xCoords = xCoord + (xCoord[0], )
-            yCoords = yCoord + (yCoord[0], )
+            xCoords = xCoord + [xCoord[0], ]
+            yCoords = yCoord + [yCoord[0], ]
             axes.plot(xCoords, yCoords, color="black", lw=0.6, linestyle=(0, (5, 4)))
             axes.text(percent(xCoords), percent(yCoords, 0.5), str(patch.getIndex()),
                       fontsize=idFontSize, horizontalalignment="center", verticalalignment="center")
@@ -628,6 +628,31 @@ def rotatePixelCoords(sources, width, height, nQuarter):
             s.set(xKey, y0)
             s.set(yKey, width - x0 - 1.0)
     return sources
+
+
+def rotatePoint(x0, y0, xToRotate, yToRotate, rotationAngle):
+    """Rotate point clockwise by the given angle about the given origin
+
+    Parameters
+    ----------
+    x0, y0 : `float`
+       The x & y coordinates of the origin about which to perform the rotation.
+    xToRotate, yToRotate : `float`
+       The x & y coordinates of the point to be rotated about the origin.
+    rotationAngle : `float`
+       The angle in radians by which to rotate point in a clockwise direction.
+       (``xToRotate``, ``yToRotate``) about origin (``x0``, ``y0``).
+
+    Returns
+    -------
+    xRoated, yRotated : `float`
+       The rotated x and y coordinates.
+    """
+    xRotated = (np.cos(-rotationAngle)*(xToRotate - x0) -
+                np.sin(-rotationAngle)*(yToRotate - y0) + x0)
+    yRotated = (np.sin(-rotationAngle)*(xToRotate - x0) +
+                np.cos(-rotationAngle)*(yToRotate - y0) + y0)
+    return xRotated, yRotated
 
 
 def bboxToXyCoordLists(bbox, wcs=None, wcsUnits="deg"):
@@ -670,7 +695,7 @@ def bboxToXyCoordLists(bbox, wcs=None, wcsUnits="deg"):
             coord = p
             corners.append([coord.getX(), coord.getY()])
     xCoords, yCorrds = zip(*corners)
-    return xCoords, yCorrds
+    return list(xCoords), list(yCorrds)
 
 
 def getMinMaxPatchList(patchList, tractInfo, nDecimals=None, raMin=360.0, raMax=0.0, decMin=90.0,
