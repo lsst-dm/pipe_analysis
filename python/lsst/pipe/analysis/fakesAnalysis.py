@@ -26,14 +26,13 @@ Make QA plots for data with fake sources inserted
 import numpy as np
 import matplotlib.pyplot as plt
 from collections import defaultdict
-from matplotlib import colors, gridspec
+from matplotlib import colors, gridspec, patches
 from matplotlib.path import Path
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.interpolate import UnivariateSpline
 import astropy.coordinates as coord
 from astropy import units as u
 from astropy.stats import mad_std as sigmaMAD
-
 
 __all__ = ["addDegreePositions", "matchCatalogs", "addNearestNeighbor", "getPlotInfo",
            "fakesAreaDepth", "fakesPositionCompare", "fakesMagnitudeBlendedness",
@@ -112,11 +111,14 @@ def matchCatalogs(catalog1, raCol1, decCol1, catalog2, raCol2, decCol2, units=u.
     inds, dists, _ = coord.match_coordinates_sky(skyCoords1, skyCoords2)
 
     ids = (dists < matchRadius)
+
     matchedInds = inds[ids]
+    catalog1["matched"] = np.zeros(len(catalog1))
+    catalog1["matched"][ids] = 1
     catalog1Matched = catalog1[ids]
     catalog2Matched = catalog2.iloc[matchedInds].copy()
 
-    return catalog1Matched, catalog2Matched
+    return catalog1Matched, catalog2Matched, catalog1
 
 
 def addNearestNeighbor(catalog, raCol, decCol, units=u.degree):
@@ -176,18 +178,46 @@ def getPlotInfo(repoInfo):
     return plotInfoDict
 
 
+def addProvenanceInfo(fig, plotInfoDict):
+    """Add some useful provenance information to the plot
+
+    Parameters
+    ----------
+    fig : `matplotlib.figure.Figure`
+        The figure that the information should be added to
+    plotInfoDict : `dict`
+        A dict containing useful information to add to the plot.
+    """
+
+    plt.text(0.85, 0.98, "Camera: " + plotInfoDict["camera"], fontsize=8, alpha=0.8,
+             transform=fig.transFigure)
+    plt.text(0.85, 0.96, "Filter: " + plotInfoDict["filter"], fontsize=8, alpha=0.8,
+             transform=fig.transFigure)
+    plt.text(0.85, 0.94, "Visit: " + plotInfoDict["visit"], fontsize=8, alpha=0.8, transform=fig.transFigure)
+    plt.text(0.85, 0.92, "Tract: " + plotInfoDict["tract"], fontsize=8, alpha=0.8, transform=fig.transFigure)
+
+    plt.text(0.02, 0.98, "rerun: " + plotInfoDict["rerun"], fontsize=8, alpha=0.8, transform=fig.transFigure)
+
+    if "jointcal" in plotInfoDict["dataset"]:
+        plt.text(0.02, 0.02, "JointCal Used? Yes", fontsize=8, alpha=0.8, transform=fig.transFigure)
+    else:
+        plt.text(0.02, 0.02, "JointCal Used? No", fontsize=8, alpha=0.8, transform=fig.transFigure)
+
+    return fig
+
+
 def fakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict, areaDict, repoInfo,
-                   measColType="base_PsfFlux_"):
+                   measColType="base_PsfFlux_", distNeighbor=2.0 / 3600.0):
     """Plot the area vs depth for the given catalog
 
     Parameters
     ----------
     inputFakesMatched : `pandas.core.frame.DataFrame`
-        The catalog used to add the fakes originally matched to the processed catalog.
+        The catalog used to add the fakes originally, matched to the processed catalog.
     processedFakesMatched : `pandas.core.frame.DataFrame`
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
-        A dict containing useful information to add to the plot.
+        A dict containing useful information to add to the plot, passed to addProvenanceInfo.
     areaDict : `dict`
         A dict containing the area of each ccd.
     repoInfo : `lsst.pipe.base.struct.Struct`
@@ -219,7 +249,7 @@ def fakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict, areaD
     for (i, ccd) in enumerate(ccds):
         onCcd = ((processedFakesMatched["ccdId"].values == ccd) &
                  (np.isfinite(processedFakesMatched[measColType + "mag"].values)) &
-                 (processedFakesMatched["nearestNeighbor"].values > 2.0 / 3600.0) &
+                 (processedFakesMatched["nearestNeighbor"].values >= distNeighbor) &
                  (inputFakesMatched["sourceType"].values == "star"))
 
         mags = processedFakesMatched[measColType + "mag"].values[onCcd]
@@ -287,22 +317,9 @@ def fakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict, areaD
         plt.axvline(magLim75, label=label75, color="k", ls="--")
         plt.legend(loc="best")
 
-        ax = plt.gca()
-        plt.text(0.96, 1.02, "Camera: " + plotInfoDict["camera"], fontsize=8, alpha=0.8,
-                 transform=ax.transAxes)
-        plt.text(0.96, 1.05, "Filter: " + plotInfoDict["filter"], fontsize=8, alpha=0.8,
-                 transform=ax.transAxes)
-        plt.text(0.96, 1.08, "Visit: " + plotInfoDict["visit"], fontsize=8, alpha=0.8, transform=ax.transAxes)
-        plt.text(0.96, 1.11, "Tract: " + plotInfoDict["tract"], fontsize=8, alpha=0.8, transform=ax.transAxes)
-
-        if "jointcal" in plotInfoDict["dataset"]:
-            plt.text(-0.1, -0.1, "JointCal Used? Yes", fontsize=8, alpha=0.8, transform=ax.transAxes)
-        else:
-            plt.text(-0.1, -0.1, "JointCal Used? No", fontsize=8, alpha=0.8, transform=ax.transAxes)
-
-        plt.text(-0.1, 1.12, "Rerun: " + plotInfoDict["rerun"], fontsize=8, alpha=0.8, transform=ax.transAxes)
-
         fig = plt.gcf()
+        fig = addProvenanceInfo(fig, plotInfoDict)
+
         repoInfo.dataId["description"] = "areaDepth" + sigmas[i]
         repoInfo.butler.put(fig, "plotFakes", repoInfo.dataId)
         plt.close()
@@ -316,17 +333,16 @@ def fakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict, areaD
 def fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict, repoInfo,
                          raFakesCol="raJ2000_deg", decFakesCol="decJ2000_deg", raCatCol="coord_ra_deg",
                          decCatCol="coord_dec_deg", magCol="base_PsfFlux_mag"):
-
     """Make a plot showing the RA and Dec offsets from the input positions.
 
     Parameters
     ----------
     inputFakesMatched : `pandas.core.frame.DataFrame`
-        The catalog used to add the fakes originally matched to the processed catalog.
+        The catalog used to add the fakes originally, matched to the processed catalog.
     processedFakesMatched : `pandas.core.frame.DataFrame`
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
-        A dict containing useful information to add to the plot.
+        A dict containing useful information to add to the plot, passed to addProvenanceInfo.
     repoInfo : `lsst.pipe.base.struct.Struct`
         A struct that contains information about the input data.
     raFakesCol : `string`
@@ -367,6 +383,7 @@ def fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict,
     """
 
     pointsToUse = (processedFakesMatched[magCol].values < plotInfoDict["magLim"])
+
     processedFakesMatched = processedFakesMatched[pointsToUse]
     inputFakesMatched = inputFakesMatched[pointsToUse]
 
@@ -438,21 +455,11 @@ def fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict,
     bbox = dict(facecolor="white", edgecolor="k", alpha=0.8)
     plt.text(-2.9, 0.7, numInfo, fontsize=8, bbox=bbox)
 
-    plt.text(0.5, 1.04, "Camera: " + plotInfoDict["camera"], fontsize=8, alpha=0.8)
-    plt.text(0.5, 1.16, "Filter: " + plotInfoDict["filter"], fontsize=8, alpha=0.8)
-    plt.text(0.5, 1.28, "Visit: " + plotInfoDict["visit"], fontsize=8, alpha=0.8)
-    plt.text(0.5, 1.40, "Tract: " + plotInfoDict["tract"], fontsize=8, alpha=0.8)
-
-    plt.text(-3.55, 1.40, "rerun: " + plotInfoDict["rerun"], fontsize=8, alpha=0.8)
-
-    if "jointcal" in plotInfoDict["dataset"]:
-        plt.text(-3.55, -3.45, "JointCal Used? Yes", fontsize=8, alpha=0.8)
-    else:
-        plt.text(-3.55, -3.45, "JointCal Used? No", fontsize=8, alpha=0.8)
-
     plt.subplots_adjust(top=0.9, hspace=0.0, wspace=0.0, right=0.93, left=0.12, bottom=0.1)
 
     fig = plt.gcf()
+    fig = addProvenanceInfo(fig, plotInfoDict)
+
     repoInfo.dataId["description"] = "positionCompare"
     repoInfo.butler.put(fig, "plotFakes", repoInfo.dataId)
     plt.close()
@@ -479,7 +486,7 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict):
     title : `string`
          The text to be displayed as the plot title.
     plotInfoDict : `dict`
-        A dict containing useful information to add to the plot.
+        A dict containing useful information to add to the plot, passed to addProvenanceInfo.
 
     Returns
     -------
@@ -601,24 +608,8 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict):
     ax.set_ylim(medYs - 3.0 * sigmaMadYs, medYs + 3 * sigmaMadYs)
     ax.set_xlim(xs1 - xScale, xs97)
 
-    # Add the infomation about the data origins
-    plt.text(0.85, 0.98, "Camera: " + plotInfoDict["camera"], fontsize=8, alpha=0.8,
-             transform=fig.transFigure)
-    plt.text(0.85, 0.96, "Filter: " + plotInfoDict["filter"], fontsize=8, alpha=0.8,
-             transform=fig.transFigure)
-    plt.text(0.85, 0.94, "Visit: " + plotInfoDict["visit"], fontsize=8, alpha=0.8, transform=fig.transFigure)
-    plt.text(0.85, 0.92, "Tract: " + plotInfoDict["tract"], fontsize=8, alpha=0.8, transform=fig.transFigure)
-
-    if "jointcal" in plotInfoDict["dataset"]:
-        plt.text(0.02, 0.02, "JointCal Used? Yes", fontsize=8, alpha=0.8, transform=fig.transFigure)
-    else:
-        plt.text(0.02, 0.02, "JointCal Used? No", fontsize=8, alpha=0.8, transform=fig.transFigure)
-
-    plt.text(0.02, 0.98, "Rerun: " + plotInfoDict["rerun"], fontsize=8, alpha=0.8, transform=fig.transFigure)
-
     # Add legends, needs to be split up as otherwise too large
     ax.set_title(title)
-    plt.subplots_adjust(wspace=0.0)
     sigmaLines = [medLine, sigmaMadLine, halfSigmaMadLine, twoSigmaMadLine]
     infoLines = [quartileLine]
 
@@ -628,6 +619,7 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict):
     legendSigmaLines = ax.legend(handles=sigmaLines, loc="lower left", ncol=2, fontsize=10, framealpha=0.9,
                                  borderpad=0.2)
     plt.draw()
+    plt.subplots_adjust(wspace=0.0)
 
     # Make the legends line up nicely
     legendBBox = legendSigmaLines.get_window_extent()
@@ -635,7 +627,10 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict):
     fig.legend(handles=[notStatsPoints, statsPoints], fontsize=8, borderaxespad=0, loc="lower left",
                bbox_to_anchor=(0.66, yLegFigure), bbox_transform=fig.transFigure, framealpha=0.9,
                markerscale=2)
+    # Add the infomation about the data origins
     fig = plt.gcf()
+    fig = addProvenanceInfo(fig, plotInfoDict)
+
     return fig
 
 
@@ -646,7 +641,7 @@ def fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict
     Parameters
     ----------
     inputFakesMatched : `pandas.core.frame.DataFrame`
-        The catalog used to add the fakes originally matched to the processed catalog.
+        The catalog used to add the fakes originally, matched to the processed catalog.
     processedFakesMatched : `pandas.core.frame.DataFrame`
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
@@ -703,7 +698,7 @@ def fakesMagnitudeNearestNeighbor(inputFakesMatched, processedFakesMatched, plot
     Parameters
     ----------
     inputFakesMatched : `pandas.core.frame.DataFrame`
-        The catalog used to add the fakes originally matched to the processed catalog.
+        The catalog used to add the fakes originally, matched to the processed catalog.
     processedFakesMatched : `pandas.core.frame.DataFrame`
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
@@ -757,11 +752,11 @@ def fakesMagnitudeBlendedness(inputFakesMatched, processedFakesMatched, plotInfo
     Parameters
     ----------
     inputFakesMatched : `pandas.core.frame.DataFrame`
-        The catalog used to add the fakes originally matched to the processed catalog.
+        The catalog used to add the fakes originally, matched to the processed catalog.
     processedFakesMatched : `pandas.core.frame.DataFrame`
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
-        A dict containing useful information to add to the plot.
+        A dict containing useful information to add to the plot, passed to addProvenanceInfo.
     repoInfo : `lsst.pipe.base.struct.Struct`
         A struct that contains information about the input data.
     magCol : `string`
@@ -798,4 +793,237 @@ def fakesMagnitudeBlendedness(inputFakesMatched, processedFakesMatched, plotInfo
     repoInfo.dataId["description"] = "magnitudeBlendedness"
     repoInfo.butler.put(fig, "plotFakes", repoInfo.dataId)
 
+    plt.close()
+
+
+def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, plotInfoDict, areaDict,
+                          repoInfo, raFakesCol="raJ2000_deg", decFakesCol="decJ2000_deg",
+                          raCatCol="coord_ra_deg", decCatCol="coord_dec_deg", distNeighbor=2.0 / 3600.0):
+    """Makes three plots, one showing a two dimensional histogram of the fraction of fakes recovered,
+    one a 1D histogram showing the area against the depth and one showing the fraction of input fakes
+    recovered by magnitude.
+
+    Parameters
+    ----------
+    inputFakes : `pandas.core.frame.DataFrame`
+        The catalog used to add the fakes originally.
+    inputFakesMatched : `pandas.core.frame.DataFrame`
+        The catalog used to add the fakes originally, matched to the processed catalog.
+    processedFakesMatched : `pandas.core.frame.DataFrame`
+        The catalog produced by the stack from the images with fakes in.
+    plotInfoDict : `dict`
+        A dict containing useful information to add to the plot, passed to addProvenanceInfo.
+     areaDict : `dict`
+        A dict containing the area of each ccd.
+    repoInfo : `lsst.pipe.base.struct.Struct`
+        A struct that contains information about the input data.
+    raFakesCol : `string`
+        default : 'raJ2000_deg'
+        The RA column to use from the fakes catalog.
+    decFakesCol : `string`
+        default : 'decJ2000_deg'
+        The Dec. column to use from the fakes catalog.
+    raCatCol : `string`
+        default : 'coord_ra_deg'
+        The RA column to use from the catalog.
+    decCatCol : `string`
+        default : 'coord_dec_deg'
+        The Dec. column to use from the catalog.
+
+    Notes
+    -----
+    Makes 3 plots to study the completeness of the data.
+    The first is a 2D histogram of the fraction of fakes recovered.
+    The second is a cumulative plot of the area which has fainter sources recovered than a given magnitude.
+    The third is a histogram showing the fraction recovered in each magnitude bin with the number input and
+    recovered overplotted.
+    """
+
+    band = plotInfoDict["filter"][-1].lower()
+
+    # Make a color map that looks nice
+    r, g, b = colors.colorConverter.to_rgb("C0")
+    r1, g1, b1 = colors.colorConverter.to_rgb("midnightblue")
+    colorDict = {"blue": ((0.0, b, b), (1.0, b1, b1)), "red": ((0.0, r, r), (1.0, r1, r1)),
+                 "green": ((0.0, g, g), (1.0, g1, g1))}
+    colorDict["alpha"] = ((0.0, 0.2, 0.2), (0.05, 0.3, 0.3), (0.5, 0.8, 0.8), (1.0, 1.0, 1.0))
+    newBlues = colors.LinearSegmentedColormap("newBlues", colorDict)
+
+    # Find the fake stars"
+    stars = np.where((inputFakes["sourceType"] == "star"))[0]
+    starsMatched = np.where((inputFakesMatched["sourceType"] == "star"))[0]
+
+    # Find the min/max ra/dec and use them to find an approximate scale for the plot limits.
+    minRa = np.min(inputFakesMatched[raFakesCol].values[starsMatched])
+    maxRa = np.max(inputFakesMatched[raFakesCol].values[starsMatched])
+    minDec = np.min(inputFakesMatched[decFakesCol].values[starsMatched])
+    maxDec = np.max(inputFakesMatched[decFakesCol].values[starsMatched])
+
+    scaleRa = np.fabs((maxRa - minRa) / 20.0)
+    scaleDec = np.fabs((maxDec - minDec) / 20.0)
+
+    rasFakes = inputFakes[raFakesCol].values[stars]
+    decsFakes = inputFakes[decFakesCol].values[stars]
+
+    rasFakesMatched = inputFakesMatched[raFakesCol].values[starsMatched]
+    decsFakesMatched = inputFakesMatched[decFakesCol].values[starsMatched]
+
+    fig, ax = plt.subplots()
+
+    # Run through the ccds, plot them and then histogram the data on them
+    for ccd in list(set(processedFakesMatched["ccdId"].values)):
+        # Find the ccd corners and sizes
+        corners = areaDict["corners_" + str(ccd)]
+        xy = (corners[0].getRa().asDegrees(), corners[0].getDec().asDegrees())
+        width = corners[1].getRa().asDegrees() - corners[0].getRa().asDegrees()
+        height = corners[1].getDec().asDegrees() - corners[0].getDec().asDegrees()
+
+        # Some of the ccds are rotated and some have xy0 as being on the right with negative width/height
+        # this upsets the binning so find the min and max to calculate positive bin widths from.
+        minX = np.min([xy[0], corners[1].getRa().asDegrees()])
+        maxX = np.max([xy[0], corners[1].getRa().asDegrees()])
+        minY = np.min([xy[1], corners[1].getDec().asDegrees()])
+        maxY = np.max([xy[1], corners[1].getDec().asDegrees()])
+        if np.fabs(width) > np.fabs(height):
+            binWidth = (maxX - minX) / 10
+        else:
+            binWidth = (maxY - minY) / 10
+        xEdges = np.arange(minX, maxX + binWidth, binWidth)
+        yEdges = np.arange(minY, maxY + binWidth, binWidth)
+
+        # Plot the ccd outlines
+        ccdPatch = patches.Rectangle(xy, width, height, fill=False, edgecolor="k", alpha=0.7)
+        ax.add_patch(ccdPatch)
+
+        # Check which points are on the ccd, the ccd patch is in different coordinates to the data, hence
+        # the transform being required
+        trans = ccdPatch.get_patch_transform()
+        histPoints = ccdPatch.get_path().contains_points(list(zip(rasFakes, decsFakes)), transform=trans)
+        pointsFakesMatched = list(zip(rasFakesMatched, decsFakesMatched))
+        histPointsMatched = ccdPatch.get_path().contains_points(pointsFakesMatched, transform=trans)
+
+        # Histogram them both and then take the ratio
+        hFakes, _, _ = np.histogram2d(rasFakes[histPoints], decsFakes[histPoints], bins=(xEdges, yEdges))
+        hFakesMatched, _, _ = np.histogram2d(rasFakesMatched[histPointsMatched],
+                                             decsFakesMatched[histPointsMatched], bins=(xEdges, yEdges))
+        X, Y = np.meshgrid(xEdges, yEdges)
+        # Plot 1 - the ratio to give the fraction missed as it looks better
+        fracIm = plt.pcolormesh(X, Y, 1.0 - hFakesMatched.T/hFakes.T, cmap=newBlues, vmin=0.0, vmax=1.0)
+
+    # Add a color bar
+    colorBar = plt.gcf().colorbar(fracIm, ax=plt.gca())
+    colorBar.set_label("Fraction Missed")
+
+    plt.xlabel("R. A. / Degrees")
+    plt.ylabel("Declination / Degrees")
+    plt.title('Fraction of Sources Missed \n (Fake stars)')
+
+    # Add useful information to the plot
+    fig = plt.gcf()
+    fig = addProvenanceInfo(fig, plotInfoDict)
+
+    plt.xlim(minRa - scaleRa, maxRa + scaleRa)
+    plt.ylim(minDec - scaleDec, maxDec + scaleDec)
+    plt.subplots_adjust(right=0.99)
+
+    # Save the graph
+    repoInfo.dataId["description"] = "completenessHist2D"
+    repoInfo.butler.put(fig, "plotFakes", repoInfo.dataId)
+    plt.close()
+
+    # Now condense this information into a histogram
+
+    depths = []
+    ccds = list(set(processedFakesMatched["ccdId"].values))
+    areas = np.zeros(len(ccds))
+
+    # Find the faintest recovered isolated star on each ccd
+    for (i, ccd) in enumerate(ccds):
+        onCcd = ((processedFakesMatched["ccdId"].values == ccd) &
+                 (processedFakesMatched["nearestNeighbor"].values >= distNeighbor) &
+                 (inputFakesMatched["sourceType"].values == "star"))
+
+        depths.append(np.max(inputFakesMatched[band + "magVar"].values[onCcd]))
+        areas[i] = areaDict[ccd] / (3600.0**2)
+
+    # Make a cumulative histogram of the area vs magnitude of the faintest source for each ccd
+    bins = np.linspace(min(depths), max(depths), 101)
+    areasOut = np.zeros(100)
+    n = 0
+    magLimHalfArea = None
+    magLim25 = None
+    magLim75 = None
+    while n < len(bins)-1:
+        ids = np.where((depths >= bins[n]) & (depths < bins[n + 1]))[0]
+        areasOut[n] += np.sum(areas[ids])
+        if np.sum(areasOut) > np.sum(areas) / 2.0 and magLimHalfArea is None:
+            magLimHalfArea = (bins[n] + bins[n + 1]) / 2.0
+        if np.sum(areasOut) > np.sum(areas) * 0.25 and magLim25 is None:
+            magLim25 = (bins[n] + bins[n + 1]) / 2.0
+        if np.sum(areasOut) > np.sum(areas) * 0.75 and magLim75 is None:
+            magLim75 = (bins[n] + bins[n + 1]) / 2.0
+        n += 1
+
+    cumAreas = np.zeros(100)
+    n = 0
+    for area in areasOut[::-1]:
+        cumAreas[n] = area + cumAreas[n-1]
+        n += 1
+
+    plt.plot(bins[::-1][1:], cumAreas)
+    plt.xlabel("Faintest Source Recovered / mags", fontsize=15)
+    plt.ylabel("Area / deg^2", fontsize=15)
+    plt.title('Faintest Source Recovered \n (Fake stars with no match within 2")')
+    labelHA = "Mag. Lim. for 50% of the area: {:0.2f}".format(magLimHalfArea)
+    plt.axvline(magLimHalfArea, label=labelHA, color="k", ls=":")
+    label25 = "Mag. Lim. for 25% of the area: {:0.2f}".format(magLim25)
+    plt.axvline(magLim25, label=label25, color="k", ls="--")
+    label75 = "Mag. Lim. for 75% of the area: {:0.2f}".format(magLim75)
+    plt.axvline(magLim75, label=label75, color="k", ls="--")
+    plt.legend(loc="best")
+
+    # Add useful information to the plot
+    fig = plt.gcf()
+    fig = addProvenanceInfo(fig, plotInfoDict)
+
+    # Save the graph
+    repoInfo.dataId["description"] = "completenessAreaDepth"
+    repoInfo.butler.put(fig, "plotFakes", repoInfo.dataId)
+    plt.close()
+
+    # Make plot showing the fraction recovered in magnitude bins
+    fig, axLeft = plt.subplots()
+    axRight = axLeft.twinx()
+    axLeft.tick_params(axis="y", labelcolor="C0")
+    axLeft.set_ylabel("Fraction Recovered", color="C0")
+    axLeft.set_xlabel("Magnitude / mags")
+    axRight.set_ylabel("Number of Sources")
+    plt.title("Fraction of Sources Recovered at Each Magnitude")
+    overlap = np.isfinite(inputFakes["onCcd"])
+    nInput, bins, _ = axRight.hist(inputFakes[band + "magVar"][overlap], bins=100, log=True, histtype="step",
+                                   label="Input Fakes", color="black")
+    nOutput, _, _ = axRight.hist(inputFakesMatched[band + "magVar"], bins=bins, log=True, histtype="step",
+                                 label="Recovered Fakes", color="grey")
+
+    # Find bin where the fraction recovered first falls below 0.5
+    lessThanHalf = np.where((nOutput/nInput < 0.5))[0]
+    mag50 = np.min(bins[lessThanHalf])
+    xlims = plt.gca().get_xlim()
+    axLeft.plot([xlims[0], mag50], [0.5, 0.5], ls=":", color="grey")
+    plt.xlim(xlims)
+    axLeft.plot([mag50, mag50], [0, 0.5], ls=":", color="grey")
+    axRight.legend(loc="upper left", ncol=2)
+    axLeft.axhline(1.0, color="grey", ls="--")
+    axLeft.bar(bins[:-1], nOutput/nInput, width=np.diff(bins), align="edge", color="C0", alpha=0.5, zorder=10)
+    bboxDict = dict(boxstyle="round", facecolor="white", alpha=0.75)
+    info50 = "Magnitude at 50% recovered: {:0.2f}".format(mag50)
+    axLeft.text(0.3, 0.15, info50, transform=fig.transFigure, bbox=bboxDict, zorder=11)
+
+    # Add useful information to the plot
+    fig = plt.gcf()
+    addProvenanceInfo(fig, plotInfoDict)
+
+    # Save the graph
+    repoInfo.dataId["description"] = "completenessHist"
+    repoInfo.butler.put(fig, "plotFakes", repoInfo.dataId)
     plt.close()
