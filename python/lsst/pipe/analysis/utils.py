@@ -40,7 +40,8 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "findCcdKey", "popIdAndCcdKeys", "getCcdNameRefList", "getDataExistsRefList",
            "orthogonalRegression", "distanceSquaredToPoly", "p1CoeffsFromP2x0y0", "p2p1CoeffsFromLinearFit",
            "lineFromP2Coeffs", "linesFromP2P1Coeffs", "makeEqnStr", "catColors", "setAliasMaps",
-           "addPreComputedColumns", "addMetricMeasurement", "updateVerifyJob", "computeMeanOfFrac"]
+           "addPreComputedColumns", "addMetricMeasurement", "updateVerifyJob", "computeMeanOfFrac",
+           "computeAngularDistance"]
 
 
 NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
@@ -231,6 +232,7 @@ class AstrometryDiff(object):
         cosDec2 = np.cos(catalog[self.declination2]) if self.declination2 is not None else 1.0
         return (first*cosDec1 - second*cosDec2)*(1.0*geom.radians).asArcseconds()*self.unitScale
 
+
 class AngularDistance(object):
     """Functor to calculate the Haversine angular distance between two points
 
@@ -258,11 +260,11 @@ class AngularDistance(object):
 
     Returns
     -------
-    angularDistance : `numpy.ndarray`
+    angularDistance : `numpy.ndarray` of `float`
        An array containing the Haversine angular distance (in radians) between
        the points:
-       (``catalog``[``ra1Str``], ``catalog``[``dec1Str``]) and
-       (``catalog``[``ra2Str``], ``catalog``[``dec2Str``]).
+       (``catalog``[``raStr1``], ``catalog``[``decStr1``]) and
+       (``catalog``[``raStr2``], ``catalog``[``decStr2``]).
     """
     def __init__(self, raStr1, raStr2, decStr1, decStr2):
         self.raStr1 = raStr1
@@ -273,14 +275,9 @@ class AngularDistance(object):
     def __call__(self, catalog):
         ra1 = catalog[self.raStr1]
         ra2 = catalog[self.raStr2]
-        deltaRa = ra1 - ra2
         dec1 = catalog[self.decStr1]
         dec2 = catalog[self.decStr2]
-        deltaDec = dec1 - dec2
-        haverDeltaRa = np.sin(deltaRa/2.00)
-        haverDeltaDec = np.sin(deltaDec/2.00)
-        haverAlpha = np.sqrt(np.square(haverDeltaDec) + np.cos(dec1)*np.cos(dec2)*np.square(haverDeltaRa))
-        angularDistance = 2.0*np.arcsin(haverAlpha)
+        angularDistance = computeAngularDistance(ra1, ra2, dec1, dec2)
         return angularDistance
 
 
@@ -1999,3 +1996,35 @@ def computeMeanOfFrac(valueArray, tailStr="upper", fraction=0.1, floorFactor=1):
                            "was provided")
 
     return meanOfFrac
+
+
+def computeAngularDistance(ra1, ra2, dec1, dec2):
+    """Calculate the Haversine angular distance between two points
+
+    The Haversine formula, which determines the great-circle distance between
+    two points on a sphere given their longitudes (ra) and latitudes (dec), is
+    given by:
+
+    distance =
+    2arcsin(sqrt(sin**2((dec2-dec1)/2) + cos(del1)cos(del2)sin**2((ra1-ra2)/2)))
+
+    Parameters
+    ----------
+    ra1, dec1 : `float` or `numpy.ndarray` of `float`
+       The RA and Dec (in radians) of the first point
+    ra2, dec2 : `float` or `numpy.ndarray` of `float`
+       The RA and Dec (in radians) of the second point
+
+    Returns
+    -------
+    angularDistance : `float` or `numpy.ndarray` of `float`
+       The Haversine angular distance (in radians) between the points:
+       (``ra1``, ``dec1``) and (``ra2``, ``dec2``).
+    """
+    deltaRa = ra1 - ra2
+    deltaDec = dec1 - dec2
+    haverDeltaRa = np.sin(deltaRa/2.00)
+    haverDeltaDec = np.sin(deltaDec/2.00)
+    haverAlpha = np.sqrt(np.square(haverDeltaDec) + np.cos(dec1)*np.cos(dec2)*np.square(haverDeltaRa))
+    angularDistance = 2.0*np.arcsin(haverAlpha)
+    return angularDistance
