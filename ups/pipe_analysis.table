@@ -12,6 +12,7 @@ setupRequired(pipe_base)
 setupRequired(pipe_drivers)
 setupRequired(pipe_tasks)
 setupRequired(sconsUtils)
+setupRequired(verify)
 
 setupOptional(qa_explorer)
 
