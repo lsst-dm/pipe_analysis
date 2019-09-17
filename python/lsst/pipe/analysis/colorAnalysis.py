@@ -8,6 +8,7 @@ np.seterr(all="ignore")  # noqa #402
 import functools
 import os
 import scipy.stats as scipyStats
+import astropy.units as u
 
 from collections import defaultdict
 
@@ -20,11 +21,12 @@ from .utils import (Filenamer, Enforcer, concatenateCatalogs, getFluxKeys, addCo
                     makeBadArray, addFlag, addIntFloatOrStrColumn, calibrateCoaddSourceCatalog,
                     fluxToPlotString, writeParquet, getRepoInfo, orthogonalRegression,
                     distanceSquaredToPoly, p2p1CoeffsFromLinearFit, linesFromP2P1Coeffs,
-                    makeEqnStr, catColors)
+                    makeEqnStr, catColors, addMetricMeasurement, updateVerifyJob)
 from .plotUtils import AllLabeller, OverlapsStarGalaxyLabeller, plotText, labelCamera, setPtSize
 
 import lsst.afw.geom as afwGeom
 import lsst.afw.table as afwTable
+import lsst.verify as verify
 
 __all__ = ["ColorTransform", "ivezicTransformsSDSS", "ivezicTransformsHSC", "straightTransforms",
            "NumStarLabeller", "ColorValueInFitRange", "ColorValueInPerpRange", "GalaxyColor",
@@ -349,6 +351,8 @@ class ColorAnalysisTask(CmdLineTask):
         CmdLineTask.__init__(self, *args, **kwargs)
         self.unitScale = 1000.0 if self.config.toMilli else 1.0
 
+        self.verifyJob = verify.Job.load_metrics_package(subset="pipe_analysis")
+
     def runDataRef(self, patchRefsByFilter):
         patchList = []
         repoInfo = None
@@ -446,6 +450,18 @@ class ColorAnalysisTask(CmdLineTask):
                                     fluxColumn, camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
                                     patchList=patchList, hscRun=repoInfo.hscRun, forcedStr=self.forcedStr,
                                     geLabel=geLabel)
+
+        # Update the verifyJob with relevant metadata
+        metaDict = {}
+        if geLabel:
+            metaDict.update({"galacticExtinctionCorrection": geLabel})
+        if repoInfo.camera:
+            metaDict.update({"camera": repoInfo.camera.getName()})
+        self.verifyJob = updateVerifyJob(self.verifyJob, metaDict=metaDict)
+        # TODO: this should become a proper butler.put once we can persist the json files
+        verifyJobFilename = repoInfo.butler.get("colorAnalysis_verify_job_filename",
+                                                dataId=repoInfo.dataId)[0]
+        self.verifyJob.write(verifyJobFilename)
 
     def readCatalogs(self, patchRefList, dataset):
         """Read in and concatenate catalogs of type dataset in lists of data references
@@ -923,6 +939,10 @@ class ColorAnalysisTask(CmdLineTask):
                       self.config.plotRanges[filtersStr + "Y1"])
             nameStr = filtersStr + fluxColStr + "-wFit"
             self.log.info("nameStr = {:s}".format(nameStr))
+            if "PSF" in fluxColStr:
+                verifyKwargs = dict(verifyJob=self.verifyJob, verifyMetricName="stellar_locus_width_wPerp")
+            else:
+                verifyKwargs = {}
             wPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                              self.log, catColors("HSC-G", "HSC-R", mags, good),
                                              catColors("HSC-R", "HSC-I", mags, good),
@@ -935,13 +955,15 @@ class ColorAnalysisTask(CmdLineTask):
                                              fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
-                                             unitScale=self.unitScale)
+                                             unitScale=self.unitScale, **verifyKwargs)
             transformPerp = self.config.transforms["xPerp"]
             transformPara = self.config.transforms["xPara"]
             fitLineUpper = [transformPerp.fitLineUpperIncpt, transformPerp.fitLineSlope]
             fitLineLower = [transformPerp.fitLineLowerIncpt, transformPerp.fitLineSlope]
             nameStr = filtersStr + fluxColStr + "-xFit"
             self.log.info("nameStr = {:s}".format(nameStr))
+            if verifyKwargs:
+                verifyKwargs.update({"verifyMetricName": "stellar_locus_width_xPerp"})
             xPerpFit = colorColorPolyFitPlot(dataId, filenamer(dataId, description=nameStr, style="fit"),
                                              self.log, catColors("HSC-G", "HSC-R", mags, good),
                                              catColors("HSC-R", "HSC-I", mags, good),
@@ -954,7 +976,7 @@ class ColorAnalysisTask(CmdLineTask):
                                              fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                              magThreshold=self.config.analysis.magThreshold, camera=camera,
                                              hscRun=hscRun, catLabel=catLabel, geLabel=geLabel,
-                                             unitScale=self.unitScale, closeToVertical=True)
+                                             unitScale=self.unitScale, closeToVertical=True, **verifyKwargs)
             # Lower branch only; upper branch is noisy due to astrophysics
             nameStr = filtersStr + fluxColStr
             self.log.info("nameStr = {:s}".format(nameStr))
@@ -1220,7 +1242,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
                           order=1, iterations=3, rej=3.0, xFitRange=None, yFitRange=None,
                           fitLineUpper=None, fitLineLower=None, numBins="auto", hscRun=None, catLabel=None,
                           geLabel=None, logger=None, magThreshold=99.9, camera=None, unitScale=1.0,
-                          closeToVertical=False):
+                          closeToVertical=False, verifyJob=None, verifyMetricName=None):
     fig, axes = plt.subplots(nrows=1, ncols=2, sharex=False, sharey=False)
     fig.subplots_adjust(wspace=0.46, bottom=0.15, left=0.11, right=0.96, top=0.9)
     axes[0].tick_params(which="both", direction="in", labelsize=9)
@@ -1665,6 +1687,24 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
                   "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; median={5:.4f})" +
                   "{7:s}").format(dataId, fitP2mean, fitP2stdDev, len(fitP2kept[good]), len(fitP2kept),
                                   np.median(fitP2kept[good]), "{", "}", unitStr, perpIndexStr))
+        if verifyJob:
+            if not verifyMetricName:
+                log.warn("A verifyJob was specified, but the metric name was not...skipping metric job")
+            else:
+                log.info("Adding verify job with metric name: {:}".format(verifyMetricName))
+                measExtrasDictList = [{"name": "nUsedInFit", "value": len(fitP2kept[good]),
+                                       "label": "nUsed", "description": "Number of points used in the fit"},
+                                      {"name": "numberTotal", "value": len(fitP2kept),
+                                       "label": "nTot", "description":
+                                       "Total number of points considered for use in the fit"},
+                                      {"name": "mean", "value": np.around(fitP2mean, decimals=3)*u.mmag,
+                                       "label": "mean", "description": "Fit mean"},
+                                      {"name": "median", "value":
+                                       np.around(np.median(fitP2kept[good]), decimals=3)*u.mmag,
+                                       "label": "median", "description": "Fit median"}]
+                verifyJob = addMetricMeasurement(verifyJob, "pipe_analysis." + verifyMetricName,
+                                                 np.around(fitP2stdDev, decimals=3)*u.mmag,
+                                                 measExtrasDictList=measExtrasDictList)
 
     axes[1].set_ylim(axes[1].get_ylim()[0], axes[1].get_ylim()[1]*2.5)
 
