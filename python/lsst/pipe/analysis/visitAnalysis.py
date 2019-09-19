@@ -21,7 +21,7 @@ from .utils import (AngularDistance, concatenateCatalogs, addApertureFluxesHSC, 
                     calibrateSourceCatalogMosaic, calibrateSourceCatalogPhotoCalib,
                     calibrateSourceCatalog, backoutApCorr, matchNanojanskyToAB, andCatalog, writeParquet,
                     getRepoInfo, getCcdNameRefList, getDataExistsRefList, setAliasMaps,
-                    addPreComputedColumns, savePlots)
+                    addPreComputedColumns, savePlots, updateVerifyJob)
 from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText
 from .fakesAnalysis import (addDegreePositions, matchCatalogs, addNearestNeighbor, fakesPositionCompare,
                             getPlotInfo, calcFakesAreaDepth, plotFakesAreaDepth, fakesMagnitudeCompare,
@@ -418,11 +418,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
                     plotInfoDict["magLim"] = areaDepthStruct.medMagsToLimit
                     plotList.append(fakesPositionCompare(inputFakesMatched, processedFakesMatched,
-                                    plotInfoDict))
+                                                         plotInfoDict))
                     plotList.append(fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched,
-                                                          plotInfoDict))
+                                                          plotInfoDict, verifyJob=self.verifyJob))
                     plotList.append(fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched,
-                                                          plotInfoDict,
+                                                          plotInfoDict, verifyJob=self.verifyJob,
                                                           magCol="base_CircularApertureFlux_12_0_mag"))
                     plotList.append(fakesMagnitudeNearestNeighbor(inputFakesMatched, processedFakesMatched,
                                                                   plotInfoDict))
@@ -506,7 +506,16 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                                          matchRadius=self.matchRadius,
                                                          matchRadiusUnitStr=self.matchRadiusUnitStr,
                                                          **plotKwargs))
+        metaDict = {"tract": plotInfoDict["tract"], "visit": plotInfoDict["visit"],
+                    "filter": plotInfoDict["filter"]}
+        if plotInfoDict["camera"]:
+            metaDict.update({"camera": plotInfoDict["camera"]})
+        self.verifyJob = updateVerifyJob(self.verifyJob, metaDict=metaDict)
+        verifyJobFilename = repoInfo.butler.get("visitAnalysis_verify_job_filename",
+                                                dataId=repoInfo.dataId)[0]
         savePlots(plotList, "plotVisit", repoInfo.dataId, repoInfo.butler)
+
+        self.verifyJob.write(verifyJobFilename)
 
     def readCatalogs(self, dataRefList, dataset, repoInfo, aliasDictList=None, fakeCat=None,
                      raFakesCol="raJ2000", decFakesCol="decJ2000"):
