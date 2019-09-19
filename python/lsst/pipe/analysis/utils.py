@@ -20,6 +20,7 @@ import lsst.geom as lsstGeom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 import lsst.pex.config as pexConfig
+import lsst.verify as verify
 
 try:
     from lsst.meas.mosaic.updateExposure import applyMosaicResultsCatalog
@@ -40,7 +41,7 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "writeParquet", "getRepoInfo", "findCcdKey", "getCcdNameRefList", "getDataExistsRefList",
            "orthogonalRegression", "distanceSquaredToPoly", "p1CoeffsFromP2x0y0", "p2p1CoeffsFromLinearFit",
            "lineFromP2Coeffs", "linesFromP2P1Coeffs", "makeEqnStr", "catColors", "setAliasMaps",
-           "addPreComputedColumns"]
+           "addPreComputedColumns", "addMetricMeasurement", "updateVerifyJob"]
 
 
 NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
@@ -1799,3 +1800,65 @@ def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=No
                                              fieldUnits=fieldUnits.strip(" ()"))
 
     return catalog
+
+
+def addMetricMeasurement(job, metricName, metricValue, measExtrasDictList=None):
+    """Add a measurement to a lsst.verify.Job instance
+
+    TODO: this functionality will likely be moved to MeasurementSet in
+          lsst.verify per DM-12655.
+
+    Parameters
+    ----------
+    job : `lsst.verify.Job`
+       The verify Job to add the measurement to.
+    metricName : `str`
+       The name of the metric to be added.
+    metricValue : `float`, `int`, `bool`, `str`
+       The value of the metric to be added.
+    measExtrasDictList : `list` of `dict`, optional
+       A dict of key value pairs of any "extras" to be added to the
+       metric measurement.  All of the following keys must be provided for
+       each `dict` in the `list`: "name", "value", "label", "description".
+       The "label" is meant to be a `str` suitable for plot axis labelling.
+
+    Returns
+    -------
+    job : `lsst.verify.Job`
+       The updated job with the new measurement added.
+    """
+    meas = verify.Measurement(job.metrics[metricName], metricValue)
+    if measExtrasDictList:
+        for extra in measExtrasDictList:
+            meas.extras[extra["name"]] = verify.Datum(extra["value"], label=extra["label"],
+                                                      description=extra["description"])
+    job.measurements.insert(meas)
+    return job
+
+
+def updateVerifyJob(job, metaDict=None, specsList=None):
+    """Update an lsst.verify.Job with metadata and specifications
+
+    Parameters
+    ----------
+    job : `lsst.verify.Job`
+       The verify Job to add the measurement to.
+    metaDict : `dict`, optional
+       A dict of key value pairs of any metadata to be added to the
+       verify `job`.
+    specsList : `list` of `lsst.verify.Specification`, optional
+       A `list` of valid `lsst.verify.Specifications`s to be added
+       verify `job`.
+
+    Returns
+    -------
+    job : `lsst.verify.Job`
+       The updated job with the new metadata and specifications added.
+    """
+    if metaDict:
+        for metaName, metaValue in metaDict.items():
+            job.meta.update({metaName: metaValue})
+    if specsList:
+        for spec in specsList:
+            job.specs.update(spec)
+    return job
