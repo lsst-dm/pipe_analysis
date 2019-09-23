@@ -24,8 +24,8 @@ __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "M
            "CosmosLabeller", "plotText", "annotateAxes", "labelVisit", "labelCamera",
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
            "plotCcdOutline", "rotatePixelCoords", "bboxToXyCoordLists", "getMinMaxPatchList",
-           "computeEqualAspectLimits", "percent", "setPtSize", "getQuiver", "makeAlphaCmap",
-           "buildTractImage", "determineUberCalLabel"]
+           "getMinMaxCcdList", "computeEqualAspectLimits", "percent", "setPtSize", "getQuiver",
+           "makeAlphaCmap", "buildTractImage", "determineUberCalLabel"]
 
 
 class AllLabeller(object):
@@ -703,6 +703,81 @@ def getMinMaxPatchList(patchList, tractInfo, nDecimals=None, raMin=360.0, raMax=
             raPatch, decPatch = bboxToXyCoordLists(patch.getOuterBBox(), wcs=tractInfo.getWcs())
             raMin, raMax = min(min(raPatch), raMin), max(max(raPatch), raMax)
             decMin, decMax = min(min(decPatch), decMin), max(max(decPatch), decMax)
+        if nDecimals:
+            raMin = np.round(raMin, nDecimals)
+            raMax = np.round(raMax, nDecimals)
+            decMin = np.round(decMin, nDecimals)
+            decMax = np.round(decMax, nDecimals)
+
+    return Struct(
+        xMin=xMin,
+        xMax=xMax,
+        yMin=yMin,
+        yMax=yMax,
+        raMin=raMin,
+        raMax=raMax,
+        decMin=decMin,
+        decMax=decMax,
+    )
+
+
+def getMinMaxCcdList(ccdList, dataId, butler, nDecimals=None, zpLabel=None, raMin=360.0, raMax=0.0,
+                     decMin=90.0, decMax=-90.0, xMin=1e15, xMax=-1e15, yMin=1e15, yMax=-1e15):
+    """Find the min/max boundaries encompased in the ccdList
+
+    Results are provided in RA/Dec (deg) and tract x/y (pixels)
+
+    Parameters
+    ----------
+    ccdList : `list` of `str`
+       List of CCD IDs.
+    dataId : `lsst.daf.persistence.DataId`
+       An instance of `lsst.daf.persistence.DataId`.  A copy will be made
+       and the "detector/ccd" key will be used to update the copy to the
+       current ccd when looping through ``ccdList``.
+    butler : `lsst.daf.persistence.Butler`
+    nDecimals : `int`, optional
+       Round coordinates to this number of decimal places.
+    raMin, raMax : `float`, optional
+       Initiate minimum[maximum] RA determination in degrees at
+       ``raMin``[``raMax``].
+    decMin, decMax : `float`, optional
+       Initiate minimum[maximum] Dec determination in degrees at
+       ``decMin``[``decMax``].
+    xMin, xMax : `float`, optional
+       Initiate minimum[maximum] x determination in pixels at
+       ``xMin``[``xMax``].
+    yMin, yMax : `float`, optional
+       Initiate minimum[maximum] y determination in pixels at
+       ``yMin``[``yMax``].
+
+    Returns
+    -------
+    `lsst.pipe.base.Struct`
+       Contains the min and max values for the ccd list provided in
+       RA/Dec (degrees) and tract x/y (pixels).
+    """
+    dataIdCopy = dataId.copy()
+    dataIdCopy = popIdAndCcdKeys(dataIdCopy)
+    ccdKey = findCcdKey(dataId)
+    for ccd in ccdList:
+        dataIdCopy[ccdKey] = ccd
+        calexp = butler.get("calexp", dataIdCopy)
+        dataRef = butler.dataRef("raw", dataId=dataIdCopy)
+        if zpLabel and (zpLabel == "MEAS_MOSAIC" or "MEAS_MOSAIC_1" in zpLabel):
+            applyMosaicResultsExposure(dataRef, calexp=calexp)
+            wcs = calexp.getWcs()
+        elif zpLabel and ("JOINTCAL" in zpLabel or "MMphotoCalib" in zpLabel or "JOINTCAL_1" in zpLabel):
+            wcs = dataRef.get("jointcal_wcs")
+        else:
+            wcs = calexp.getWcs()
+
+        xCcd, yCcd = bboxToXyCoordLists(calexp.getBBox(), wcs=None)
+        xMin, xMax = min(min(xCcd), xMin), max(max(xCcd), xMax)
+        yMin, yMax = min(min(yCcd), yMin), max(max(yCcd), yMax)
+        raCcd, decCcd = bboxToXyCoordLists(calexp.getBBox(), wcs=wcs)
+        raMin, raMax = min(min(raCcd), raMin), max(max(raCcd), raMax)
+        decMin, decMax = min(min(decCcd), decMin), max(max(decCcd), decMax)
         if nDecimals:
             raMin = np.round(raMin, nDecimals)
             raMax = np.round(raMax, nDecimals)
