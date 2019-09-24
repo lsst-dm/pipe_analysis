@@ -357,6 +357,7 @@ def plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=None, zpLabel=None, 
             applyMosaicResultsExposure(dataRef, calexp=calexp)
             wcs = calexp.getWcs()
         elif zpLabel and (zpLabel == "MMphotoCalib" or zpLabel == "JOINTCAL" or
+                          zpLabel == 'FGCMCAL' or
                           "MMphotoCalib" in zpLabel or "JOINTCAL_1" in zpLabel):
             wcs = dataRef.get("jointcal_wcs")
         else:
@@ -663,6 +664,9 @@ def determineUberCalLabel(repoInfo, patch, coaddName="deep"):
 
     if repoInfo.butler.datasetExists("fcr_md", dataId=visitDataId):
         uberCalLabel = "MEAS_MOSAIC"
+    elif (not repoInfo.butler.datasetExists("fgcm_md", dataId=visitDataId) and
+          repoInfo.butler.datasetExists("fgcmcal_tract_photoCalib", dataId=visitDataId)):
+        uberCalLabel = "FGCMCAL"
     elif (not repoInfo.butler.datasetExists("fcr_md", dataId=visitDataId) and
           repoInfo.butler.datasetExists("jointcal_photoCalib", dataId=visitDataId)):
         uberCalLabel = "JOINTCAL"

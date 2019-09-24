@@ -965,7 +965,7 @@ def calibrateSourceCatalogMosaic(dataRef, catalog, fluxKeys=None, errKeys=None, 
     return catalog
 
 
-def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
+def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0, fgcmcal=False):
     """Calibrate catalog with (e.g. jointcal/meas_mosaic) PhotoCalib results
 
     Parameters
@@ -981,6 +981,8 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
     zp : `float`, optional
        A constant zero point magnitude to which to scale all the fluxes in
        ``fluxKeys``.
+    fgcmcal : `bool`, optional
+       Use fgcmcal photoCalib instead of jointcal.
 
     Returns
     -------
@@ -996,7 +998,11 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
     for record in catalog:
         record.updateCoord(wcs)
 
-    photoCalib = dataRef.get("jointcal_photoCalib")
+    if fgcmcal:
+        # Probably want to try the global one as well
+        photoCalib = dataRef.get("fgcmcal_tract_photoCalib")
+    else:
+        photoCalib = dataRef.get("jointcal_photoCalib")
     # Scale to AB and convert to constant zero point, as for the coadds
     factor = NANOJANSKYS_PER_AB_FLUX/10.0**(0.4*zp)
     if fluxKeys is None:

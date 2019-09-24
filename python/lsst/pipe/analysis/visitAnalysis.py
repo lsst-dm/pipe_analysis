@@ -172,6 +172,9 @@ class VisitAnalysisConfig(CoaddAnalysisConfig):
     useMeasMosaic = Field(dtype=bool, default=False, doc="Use meas_mosaic's applyMosaicResultsExposure " +
                           "to apply meas_mosaic ubercal results to catalog (i.e. as opposed to using " +
                           "the photoCalib object)?")
+    useFgcmcal = Field(dtype=bool, default=True, doc="Use fgcmcal's fgcm_tract_photoCalib to apply " +
+                       "fgcmcal ubercal results to catalog (i.e. as opposed to using the photoCalib "+
+                       "object)?")
 
     hasFakes = Field(dtype=bool, default=False, doc="Include the analysis of the added fake sources?")
 
@@ -670,7 +673,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         except Exception:
             self.zpLabel = None
         if self.config.doApplyUberCal:
-            if "jointcal" in photoCalibDataset and not self.config.useMeasMosaic:
+            if ("jointcal" in photoCalibDataset and not self.config.useMeasMosaic and
+                not self.config.useFgcmcal):
                 # i.e. the processing was post-photoCalib output generation
                 # AND you want the photoCalib flux object used for the
                 # calibration (as opposed to meas_mosaic's fcr object).
@@ -679,6 +683,12 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     self.log.info("Applying {:} photoCalib calibration to catalog".format(zpStr))
                 self.zpLabel = "MMphotoCalib" if dataRef.datasetExists("fcr_md") else "JOINTCAL"
                 calibrated = calibrateSourceCatalogPhotoCalib(dataRef, catalog, zp=self.zp)
+            elif "jointcal" in photoCalibDataset and self.config.useFgcmcal:
+                if not self.zpLabel:
+                    zpStr = "FGCMCAL"
+                    self.log.info("Applying {:} photoCalib calibration to catalog".format(zpStr))
+                self.zpLabel = "FGCMCAL"
+                calibrated = CalibrateSourceCatalogPhotoCalib(dataRef, catalog, zp=self.zp)
             else:
                 # If here, the data were processed pre-photoCalib output
                 # generation, so must use old method OR old method was
