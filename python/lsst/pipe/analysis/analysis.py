@@ -212,7 +212,7 @@ class Analysis(object):
             # and clipped stats range + 25%
             dataType = "all" if "all" in self.data else "star"
             if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar", "resolution",
-                                                       "race"]):
+                                                       "race", "psfInst", "psfCal"]):
                 self.qMin = max(min(self.qMin, self.stats[dataType].mean - 6.0*self.stats[dataType].stdev,
                                 self.stats[dataType].median - 1.25*self.stats[dataType].clip),
                                 min(self.stats[dataType].mean - 20.0*self.stats[dataType].stdev,
@@ -221,7 +221,8 @@ class Analysis(object):
                     abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
                     minmax = 2.0*max(abs(min(self.quantity[self.good])), abs(max(self.quantity[self.good])))
                     self.qMin = -minmax if minmax > 0 else self.qMin
-            if not any(ss in self.shortName for ss in ["footNpix", "pStar", "resolution", "race"]):
+            if not any(ss in self.shortName for ss in ["footNpix", "pStar", "resolution", "race",
+                                                       "psfInst", "psfCal"]):
                 self.qMax = min(max(self.qMax, self.stats[dataType].mean + 6.0*self.stats[dataType].stdev,
                                 self.stats[dataType].median + 1.25*self.stats[dataType].clip),
                                 max(self.stats[dataType].mean + 20.0*self.stats[dataType].stdev,
@@ -312,10 +313,9 @@ class Analysis(object):
         axScatter.tick_params(which="both", direction="in", labelsize=9)
 
         if camera is not None and ccdList is not None:
-            if ccdList:
-                axTopRight = plt.axes(topRight)
-                axTopRight.set_aspect("equal")
-                plotCameraOutline(plt, axTopRight, camera, ccdList)
+            axTopRight = plt.axes(topRight)
+            axTopRight.set_aspect("equal")
+            plotCameraOutline(plt, axTopRight, camera, ccdList)
 
         if self.config.doPlotTractOutline and tractInfo is not None and patchList:
             axTopRight = plt.axes(topRight)
@@ -542,42 +542,79 @@ class Analysis(object):
         labelVisit(filename, plt, axScatter, 1.18, -0.11, color="green")
         if zpLabel is not None:
             prefix = "" if "GalExt" in zpLabel else "zp: "
-            plotText(zpLabel, plt, axScatter, 0.09, -0.1, prefix=prefix, color="green")
+            plotText(zpLabel, plt, axScatter, 0.09, -0.1, prefix=prefix, fontSize=7, color="green")
         if uberCalLabel:
-            plotText(uberCalLabel, plt, axScatter, 0.09, -0.14, prefix="uberCal: ", fontSize=8, color="green")
+            plotText(uberCalLabel, plt, axScatter, 0.09, -0.14, prefix="uberCal: ", fontSize=7, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axScatter, 0.87, -0.11, prefix="cat: ", color="green")
+            plotText(forcedStr, plt, axScatter, 0.87, -0.11, prefix="cat: ", fontSize=7, color="green")
         if extraLabels is not None:
             for i, extraLabel in enumerate(extraLabels):
-                plotText(extraLabel, plt, axScatter, 0.3, 0.21 + i*0.05, fontSize=10, color="tab:orange")
+                plotText(extraLabel, plt, axScatter, 0.3, 0.21 + i*0.05, fontSize=7, color="tab:orange")
         plt.savefig(filename, dpi=120)
         plt.close()
 
-    def plotHistogram(self, filename, numBins=51, stats=None, hscRun=None, matchRadius=None,
-                      matchRadiusUnitStr=None, zpLabel=None, forcedStr=None, camera=None, filterStr=None,
-                      uberCalLabel=None, doPrintMedian=False):
+    def plotHistogram(self, filename, numBins=51, stats=None, hscRun=None, camera=None, ccdList=None,
+                      tractInfo=None, patchList=None, zpLabel=None, forcedStr=None, filterStr=None,
+                      magThreshold=None, matchRadius=None, matchRadiusUnitStr=None, uberCalLabel=None,
+                      doPrintMedian=False, vertLineList=None, logPlot=True, density=False, cumulative=False,
+                      addDataList=None, addDataLabelList=None):
         """Plot histogram of quantity"""
         fig, axes = plt.subplots(1, 1)
         axes.axvline(0, linestyle="--", color="0.6")
-        numMax = 0
+        if vertLineList:
+            for xLine in vertLineList:
+                axes.axvline(xLine, linestyle="--", color="0.6")
+        numMin = 0 if density else 0.9
+        numMax = 1
+        alpha = 0.4
+        ic = 1
         for name, data in self.data.items():
             if not data.mag.any():
                 continue
+            color = "tab:" + data.color
+            ic += 1
             good = np.isfinite(data.quantity)
-            if self.magThreshold is not None:
-                good &= data.mag < self.magThreshold
+            if magThreshold and stats is not None:
+                good &= data.mag < magThreshold
             nValid = np.abs(data.quantity[good]) <= self.qMax  # need to have datapoints lying within range
             if good.sum() == 0 or nValid.sum() == 0:
                 continue
-            num, _, _ = axes.hist(data.quantity[good], numBins, range=(self.qMin, self.qMax), density=False,
-                                  color=data.color, label=name, histtype="step")
-            numMax = max(numMax, num.max()*1.1)
+            num, fluxBins, _ = axes.hist(data.quantity[good], bins=numBins, range=(self.qMin, self.qMax),
+                                         density=density, log=logPlot, color=color, alpha=alpha,
+                                         label=name, histtype="stepfilled")
+            if cumulative:
+                axes2 = axes.twinx()  # instantiate a second axes that shares the same x-axis
+                axes2.hist(data.quantity[good], bins=fluxBins, density=True, log=False, color=data.color,
+                           label=name + "_cum", histtype="step", cumulative=cumulative)
+            # yaxis limit for non-normalized histograms
+            numMax = max(numMax, num.max()*1.1) if not density else numMax
+        if cumulative:
+            axes2.set_ylim(0, 1.05)
+            axes2.tick_params(axis="y", which="both", direction="in")
+            axes2.set_ylabel("Cumulative Fraction", rotation=270, labelpad=12, color=color, fontsize=9)
+            axes2.legend(loc="right", fontsize=8)
+            axes2.grid(True, "both", color="black", alpha=0.3)
+        if addDataList is not None:
+            hatches = ["\\\\", "//", "*", "+"]
+            cmap = plt.cm.Spectral
+            addColors = [cmap(i) for i in np.linspace(0, 1, len(addDataList))]
+            if addDataLabelList is None:
+                addDataLabelList = ["" for i in len(addDataList)]
+            for i, extraData in enumerate(addDataList):
+                axes.hist(extraData, bins=fluxBins, density=density, log=logPlot, color=addColors[i],
+                          alpha=0.65, label=addDataLabelList[i], histtype="step", hatch=hatches[i%4])
+
+        axes.tick_params(axis="both", which="both", direction="in", labelsize=8)
         axes.set_xlim(self.qMin, self.qMax)
-        axes.set_ylim(0.9, numMax)
+        axes.set_ylim(numMin, numMax)
         if filterStr is None:
-            filterStr = ''
-        axes.set_xlabel("{0:s} [{1:s}]".format(self.quantityName, filterStr))
-        axes.set_ylabel("Number")
+            filterStr = ""
+        if camera is not None:
+            if len(filterStr) < len(camera.getName()):
+                # Add camera name to filter string
+                filterStr = camera.getName() + "-" + filterStr
+        axes.set_xlabel("{0:s} [{1:s}]".format(self.quantityName, filterStr), fontsize=9)
+        axes.set_ylabel("Number", fontsize=9)
         axes.set_yscale("log", nonposy="clip")
         x0, y0 = 0.03, 0.97
         if self.qMin == 0.0:
@@ -588,17 +625,26 @@ class Analysis(object):
                          isHist=True, hscRun=hscRun, matchRadius=matchRadius,
                          matchRadiusUnitStr=matchRadiusUnitStr, unitScale=self.unitScale,
                          doPrintMedian=doPrintMedian)
-        axes.legend()
+        axes.legend(loc="upper right", fontsize=8)
         if camera is not None:
             labelCamera(camera, plt, axes, 0.5, 1.09)
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
             prefix = "" if "GalExt" in zpLabel else "zp: "
-            plotText(zpLabel, plt, axes, 0.13, -0.08, prefix=prefix, color="green")
+            plotText(zpLabel, plt, axes, 0.10, -0.10, prefix=prefix, fontSize=7, color="green")
         if uberCalLabel:
-            plotText(uberCalLabel, plt, axes, 0.13, -0.12, prefix="uberCal: ", fontSize=8, color="green")
+            plotText(uberCalLabel, plt, axes, 0.10, -0.13, prefix="uberCal: ", fontSize=7, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
+            plotText(forcedStr, plt, axes, 0.90, -0.10, prefix="cat: ", fontSize=7, color="green")
+        if camera is not None and ccdList is not None:
+            axTopMiddle = plt.axes([0.42, 0.68, 0.2, 0.2])
+            axTopMiddle.set_aspect("equal")
+            plotCameraOutline(plt, axTopMiddle, camera, ccdList)
+        if self.config.doPlotTractOutline and tractInfo is not None and patchList:
+            axTopMiddle = plt.axes([0.42, 0.68, 0.2, 0.2])
+            axTopMiddle.set_aspect("equal")
+            plotTractOutline(axTopMiddle, tractInfo, patchList)
+
         fig.savefig(filename, dpi=120)
         plt.close(fig)
 
@@ -669,7 +715,7 @@ class Analysis(object):
         ptSize = None
 
         if dataId is not None and butler is not None and ccdList is not None:
-            if "commonZp" in filename:
+            if any(ss in filename for ss in ["commonZp", "_raw"]):
                 plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=None, zpLabel=zpLabel)
             else:
                 plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=tractInfo, zpLabel=zpLabel)
@@ -1138,7 +1184,7 @@ class Analysis(object):
             self.plotAgainstMagAndHist(log, filenamer(dataId, description=self.shortName,
                                                       style="psfMagHist" + postFix),
                                        plotRunStats=plotRunStats, highlightList=highlightList,
-                                       filterStr=dataId['filter'], extraLabels=extraLabels, **plotKwargs)
+                                       filterStr=dataId["filter"], extraLabels=extraLabels, **plotKwargs)
 
         if self.config.doPlotOldMagsHist and "galacticExtinction" not in self.shortName:
             self.plotAgainstMag(filenamer(dataId, description=self.shortName, style="psfMag" + postFix),

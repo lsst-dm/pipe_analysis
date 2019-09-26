@@ -3,6 +3,7 @@
 from __future__ import print_function
 
 import os
+import astropy.units as units
 import numpy as np
 np.seterr(all="ignore")  # noqa E402
 import functools
@@ -31,8 +32,8 @@ from .utils import (Filenamer, Enforcer, MagDiff, MagDiffMatches, MagDiffCompare
                     addFootprintNPix, makeBadArray, addIntFloatOrStrColumn,
                     calibrateCoaddSourceCatalog, backoutApCorr, matchNanojanskyToAB,
                     fluxToPlotString, andCatalog, writeParquet, getRepoInfo, setAliasMaps,
-                    addPreComputedColumns)
-from .plotUtils import (CosmosLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
+                    addPreComputedColumns, computeMeanOfFrac)
+from .plotUtils import (CosmosLabeller, AllLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
                         MatchesStarGalaxyLabeller, determineUberCalLabel)
 
 import lsst.afw.geom as afwGeom
@@ -42,6 +43,7 @@ import lsst.afw.table as afwTable
 __all__ = ["CoaddAnalysisConfig", "CoaddAnalysisRunner", "CoaddAnalysisTask", "CompareCoaddAnalysisConfig",
            "CompareCoaddAnalysisRunner", "CompareCoaddAnalysisTask"]
 
+NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
 
 class CoaddAnalysisConfig(Config):
     coaddName = Field(dtype=str, default="deep", doc="Name for coadd")
@@ -82,6 +84,7 @@ class CoaddAnalysisConfig(Config):
                                                                  "? (ignored if plotMatchesOnly is True)"))
     doPlotQuiver = Field(dtype=bool, default=True, doc=("Plot ellipticity residuals quiver plot? "
                                                         "(ignored if plotMatchesOnly is True)"))
+    doPlotPsfFluxSnHists = Field(dtype=bool, default=True, doc="Plot histograms of raw PSF fluxes and S/N?")
     doPlotFootprintNpix = Field(dtype=bool, default=True, doc=("Plot histogram of footprint nPix? "
                                                                "(ignored if plotMatchesOnly is True)"))
     doPlotInputCounts = Field(dtype=bool, default=True, doc=("Make input counts plot? "
@@ -347,6 +350,11 @@ class CoaddAnalysisTask(CmdLineTask):
 
             flagsCat = unforced
 
+            if self.config.doPlotPsfFluxSnHists:
+                self.plotPsfFluxSnHists(unforced,
+                                        filenamer(repoInfo.dataId, description="base_PsfFlux_cal",
+                                                  style="hist"),
+                                        repoInfo.dataId, forcedStr="unforced " + self.catLabel, **plotKwargs)
             if self.config.doPlotFootprintNpix:
                 self.plotFootprintHist(forced,
                                        filenamer(repoInfo.dataId, description="footNpix", style="hist"),
@@ -798,9 +806,87 @@ class CoaddAnalysisTask(CmdLineTask):
         self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
                            self.config.analysis, flags=["base_Footprint_nPix_flag"], qMin=0, qMax=3000,
                            labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
-                           ).plotHistogram(filenamer, stats=stats, camera=camera, hscRun=hscRun,
+                           ).plotHistogram(filenamer, stats=stats, camera=camera, ccdList=ccdList,
+                                           tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
                                            matchRadius=matchRadius, zpLabel=zpLabel,
                                            filterStr=dataId['filter'], uberCalLabel=uberCalLabel)
+
+    def plotPsfFluxSnHists(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
+                           tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
+                           forcedStr=None, uberCalLabel=None, postFix="", flagsCat=None, logPlot=True,
+                           density=True, cumulative=-1):
+        stats = None
+        shortName = "psfInstFlux" if zpLabel == "raw" else "psfCalFlux"
+        self.log.info("shortName = {:s}".format(shortName))
+        # want "raw" flux
+        factor = 10.0**(0.4*self.config.analysis.commonZp) if zpLabel == "raw" else NANOJANSKYS_PER_AB_FLUX
+        psfFlux = catalog["base_PsfFlux_instFlux"]*factor
+        psfFluxErr = catalog["base_PsfFlux_instFluxErr"]*factor
+        psfSn = psfFlux/psfFluxErr
+
+        # Scale S/N threshold by ~sqrt(#exposures) if catalog is coadd data
+        if "base_InputCount_value" in catalog.schema:
+            inputCounts = catalog["base_InputCount_value"]
+            scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=10)
+            highSn = np.floor(
+                np.sqrt(scaleFactor)*self.config.analysis.signalToNoiseThreshold/100 + 0.49)*100
+        else:
+            highSn = self.config.analysis.signalToNoiseThreshold
+
+        lowSn = 20.0
+        lowFlux, highFlux = 4000.0, 12500.0
+        goodSn = psfSn > lowSn
+        psfFluxSnGtLow = psfFlux[goodSn]
+        goodSn = psfSn > highSn
+        psfFluxSnGtHigh = psfFlux[goodSn]
+        goodFlux = psfFlux > lowFlux
+        psfSnFluxGtLow= psfSn[goodFlux]
+        goodFlux = psfFlux > highFlux
+        psfSnFluxGtHigh = psfSn[goodFlux]
+        psfUsedCat = catalog[catalog["calib_psf_used"]]
+        psfUsedPsfFlux = psfUsedCat["base_PsfFlux_instFlux"]*factor
+        psfUsedPsfFluxErr = psfUsedCat["base_PsfFlux_instFluxErr"]*factor
+        psfUsedPsfSn = psfUsedPsfFlux/psfUsedPsfFluxErr
+
+        self.AnalysisClass(catalog, psfFlux, "%s" % shortName, shortName,
+                           self.config.analysis, flags=["base_PsfFlux_flag"], qMin=0,
+                           qMax = int(min(99999, max(4.0*np.median(psfFlux), 0.25*np.max(psfFlux)))),
+                           labeller=AllLabeller(), flagsCat=flagsCat,
+                           ).plotHistogram(filenamer, numBins="sqrt", stats=stats, camera=camera,
+                                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
+                                           hscRun=hscRun, zpLabel=zpLabel,
+                                           forcedStr=forcedStr, filterStr=dataId["filter"],
+                                           uberCalLabel=uberCalLabel, vertLineList=[lowFlux, highFlux],
+                                           logPlot=logPlot, density=False, cumulative=cumulative,
+                                           addDataList=[psfFluxSnGtLow, psfFluxSnGtHigh, psfUsedPsfFlux],
+                                           addDataLabelList=["S/N>{:.1f}".format(lowSn),
+                                                             "S/N>{:.1f}".format(highSn), "psf_used"])
+        shortName = "psfInstFlux/psfInstFluxErr" if zpLabel == "raw" else "psfCalFlux/psfCalFluxErr"
+        filenamer = filenamer.replace("Flux", "FluxSn")
+        self.log.info("shortName = {:s}".format(shortName))
+        self.AnalysisClass(catalog, psfSn, "%s" % "S/N = " + shortName, shortName,
+                           self.config.analysis, flags=["base_PsfFlux_flag"], qMin=0,
+                           qMax = 4*highSn, labeller=AllLabeller(), flagsCat=flagsCat,
+                           ).plotHistogram(filenamer, numBins="sqrt", stats=stats, camera=camera,
+                                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
+                                           hscRun=hscRun, zpLabel=zpLabel,
+                                           forcedStr=forcedStr, filterStr=dataId["filter"],
+                                           uberCalLabel=uberCalLabel, vertLineList=[lowSn, highSn],
+                                           logPlot=logPlot, density=False, cumulative=cumulative,
+                                           addDataList=[psfSnFluxGtLow, psfSnFluxGtHigh, psfUsedPsfSn],
+                                           addDataLabelList=["Flux>{:.1f}".format(lowFlux),
+                                                             "Flux>{:.1f}".format(highFlux), "psf_used"])
+
+        skyplotKwargs = dict(dataId=dataId, butler=butler, stats=stats, camera=camera, ccdList=ccdList,
+                             tractInfo=tractInfo, patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
+                             matchRadiusUnitStr=None, zpLabel=zpLabel)
+        filenamer = filenamer.replace("hist", "sky-all")
+
+        self.AnalysisClass(catalog, psfSn, "%s" % "S/N = " + shortName, shortName,
+                           self.config.analysis, flags=["base_PsfFlux_flag"], qMin=0,
+                           qMax = 1.25*highSn, labeller=AllLabeller(), flagsCat=flagsCat,
+                           ).plotSkyPosition(filenamer, dataName="all", **skyplotKwargs)
+
 
     def plotStarGal(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                     patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,

@@ -352,8 +352,17 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
                 # Dict of all parameters common to plot* functions
                 plotKwargs = dict(butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
-                                  hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
-
+                                  hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo)
+                if self.config.doPlotPsfFluxSnHists:
+                    self.plotPsfFluxSnHists(commonZpCat,
+                                            filenamer(repoInfo.dataId, description="base_PsfFlux_raw",
+                                                      style="hist"),
+                                        repoInfo.dataId, zpLabel="raw", **plotKwargs)
+                    self.plotPsfFluxSnHists(catalog,
+                                            filenamer(repoInfo.dataId, description="base_PsfFlux_cal",
+                                                      style="hist"),
+                                            repoInfo.dataId, zpLabel=self.zpLabel, **plotKwargs)
+                plotKwargs.update(dict(zpLabel=self.zpLabel))
                 if self.config.doPlotFootprintNpix:
                     self.plotFootprintHist(catalog,
                                            filenamer(repoInfo.dataId, description="footNpix", style="hist"),
