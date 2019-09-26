@@ -145,6 +145,7 @@ class CoaddAnalysisRunner(TaskRunner):
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
         kwargs["cosmos"] = parsedCmd.cosmos
+        kwargs["subdir"] = parsedCmd.subdir
 
         # Partition all inputs by tract,filter
         FilterRefsDict = functools.partial(defaultdict, list)  # Dict for filter-->dataRefs
@@ -185,6 +186,10 @@ class CoaddAnalysisTask(CmdLineTask):
         parser.add_id_argument("--id", "deepCoadd_meas",
                                help="data ID, e.g. --id tract=12345 patch=1,2 filter=HSC-X",
                                ContainerClass=TractDataIdContainer)
+        parser.add_argument("--subdir", type=str, default="",
+                            help=("Subdirectory below plots/filter/tract-NNNN/ (useful for, "
+                                  "e.g., subgrouping of Patches.  Ignored if only one Patch is "
+                                  "specified, in which case the subdir is set to patch-NNN"))
         return parser
 
     def __init__(self, *args, **kwargs):
@@ -197,7 +202,7 @@ class CoaddAnalysisTask(CmdLineTask):
         self.matchControl.findOnlyClosest = True
         self.matchControl.symmetricMatch = False
 
-    def runDataRef(self, patchRefList, cosmos=None):
+    def runDataRef(self, patchRefList, subdir="", cosmos=None):
         haveForced = False  # do forced datasets exits (may not for single band datasets)
         dataset = "Coadd_forced_src"
         # Explicit input file was checked in CoaddAnalysisRunner, so a check on datasetExists
@@ -217,7 +222,8 @@ class CoaddAnalysisTask(CmdLineTask):
         patchList = [patchRef.dataId["patch"] for patchRef in patchRefList]
         self.log.info("patchList size: {:d}".format(len(patchList)))
         repoInfo = getRepoInfo(patchRefList[0], coaddName=self.config.coaddName, coaddDataset=dataset)
-        filenamer = Filenamer(repoInfo.butler, self.outputDataset, repoInfo.dataId)
+        subdir = "patch-" + str(patchList[0]) if len(patchList) == 1 else subdir
+        filenamer = Filenamer(repoInfo.butler, self.outputDataset, repoInfo.dataId, subdir=subdir)
         # Find a visit/ccd input so that you can check for meas_mosaic input (i.e. to set uberCalLabel)
         self.uberCalLabel = determineUberCalLabel(repoInfo, patchList[0], coaddName=self.config.coaddName)
         self.log.info("Uber-calibration used: {:}".format(self.uberCalLabel))
@@ -1118,6 +1124,7 @@ class CompareCoaddAnalysisConfig(CoaddAnalysisConfig):
 class CompareCoaddAnalysisRunner(TaskRunner):
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
+        kwargs["subdir"] = parsedCmd.subdir
         rootDir = parsedCmd.input.split("rerun")[0] if len(parsedCmd.rerun) == 2 else parsedCmd.input
         butlerArgs = dict(root=os.path.join(rootDir, "rerun", parsedCmd.rerun2))
         if parsedCmd.calib is not None:
@@ -1146,6 +1153,10 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         parser.add_id_argument("--id", "deepCoadd_forced_src",
                                help="data ID, e.g. --id tract=12345 patch=1,2 filter=HSC-X",
                                ContainerClass=TractDataIdContainer)
+        parser.add_argument("--subdir", type=str, default="",
+                            help=("Subdirectory below plots/filter/tract-NNNN/ (useful for, "
+                                  "e.g., subgrouping of Patches.  Ignored if only one Patch is "
+                                  "specified, in which case the subdir is set to patch-NNN"))
         return parser
 
     def __init__(self, *args, **kwargs):
@@ -1157,7 +1168,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         self.matchControl.findOnlyClosest = True
         self.matchControl.symmetricMatch = False
 
-    def runDataRef(self, patchRefList1, patchRefList2):
+    def runDataRef(self, patchRefList1, patchRefList2, subdir=""):
         haveForced = True  # do forced datasets exits (may not for single band datasets)
         dataset = "Coadd_forced_src"
         patchRefExistsList1 = [patchRef1 for patchRef1 in patchRefList1 if
@@ -1265,7 +1276,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         self.log.info("\nNumber of sources in forced catalogs: first = {0:d} and second = {1:d}".format(
                       len(forced1), len(forced2)))
 
-        filenamer = Filenamer(repoInfo1.butler, "plotCompareCoadd", repoInfo1.dataId)
+        subdir = "patch-" + str(patchList1[0]) if len(patchList1) == 1 else subdir
+        filenamer = Filenamer(repoInfo1.butler, "plotCompareCoadd", repoInfo1.dataId, subdir=subdir)
         hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
         # Dict of all parameters common to plot* functions
         plotKwargs1 = dict(butler=repoInfo1.butler, camera=repoInfo1.camera, tractInfo=repoInfo1.tractInfo,

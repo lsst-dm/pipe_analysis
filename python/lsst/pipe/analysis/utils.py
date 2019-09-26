@@ -89,10 +89,11 @@ def writeParquet(dataRef, table, badArray=None):
 
 class Filenamer(object):
     """Callable that provides a filename given a style"""
-    def __init__(self, butler, dataset, dataId={}):
+    def __init__(self, butler, dataset, dataId={}, subdir=""):
         self.butler = butler
         self.dataset = dataset
         self.dataId = dataId
+        self.subdir = subdir
 
     def __call__(self, dataId, **kwargs):
         filename = self.butler.get(self.dataset + "_filename", self.dataId, **kwargs)[0]
@@ -104,6 +105,9 @@ class Filenamer(object):
         if "_parent/" in filename:
             print("Note: stripping _parent from filename: ", filename)
             filename = filename.replace("_parent/", "")
+        if self.subdir:
+            lastSlashInd = filename.rfind("/")
+            filename = filename[:lastSlashInd] + "/" + self.subdir + "/" + filename[lastSlashInd + 1:]
         safeMakeDir(os.path.dirname(filename))
         return filename
 
