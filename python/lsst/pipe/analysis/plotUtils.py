@@ -147,12 +147,94 @@ def annotateAxes(filename, plt, axes, statsConf, dataSet, magThresholdConf, sign
                  statsHigh=None, magThresholdHigh=None, signalToNoiseHighStr=None,
                  x0=0.03, y0=0.96, yOff=0.05, fontSize=8, ha="left", va="top", color="blue",
                  isHist=False, hscRun=None, matchRadius=None, matchRadiusUnitStr="\"",
-                 writeMinMax=None, unitScale=1.0, doPrintMedian=False):
+                 unitScale=1.0, doPrintMedian=False):
+    """Label the plot with the statistical computation results
+
+    Parameters
+    ----------
+    filename : `str`
+       String representing the full path of the plot output filename.  Used
+       here to select for/against certain annotations for certain styles of
+       plots.
+    plt : `matplotlib.pyplot`
+       Instance of the matplotlib plot to be annotated.
+    axes : `matplotlib.axes._axes.Axes`
+       Particular matplotlib axes of ``plt`` on which to plot the annotations.
+    statsConf : `lsst.pipe.analysis.utils.Stats`
+       `lsst.pipe.analysis.utils.Stats` object that contains the results from
+       the "configured" statistical computation results for the threshold type
+       and values set in ``analysis.config.suseSignalToNoiseThreshold`` and:
+       - ``analysis.config.signalToNoiseThreshold`` if the former is `True` or
+       - ``analysis.config.magThreshold`` if it is `False`.
+    dataset : `str`
+       Name of the catalog dataset to for which annotations are being added.
+       Valid strings are "star", "galaxy", "all", and "split".
+    magThresholdConf : `float`
+       The "configured" value for the magnitude threshold (i.e. the value set
+       in ``analysis.config.magThreshold`` if the threshold was set based on
+       magnitude or the "effective" magnitude threshold if the cut was based
+       on S/N).
+    signalToNoiseStrConf : `str` or `None`, optional
+       A string representing the type of threshold used in culling the data to
+       the subset of the quantity that was used in the statistics computation
+       of ``statsConf``: "S/N" and "mag" indicate a threshold based on
+       signal-to-noise or magnitude, respectively.  Default is `None`.
+    statsHigh : `lsst.pipe.analysis.utils.Stats`, optional
+       `lsst.pipe.analysis.utils.Stats` object that contains the results from
+       the "high" statistical computation results whose value is set in
+       ``analysis.config.signalToNoiseHighThreshold``.  Default is `None`.
+    magThresholdHigh : `float`, optional
+       The "effective" magnitude threshold based on the "high" S/N cut.
+       Default is `None`.
+    signalToNoiseHighStr : `str`
+       A string representing the threshold used in culling of the dataset to
+       the subset of the quantity that was used in the statistics computation
+       of ``statsHigh``.  Default is `None`.
+    x0, y0 : `float`, optional
+       Axis coordinates controlling placement of annotations on the plot.
+       Defaults are ``x0``=0.03 and ``y0``=0.96.
+    yOff : `float`, optional
+       Offset by which to separate annotations along the y-axis.
+       Default is 0.05.
+    fontSize : `int`, optional
+       Font size for plot labels.  Default is 8.
+    ha, va : `str`, optional
+       Horizontal and vertical allignments for text labels.  Can be any valid
+       matplotlib allignment string.  Defaults are ``ha``="left", ``va``="top".
+    color : `str`, optional
+       Color for annotations.  Can be any matplotlib color str.
+       Default is "blue".
+    isHist : `bool`, optional
+       Boolean indicating if this is a histogram style plot (for slightly
+       different annotation settings).  Default is `False`.
+    hscRun : `str` or `None`, optional
+       String representing "HSCPIPE_VERSION" fits header if the data were
+       processed with the (now obsolete, but old reruns still exist)
+       "HSC stack".  Default is `None`.
+    matchRadius : `float` or `None`, optional
+       Maximum search radius for source matching between catalogs.
+       Default is `None`.
+    matchRadiusUnitStr : `str`, optional
+       String representing the units of the match radius (e.g. "arcsec",
+       "pixel").  Default is "\"" (i.e. arcsec).
+    unitScale : `float`, optional
+       Number indicating any scaling of the units (e.g 1000.0 means units
+       are in "milli" of the base unit).  Default is 1.0.
+    doPrintMedian : `bool`, optional
+       Boolean to indicate if the median (in addition to the mean) should
+       be printed on the plot.  Default is `False`.
+
+    Returns
+    -------
+    l1, l2 : `matplotlib.lines.Line2D`
+       Output of the axes.axvline commands for the median and clipped
+       values (used for plot legends).
+    """
     xThresh = axes.get_xlim()[0] + 0.58*(axes.get_xlim()[1] - axes.get_xlim()[0])
     for stats, magThreshold, signalToNoiseStr, y00 in [[statsConf, magThresholdConf, signalToNoiseStrConf, y0],
                                                        [statsHigh, magThresholdHigh, signalToNoiseHighStr,
                                                         0.18]]:
-        axes.annotate(dataSet+r" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]),
+        axes.annotate(dataSet + r" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]),
                       xy=(x0, y00), xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize, color=color)
         if signalToNoiseStr:
             axes.annotate(signalToNoiseStr, xy=(xThresh, y00), xycoords=("data", "axes fraction"),
@@ -192,10 +274,6 @@ def annotateAxes(filename, plt, axes, statsConf, dataSet, magThresholdConf, sign
             axes.annotate("med = ", xy=(x0 + 0.12, y00 - yOffMult*yOff), ha="right", **strKwargs)
             axes.annotate(medianStr, xy=(x0 + lenStr, y00 - yOffMult*yOff), ha="right", **strKwargs)
 
-    if writeMinMax is not None:
-        yOffMult += 1
-        axes.annotate("Min, Max (all stars) = ({0:.2f}, {1:.2f})\"".format(), xy=(x0, y0 - yOffMult*yOff),
-                      ha=ha, **strKwargs)
     if matchRadius is not None:
         yOffMult += 1
         axes.annotate("Match radius = {0:.2f}{1:s}".format(matchRadius, matchRadiusUnitStr),
@@ -206,13 +284,13 @@ def annotateAxes(filename, plt, axes, statsConf, dataSet, magThresholdConf, sign
                       xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize, color="#800080")
     if isHist:
         l1 = axes.axvline(stats[dataSet].median, linestyle="dotted", color="0.7")
-        l2 = axes.axvline(stats[dataSet].median+stats[dataSet].clip, linestyle="dashdot", color="0.7")
-        axes.axvline(stats[dataSet].median-stats[dataSet].clip, linestyle="dashdot", color="0.7")
+        l2 = axes.axvline(stats[dataSet].median + stats[dataSet].clip, linestyle="dashdot", color="0.7")
+        axes.axvline(stats[dataSet].median - stats[dataSet].clip, linestyle="dashdot", color="0.7")
     else:
         l1 = axes.axhline(stats[dataSet].median, linestyle="dotted", color="0.7", label="median")
-        l2 = axes.axhline(stats[dataSet].median+stats[dataSet].clip, linestyle="dashdot", color="0.7",
+        l2 = axes.axhline(stats[dataSet].median + stats[dataSet].clip, linestyle="dashdot", color="0.7",
                           label="clip")
-        axes.axhline(stats[dataSet].median-stats[dataSet].clip, linestyle="dashdot", color="0.7")
+        axes.axhline(stats[dataSet].median - stats[dataSet].clip, linestyle="dashdot", color="0.7")
     return l1, l2
 
 

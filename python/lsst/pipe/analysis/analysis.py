@@ -28,12 +28,19 @@ class AnalysisConfig(Config):
                                "base_ClassificationExtendedness_flag"])
     clip = Field(dtype=float, default=4.0, doc="Rejection threshold (stdev)")
     useSignalToNoiseThreshold = Field(dtype=bool, default=True, doc="Use a Signal-to-Noise threshold "
-                                      "to set the magnitude limit for the statistics computation?  "
-                                      "If False, the value in magThreshold is used.")
+                                      "to set the limit for the statistics computation?  If True, the "
+                                      "value set in signalToNoiseThreshold is used directly for single "
+                                      "frame (visit) catalogs, but is scaled by sqrt(NumberOfVisits) for "
+                                      "coadd catalogs (to ensure a similar effective magnitude cut for "
+                                      "both).  If False, the cut will be based on magnitude using the "
+                                      "value in magThreshold for both visit and coadd catalogs.")
     signalToNoiseThreshold = Field(dtype=float, default=100.0, doc="Signal-to-Noise threshold to apply")
     signalToNoiseHighThreshold = Field(dtype=float, default=500.0, doc="Signal-to-Noise threshold to apply "
                                        "as representative of a \"high\" S/N sample that is always computed "
-                                       "(i.e. regardless of useSignalToNoiseThreshold)")
+                                       "(i.e. regardless of useSignalToNoiseThreshold).  The value is "
+                                       "used directly for single frame (visit) catalogs, but is scaled by "
+                                       "sqrt(NumberOfVisits) for coadd catalogs (to ensure a similar "
+                                       "effective magnitude cut for both).")
     minHighSampleN = Field(dtype=int, default=20, doc="Minimum number of stars for the "
                            "signalToNoiseHighThreshold sample.  If too few objects classified as stars "
                            "exist with the configured value, decrease the S/N threshold by 10 until a "
@@ -1228,7 +1235,7 @@ class Analysis(object):
     def statistics(self, magThreshold=None, signalToNoiseThreshold=None, forcedMean=None):
         """Calculate statistics on quantity
 
-        Parameters:
+        Parameters
         ----------
         magThreshold : `float` or `None`
            Subsample for computing stats only includes objects brighter than
@@ -1242,7 +1249,6 @@ class Analysis(object):
         `RuntimeError`
            If both ``magThreshold`` and ``signalToNoiseThreshold`` are -- or
            are not -- `None`.
-
         """
         thresholdList = [magThreshold, signalToNoiseThreshold]
         if (all(threshold is not None for threshold in thresholdList) or
@@ -1269,6 +1275,76 @@ class Analysis(object):
         return stats
 
     def calculateStats(self, quantity, selection, forcedMean=None, thresholdType="", thresholdValue=None):
+        """Calculate some basic statistics for a (sub-selection of a) quanatity
+
+        Parameters
+        ----------
+        quantity : `numpy.ndarray` of `float`
+           Array containing the values of the quantity on which the statistics
+           are to be computed.
+        selection : `numpy.ndarray` of `bool`
+           Boolean array indicating the sub-selection of data points in
+           ``quantity`` to be considered for the statistics computation.
+        forcedMean : `float`, `int`, or `None`, optional
+           If provided, the value at which to force the mean (i.e. the other
+           stats will be calculated based on an assumed mean of this value).
+           Default is `None`.
+        thresholdType : `str`, optional
+           String representing the type of threshold to be used in culling to
+           the subset of ``quantity`` to be used in the statistics computation:
+           "S/N" and "mag" indicate a threshold based on signal-to-noise or
+           magnitude, respectively.  A flag name, e.g. "calib_psf_used",
+           indicates that the sample was culled based on the value of this flag.
+           Provided here simply for inclusion in the returned ``Stats`` object.
+           Default is an empty `str`.
+        thresholdValue : `float`, `int`, or `None`, optional
+           The threshold value used in culling ``quantity`` to the subset to be
+           included in the statistics computation.  Provided here simply for
+           inclusion in the returned ``Stats`` object.  Default is `None`.
+
+        Returns
+        -------
+        Stats : `lsst.pipe.analysis.utils.Stats`
+           Instance of the `lsst.pipe.analysis.utils.Stats` class (a
+           sub-class of `lsst.pipe.base.Struct`) containing the results of
+           the statistics calculation.  Attributes are:
+
+           ``dataUsed``
+              Boolean array indicating the subset of ``quantity`` that was
+              used in the statistics computation (`numpy.ndarray` of `bool`).
+           ``num``
+              Number of data points used in calculation after culling based on
+             ``selection`` and sigma clipping during the computation (`int`).
+           ``total``
+              Number of data points considered for use in calculation after
+              cut based on ``selection`` (`int`).
+           ``mean``
+              Mean of the data points used in the calculation (`float`).
+           ``stddev``
+              Standard deviation of the data points used in the calculation
+              (`float`).
+           ``forcedMean``
+              Value provided in ``forcedMean`` indicating (if not `None`) the
+              value the mean was forced to be for computation of the other
+              statistics.  A value of `None` indicates the mean was computed
+              from the data themselves (`float` or `None`).
+           ``median``
+              Median of the data points used in the calculation (`float`).
+           ``clip``
+              Value used for clipping outliers from the data points used in
+              statistics calculation (`float`).
+              - i.e. clip x if abs(x - ``mean``) > ``clip``
+              - this parameter is controlled by the config parameter
+                ``analysis.config.clip`` which is in units of number of
+                standard deviations (defined here as 0.74*interQuartileDistance)
+                (`float`).
+           ``thresholdType``
+              String provided in input variable ``thresholdType`` representing
+              the type of threshold used for culling data (`str`).
+           ``thresholdValue``
+              Value provided in input variable ``thresholdValue`` representing
+              the value used for the threshold culling of the data (`float`).
+        """
         total = selection.sum()  # Total number we're considering
         if total == 0:
             return Stats(dataUsed=0, num=0, total=0, mean=np.nan, stdev=np.nan, forcedMean=np.nan,
@@ -1287,6 +1363,32 @@ class Analysis(object):
                      thresholdValue=thresholdValue)
 
     def calculateSysError(self, quantity, error, selection, forcedMean=None, tol=1.0e-3):
+        """Calculate the systematic error of a (sub-selection of a) quantity
+
+        Parameters
+        ----------
+        quantity : `numpy.ndarray` of `float`
+           Array containing the values of the quantity on which the statistics
+           are to be computed.
+        error : `numpy.ndarray` of `float`
+           Array containing the errors on the data in ``quantity``.
+        selection : `numpy.ndarray` of `bool`
+           Boolean array indicating the sub-selection of data points in
+           ``quantity`` to be considered for the statistics computation.
+        forcedMean : `float`, `int`, or `None`, optional
+           If provided, the value at which to forced the mean (i.e. the other
+           stats will be calculated based on an assumed mean of this value).
+           Otherwise, a value of `None` indicates the mean is to be computed
+           from the data themselves.  Default is `None`.
+        tol : `float`, optional
+           Stopping tolerance for the `scipy.optimize.root` routine.
+           Default is 1.0e-3.
+
+        Returns
+        -------
+        answer : `str`
+           String providing the mean and spread of the systematic error.
+        """
         import scipy.optimize
 
         def function(sysErr2):
