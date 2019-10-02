@@ -214,6 +214,7 @@ class VisitAnalysisRunner(TaskRunner):
         if len(parsedCmd.id.refList) < 1:
             raise RuntimeWarning("refList from parsedCmd is empty...")
         kwargs["tract"] = parsedCmd.tract
+        kwargs["subdir"] = parsedCmd.subdir
         visits = defaultdict(list)
         for ref in parsedCmd.id.refList:
             visits[ref.dataId["visit"]].append(ref)
@@ -233,9 +234,13 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                "e.g. --id visit=12345 ccd=6^8..11", ContainerClass=PerTractCcdDataIdContainer)
         parser.add_argument("--tract", type=str, default=None,
                             help="Tract(s) to use (do one at a time for overlapping) e.g. 1^5^0")
+        parser.add_argument("--subdir", type=str, default="",
+                            help=("Subdirectory below plots/filter/tract-NNNN/visit-NNNN (useful "
+                                  "for, e.g., subgrouping of CCDs.  Ignored if only one CCD is "
+                                  "specified, in which case the subdir is set to ccd-NNN"))
         return parser
 
-    def runDataRef(self, dataRefList, tract=None):
+    def runDataRef(self, dataRefList, tract=None, subdir=""):
         self.log.info("dataRefList size: {:d}".format(len(dataRefList)))
         if tract is None:
             tractList = [0, ]
@@ -266,7 +271,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     self.log.fatal("No data found for {:s} datset...are you sure you ran meas_mosaic? "
                                    "If not, run with --config doApplyUberCal=False".format(repoInfo.dataset))
                 raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo.dataset))
-            filenamer = Filenamer(repoInfo.butler, "plotVisit", repoInfo.dataId)
+            subdir = "ccd-" + str(ccdListPerTract[0]) if len(ccdListPerTract) == 1 else subdir
+            filenamer = Filenamer(repoInfo.butler, "plotVisit", repoInfo.dataId, subdir=subdir)
             # Create list of alias mappings for differing schema naming conventions (if any)
             aliasDictList = [self.config.flagsToAlias, ]
             if repoInfo.hscRun and self.config.srcSchemaMap is not None:
@@ -346,8 +352,17 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
                 # Dict of all parameters common to plot* functions
                 plotKwargs = dict(butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
-                                  hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
-
+                                  hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo)
+                if self.config.doPlotPsfFluxSnHists:
+                    self.plotPsfFluxSnHists(commonZpCat,
+                                            filenamer(repoInfo.dataId, description="base_PsfFlux_raw",
+                                                      style="hist"),
+                                        repoInfo.dataId, zpLabel="raw", **plotKwargs)
+                    self.plotPsfFluxSnHists(catalog,
+                                            filenamer(repoInfo.dataId, description="base_PsfFlux_cal",
+                                                      style="hist"),
+                                            repoInfo.dataId, zpLabel=self.zpLabel, **plotKwargs)
+                plotKwargs.update(dict(zpLabel=self.zpLabel))
                 if self.config.doPlotFootprintNpix:
                     self.plotFootprintHist(catalog,
                                            filenamer(repoInfo.dataId, description="footNpix", style="hist"),
@@ -745,6 +760,7 @@ class CompareVisitAnalysisRunner(TaskRunner):
     def getTargetList(parsedCmd, **kwargs):
         rootDir = parsedCmd.input.split("rerun")[0] if len(parsedCmd.rerun) == 2 else parsedCmd.input
         kwargs["tract"] = parsedCmd.tract
+        kwargs["subdir"] = parsedCmd.subdir
         # New butler requires identical RepositoryArgs and RepositoryCfg and mapperArgs={} is NOT
         # considered equivalent to mapperArgs={'calibRoot': None}, so only use if pasedCmd.calib
         # is not None
@@ -782,9 +798,13 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                "e.g. --id visit=12345 ccd=6^8..11", ContainerClass=PerTractCcdDataIdContainer)
         parser.add_argument("--tract", type=str, default=None,
                             help="Tract(s) to use (do one at a time for overlapping) e.g. 1^5^0")
+        parser.add_argument("--subdir", type=str, default="",
+                            help=("Subdirectory below plots/filter/tract-NNNN/visit-NNNN (useful "
+                                  "for, e.g., subgrouping of CCDs.  Ignored if only one CCD is "
+                                  "specified, in which case the subdir is set to ccd-NNN"))
         return parser
 
-    def runDataRef(self, dataRefList1, dataRefList2, tract=None):
+    def runDataRef(self, dataRefList1, dataRefList2, tract=None, subdir=""):
         # This is for the commonZP plots (i.e. all ccds regardless of tract)
         if tract is None:
             tractList = [0, ]
@@ -895,7 +915,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             except Exception:
                 pass
 
-            filenamer = Filenamer(repoInfo1.butler, "plotCompareVisit", repoInfo1.dataId)
+            subdir = "ccd-" + str(ccdListPerTract1[0]) if len(ccdIntersectList) == 1 else subdir
+            filenamer = Filenamer(repoInfo1.butler, "plotCompareVisit", repoInfo1.dataId, subdir=subdir)
             hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
 
             # Dict of all parameters common to plot* functions

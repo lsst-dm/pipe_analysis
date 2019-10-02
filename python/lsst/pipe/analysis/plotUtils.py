@@ -86,7 +86,7 @@ class CosmosLabeller(StarGalaxyLabeller):
         return np.array([0 if ii in good else 1 for ii in catalog["id"]])
 
 
-def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", fontSize=9, color="k", coordSys="axes", **kwargs):
+def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", fontSize=None, color="k", coordSys="axes", **kwargs):
     """Label the plot with the string provided at a given location
 
     Parameters
@@ -102,9 +102,10 @@ def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", fontSize=9, color="k", c
        The string will be centered both horizontally and vertically at this position.
     prefix : `str`, optional
        Optional prefix to add to ``textStr``.
-    fontSize : `int` or `str`, optional
+    fontSize : `int` or `str` or `None`, optional
        Size of font for plotting of ``textStr``.  May be either an absolute font size in points, or a
-       size string, relative to the default font size.  Default is 9 points.
+       size string, relative to the default font size.  Default is `None`, in which case an automatic
+       scaling based on the length of ``textStr`` will be used.
     color : `str`, optional
        Color to plot ``textStr``.  Can be any matplotlib color str.  Default is k (for black).
     coordSys : `str`, optional
@@ -136,50 +137,143 @@ def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", fontSize=9, color="k", c
         transform = axis.transFigure
     else:
         raise ValueError("Unrecognized coordSys: {}.  Must be one of axes, data, figure".format(coordSys))
-    fontSize = int(fontSize - min(3, len(textStr)/10))
+    if not fontSize:
+        fontSize = int(9 - min(3, len(textStr)/10))
     plt.text(xLoc, yLoc, prefix + textStr, ha="center", va="center", fontsize=fontSize, transform=transform,
              color=color, **kwargs)
 
 
-def annotateAxes(filename, plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=0.96, yOff=0.05,
-                 fontSize=8, ha="left", va="top", color="blue", isHist=False, hscRun=None, matchRadius=None,
-                 matchRadiusUnitStr="\"", writeMinMax=None, unitScale=1.0, doPrintMedian=False):
-    xOffFact = 0.67*len(" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]))
-    axes.annotate(dataSet+r" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]),
-                  xy=(x0, y0), xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize, color=color)
-    axes.annotate(r" [mag<{0:.1f}]".format(magThreshold), xy=(x0*xOffFact, y0), xycoords="axes fraction",
-                  ha=ha, va=va, fontsize=fontSize, color="k", alpha=0.55)
-    meanStr = "{0.mean:.4f}".format(stats[dataSet])
-    medianStr = "{0.median:.4f}".format(stats[dataSet])
-    stdevStr = "{0.stdev:.4f}".format(stats[dataSet])
-    statsUnitStr = None
-    if unitScale == 1000.0:
-        meanStr = "{0.mean:.2f}".format(stats[dataSet])
-        medianStr = "{0.median:.2f}".format(stats[dataSet])
-        stdevStr = "{0.stdev:.2f}".format(stats[dataSet])
-        statsUnitStr = " (milli)"
-        if any(ss in filename for ss in ["_ra", "_dec", "distance"]):
-            statsUnitStr = " (mas)"
-        if any(ss in filename for ss in ["Flux", "_photometry", "matches_mag"]):
-            statsUnitStr = " (mmag)"
-    lenStr = 0.12 + 0.017*(max(len(meanStr), len(stdevStr)))
-    strKwargs = dict(xycoords="axes fraction", va=va, fontsize=fontSize, color="k")
-    yOffMult = 1
-    axes.annotate("mean = ", xy=(x0 + 0.12, y0 - yOffMult*yOff), ha="right", **strKwargs)
-    axes.annotate(meanStr, xy=(x0 + lenStr, y0 - yOffMult*yOff), ha="right", **strKwargs)
-    if statsUnitStr is not None:
-        axes.annotate(statsUnitStr, xy=(x0 + lenStr + 0.006, y0 - yOffMult*yOff), ha="left", **strKwargs)
-    yOffMult += 1
-    axes.annotate("stdev = ", xy=(x0 + 0.12, y0 - yOffMult*yOff), ha="right", **strKwargs)
-    axes.annotate(stdevStr, xy=(x0 + lenStr, y0 - yOffMult*yOff), ha="right", **strKwargs)
-    if doPrintMedian:
+def annotateAxes(filename, plt, axes, statsConf, dataSet, magThresholdConf, signalToNoiseStrConf=None,
+                 statsHigh=None, magThresholdHigh=None, signalToNoiseHighStr=None,
+                 x0=0.03, y0=0.96, yOff=0.05, fontSize=8, ha="left", va="top", color="blue",
+                 isHist=False, hscRun=None, matchRadius=None, matchRadiusUnitStr="\"",
+                 unitScale=1.0, doPrintMedian=False):
+    """Label the plot with the statistical computation results
+
+    Parameters
+    ----------
+    filename : `str`
+       String representing the full path of the plot output filename.  Used
+       here to select for/against certain annotations for certain styles of
+       plots.
+    plt : `matplotlib.pyplot`
+       Instance of the matplotlib plot to be annotated.
+    axes : `matplotlib.axes._axes.Axes`
+       Particular matplotlib axes of ``plt`` on which to plot the annotations.
+    statsConf : `lsst.pipe.analysis.utils.Stats`
+       `lsst.pipe.analysis.utils.Stats` object that contains the results from
+       the "configured" statistical computation results for the threshold type
+       and values set in ``analysis.config.suseSignalToNoiseThreshold`` and:
+       - ``analysis.config.signalToNoiseThreshold`` if the former is `True` or
+       - ``analysis.config.magThreshold`` if it is `False`.
+    dataset : `str`
+       Name of the catalog dataset to for which annotations are being added.
+       Valid strings are "star", "galaxy", "all", and "split".
+    magThresholdConf : `float`
+       The "configured" value for the magnitude threshold (i.e. the value set
+       in ``analysis.config.magThreshold`` if the threshold was set based on
+       magnitude or the "effective" magnitude threshold if the cut was based
+       on S/N).
+    signalToNoiseStrConf : `str` or `None`, optional
+       A string representing the type of threshold used in culling the data to
+       the subset of the quantity that was used in the statistics computation
+       of ``statsConf``: "S/N" and "mag" indicate a threshold based on
+       signal-to-noise or magnitude, respectively.  Default is `None`.
+    statsHigh : `lsst.pipe.analysis.utils.Stats`, optional
+       `lsst.pipe.analysis.utils.Stats` object that contains the results from
+       the "high" statistical computation results whose value is set in
+       ``analysis.config.signalToNoiseHighThreshold``.  Default is `None`.
+    magThresholdHigh : `float`, optional
+       The "effective" magnitude threshold based on the "high" S/N cut.
+       Default is `None`.
+    signalToNoiseHighStr : `str`
+       A string representing the threshold used in culling of the dataset to
+       the subset of the quantity that was used in the statistics computation
+       of ``statsHigh``.  Default is `None`.
+    x0, y0 : `float`, optional
+       Axis coordinates controlling placement of annotations on the plot.
+       Defaults are ``x0``=0.03 and ``y0``=0.96.
+    yOff : `float`, optional
+       Offset by which to separate annotations along the y-axis.
+       Default is 0.05.
+    fontSize : `int`, optional
+       Font size for plot labels.  Default is 8.
+    ha, va : `str`, optional
+       Horizontal and vertical allignments for text labels.  Can be any valid
+       matplotlib allignment string.  Defaults are ``ha``="left", ``va``="top".
+    color : `str`, optional
+       Color for annotations.  Can be any matplotlib color str.
+       Default is "blue".
+    isHist : `bool`, optional
+       Boolean indicating if this is a histogram style plot (for slightly
+       different annotation settings).  Default is `False`.
+    hscRun : `str` or `None`, optional
+       String representing "HSCPIPE_VERSION" fits header if the data were
+       processed with the (now obsolete, but old reruns still exist)
+       "HSC stack".  Default is `None`.
+    matchRadius : `float` or `None`, optional
+       Maximum search radius for source matching between catalogs.
+       Default is `None`.
+    matchRadiusUnitStr : `str`, optional
+       String representing the units of the match radius (e.g. "arcsec",
+       "pixel").  Default is "\"" (i.e. arcsec).
+    unitScale : `float`, optional
+       Number indicating any scaling of the units (e.g 1000.0 means units
+       are in "milli" of the base unit).  Default is 1.0.
+    doPrintMedian : `bool`, optional
+       Boolean to indicate if the median (in addition to the mean) should
+       be printed on the plot.  Default is `False`.
+
+    Returns
+    -------
+    l1, l2 : `matplotlib.lines.Line2D`
+       Output of the axes.axvline commands for the median and clipped
+       values (used for plot legends).
+    """
+    xThresh = axes.get_xlim()[0] + 0.58*(axes.get_xlim()[1] - axes.get_xlim()[0])
+    for stats, magThreshold, signalToNoiseStr, y00 in [[statsConf, magThresholdConf, signalToNoiseStrConf, y0],
+                                                       [statsHigh, magThresholdHigh, signalToNoiseHighStr,
+                                                        0.18]]:
+        axes.annotate(dataSet + r" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]),
+                      xy=(x0, y00), xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize, color=color)
+        if signalToNoiseStr:
+            axes.annotate(signalToNoiseStr, xy=(xThresh, y00), xycoords=("data", "axes fraction"),
+                          ha="right", va=va, fontsize=fontSize, color="k", alpha=0.8)
+            axes.annotate(r" [mag$\lesssim${0:.1f}]".format(magThreshold), xy=(xThresh, y00 - yOff),
+                          xycoords=("data", "axes fraction"),
+                          ha="right", va=va, fontsize=fontSize, color="k", alpha=0.8)
+        else:
+            axes.annotate(r" [mag$\leqslant${0:.1f}]".format(magThreshold), xy=(xThresh, y00),
+                          xycoords=("data", "axes fraction"),
+                          ha="right", va=va, fontsize=fontSize, color="k", alpha=0.8)
+        meanStr = "{0.mean:.4f}".format(stats[dataSet])
+        medianStr = "{0.median:.4f}".format(stats[dataSet])
+        stdevStr = "{0.stdev:.4f}".format(stats[dataSet])
+        statsUnitStr = None
+        if unitScale == 1000.0:
+            meanStr = "{0.mean:.2f}".format(stats[dataSet])
+            medianStr = "{0.median:.2f}".format(stats[dataSet])
+            stdevStr = "{0.stdev:.2f}".format(stats[dataSet])
+            statsUnitStr = " (milli)"
+            if any(ss in filename for ss in ["_ra", "_dec", "distance"]):
+                statsUnitStr = " (mas)"
+            if any(ss in filename for ss in ["Flux", "_photometry", "_mag"]):
+                statsUnitStr = " (mmag)"
+        lenStr = 0.12 + 0.017*(max(len(meanStr), len(stdevStr)))
+        strKwargs = dict(xycoords="axes fraction", va=va, fontsize=fontSize, color="k")
+        yOffMult = 1
+        axes.annotate("mean = ", xy=(x0 + 0.12, y00 - yOffMult*yOff), ha="right", **strKwargs)
+        axes.annotate(meanStr, xy=(x0 + lenStr, y00 - yOffMult*yOff), ha="right", **strKwargs)
+        if statsUnitStr is not None:
+            axes.annotate(statsUnitStr, xy=(x0 + lenStr + 0.006, y00 - yOffMult*yOff), ha="left", **strKwargs)
         yOffMult += 1
-        axes.annotate("med = ", xy=(x0 + 0.12, y0 - yOffMult*yOff), ha="right", **strKwargs)
-        axes.annotate(medianStr, xy=(x0 + lenStr, y0 - yOffMult*yOff), ha="right", **strKwargs)
-    if writeMinMax is not None:
-        yOffMult += 1
-        axes.annotate("Min, Max (all stars) = ({0:.2f}, {1:.2f})\"".format(), xy=(x0, y0 - yOffMult*yOff),
-                      ha=ha, **strKwargs)
+        axes.annotate("stdev = ", xy=(x0 + 0.12, y00 - yOffMult*yOff), ha="right", **strKwargs)
+        axes.annotate(stdevStr, xy=(x0 + lenStr, y00 - yOffMult*yOff), ha="right", **strKwargs)
+        if doPrintMedian:
+            yOffMult += 1
+            axes.annotate("med = ", xy=(x0 + 0.12, y00 - yOffMult*yOff), ha="right", **strKwargs)
+            axes.annotate(medianStr, xy=(x0 + lenStr, y00 - yOffMult*yOff), ha="right", **strKwargs)
+
     if matchRadius is not None:
         yOffMult += 1
         axes.annotate("Match radius = {0:.2f}{1:s}".format(matchRadius, matchRadiusUnitStr),
@@ -190,13 +284,13 @@ def annotateAxes(filename, plt, axes, stats, dataSet, magThreshold, x0=0.03, y0=
                       xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize, color="#800080")
     if isHist:
         l1 = axes.axvline(stats[dataSet].median, linestyle="dotted", color="0.7")
-        l2 = axes.axvline(stats[dataSet].median+stats[dataSet].clip, linestyle="dashdot", color="0.7")
-        axes.axvline(stats[dataSet].median-stats[dataSet].clip, linestyle="dashdot", color="0.7")
+        l2 = axes.axvline(stats[dataSet].median + stats[dataSet].clip, linestyle="dashdot", color="0.7")
+        axes.axvline(stats[dataSet].median - stats[dataSet].clip, linestyle="dashdot", color="0.7")
     else:
         l1 = axes.axhline(stats[dataSet].median, linestyle="dotted", color="0.7", label="median")
-        l2 = axes.axhline(stats[dataSet].median+stats[dataSet].clip, linestyle="dashdot", color="0.7",
+        l2 = axes.axhline(stats[dataSet].median + stats[dataSet].clip, linestyle="dashdot", color="0.7",
                           label="clip")
-        axes.axhline(stats[dataSet].median-stats[dataSet].clip, linestyle="dashdot", color="0.7")
+        axes.axhline(stats[dataSet].median - stats[dataSet].clip, linestyle="dashdot", color="0.7")
     return l1, l2
 
 
@@ -239,23 +333,50 @@ def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
     axes.locator_params(nbins=6)
     axes.ticklabel_format(useOffset=False)
     camRadius = max(camera.getFpBBox().getWidth(), camera.getFpBBox().getHeight())/2
-    camRadius = np.round(camRadius, -2)
-    camLimits = np.round(1.25*camRadius, -2)
+    camRadius = np.round(camRadius, -1)
+    camLimits = np.round(1.25*camRadius, -1)
     intCcdList = [int(ccd) for ccd in ccdList]
+    prop_cycle = plt.rcParams['axes.prop_cycle']
+    colors = prop_cycle.by_key()['color']
+    colors.pop(colors.index('#7f7f7f'))  # get rid of the gray one as is doesn't contrast well with white
+    colors.append("gold")
+    hasRotatedCcds = False
     for ccd in camera:
+        if ccd.getOrientation().getNQuarter() != 0:
+            hasRotatedCcds = True
+            break
+    for ic, ccd in enumerate(camera):
+        ccdCorners = ccd.getCorners(cameraGeom.FOCAL_PLANE)
+        if ccd.getType() == cameraGeom.SCIENCE:
+            plt.gca().add_patch(patches.Rectangle(ccdCorners[0], *list(ccdCorners[2] - ccdCorners[0]),
+                                                  facecolor="none", edgecolor="k", ls="solid", lw=0.5,
+                                                  alpha=0.5))
         if ccd.getId() in intCcdList:
+            if hasRotatedCcds:
+                nQuarter = ccd.getOrientation().getNQuarter()
+                fillColor = colors[nQuarter%len(colors)]
+            elif ccd.getName()[0] == "R":
+                try:
+                    fillColor = colors[(int(ccd.getName()[1]) + int(ccd.getName()[2]))%len(colors)]
+                except:
+                    fillColor = colors[ic%len(colors)]
+            else:
+                fillColor = colors[ic%len(colors)]
             ccdCorners = ccd.getCorners(cameraGeom.FOCAL_PLANE)
             plt.gca().add_patch(patches.Rectangle(ccdCorners[0], *list(ccdCorners[2] - ccdCorners[0]),
-                                                  fill=True, facecolor="y", edgecolor="k", ls="solid"))
+                                                  fill=True, facecolor=fillColor, edgecolor="k",
+                                                  ls="solid", lw=1.0, alpha=0.7))
     axes.set_xlim(-camLimits, camLimits)
     axes.set_ylim(-camLimits, camLimits)
-    axes.add_patch(patches.Circle((0, 0), radius=camRadius, color="k", alpha=0.2))
     if camera.getName() == "HSC":
         for x, y, t in ([-1, 0, "N"], [0, 1, "W"], [1, 0, "S"], [0, -1, "E"]):
             axes.text(1.085*camRadius*x, 1.085*camRadius*y, t, ha="center", va="center",
                       fontsize=fontSize - 1)
-    axes.text(-0.82*camRadius, 0.95*camRadius, "%s" % camera.getName(), ha="center", fontsize=fontSize,
-              color=color)
+            axes.text(-0.82*camRadius, 1.04*camRadius, "%s" % camera.getName(), ha="center",
+                      fontsize=fontSize, color=color)
+    else:
+        axes.text(0.0, 1.04*camRadius, "%s" % camera.getName(), ha="center", fontsize=fontSize,
+                  color=color)
 
 
 def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1.5):
@@ -291,8 +412,7 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
     yMax = min(max(tractDec), patchBoundary.decMax) + buff
     xlim = xMin, xMax
     ylim = yMin, yMax
-    axes.fill(tractRa, tractDec, fill=True, edgecolor='k', lw=1, linestyle='solid',
-              color="black", alpha=0.05)
+    axes.fill(tractRa, tractDec, fill=False, edgecolor='k', lw=0.5, linestyle='solid', color="k", alpha=0.3)
     prop_cycle = plt.rcParams['axes.prop_cycle']
     colors = prop_cycle.by_key()['color']
     colors.pop(colors.index('#7f7f7f'))  # get rid of the gray one as that's our no-data colour
@@ -310,7 +430,7 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
         centerDec = min(dec) + 0.5*deltaDec
         if (centerRa < xMin + pBuff and centerRa > xMax - pBuff and
                 centerDec > yMin - pBuff and centerDec < yMax + pBuff):
-            axes.fill(ra, dec, fill=True, color=color, lw=1, linestyle="solid", alpha=alpha)
+            axes.fill(ra, dec, fill=True, color=color, lw=0.5, linestyle="solid", alpha=alpha)
             if patchIndexStr in patchList or (centerRa < xMin - 0.2*pBuff and
                                               centerRa > xMax + 0.2*pBuff and
                                               centerDec > yMin + 0.2*pBuff and
@@ -333,8 +453,13 @@ def plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=None, zpLabel=None, 
     if "raftName" in dataId:  # Pop these (if present) so that the ccd is looked up by just the detector field
         dataIdCopy.pop("raftName", None)
         dataIdCopy.pop("detectorName", None)
+    ccdKey = findCcdKey(dataId)
+    # Pop (if present) so that the ccd is looked up by just the ccdKey field
+    for keyName in ["extension", ]:
+        if keyName != ccdKey and keyName in dataIdCopy:
+            print("Popping:", keyName)
+            dataIdCopy.pop(keyName, None)
     for ccd in ccdList:
-        ccdKey = findCcdKey(dataId)
         ccdLabelStr = str(ccd)
         if "raft" in dataId:
             if len(ccd) != 4:
@@ -534,7 +659,7 @@ def percent(values, p=0.5):
 def setPtSize(num, ptSize=12):
     """Set the point size according to the size of the catalog"""
     if num > 10:
-        ptSize = min(12, max(4, int(20/np.log10(num))))
+        ptSize = min(12, max(3, int(20/np.log10(num))))
     return ptSize
 
 

@@ -41,7 +41,7 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "writeParquet", "getRepoInfo", "findCcdKey", "getCcdNameRefList", "getDataExistsRefList",
            "orthogonalRegression", "distanceSquaredToPoly", "p1CoeffsFromP2x0y0", "p2p1CoeffsFromLinearFit",
            "lineFromP2Coeffs", "linesFromP2P1Coeffs", "makeEqnStr", "catColors", "setAliasMaps",
-           "addPreComputedColumns", "addMetricMeasurement", "updateVerifyJob"]
+           "addPreComputedColumns", "addMetricMeasurement", "updateVerifyJob", "computeMeanOfFrac"]
 
 
 NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
@@ -89,10 +89,11 @@ def writeParquet(dataRef, table, badArray=None):
 
 class Filenamer(object):
     """Callable that provides a filename given a style"""
-    def __init__(self, butler, dataset, dataId={}):
+    def __init__(self, butler, dataset, dataId={}, subdir=""):
         self.butler = butler
         self.dataset = dataset
         self.dataId = dataId
+        self.subdir = subdir
 
     def __call__(self, dataId, **kwargs):
         filename = self.butler.get(self.dataset + "_filename", self.dataId, **kwargs)[0]
@@ -104,25 +105,31 @@ class Filenamer(object):
         if "_parent/" in filename:
             print("Note: stripping _parent from filename: ", filename)
             filename = filename.replace("_parent/", "")
+        if self.subdir:
+            lastSlashInd = filename.rfind("/")
+            filename = filename[:lastSlashInd] + "/" + self.subdir + "/" + filename[lastSlashInd + 1:]
         safeMakeDir(os.path.dirname(filename))
         return filename
 
 
 class Data(Struct):
-    def __init__(self, catalog, quantity, mag, selection, color, error=None, plot=True):
+    def __init__(self, catalog, quantity, mag, signalToNoise, selection, color, error=None, plot=True):
         Struct.__init__(self, catalog=catalog[selection].copy(deep=True), quantity=quantity[selection],
-                        mag=mag[selection], selection=selection, color=color, plot=plot,
-                        error=error[selection] if error is not None else None)
+                        mag=mag[selection], signalToNoise=signalToNoise[selection], selection=selection,
+                        color=color, plot=plot, error=error[selection] if error is not None else None)
 
 
 class Stats(Struct):
-    def __init__(self, dataUsed, num, total, mean, stdev, forcedMean, median, clip):
+    def __init__(self, dataUsed, num, total, mean, stdev, forcedMean, median, clip, thresholdType,
+                 thresholdValue):
         Struct.__init__(self, dataUsed=dataUsed, num=num, total=total, mean=mean, stdev=stdev,
-                        forcedMean=forcedMean, median=median, clip=clip)
+                        forcedMean=forcedMean, median=median, clip=clip, thresholdType=thresholdType,
+                        thresholdValue=thresholdValue)
 
     def __repr__(self):
-        return "Stats(mean={0.mean:.4f}; stdev={0.stdev:.4f}; num={0.num:d}; total={0.total:d}; " \
-            "median={0.median:.4f}; clip={0.clip:.4f}; forcedMean={0.forcedMean:})".format(self)
+        return ("Stats(mean={0.mean:.4f}; stdev={0.stdev:.4f}; num={0.num:d}; total={0.total:d}; "
+                "median={0.median:.4f}; clip={0.clip:.4f}; forcedMean={0.forcedMean:}; "
+                "thresholdType={0.thresholdType:s}; thresholdValue={0.thresholdValue:})".format(self))
 
 
 class Enforcer(object):
@@ -1229,9 +1236,14 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
     butler = dataRef.getButler()
     camera = butler.get("camera")
     dataId = dataRef.dataId
-    filterName = dataId["filter"]
-    genericFilterName = afwImage.Filter(afwImage.Filter(filterName).getId()).getName()
     isCoadd = True if "patch" in dataId else False
+    try:
+        filterName = dataId["filter"]
+    except Exception:
+        exp = butler.get("calexp", dataId) if not isCoadd else butler.get(coaddName + "Coadd_calexp", dataId)
+        filterName = exp.getFilter().getFilterProperty().getName()
+        dataId.update(dict(filter=filterName))
+    genericFilterName = afwImage.Filter(afwImage.Filter(filterName).getId()).getName()
     ccdKey = None if isCoadd else findCcdKey(dataId)
     # Check metadata to see if stack used was HSC
     metaStr = coaddName + coaddDataset + "_md" if coaddName else "calexp_md"
@@ -1288,7 +1300,7 @@ def findCcdKey(dataId):
        The string associated with the "ccd" key.
     """
     ccdKey = None
-    ccdKeyList = ["ccd", "sensor", "camcol", "detector"]
+    ccdKeyList = ["ccd", "sensor", "camcol", "detector", "ccdnum"]
     for ss in ccdKeyList:
         if ss in dataId:
             ccdKey = ss
@@ -1862,3 +1874,57 @@ def updateVerifyJob(job, metaDict=None, specsList=None):
         for spec in specsList:
             job.specs.update(spec)
     return job
+
+
+def computeMeanOfFrac(valueArray, tailStr="upper", fraction=0.1, floorFactor=1):
+    """Compute the rounded mean of the upper/lower fraction of the input array
+
+    In other words, sort ``valueArray`` by value and compute the mean values of
+    the highest[lowest] ``fraction`` of points for ``tailStr`` = upper[lower]
+    and round this mean to a number of significant digits given by ``floorFactor``.
+    e.g.
+     ``floorFactor`` = 0.001, round to nearest thousandth (657.14727 -> 657.147)
+     ``floorFactor`` = 0.01,  round to nearest hundredth (657.14727 -> 657.15)
+     ``floorFactor`` = 0.1,   round to nearest tenth     (657.14727 -> 657.1)
+     ``floorFactor`` = 1,     round to nearest integer   (657.14727 -> 657.0)
+     ``floorFactor`` = 10,    round to nearest ten       (657.14727 -> 660.0)
+     ``floorFactor`` = 100,   round to nearest hundred   (657.14727 -> 700.0)
+
+    Parameters
+    ----------
+    valueArray : `numpy.ndarray`
+       The array of values from which to compute the rounded mean.
+    taiStr : `str`, optional
+       Whether to compute the mean of the upper or lower ``fraction`` of points
+       in ``valueArray`` ("upper" by default).
+    fraction : `float`, optional
+       The fraction of the upper or lower tail of the sorted values of
+       ``valueArray`` to use in the calculation (0.1, i.e. 10% by default).
+    floorFactor : `float`, optional
+       Factor of 10 representing the number of significant digits to round to.
+       See above for examples (1.0 by default).
+
+    Raises
+    ------
+    `RuntimeError`
+       If ``tailStr`` is not either \"upper\" or \"lower\".
+
+    Returns
+    -------
+    meanOfFrac : `float`
+       The mean of the upper/lower ``fraction`` of the values in
+       ``valueArray``.
+    """
+    pad = 0.49
+    ptFrac = max(2, int(fraction*len(valueArray)))
+    if tailStr == "upper":
+        meanOfFrac = np.floor(
+            valueArray[valueArray.argsort()[-ptFrac:]].mean()/floorFactor + pad)*floorFactor
+    elif tailStr == "lower":
+        meanOfFrac = np.floor(
+            valueArray[valueArray.argsort()[0:ptFrac]].mean()/floorFactor - pad)*floorFactor
+    else:
+        raise RuntimeError("tailStr must be either \"upper\" or \"lower\" (" + tailStr +
+                           "was provided")
+
+    return meanOfFrac

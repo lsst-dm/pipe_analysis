@@ -3,6 +3,7 @@
 from __future__ import print_function
 
 import os
+import astropy.units as units
 import numpy as np
 np.seterr(all="ignore")  # noqa E402
 import functools
@@ -16,7 +17,6 @@ from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError
 from lsst.pipe.drivers.utils import TractDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
 from lsst.meas.astrom import AstrometryConfig
-from lsst.meas.extensions.astrometryNet import LoadAstrometryNetObjectsTask
 from lsst.pipe.tasks.colorterms import Colorterm, ColortermLibrary
 
 from lsst.meas.algorithms import LoadIndexedReferenceObjectsTask
@@ -31,8 +31,8 @@ from .utils import (Filenamer, Enforcer, MagDiff, MagDiffMatches, MagDiffCompare
                     addFootprintNPix, makeBadArray, addIntFloatOrStrColumn,
                     calibrateCoaddSourceCatalog, backoutApCorr, matchNanojanskyToAB,
                     fluxToPlotString, andCatalog, writeParquet, getRepoInfo, setAliasMaps,
-                    addPreComputedColumns)
-from .plotUtils import (CosmosLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
+                    addPreComputedColumns, computeMeanOfFrac)
+from .plotUtils import (CosmosLabeller, AllLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
                         MatchesStarGalaxyLabeller, determineUberCalLabel)
 
 import lsst.afw.geom as afwGeom
@@ -42,6 +42,7 @@ import lsst.afw.table as afwTable
 __all__ = ["CoaddAnalysisConfig", "CoaddAnalysisRunner", "CoaddAnalysisTask", "CompareCoaddAnalysisConfig",
            "CompareCoaddAnalysisRunner", "CompareCoaddAnalysisTask"]
 
+NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
 
 class CoaddAnalysisConfig(Config):
     coaddName = Field(dtype=str, default="deep", doc="Name for coadd")
@@ -82,6 +83,7 @@ class CoaddAnalysisConfig(Config):
                                                                  "? (ignored if plotMatchesOnly is True)"))
     doPlotQuiver = Field(dtype=bool, default=True, doc=("Plot ellipticity residuals quiver plot? "
                                                         "(ignored if plotMatchesOnly is True)"))
+    doPlotPsfFluxSnHists = Field(dtype=bool, default=True, doc="Plot histograms of raw PSF fluxes and S/N?")
     doPlotFootprintNpix = Field(dtype=bool, default=True, doc=("Plot histogram of footprint nPix? "
                                                                "(ignored if plotMatchesOnly is True)"))
     doPlotInputCounts = Field(dtype=bool, default=True, doc=("Make input counts plot? "
@@ -145,6 +147,7 @@ class CoaddAnalysisRunner(TaskRunner):
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
         kwargs["cosmos"] = parsedCmd.cosmos
+        kwargs["subdir"] = parsedCmd.subdir
 
         # Partition all inputs by tract,filter
         FilterRefsDict = functools.partial(defaultdict, list)  # Dict for filter-->dataRefs
@@ -185,6 +188,10 @@ class CoaddAnalysisTask(CmdLineTask):
         parser.add_id_argument("--id", "deepCoadd_meas",
                                help="data ID, e.g. --id tract=12345 patch=1,2 filter=HSC-X",
                                ContainerClass=TractDataIdContainer)
+        parser.add_argument("--subdir", type=str, default="",
+                            help=("Subdirectory below plots/filter/tract-NNNN/ (useful for, "
+                                  "e.g., subgrouping of Patches.  Ignored if only one Patch is "
+                                  "specified, in which case the subdir is set to patch-NNN"))
         return parser
 
     def __init__(self, *args, **kwargs):
@@ -197,7 +204,7 @@ class CoaddAnalysisTask(CmdLineTask):
         self.matchControl.findOnlyClosest = True
         self.matchControl.symmetricMatch = False
 
-    def runDataRef(self, patchRefList, cosmos=None):
+    def runDataRef(self, patchRefList, subdir="", cosmos=None):
         haveForced = False  # do forced datasets exits (may not for single band datasets)
         dataset = "Coadd_forced_src"
         # Explicit input file was checked in CoaddAnalysisRunner, so a check on datasetExists
@@ -217,7 +224,8 @@ class CoaddAnalysisTask(CmdLineTask):
         patchList = [patchRef.dataId["patch"] for patchRef in patchRefList]
         self.log.info("patchList size: {:d}".format(len(patchList)))
         repoInfo = getRepoInfo(patchRefList[0], coaddName=self.config.coaddName, coaddDataset=dataset)
-        filenamer = Filenamer(repoInfo.butler, self.outputDataset, repoInfo.dataId)
+        subdir = "patch-" + str(patchList[0]) if len(patchList) == 1 else subdir
+        filenamer = Filenamer(repoInfo.butler, self.outputDataset, repoInfo.dataId, subdir=subdir)
         # Find a visit/ccd input so that you can check for meas_mosaic input (i.e. to set uberCalLabel)
         self.uberCalLabel = determineUberCalLabel(repoInfo, patchList[0], coaddName=self.config.coaddName)
         self.log.info("Uber-calibration used: {:}".format(self.uberCalLabel))
@@ -279,7 +287,6 @@ class CoaddAnalysisTask(CmdLineTask):
                 if not overlappingPatches:
                     self.log.info("No overlapping patches...skipping overlap plots")
                 else:
-                    self.catLabel = "nChild = 0"
                     if haveForced:
                         forcedOverlaps = self.overlaps(forced)
                         if forcedOverlaps:
@@ -301,7 +308,6 @@ class CoaddAnalysisTask(CmdLineTask):
                                       format(len(unforcedOverlaps)))
 
             # Set boolean array indicating sources deemed unsuitable for qa analyses
-            self.catLabel = "noDuplicates"
             bad = makeBadArray(unforced, flagList=self.config.analysis.flags,
                                onlyReadStars=self.config.onlyReadStars)
             if haveForced:
@@ -333,7 +339,8 @@ class CoaddAnalysisTask(CmdLineTask):
                 forced = forced[~bad].copy(deep=True)
             else:
                 forced = unforced
-            self.zpLabel = self.zpLabel + " " + self.catLabel
+            self.catLabel = "nChild = 0"
+            forcedStr = forcedStr + " " + self.catLabel
             if haveForced:
                 self.log.info("\nNumber of sources in catalogs: unforced = {0:d} and forced = {1:d}".format(
                     len(unforced), len(forced)))
@@ -342,6 +349,11 @@ class CoaddAnalysisTask(CmdLineTask):
 
             flagsCat = unforced
 
+            if self.config.doPlotPsfFluxSnHists:
+                self.plotPsfFluxSnHists(unforced,
+                                        filenamer(repoInfo.dataId, description="base_PsfFlux_cal",
+                                                  style="hist"),
+                                        repoInfo.dataId, forcedStr="unforced " + self.catLabel, **plotKwargs)
             if self.config.doPlotFootprintNpix:
                 self.plotFootprintHist(forced,
                                        filenamer(repoInfo.dataId, description="footNpix", style="hist"),
@@ -352,17 +364,18 @@ class CoaddAnalysisTask(CmdLineTask):
             if self.config.doPlotQuiver:
                 self.plotQuiver(unforced,
                                 filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
-                                dataId=repoInfo.dataId, forcedStr="unforced", scale=2, **plotKwargs)
+                                dataId=repoInfo.dataId, forcedStr="unforced " + self.catLabel, scale=2,
+                                **plotKwargs)
 
             if self.config.doPlotInputCounts:
                 self.plotInputCounts(unforced, filenamer(repoInfo.dataId, description="inputCounts",
                                                          style="tract"), dataId=repoInfo.dataId,
-                                     forcedStr="unforced", alpha=0.5,
+                                     forcedStr="unforced " + self.catLabel, alpha=0.5,
                                      doPlotTractImage=True, doPlotPatchOutline=True, sizeFactor=5.0,
                                      maxDiamPix=1000, **plotKwargs)
 
             if self.config.doPlotMags:
-                self.plotMags(unforced, filenamer, repoInfo.dataId, forcedStr="unforced",
+                self.plotMags(unforced, filenamer, repoInfo.dataId, forcedStr="unforced " + self.catLabel,
                               postFix="_unforced", flagsCat=flagsCat, **plotKwargs)
                 if haveForced:
                     self.plotMags(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr, postFix="_forced",
@@ -371,14 +384,15 @@ class CoaddAnalysisTask(CmdLineTask):
                                                   "yellow"), ], **plotKwargs)
             if self.config.doPlotStarGalaxy:
                 if "ext_shapeHSM_HsmSourceMoments_xx" in unforced.schema:
-                    self.plotStarGal(unforced, filenamer, repoInfo.dataId, forcedStr="unforced", **plotKwargs)
+                    self.plotStarGal(unforced, filenamer, repoInfo.dataId,
+                                     forcedStr="unforced " + self.catLabel, **plotKwargs)
                 else:
                     self.log.warn("Cannot run plotStarGal: ext_shapeHSM_HsmSourceMoments_xx not "
                                   "in forced.schema")
 
             if self.config.doPlotSizes:
                 if all(ss in unforced.schema for ss in ["base_SdssShape_psf_xx", "calib_psf_used"]):
-                    self.plotSizes(unforced, filenamer, repoInfo.dataId, forcedStr="unforced",
+                    self.plotSizes(unforced, filenamer, repoInfo.dataId, forcedStr="unforced " + self.catLabel,
                                    postFix="_unforced", **plotKwargs)
                 else:
                     self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx and/or calib_psf_used "
@@ -410,9 +424,13 @@ class CoaddAnalysisTask(CmdLineTask):
         for cat in self.config.externalCatalogs:
             with andCatalog(cat):
                 matches = self.matchCatalog(forced, repoInfo.filterName, self.config.externalCatalogs[cat])
-                self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
-                                 forcedStr=forcedStr, matchRadius=self.matchRadius,
-                                 matchRadiusUnitStr=self.matchRadiusUnitStr, **plotKwargs)
+                if matches is not None:
+                    self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
+                                     forcedStr=forcedStr, matchRadius=self.matchRadius,
+                                     matchRadiusUnitStr=self.matchRadiusUnitStr, **plotKwargs)
+                else:
+                    self.log.warn("Could not create match catalog for {:}.  Is "
+                                  "lsst.meas.extensions.astrometryNet setup?".format(cat))
 
     def readCatalogs(self, patchRefList, dataset):
         """Read in and concatenate catalogs of type dataset in lists of data references
@@ -493,8 +511,7 @@ class CoaddAnalysisTask(CmdLineTask):
             for iMat, iMatch in enumerate(packedMatches):
                 if iMatch["second"] in badIds:
                     badMatch[iMat] = True
-            self.catLabel = "noDuplicates"
-            self.zpLabel = self.zpLabel + " " + self.catLabel
+            self.zpLabel = self.zpLabel
             packedMatches = packedMatches[~badMatch].copy(deep=True)
             if not packedMatches:
                 self.log.warn("No good matches for %s" % (dataRef.dataId,))
@@ -511,8 +528,8 @@ class CoaddAnalysisTask(CmdLineTask):
             matches = refObjLoader.joinMatchListWithCatalog(packedMatches, catalog)
             if not hasattr(matches[0].first, "schema"):
                 raise RuntimeError("Unable to unpack matches.  "
-                                   "Do you have the correct astrometry_net_data setup?")
-            # LSST reads in a_net catalogs with flux in "nanojanskys", so must convert to AB
+                                   "Do you have the correct reference catalog setup?")
+            # LSST reads in reference catalogs with flux in "nanojanskys", so must convert to AB
             matches = matchNanojanskyToAB(matches)
             if hscRun and self.config.doAddAperFluxHsc:
                 addApertureFluxesHSC(matches, prefix="second_")
@@ -573,7 +590,8 @@ class CoaddAnalysisTask(CmdLineTask):
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in fluxToPlotList:
-            if col + "_instFlux" in catalog.schema and not (forcedStr == "forced" and "CircularAper" in col):
+            isForced = False if forcedStr is None else ("forced" in forcedStr)
+            if col + "_instFlux" in catalog.schema and not (isForced and "CircularAper" in col):
                 shortName = "mag_" + col + postFix
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog,
@@ -791,9 +809,87 @@ class CoaddAnalysisTask(CmdLineTask):
         self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
                            self.config.analysis, flags=["base_Footprint_nPix_flag"], qMin=0, qMax=3000,
                            labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
-                           ).plotHistogram(filenamer, stats=stats, camera=camera, hscRun=hscRun,
+                           ).plotHistogram(filenamer, stats=stats, camera=camera, ccdList=ccdList,
+                                           tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
                                            matchRadius=matchRadius, zpLabel=zpLabel,
                                            filterStr=dataId['filter'], uberCalLabel=uberCalLabel)
+
+    def plotPsfFluxSnHists(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
+                           tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
+                           forcedStr=None, uberCalLabel=None, postFix="", flagsCat=None, logPlot=True,
+                           density=True, cumulative=-1):
+        stats = None
+        shortName = "psfInstFlux" if zpLabel == "raw" else "psfCalFlux"
+        self.log.info("shortName = {:s}".format(shortName))
+        # want "raw" flux
+        factor = 10.0**(0.4*self.config.analysis.commonZp) if zpLabel == "raw" else NANOJANSKYS_PER_AB_FLUX
+        psfFlux = catalog["base_PsfFlux_instFlux"]*factor
+        psfFluxErr = catalog["base_PsfFlux_instFluxErr"]*factor
+        psfSn = psfFlux/psfFluxErr
+
+        # Scale S/N threshold by ~sqrt(#exposures) if catalog is coadd data
+        if "base_InputCount_value" in catalog.schema:
+            inputCounts = catalog["base_InputCount_value"]
+            scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=10)
+            highSn = np.floor(
+                np.sqrt(scaleFactor)*self.config.analysis.signalToNoiseThreshold/100 + 0.49)*100
+        else:
+            highSn = self.config.analysis.signalToNoiseThreshold
+
+        lowSn = 20.0
+        lowFlux, highFlux = 4000.0, 12500.0
+        goodSn = psfSn > lowSn
+        psfFluxSnGtLow = psfFlux[goodSn]
+        goodSn = psfSn > highSn
+        psfFluxSnGtHigh = psfFlux[goodSn]
+        goodFlux = psfFlux > lowFlux
+        psfSnFluxGtLow= psfSn[goodFlux]
+        goodFlux = psfFlux > highFlux
+        psfSnFluxGtHigh = psfSn[goodFlux]
+        psfUsedCat = catalog[catalog["calib_psf_used"]]
+        psfUsedPsfFlux = psfUsedCat["base_PsfFlux_instFlux"]*factor
+        psfUsedPsfFluxErr = psfUsedCat["base_PsfFlux_instFluxErr"]*factor
+        psfUsedPsfSn = psfUsedPsfFlux/psfUsedPsfFluxErr
+
+        self.AnalysisClass(catalog, psfFlux, "%s" % shortName, shortName,
+                           self.config.analysis, flags=["base_PsfFlux_flag"], qMin=0,
+                           qMax = int(min(99999, max(4.0*np.median(psfFlux), 0.25*np.max(psfFlux)))),
+                           labeller=AllLabeller(), flagsCat=flagsCat,
+                           ).plotHistogram(filenamer, numBins="sqrt", stats=stats, camera=camera,
+                                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
+                                           hscRun=hscRun, zpLabel=zpLabel,
+                                           forcedStr=forcedStr, filterStr=dataId["filter"],
+                                           uberCalLabel=uberCalLabel, vertLineList=[lowFlux, highFlux],
+                                           logPlot=logPlot, density=False, cumulative=cumulative,
+                                           addDataList=[psfFluxSnGtLow, psfFluxSnGtHigh, psfUsedPsfFlux],
+                                           addDataLabelList=["S/N>{:.1f}".format(lowSn),
+                                                             "S/N>{:.1f}".format(highSn), "psf_used"])
+        shortName = "psfInstFlux/psfInstFluxErr" if zpLabel == "raw" else "psfCalFlux/psfCalFluxErr"
+        filenamer = filenamer.replace("Flux", "FluxSn")
+        self.log.info("shortName = {:s}".format(shortName))
+        self.AnalysisClass(catalog, psfSn, "%s" % "S/N = " + shortName, shortName,
+                           self.config.analysis, flags=["base_PsfFlux_flag"], qMin=0,
+                           qMax = 4*highSn, labeller=AllLabeller(), flagsCat=flagsCat,
+                           ).plotHistogram(filenamer, numBins="sqrt", stats=stats, camera=camera,
+                                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
+                                           hscRun=hscRun, zpLabel=zpLabel,
+                                           forcedStr=forcedStr, filterStr=dataId["filter"],
+                                           uberCalLabel=uberCalLabel, vertLineList=[lowSn, highSn],
+                                           logPlot=logPlot, density=False, cumulative=cumulative,
+                                           addDataList=[psfSnFluxGtLow, psfSnFluxGtHigh, psfUsedPsfSn],
+                                           addDataLabelList=["Flux>{:.1f}".format(lowFlux),
+                                                             "Flux>{:.1f}".format(highFlux), "psf_used"])
+
+        skyplotKwargs = dict(dataId=dataId, butler=butler, stats=stats, camera=camera, ccdList=ccdList,
+                             tractInfo=tractInfo, patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
+                             matchRadiusUnitStr=None, zpLabel=zpLabel)
+        filenamer = filenamer.replace("hist", "sky-all")
+
+        self.AnalysisClass(catalog, psfSn, "%s" % "S/N = " + shortName, shortName,
+                           self.config.analysis, flags=["base_PsfFlux_flag"], qMin=0,
+                           qMax = 1.25*highSn, labeller=AllLabeller(), flagsCat=flagsCat,
+                           ).plotSkyPosition(filenamer, dataName="all", **skyplotKwargs)
+
 
     def plotStarGal(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                     patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
@@ -1058,6 +1154,10 @@ class CoaddAnalysisTask(CmdLineTask):
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.2}}))
 
     def matchCatalog(self, catalog, filterName, astrometryConfig):
+        try:  # lsst.meas.extensions.astrometryNet is not setup by default
+            from lsst.meas.extensions.astrometryNet import LoadAstrometryNetObjectsTask  # noqa : F401
+        except ImportError:
+            return None
         refObjLoader = LoadAstrometryNetObjectsTask(self.config.refObjLoaderConfig)
         center = afwGeom.averageSpherePoint([src.getCoord() for src in catalog])
         radius = max(center.separation(src.getCoord()) for src in catalog)
@@ -1117,6 +1217,7 @@ class CompareCoaddAnalysisConfig(CoaddAnalysisConfig):
 class CompareCoaddAnalysisRunner(TaskRunner):
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
+        kwargs["subdir"] = parsedCmd.subdir
         rootDir = parsedCmd.input.split("rerun")[0] if len(parsedCmd.rerun) == 2 else parsedCmd.input
         butlerArgs = dict(root=os.path.join(rootDir, "rerun", parsedCmd.rerun2))
         if parsedCmd.calib is not None:
@@ -1145,6 +1246,10 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         parser.add_id_argument("--id", "deepCoadd_forced_src",
                                help="data ID, e.g. --id tract=12345 patch=1,2 filter=HSC-X",
                                ContainerClass=TractDataIdContainer)
+        parser.add_argument("--subdir", type=str, default="",
+                            help=("Subdirectory below plots/filter/tract-NNNN/ (useful for, "
+                                  "e.g., subgrouping of Patches.  Ignored if only one Patch is "
+                                  "specified, in which case the subdir is set to patch-NNN"))
         return parser
 
     def __init__(self, *args, **kwargs):
@@ -1156,7 +1261,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         self.matchControl.findOnlyClosest = True
         self.matchControl.symmetricMatch = False
 
-    def runDataRef(self, patchRefList1, patchRefList2):
+    def runDataRef(self, patchRefList1, patchRefList2, subdir=""):
         haveForced = True  # do forced datasets exits (may not for single band datasets)
         dataset = "Coadd_forced_src"
         patchRefExistsList1 = [patchRef1 for patchRef1 in patchRefList1 if
@@ -1229,7 +1334,6 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                 catalog = setAliasMaps(catalog, aliasDictList)
 
         # Set boolean array indicating sources deemed unsuitable for qa analyses
-        self.catLabel = "noDuplicates"
         bad1 = makeBadArray(unforced1, flagList=self.config.analysis.flags,
                             onlyReadStars=self.config.onlyReadStars)
         bad2 = makeBadArray(unforced2, flagList=self.config.analysis.flags,
@@ -1252,6 +1356,9 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         unforced = self.matchCatalogs(unforced1, unforced2)
         forced = self.matchCatalogs(forced1, forced2)
 
+        self.catLabel = "nChild = 0"
+        forcedStr = forcedStr + " " + self.catLabel
+
         aliasDictList = aliasDictList0
         if hscRun and self.config.srcSchemaMap is not None:
             aliasDictList += [self.config.srcSchemaMap]
@@ -1262,7 +1369,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         self.log.info("\nNumber of sources in forced catalogs: first = {0:d} and second = {1:d}".format(
                       len(forced1), len(forced2)))
 
-        filenamer = Filenamer(repoInfo1.butler, "plotCompareCoadd", repoInfo1.dataId)
+        subdir = "patch-" + str(patchList1[0]) if len(patchList1) == 1 else subdir
+        filenamer = Filenamer(repoInfo1.butler, "plotCompareCoadd", repoInfo1.dataId, subdir=subdir)
         hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
         # Dict of all parameters common to plot* functions
         plotKwargs1 = dict(butler=repoInfo1.butler, camera=repoInfo1.camera, tractInfo=repoInfo1.tractInfo,
@@ -1281,7 +1389,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                 self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
 
         if self.config.doApCorrs:
-            self.plotApCorrs(unforced, filenamer, repoInfo1.dataId, forcedStr="unforced", **plotKwargs1)
+            self.plotApCorrs(unforced, filenamer, repoInfo1.dataId, forcedStr="unforced " + self.catLabel,
+                             **plotKwargs1)
         if self.config.doPlotCentroids:
             self.plotCentroids(forced, filenamer, repoInfo1.dataId, forcedStr=forcedStr,
                                hscRun1=repoInfo1.hscRun, hscRun2=repoInfo2.hscRun, **plotKwargs1)
