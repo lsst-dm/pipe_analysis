@@ -17,7 +17,6 @@ from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError
 from lsst.pipe.drivers.utils import TractDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
 from lsst.meas.astrom import AstrometryConfig
-from lsst.meas.extensions.astrometryNet import LoadAstrometryNetObjectsTask
 from lsst.pipe.tasks.colorterms import Colorterm, ColortermLibrary
 
 from lsst.meas.algorithms import LoadIndexedReferenceObjectsTask
@@ -425,9 +424,13 @@ class CoaddAnalysisTask(CmdLineTask):
         for cat in self.config.externalCatalogs:
             with andCatalog(cat):
                 matches = self.matchCatalog(forced, repoInfo.filterName, self.config.externalCatalogs[cat])
-                self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
-                                 forcedStr=forcedStr, matchRadius=self.matchRadius,
-                                 matchRadiusUnitStr=self.matchRadiusUnitStr, **plotKwargs)
+                if matches is not None:
+                    self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
+                                     forcedStr=forcedStr, matchRadius=self.matchRadius,
+                                     matchRadiusUnitStr=self.matchRadiusUnitStr, **plotKwargs)
+                else:
+                    self.log.warn("Could not create match catalog for {:}.  Is "
+                                  "lsst.meas.extensions.astrometryNet setup?".format(cat))
 
     def readCatalogs(self, patchRefList, dataset):
         """Read in and concatenate catalogs of type dataset in lists of data references
@@ -525,8 +528,8 @@ class CoaddAnalysisTask(CmdLineTask):
             matches = refObjLoader.joinMatchListWithCatalog(packedMatches, catalog)
             if not hasattr(matches[0].first, "schema"):
                 raise RuntimeError("Unable to unpack matches.  "
-                                   "Do you have the correct astrometry_net_data setup?")
-            # LSST reads in a_net catalogs with flux in "nanojanskys", so must convert to AB
+                                   "Do you have the correct reference catalog setup?")
+            # LSST reads in reference catalogs with flux in "nanojanskys", so must convert to AB
             matches = matchNanojanskyToAB(matches)
             if hscRun and self.config.doAddAperFluxHsc:
                 addApertureFluxesHSC(matches, prefix="second_")
@@ -1151,6 +1154,10 @@ class CoaddAnalysisTask(CmdLineTask):
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.2}}))
 
     def matchCatalog(self, catalog, filterName, astrometryConfig):
+        try:  # lsst.meas.extensions.astrometryNet is not setup by default
+            from lsst.meas.extensions.astrometryNet import LoadAstrometryNetObjectsTask  # noqa : F401
+        except ImportError:
+            return None
         refObjLoader = LoadAstrometryNetObjectsTask(self.config.refObjLoaderConfig)
         center = afwGeom.averageSpherePoint([src.getCoord() for src in catalog])
         radius = max(center.separation(src.getCoord()) for src in catalog)
