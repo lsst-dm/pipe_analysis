@@ -679,7 +679,34 @@ def addApertureFluxesHSC(catalog, prefix=""):
 
 
 def addFpPoint(det, catalog, prefix=""):
-    # Compute Focal Plane coordinates (in mm) for SdssCentroid of each source and add to schema
+    """Add Focal Plane coordinates in mm for each object
+
+    This computes Focal Plane coordinates in mm (or whatever unit is specified
+    in the camera geometry for the given detector) for the SdssCentroid entry
+    of each source and adds them to schema.  Note: this is equivalent to the
+    entries that would have been added if the "base_FPPosition" was run as
+    part of the processing.  It is added here in case this pluggin was not
+    run during processing but the FP-projection plots are desired.
+
+    Parameters
+    ----------
+    det : `lsst.afw.cameraGeom.Detector`
+       The detector object associated with the dataset.
+    catalog : `lsst.afw.table.SourceCatalog`
+       The source catalog to which the mapping will be added.
+    prefix : `str`, optional
+       This `str` will be prepended to the base column names before looking
+       them up in the schema.  This will be true for, e.g., matched catalogs
+       for which "src_" and "ref_" prefixes have been added to all schema
+       names).  Both the old and new names have ``prefix`` associated with
+       them.  Default is an empty string.
+
+    Returns
+    -------
+    newCatalog : `lsst.afw.table.SourceCatalog`
+       The new source catalog with the centroids in Focal Plane coordinates
+       in mm added.
+    """
     mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
     schema = mapper.getOutputSchema()
@@ -709,7 +736,31 @@ def addFpPoint(det, catalog, prefix=""):
 
 
 def addFpPointPix(det, catalog, prefix=""):
-    # Compute Focal Plane coordinates (in "pixels") for SdssCentroid of each source and add to schema
+    """Add Focal Plane coordinates in "pixels" for each object
+
+    This computes Focal Plane coordinates in "pixels" for the associated
+    point in mm (given in base_FPPosition_x/y) of each source and adds them
+    to schema.
+
+    Parameters
+    ----------
+    det : `lsst.afw.cameraGeom.Detector`
+       The detector object associated with the dataset.
+    catalog : `lsst.afw.table.SourceCatalog`
+       The source catalog to which the mapping will be added.
+    prefix : `str`, optional
+       This `str` will be prepended to the base column names before looking
+       them up in the schema.  This will be true for, e.g., matched catalogs
+       for which "src_" and "ref_" prefixes have been added to all schema
+       names).  Both the old and new names have ``prefix`` associated with
+       them.  Default is an empty string.
+
+    Returns
+    -------
+    newCatalog : `lsst.afw.table.SourceCatalog`
+       The new source catalog with the centroids in Focal Plane coordinates
+       in "pixels" added.
+    """
     fpMmCol = prefix + "base_FPPosition"
     if not all([fpMmCol + "_x" in catalog.schema, fpMmCol + "_y" in catalog.schema]):
         raise RuntimeError("Columns " + prefix + "base_FPPosition_x/y must be in catalog schema.")
