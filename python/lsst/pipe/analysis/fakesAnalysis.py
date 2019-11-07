@@ -77,7 +77,7 @@ def matchCatalogs(catalog1, raCol1, decCol1, catalog2, raCol2, decCol2, units=u.
     catalog1 : `pandas.core.frame.DataFrame`
         The catalog to be matched to catalog2.
     catalog2 : `pandas.core.frame.DataFrame`
-        The catalog that catalo1 is matched to.
+        The catalog that catalog1 is matched to.
     raCol1 : `string`
         The column name for the RA column in catalog1.
     decCol1 : `string`
@@ -103,7 +103,8 @@ def matchCatalogs(catalog1, raCol1, decCol1, catalog2, raCol2, decCol2, units=u.
     -----
     Returns two shortened catalogs, with the matched rows in the same order and objects without a match
     removed. Matches the first catalog to the second, multiple objects from the first catalog can match
-    the same object in the second. Uses astropy's match_coordinates_sky and their units framework.
+    the same object in the second. Uses astropy's match_coordinates_sky and their units framework. Adds a new
+    column to the catalogs, matchDistance, that contains the distance to the matched source in degrees.
     """
 
     skyCoords1 = coord.SkyCoord(catalog1[raCol1], catalog1[decCol1], unit=units)
@@ -113,10 +114,16 @@ def matchCatalogs(catalog1, raCol1, decCol1, catalog2, raCol2, decCol2, units=u.
     ids = (dists < matchRadius)
 
     matchedInds = inds[ids]
+    matchDists = dists[ids]
+
     catalog1["matched"] = np.zeros(len(catalog1))
-    catalog1["matched"][ids] = 1
-    catalog1Matched = catalog1[ids]
+    catalog1["matched"].iloc[ids] = 1
+
+    catalog1Matched = catalog1[ids].copy()
     catalog2Matched = catalog2.iloc[matchedInds].copy()
+
+    catalog1Matched["matchDistance"] = matchDists.degree
+    catalog2Matched["matchDistance"] = matchDists.degree
 
     return catalog1Matched, catalog2Matched, catalog1
 
@@ -330,144 +337,125 @@ def fakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict, areaD
     return medMag10, medMag100
 
 
-def fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict, repoInfo,
-                         raFakesCol="raJ2000_deg", decFakesCol="decJ2000_deg", raCatCol="coord_ra_deg",
-                         decCatCol="coord_dec_deg", magCol="base_PsfFlux_mag"):
-    """Make a plot showing the RA and Dec offsets from the input positions.
+def plotWithTwoHists(xs, ys, xName, yName, xLabel, yLabel, title, plotInfoDict, statsUnit):
+    """Makes a generic plot with a 2D histogram and collapsed histograms of each axis.
 
     Parameters
     ----------
-    inputFakesMatched : `pandas.core.frame.DataFrame`
-        The catalog used to add the fakes originally, matched to the processed catalog.
-    processedFakesMatched : `pandas.core.frame.DataFrame`
-        The catalog produced by the stack from the images with fakes in.
+    xs : `numpy.ndarray`
+         The array to be plotted on the x axis.
+    ys : `numpy.ndarray`
+         The array to be plotted on the y axis.
+    xName : `string`
+         The name to be used in the text for the x axis statistics.
+    yName : `string`
+         The name to be used in the text for the y axis statistics.
+    xLabel : `string`
+         The text to go on the xLabel of the plot.
+    yLabel : `string`
+         The text to go on the yLabel of the plot.
+    title : `string`
+         The text to be displayed as the plot title.
     plotInfoDict : `dict`
         A dict containing useful information to add to the plot, passed to addProvenanceInfo.
-    repoInfo : `lsst.pipe.base.struct.Struct`
-        A struct that contains information about the input data.
-    raFakesCol : `string`
-        default : 'raJ2000_deg'
-        The RA column to use from the fakes catalog.
-    decFakesCol : `string`
-        default : 'decJ2000_deg'
-        The Dec. column to use from the fakes catalog.
-    raCatCol : `string`
-        default : 'coord_ra_deg'
-        The RA column to use from the catalog.
-    decCatCol : `string`
-        default : 'coord_dec_deg'
-        The Dec. column to use from the catalog.
-    magCol : `string`
-        default : 'base_CircularApertureFlux_25_0_mag'
-        The magnitude column to use from the catalog.
+    statsUnit : `string`
+        The text used to describe the units of the statistics calculated.
 
     Returns
     -------
-    dRAMed : `float`
-        The median RA difference.
-    dRASigmaMAD : `float`
-        The sigma MAD from the RA difference.
-    dDecMed : `float`
-        The median Dec. difference.
-    dDecSigmaMAD : `float`
-        The sigma MAD from the Dec. difference.
+    fig : `matplotlib.figure.Figure`
+        The resulting figure.
+    xsMed : `float`
+        The median of the values plotted on the x axis.
+    xsSigmaMAD : `float`
+        The sigma MAD from the x axis values.
+    ysMed : `float`
+        The median of the values plotted on the y axis.
+    ysSigmaMAD : `float`
+        The sigma MAD from the y axis values.
 
     Notes
     -----
-    The two input catalogs need to be pre matched and in the same order so that the entry for an object is
-    in the same row in each catalog. The delta RA and Dec is given in milli arcseconds. The plot is made
-    using only objects that were stars in the input catalog of fakes. `plotInfoDict` needs to be a dict
-    containing camera, filter, visit, tract and dataset (jointcal or not). Returns the median and sigma MAD
-    for the RA and Dec offsets. plotInfoDict should also contain the magnitude limit that the plot should go
-    to (magLim) and the path and filename that the figure should be written to (outputName).
+    The `plotInfoDict` needs to be a dict containing camera, filter, visit, tract and
+    dataset (jointcal or not), it is used to add information to the plot. Returns the median and sigma MAD
+    for the x and y values.
     """
 
-    pointsToUse = (processedFakesMatched[magCol].values < plotInfoDict["magLim"])
+    xsMed = np.median(xs)
+    ysMed = np.median(ys)
+    xsSigmaMAD = sigmaMAD(xs)
+    ysSigmaMAD = sigmaMAD(ys)
 
-    processedFakesMatched = processedFakesMatched[pointsToUse]
-    inputFakesMatched = inputFakesMatched[pointsToUse]
+    nBins = 20.0 * np.log10(len(xs))
+    xMin = xsMed - 3.0 * xsSigmaMAD
+    xMax = xsMed + 3.0 * xsSigmaMAD
+    yMin = ysMed - 3.0 * ysSigmaMAD
+    yMax = ysMed + 3.0 * ysSigmaMAD
+    xEdges = np.arange(xMin, xMax, (xMax - xMin) / nBins)
+    yEdges = np.arange(yMin, yMax, (yMax - yMin) / nBins)
+    bins = (xEdges, yEdges)
 
-    stars = (inputFakesMatched["sourceType"] == "star")
-
-    dRA = (inputFakesMatched[raFakesCol].values - processedFakesMatched[raCatCol].values)[stars]
-    dRA *= (3600 * 1000 * np.cos(np.deg2rad(inputFakesMatched[decFakesCol].values[stars])))
-    dDec = (inputFakesMatched[decFakesCol].values - processedFakesMatched[decCatCol].values)[stars]
-    dDec *= (3600 * 1000)
-
-    dRAMax = np.max(np.fabs(dRA))
-    dDecMax = np.max(np.fabs(dDec))
-
-    nBins = int(len(inputFakesMatched) / 100)
     gs = gridspec.GridSpec(4, 4)
 
     # Make a 2D histogram of the position offsets
     axHist = plt.subplot(gs[1:, :-1])
     axHist.axvline(0.0, ls=":", color="gray", alpha=0.5, zorder=0)
     axHist.axhline(0.0, ls=":", color="gray", alpha=0.5, zorder=0)
-    _, _, _, im = axHist.hist2d(dRA, dDec, bins=nBins, cmap="winter", norm=colors.LogNorm(), zorder=10)
-    axHist.set_xlim(-1 * dRAMax, dRAMax)
-    axHist.set_ylim(-1 * dDecMax, dDecMax)
+    _, _, _, im = axHist.hist2d(xs, ys, bins=bins, cmap="winter", norm=colors.LogNorm(), zorder=10)
+    axHist.set_xlim(xMin, xMax)
+    axHist.set_ylim(yMin, yMax)
     axHist.tick_params(top=True, right=True)
 
-    # Make a 1D histogram of the RA offsets
-    axRA = plt.subplot(gs[0, :-1], sharex=axHist)
-    axRA.hist(dRA, bins=nBins, log=True)
-    axRA.axes.get_xaxis().set_visible(False)
-    axRA.set_ylabel("Number")
+    # Make a 1D histogram of the offsets for the xs
+    axXs = plt.subplot(gs[0, :-1], sharex=axHist)
+    axXs.hist(xs, bins=xEdges, log=True)
+    axXs.axes.get_xaxis().set_visible(False)
+    axXs.set_ylabel("Number")
 
-    # Make a 1D histogram of the Dec. offsets
-    axDec = plt.subplot(gs[1:, -1], sharey=axHist)
-    axDec.hist(dDec, orientation="horizontal", bins=nBins, log=True)
-    axDec.axes.get_yaxis().set_visible(False)
-    axDec.set_xlabel("Number")
+    # Make a 1D histogram of the offsets for the ys
+    axYs = plt.subplot(gs[1:, -1], sharey=axHist)
+    axYs.hist(ys, orientation="horizontal", bins=yEdges, log=True)
+    axYs.axes.get_yaxis().set_visible(False)
+    axYs.set_xlabel("Number")
 
     # Add a color bar for the 2D histogram
-    divider = make_axes_locatable(axDec)
+    divider = make_axes_locatable(axYs)
     cax = divider.append_axes("right", size="8%", pad=0.00)
-    plt.colorbar(im, cax=cax, orientation="vertical")
+    plt.colorbar(im, cax=cax, orientation="vertical", label="Points Per Bin")
 
     # Add some statistics to the axis in the top right corner
     axStats = plt.subplot(gs[0, -1])
     axStats.axes.get_xaxis().set_visible(False)
     axStats.axes.get_yaxis().set_visible(False)
 
-    dRAMed = np.median(dRA)
-    dDecMed = np.median(dDec)
-    dRASigmaMAD = sigmaMAD(dRA)
-    dDecSigmaMAD = sigmaMAD(dDec)
+    infoMedXs = r"Med. $\delta$%s %0.3f" % (xName, xsMed)
+    infoMadXs = r"$\sigma_{MAD}$ $\delta$%s %0.3f" % (xName, xsSigmaMAD)
+    infoMedYs = r"Med. $\delta$%s %0.3f" % (yName, ysMed)
+    infoMadYs = r"$\sigma_{MAD}$ $\delta$%s %0.3f" % (yName, ysSigmaMAD)
 
-    infoMedRA = r"Med. $\delta$RA %0.3f" % dRAMed
-    infoMadRA = r"$\sigma_{MAD}$ $\delta$RA %0.3f" % dRASigmaMAD
-    infoMedDec = r"Med. $\delta$Dec %0.3f" % dDecMed
-    infoMadDec = r"$\sigma_{MAD}$ $\delta$Dec %0.3f" % dDecSigmaMAD
+    axStats.text(0.05, 0.8, infoMedXs, fontsize=10)
+    axStats.text(0.05, 0.6, infoMadXs, fontsize=10)
+    axStats.text(0.05, 0.4, infoMedYs, fontsize=10)
+    axStats.text(0.05, 0.2, infoMadYs, fontsize=10)
+    axStats.text(0.05, 0.05, statsUnit, fontsize=8)
 
-    axStats.text(0.05, 0.8, infoMedRA, fontsize=10)
-    axStats.text(0.05, 0.6, infoMadRA, fontsize=10)
-    axStats.text(0.05, 0.4, infoMedDec, fontsize=10)
-    axStats.text(0.05, 0.2, infoMadDec, fontsize=10)
-    axStats.text(0.05, 0.05, "(mas)", fontsize=8)
+    axHist.set_xlabel(xLabel)
+    axHist.set_ylabel(yLabel)
 
-    axHist.set_xlabel(r"$\delta$RA / mas")
-    axHist.set_ylabel(r"$\delta$Dec / mas")
-
-    axRA.set_title("Position Offsets for Input Fakes - Recovered Fakes")
-    numInfo = "Num. Sources: %d \n Mag. Limit: %0.2f" % (len(dRA), plotInfoDict["magLim"])
+    axXs.set_title(title)
+    numInfo = "Num. Sources: %d \n Mag. Limit: %0.2f" % (len(xs), plotInfoDict["magLim"])
     bbox = dict(facecolor="white", edgecolor="k", alpha=0.8)
     plt.text(-2.9, 0.7, numInfo, fontsize=8, bbox=bbox)
 
-    plt.subplots_adjust(top=0.9, hspace=0.0, wspace=0.0, right=0.93, left=0.12, bottom=0.1)
+    plt.subplots_adjust(top=0.9, hspace=0.0, wspace=0.0, right=0.90, left=0.12, bottom=0.1)
 
     fig = plt.gcf()
     fig = addProvenanceInfo(fig, plotInfoDict)
 
-    repoInfo.dataId["description"] = "positionCompare"
-    repoInfo.butler.put(fig, "plotFakes", repoInfo.dataId)
-    plt.close()
-
-    return dRAMed, dRASigmaMAD, dDecMed, dDecSigmaMAD
+    return fig, xsMed, xsSigmaMAD, ysMed, ysSigmaMAD
 
 
-def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict):
+def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict, binThresh=50.0):
     """Makes a generic plot with a scatter plot/2D histogram in the dense areas and a collapsed histogram of
        the y axis.
 
@@ -518,7 +506,7 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict):
     counts, xBins, yBins = np.histogram2d(xs, ys, bins=(xEdges, yEdges))
     countsYs = np.sum(counts, axis=1)
 
-    ids = np.where((countsYs > 50.0))[0]
+    ids = np.where((countsYs > binThresh))[0]
     xEdgesPlot = xEdges[1:][ids]
 
     # Create the codes needed to turn the sigmaMad lines into a path to speed up checking which points are
@@ -622,7 +610,7 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict):
     plt.subplots_adjust(wspace=0.0)
 
     # Make the legends line up nicely
-    legendBBox = legendSigmaLines.get_window_extent()
+    legendBBox = legendSigmaLines.get_window_extent(renderer=fig.canvas.get_renderer())
     yLegFigure = legendBBox.transformed(plt.gcf().transFigure.inverted()).ymin
     fig.legend(handles=[notStatsPoints, statsPoints], fontsize=8, borderaxespad=0, loc="lower left",
                bbox_to_anchor=(0.66, yLegFigure), bbox_transform=fig.transFigure, framealpha=0.9,
@@ -632,6 +620,88 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict):
     fig = addProvenanceInfo(fig, plotInfoDict)
 
     return fig
+
+
+def fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict, repoInfo,
+                         raFakesCol="raJ2000_deg", decFakesCol="decJ2000_deg", raCatCol="coord_ra_deg",
+                         decCatCol="coord_dec_deg", magCol="base_PsfFlux_mag"):
+    """Make a plot showing the RA and Dec offsets from the input positions.
+
+    Parameters
+    ----------
+    inputFakesMatched : `pandas.core.frame.DataFrame`
+        The catalog used to add the fakes originally, matched to the processed catalog.
+    processedFakesMatched : `pandas.core.frame.DataFrame`
+        The catalog produced by the stack from the images with fakes in.
+    plotInfoDict : `dict`
+        A dict containing useful information to add to the plot, passed to addProvenanceInfo.
+    repoInfo : `lsst.pipe.base.struct.Struct`
+        A struct that contains information about the input data.
+    raFakesCol : `string`
+        default : 'raJ2000_deg'
+        The RA column to use from the fakes catalog.
+    decFakesCol : `string`
+        default : 'decJ2000_deg'
+        The Dec. column to use from the fakes catalog.
+    raCatCol : `string`
+        default : 'coord_ra_deg'
+        The RA column to use from the catalog.
+    decCatCol : `string`
+        default : 'coord_dec_deg'
+        The Dec. column to use from the catalog.
+    magCol : `string`
+        default : 'base_CircularApertureFlux_25_0_mag'
+        The magnitude column to use from the catalog.
+
+    Returns
+    -------
+    dRAMed : `float`
+        The median RA difference.
+    dRASigmaMAD : `float`
+        The sigma MAD from the RA difference.
+    dDecMed : `float`
+        The median Dec. difference.
+    dDecSigmaMAD : `float`
+        The sigma MAD from the Dec. difference.
+
+    Notes
+    -----
+    The two input catalogs need to be pre matched and in the same order so that the entry for an object is
+    in the same row in each catalog. The delta RA and Dec is given in milli arcseconds. The plot is made
+    using only objects that were stars in the input catalog of fakes. `plotInfoDict` needs to be a dict
+    containing camera, filter, visit, tract and dataset (jointcal or not). Returns the median and sigma MAD
+    for the RA and Dec offsets. plotInfoDict should also contain the magnitude limit that the plot should go
+    to (magLim) and the path and filename that the figure should be written to (outputName).
+    """
+
+    pointsToUse = (processedFakesMatched[magCol].values < plotInfoDict["magLim"])
+
+    processedFakesMatched = processedFakesMatched[pointsToUse]
+    inputFakesMatched = inputFakesMatched[pointsToUse]
+
+    stars = (inputFakesMatched["sourceType"] == "star")
+
+    dRA = (inputFakesMatched[raFakesCol].values - processedFakesMatched[raCatCol].values)[stars]
+    dRA *= (3600 * 1000 * np.cos(np.deg2rad(inputFakesMatched[decFakesCol].values[stars])))
+    dDec = (inputFakesMatched[decFakesCol].values - processedFakesMatched[decCatCol].values)[stars]
+    dDec *= (3600 * 1000)
+
+    xLabel = r"$\delta$RA / mas"
+    yLabel = r"$\delta$Dec / mas"
+    title = "Position Offsets for Input Fakes - Recovered Fakes"
+    xName = "RA"
+    yName = "Dec"
+    statsUnit = "(mas)"
+
+    fig, dRAMed, dRASigmaMAD, dDecMed, dDecSigmaMAD = plotWithTwoHists(dRA, dDec, xName, yName, xLabel,
+                                                                       yLabel, title, plotInfoDict, statsUnit)
+
+    repoInfo.dataId["description"] = "positionCompare"
+    repoInfo.butler.put(fig, "plotFakes", repoInfo.dataId)
+    plt.close()
+
+    return dRAMed, dRASigmaMAD, dDecMed, dDecSigmaMAD
+
 
 
 def fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict, repoInfo,
