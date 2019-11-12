@@ -337,7 +337,8 @@ def fakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict, areaD
     return medMag10, medMag100
 
 
-def plotWithTwoHists(xs, ys, xName, yName, xLabel, yLabel, title, plotInfoDict, statsUnit):
+def plotWithTwoHists(xs, ys, xName, yName, xLabel, yLabel, title, plotInfoDict, statsUnit, yLims=False,
+                     xLims=False):
     """Makes a generic plot with a 2D histogram and collapsed histograms of each axis.
 
     Parameters
@@ -360,6 +361,12 @@ def plotWithTwoHists(xs, ys, xName, yName, xLabel, yLabel, title, plotInfoDict, 
         A dict containing useful information to add to the plot, passed to addProvenanceInfo.
     statsUnit : `string`
         The text used to describe the units of the statistics calculated.
+    yLims : `Bool` or `tuple`
+        The y axis limits to use for the plot, default is False and they are calculated from the data.
+        If being given a tuple of (yMin, yMax).
+    xLims : `Bool` or `tuple`
+        The x axis limits to use for the plot, default is False and they are calculated from the data.
+        If being given a tuple of (xMin, xMax).
 
     Returns
     -------
@@ -387,10 +394,18 @@ def plotWithTwoHists(xs, ys, xName, yName, xLabel, yLabel, title, plotInfoDict, 
     ysSigmaMAD = sigmaMAD(ys)
 
     nBins = 20.0 * np.log10(len(xs))
-    xMin = xsMed - 3.0 * xsSigmaMAD
-    xMax = xsMed + 3.0 * xsSigmaMAD
-    yMin = ysMed - 3.0 * ysSigmaMAD
-    yMax = ysMed + 3.0 * ysSigmaMAD
+    if xLims:
+        xMin = xLims[0]
+        xMax = xLims[1]
+    else:
+        xMin = xsMed - 3.0 * xsSigmaMAD
+        xMax = xsMed + 3.0 * xsSigmaMAD
+    if yLims:
+        yMin = yLims[0]
+        yMax = yLims[1]
+    else:
+        yMin = ysMed - 3.0 * ysSigmaMAD
+        yMax = ysMed + 3.0 * ysSigmaMAD
     xEdges = np.arange(xMin, xMax, (xMax - xMin) / nBins)
     yEdges = np.arange(yMin, yMax, (yMax - yMin) / nBins)
     bins = (xEdges, yEdges)
@@ -455,7 +470,8 @@ def plotWithTwoHists(xs, ys, xName, yName, xLabel, yLabel, title, plotInfoDict, 
     return fig, xsMed, xsSigmaMAD, ysMed, ysSigmaMAD
 
 
-def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict, binThresh=50.0):
+def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict, binThresh=50.0, yLims=False,
+                    xLims=False):
     """Makes a generic plot with a scatter plot/2D histogram in the dense areas and a collapsed histogram of
        the y axis.
 
@@ -475,6 +491,15 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict, b
          The text to be displayed as the plot title.
     plotInfoDict : `dict`
         A dict containing useful information to add to the plot, passed to addProvenanceInfo.
+    binThresh : `float`
+        The number of points there needs to be (in a vertical bin) to trigger binning the data rather
+        than plotting points.
+    yLims : `Bool` or `tuple`
+        The y axis limits to use for the plot, default is False and they are calculated from the data.
+        If being given a tuple of (yMin, yMax).
+    xLims : `Bool` or `tuple`
+        The x axis limits to use for the plot, default is False and they are calculated from the data.
+        If being given a tuple of (xMin, xMax).
 
     Returns
     -------
@@ -593,8 +618,14 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict, b
     ax.axhline(0.0, color="grey", ls="--", zorder=-11)
 
     # Make the plot limits median + 3 sigmaMad from all the points (not just those < the mag lim)
-    ax.set_ylim(medYs - 3.0 * sigmaMadYs, medYs + 3 * sigmaMadYs)
-    ax.set_xlim(xs1 - xScale, xs97)
+    if yLims:
+        ax.set_ylim(yLims[0], yLims[1])
+    else:
+        ax.set_ylim(medYs - 3.0 * sigmaMadYs, medYs + 3 * sigmaMadYs)
+    if xLims:
+        ax.set_xlim(xLims[0], xLims[1])
+    else:
+        ax.set_xlim(xs1 - xScale, xs97)
 
     # Add legends, needs to be split up as otherwise too large
     ax.set_title(title)
@@ -701,7 +732,6 @@ def fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict,
     plt.close()
 
     return dRAMed, dRASigmaMAD, dDecMed, dDecSigmaMAD
-
 
 
 def fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict, repoInfo,
