@@ -1391,7 +1391,7 @@ def findCcdKey(dataId):
     return ccdKey
 
 
-def popIdAndCcdKeys(dataId, ccdKeyNames=["raftName", "detectorName", "extension"]):
+def popIdAndCcdKeys(dataId, ccdKeyNames=["raftName", "detectorName", "extension", "ccdnum"]):
     """Pop certain dataId keys for "detector" lookup
 
     Occasionally, a dataId is passed to a function, but said function would
