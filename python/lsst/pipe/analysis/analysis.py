@@ -10,14 +10,15 @@ np.seterr(all="ignore")  # noqa E402
 import lsst.afw.cameraGeom as cameraGeom
 import lsst.afw.geom as afwGeom
 import lsst.geom as geom
-from lsst.display.matplotlib.matplotlib import AsinhNormalize
 from lsst.pex.config import Config, Field, ListField, DictField, ChoiceField
 
-from .utils import Data, Stats, E1Resids, E2Resids, checkIdLists, fluxToPlotString, computeMeanOfFrac
+from .utils import (Data, Stats, E1Resids, E2Resids, checkIdLists, fluxToPlotString, computeMeanOfFrac,
+                    findCcdKey, popIdAndCcdKeys)
 from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotText, plotCameraOutline,
-                        plotTractOutline, plotPatchOutline, plotCcdOutline, rotatePoint, labelCamera,
+                        plotTractOutline, plotPatchOutline, plotCcdOutline, labelCamera,
                         getQuiver, getMinMaxPatchList, getMinMaxCcdList, computeEqualAspectLimits,
-                        bboxToXyCoordLists, makeAlphaCmap, buildTractImage)
+                        bboxToXyCoordLists, makeAlphaCmap, getArrayFromImage, makeAsinhNormFromArray,
+                        plotSkyLimitLabels)
 
 __all__ = ["AnalysisConfig", "Analysis"]
 
@@ -675,7 +676,7 @@ class Analysis(object):
                         camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
                         matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, highlightList=None,
                         forcedStr=None, dataName="star", uberCalLabel=None, doPrintMedian=False,
-                        tractImage=None, raDecProj=True):
+                        fullImage=None, raDecProj=True):
         """Plot quantity as a function of position"""
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
         dec = np.rad2deg(self.catalog[self.prefix + "coord_dec"])
@@ -686,10 +687,14 @@ class Analysis(object):
         else:
             xFpPix = self.catalog[self.prefix + centStr + "_x"]
             yFpPix = self.catalog[self.prefix + centStr + "_y"]
+        raDecMin, raDecMax = None, None
+        if ccdList is not None:
+            ccdBoundary = getMinMaxCcdList(ccdList, dataId, butler, nDecimals=3, zpLabel=zpLabel)
+            raDecMin = geom.Point2D(ccdBoundary.raMin, ccdBoundary.decMin)
+            raDecMax = geom.Point2D(ccdBoundary.raMax, ccdBoundary.decMax)
         if raDecProj:
             xPlot, yPlot = ra, dec
             if ccdList is not None:
-                ccdBoundary = getMinMaxCcdList(ccdList, dataId, butler, nDecimals=3, zpLabel=zpLabel)
                 plotLimits = computeEqualAspectLimits(ccdBoundary.raMin, ccdBoundary.raMax,
                                                       ccdBoundary.decMin, ccdBoundary.decMax, percentPad=5.0)
                 # plot in same +x: E->W direction of image projection
@@ -701,8 +706,13 @@ class Analysis(object):
         if ccdList is not None and not raDecProj:
             xs = list()
             ys = list()
+            dataIdCopy = dataId.copy()
+            dataIdCopy = popIdAndCcdKeys(dataIdCopy)
+            ccdKey = findCcdKey(dataIdCopy)
             for ccd in ccdList:
-                detector = camera[ccd]
+                dataIdCopy[ccdKey] = ccd
+                calexp = butler.get("calexp", dataIdCopy, immediate=True)
+                detector = calexp.getDetector()
                 ccdCorners = detector.getCorners(cameraGeom.FOCAL_PLANE)
                 pixelSizeX = detector.getPixelSize()[0]
                 pixelSizeY = detector.getPixelSize()[1]
@@ -758,7 +768,7 @@ class Analysis(object):
             vMin, vMax = 4.0*self.qMin, 1.0*self.qMax
 
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.6"))
-        axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=6)
+        axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=7)
         ptSize = None
 
         if tractInfo is not None:
@@ -792,12 +802,9 @@ class Analysis(object):
                 yPlotMin, yPlotMax = plotLimits.yPlotMin, plotLimits.yPlotMax
                 plotPatchOutline(axes, tractInfo, patchList, plotUnits="pixels")
 
-            if tractImage is not None:
-                med = np.nanmedian(tractImage.array)
-                mad = np.nanmedian(abs(tractImage.array - med))
-                imMin = med - 3.0*1.4826*mad
-                imMax = med + 20.0*1.4826*mad
-                norm = AsinhNormalize(minimum=imMin, dataRange=imMax - imMin, Q=8)
+            if fullImage is not None:
+                fullImageArray = getArrayFromImage(fullImage)
+                asinhNorm = makeAsinhNormFromArray(fullImageArray, nMinDev=3.0, nMaxDev=20.0, Q=8)
                 tractXs, tractYs = bboxToXyCoordLists(tractInfo.getBBox(), wcs=None)
                 tractRas, tractDecs = bboxToXyCoordLists(tractInfo.getBBox(), wcs=tractInfo.getWcs())
                 if ccdList is not None:
@@ -810,7 +817,7 @@ class Analysis(object):
                     extent = tractRas[0], tractRas[2], tractDecs[0], tractDecs[2]
                 else:
                     extent = tractXs[0], tractXs[2], tractYs[0], tractYs[2]
-                axes.imshow(tractImage.array, extent=extent, cmap="gray_r", norm=norm)
+                axes.imshow(fullImageArray, extent=extent, cmap="gray_r", norm=asinhNorm.norm)
 
         stats0 = None
         for name, data in self.data.items():
@@ -842,93 +849,10 @@ class Analysis(object):
             if len(filterStr) < len(camera.getName()):
                 filterStr = camera.getName() + "-" + filterStr
         filterLabelStr = "[" + filterStr + "]" if (filterStr and "/color/" not in filename) else ""
-        if raDecProj:
-            axes.set_xlabel("RA (deg) {0:s}".format(filterLabelStr))
-            axes.set_ylabel("Dec (deg) {0:s}".format(filterLabelStr))
-        else:
-            axes.set_xlabel("x (pixels) {0:s}".format(filterLabelStr), size=7, labelpad=10)
-            axes.set_ylabel("y (pixels) {0:s}".format(filterLabelStr), size=7)
-            # Get RA and Dec tract/visit limits to add to plot axis labels
-            textKwargs = dict(ha="center", va="center", transform=axes.transAxes, fontsize=6, color="blue")
-            if tractInfo is not None and ccdList is None:
-                tract00 = tractInfo.getWcs().pixelToSky(xPlotMin, yPlotMin).getPosition(units=geom.degrees)
-                tract0N = tractInfo.getWcs().pixelToSky(xPlotMin, yPlotMax).getPosition(units=geom.degrees)
-                tractN0 = tractInfo.getWcs().pixelToSky(xPlotMax, yPlotMin).getPosition(units=geom.degrees)
-                plot00 = (tract00.getX(), tract00.getY())
-                plot0N = (tract0N.getX(), tract0N.getY())
-                plotN0 = (tractN0.getX(), tractN0.getY())
-                plt.text(-0.05, -0.05, str("{:.2f}".format(plot00[0])), **textKwargs)
-                plt.text(-0.16, 0.00, str("{:.2f}".format(plot00[1])), **textKwargs)
-                plt.text(0.97, -0.05, str("{:.2f}".format(plotN0[0])), **textKwargs)
-                plt.text(-0.16, 0.99, str("{:.2f}".format(plot0N[1])), **textKwargs)
-
-            xCoordStr = "RA (deg)"
-            yCoordStr = "Dec (deg)"
-            if ccdList is not None:
-                # Plot direction arrows according to the boresight rotation angle
-                # assuming FP projected as:
-                #       +x: E->W (-ve RA), +y: S->N (+ve Dec)
-                # at a boresight rotation angle of 0.
-                calexp = butler.get("calexp", dataId)
-                boresightRotAng = calexp.getInfo().getVisitInfo().getBoresightRotAngle().asRadians()
-                dPix = int(0.08*max((xPlotMax - xPlotMin), (yPlotMax - yPlotMin)))
-                xy0 = (xPlotMin + 1.5*dPix, yPlotMax - 1.5*dPix)
-                # The following just moves the arrows to be as close to the upper left
-                # corner as possible based on the boresight rotation angel.
-                xy0 = (xy0[0] - abs(np.sin(boresightRotAng)*np.cos(boresightRotAng/3.0))*dPix,
-                       xy0[1] + abs(np.sin(boresightRotAng/6.0)*np.cos(np.pi/2.0 - boresightRotAng))*dPix)
-                xyNorth = (xy0[0], xy0[1] + dPix)
-                xyEast = (xy0[0] - dPix, xy0[1])
-                rotatedNorth = (rotatePoint(xy0[0], xy0[1], xyNorth[0], xyNorth[1], boresightRotAng))
-                rotatedEast = (rotatePoint(xy0[0], xy0[1], xyEast[0], xyEast[1], boresightRotAng))
-                deltaNx, deltaNy = rotatedNorth[0] - xy0[0], rotatedNorth[1] - xy0[1]
-                deltaEx, deltaEy = rotatedEast[0] - xy0[0], rotatedEast[1] - xy0[1]
-                deltaFrac = 0.06
-                axes.plot(xy0[0], xy0[1], markersize=3, marker="o", color="black")
-                arrowKwargs = dict(xycoords="data", textcoords="data", ha="center", va="center",
-                                   arrowprops=dict(arrowstyle="<|-", facecolor="springgreen"))
-                axes.annotate("", xy=xy0, xytext=rotatedNorth, **arrowKwargs)
-                # DECam has flipX = True, but can't access this info until RFC-605 is implemented
-                # on DM-20746
-                if camera.getName() == "DECam":
-                    axes.annotate("S", xy=(rotatedNorth[0] + deltaFrac*deltaNx,
-                                           rotatedNorth[1] + deltaFrac*deltaNy), fontsize=7, **arrowKwargs)
-                else:
-                    axes.annotate("N", xy=(rotatedNorth[0] + deltaFrac*deltaNx,
-                                           rotatedNorth[1] + deltaFrac*deltaNy), fontsize=7, **arrowKwargs)
-                axes.annotate("", xy=xy0, xytext=rotatedEast, **arrowKwargs)
-                axes.annotate("E", xy=(rotatedEast[0] + deltaFrac*deltaEx,
-                                       rotatedEast[1] + deltaFrac*deltaEy), fontsize=7, **arrowKwargs)
-                # If boresight is rotated a factor of 90 deg, print the RA and Dec
-                # at the min/max positions of the data
-                if np.degrees(boresightRotAng)%90 == 0:
-                    if np.degrees(boresightRotAng)%180 != 0:
-                        xCoordStr = "Dec (deg)"
-                        yCoordStr = "RA (deg)"
-                        xRaDecDataMin = dec[(np.where(xFpPix == xFpPix.min()))][0]
-                        xRaDecDataMax = dec[(np.where(xFpPix == xFpPix.max()))][0]
-                        yRaDecDataMin = ra[(np.where(yFpPix == yFpPix.min()))][0]
-                        yRaDecDataMax = ra[(np.where(yFpPix == yFpPix.max()))][0]
-                    else:
-                        xRaDecDataMin = ra[(np.where(xFpPix == xFpPix.min()))][0]
-                        xRaDecDataMax = ra[(np.where(xFpPix == xFpPix.max()))][0]
-                        yRaDecDataMin = dec[(np.where(yFpPix == yFpPix.min()))][0]
-                        yRaDecDataMax = dec[(np.where(yFpPix == yFpPix.max()))][0]
-                    xMinForRaDecLabel = xPlotMin - 0.13*(xPlotMax - xPlotMin)
-                    yMinForRaDecLabel = yPlotMin - 0.06*(yPlotMax - yPlotMin)
-                    textKwargs.update(dict(transform=axes.transData))
-                    plt.text(xFpPix.min(), yMinForRaDecLabel, str("{:.2f}".format(xRaDecDataMin)),
-                             **textKwargs)
-                    plt.text(xFpPix.max(), yMinForRaDecLabel, str("{:.2f}".format(xRaDecDataMax)),
-                             **textKwargs)
-                    plt.text(xMinForRaDecLabel, yFpPix.min(), str("{:.2f}".format(yRaDecDataMin)),
-                             **textKwargs)
-                    plt.text(xMinForRaDecLabel, yFpPix.max(), str("{:.2f}".format(yRaDecDataMax)),
-                             **textKwargs)
-                    textKwargs.update(dict(transform=axes.transAxes))
-                    plt.text(0.5, -0.12, xCoordStr, **textKwargs)
-                    plt.text(-0.16, 0.5, yCoordStr, rotation=90, **textKwargs)
-
+        axes = plotSkyLimitLabels(axes, raDecProj, plt=plt, butler=butler, dataId=dataId, camera=camera,
+                                  ccdList=ccdList, tractInfo=tractInfo, xPlotMin=xPlotMin, xPlotMax=xPlotMax,
+                                  yPlotMin=yPlotMin, yPlotMax=yPlotMax, raDecMin=raDecMin, raDecMax=raDecMax,
+                                  filterLabelStr=filterLabelStr)
         axes.set_xlim(xPlotMin, xPlotMax)
         axes.set_ylim(yPlotMin, yPlotMax)
 
@@ -991,7 +915,7 @@ class Analysis(object):
         axes.annotate(r"N = {0} [mag<{1:.1f}]".format(stats0.num, magThreshold),
                       xy=(x0 + lenStr + 0.012, 1.035), ha="left", **strKwargs)
 
-        dpi = 350 if tractImage else 150
+        dpi = 350 if fullImage else 150
         fig.savefig(filename, dpi=dpi)
         plt.close(fig)
 
@@ -1048,7 +972,7 @@ class Analysis(object):
     def plotQuiver(self, catalog, filename, log, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
                    camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
                    matchRadius=None, zpLabel=None, forcedStr=None, dataName="star", uberCalLabel=None,
-                   scale=1, tractImage=None, raDecProj=True):
+                   scale=1, fullImage=None, raDecProj=True):
         """Plot ellipticity residuals quiver plot"""
 
         # Use HSM algorithm results if present, if not, use SDSS Shape
@@ -1094,10 +1018,14 @@ class Analysis(object):
         else:
             xFpPix = catalog[self.prefix + centStr + "_x"]
             yFpPix = catalog[self.prefix + centStr + "_y"]
+        raDecMin, raDecMax = None, None
+        if ccdList is not None:
+            ccdBoundary = getMinMaxCcdList(ccdList, dataId, butler, nDecimals=3, zpLabel=zpLabel)
+            raDecMin = geom.Point2D(ccdBoundary.raMin, ccdBoundary.decMin)
+            raDecMax = geom.Point2D(ccdBoundary.raMax, ccdBoundary.decMax)
         if raDecProj:
             xPlot, yPlot = ra, dec
             if ccdList is not None:
-                ccdBoundary = getMinMaxCcdList(ccdList, dataId, butler, nDecimals=3, zpLabel=zpLabel)
                 plotLimits = computeEqualAspectLimits(ccdBoundary.raMin, ccdBoundary.raMax,
                                                       ccdBoundary.decMin, ccdBoundary.decMax, percentPad=5.0)
                 # plot in same +x: E->W direction of image projection
@@ -1109,8 +1037,13 @@ class Analysis(object):
         if ccdList is not None and not raDecProj:
             xs = list()
             ys = list()
+            dataIdCopy = dataId.copy()
+            dataIdCopy = popIdAndCcdKeys(dataIdCopy)
+            ccdKey = findCcdKey(dataIdCopy)
             for ccd in ccdList:
-                detector = camera[ccd]
+                dataIdCopy[ccdKey] = ccd
+                calexp = butler.get("calexp", dataIdCopy, immediate=True)
+                detector = calexp.getDetector()
                 ccdCorners = detector.getCorners(cameraGeom.FOCAL_PLANE)
                 pixelSizeX = detector.getPixelSize()[0]
                 pixelSizeY = detector.getPixelSize()[1]
@@ -1124,7 +1057,7 @@ class Analysis(object):
             yPlotMin, yPlotMax = plotLimits.yPlotMin, plotLimits.yPlotMax
 
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.6"))
-        axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=6)
+        axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=7)
         axes.ticklabel_format(axis="both", style="plain", useOffset=False)
 
         if dataId is not None and butler is not None and ccdList is not None:
@@ -1147,19 +1080,16 @@ class Analysis(object):
                 yPlotMin, yPlotMax = plotLimits.yPlotMin, plotLimits.yPlotMax
                 plotPatchOutline(axes, tractInfo, patchList, plotUnits="pixels")
 
-            if tractImage is not None:
-                med = np.nanmedian(tractImage.array)
-                mad = np.nanmedian(abs(tractImage.array - med))
-                imMin = med - 3.0*1.4826*mad
-                imMax = med + 10.0*1.4826*mad
-                norm = AsinhNormalize(minimum=imMin, dataRange=imMax - imMin, Q=8)
+            if fullImage is not None:
+                fullImageArray = getArrayFromImage(fullImage)
+                asinhNorm = makeAsinhNormFromArray(fullImageArray, nMinDev=3.0, nMaxDev=10.0, Q=8)
                 tractXs, tractYs = bboxToXyCoordLists(tractInfo.getBBox(), wcs=None)
                 tractRas, tractDecs = bboxToXyCoordLists(tractInfo.getBBox(), wcs=tractInfo.getWcs())
                 if raDecProj:
                     extent = tractRas[0], tractRas[2], tractDecs[0], tractDecs[2]
                 else:
                     extent = tractXs[0], tractXs[2], tractYs[0], tractYs[2]
-                axes.imshow(tractImage.array, extent=extent, cmap="gray_r", norm=norm)
+                axes.imshow(fullImageArray, extent=extent, cmap="gray_r", norm=asinhNorm.norm)
 
         e1 = E1Resids(compareCol, psfCompareCol)
         e1 = e1(catalog)
@@ -1182,84 +1112,10 @@ class Analysis(object):
             if len(filterStr) < len(camera.getName()):
                 filterStr = camera.getName() + "-" + filterStr
         filterLabelStr = "[" + filterStr + "]"
-        if raDecProj:
-            axes.set_xlabel("RA (deg) {0:s}".format(filterLabelStr))
-            axes.set_ylabel("Dec (deg) {0:s}".format(filterLabelStr))
-        else:
-            axes.set_xlabel("x (pixels) {0:s}".format(filterLabelStr), size=7, labelpad=10)
-            axes.set_ylabel("y (pixels) {0:s}".format(filterLabelStr), size=7)
-            # Get RA and Dec tract/visit limits to add to plot axis labels
-            textKwargs = dict(ha="left", va="center", transform=axes.transAxes, fontsize=6, color="blue")
-            if tractInfo is not None and ccdList is None:
-                tract00 = tractInfo.getWcs().pixelToSky(xPlotMin, yPlotMin).getPosition(units=geom.degrees)
-                tract0N = tractInfo.getWcs().pixelToSky(xPlotMin, yPlotMax).getPosition(units=geom.degrees)
-                tractN0 = tractInfo.getWcs().pixelToSky(xPlotMax, yPlotMin).getPosition(units=geom.degrees)
-                plot00 = (tract00.getX(), tract00.getY())
-                plot0N = (tract0N.getX(), tract0N.getY())
-                plotN0 = (tractN0.getX(), tractN0.getY())
-                plt.text(-0.05, -0.05, str("{:.2f}".format(plot00[0])), **textKwargs)
-                plt.text(-0.16, 0.00, str("{:.2f}".format(plot00[1])), **textKwargs)
-                plt.text(0.97, -0.05, str("{:.2f}".format(plotN0[0])), **textKwargs)
-                plt.text(-0.16, 0.99, str("{:.2f}".format(plot0N[1])), **textKwargs)
-
-            xCoordStr = "RA (deg)"
-            yCoordStr = "Dec (deg)"
-            if ccdList is not None:
-                # Plot direction arrows according to the boresight rotation angle
-                # assuming FP projected as:
-                #       +x: E->W (-ve RA), +y: S->N (+ve Dec)
-                # at a boresight rotation angle of 0.
-                calexp = butler.get("calexp", dataId)
-                boresightRotAng = calexp.getInfo().getVisitInfo().getBoresightRotAngle().asRadians()
-                dPix = int(0.08*max((xPlotMax - xPlotMin), (yPlotMax - yPlotMin)))
-                xy0 = (xPlotMin + 1.5*dPix, yPlotMax - 1.5*dPix)
-                # The following just moves the arrows to be as close to the upper left
-                # corner as possible based on the boresight rotation angel.
-                xy0 = (xy0[0] - abs(np.sin(boresightRotAng)*np.cos(boresightRotAng/3.0))*dPix,
-                       xy0[1] + abs(np.sin(boresightRotAng/6.0)*np.cos(np.pi/2.0 - boresightRotAng))*dPix)
-                xyNorth = (xy0[0], xy0[1] + dPix)
-                xyEast = (xy0[0] - dPix, xy0[1])
-                rotatedNorth = (rotatePoint(xy0[0], xy0[1], xyNorth[0], xyNorth[1], boresightRotAng))
-                rotatedEast = (rotatePoint(xy0[0], xy0[1], xyEast[0], xyEast[1], boresightRotAng))
-                deltaNx, deltaNy = rotatedNorth[0] - xy0[0], rotatedNorth[1] - xy0[1]
-                deltaEx, deltaEy = rotatedEast[0] - xy0[0], rotatedEast[1] - xy0[1]
-                deltaFrac = 0.06
-                axes.plot(xy0[0], xy0[1], markersize=3, marker="o", color="black")
-                arrowKwargs = dict(xycoords="data", textcoords="data", ha="center", va="center",
-                                   arrowprops=dict(arrowstyle="<|-", facecolor="springgreen"))
-                axes.annotate("", xy=xy0, xytext=rotatedNorth, **arrowKwargs)
-                # DECam has flipX = True, but can't access this info until RFC-605 is implemented
-                # on DM-20746
-                if camera.getName() == "DECam":
-                    axes.annotate("S", xy=(rotatedNorth[0] + deltaFrac*deltaNx,
-                                           rotatedNorth[1] + deltaFrac*deltaNy), fontsize=7, **arrowKwargs)
-                else:
-                    axes.annotate("N", xy=(rotatedNorth[0] + deltaFrac*deltaNx,
-                                           rotatedNorth[1] + deltaFrac*deltaNy), fontsize=7, **arrowKwargs)
-                axes.annotate("", xy=xy0, xytext=rotatedEast, **arrowKwargs)
-                axes.annotate("E", xy=(rotatedEast[0] + deltaFrac*deltaEx,
-                                       rotatedEast[1] + deltaFrac*deltaEy), fontsize=7, **arrowKwargs)
-                # If boresight is rotated a factor of 90 deg, print the RA and Dec
-                # at the min/max positions of the data
-                if np.degrees(boresightRotAng)%90 == 0:
-                    xMinForRa = xPlotMin - 0.15*(xPlotMax - xPlotMin)
-                    yMinForDec = yPlotMin - 0.06*(yPlotMax - yPlotMin)
-                    decDataMin = dec[(np.where(xFpPix == xFpPix.min()))][0]
-                    decDataMax = dec[(np.where(xFpPix == xFpPix.max()))][0]
-                    raDataMin = ra[(np.where(yFpPix == yFpPix.min()))][0]
-                    raDataMax = ra[(np.where(yFpPix == yFpPix.max()))][0]
-                    textKwargs.update(dict(transform=axes.transData))
-                    plt.text(xFpPix.min(), yMinForDec, str("{:.2f}".format(decDataMin)), **textKwargs)
-                    plt.text(xFpPix.max(), yMinForDec, str("{:.2f}".format(decDataMax)), **textKwargs)
-                    plt.text(xMinForRa, yFpPix.min(), str("{:.2f}".format(raDataMin)), **textKwargs)
-                    plt.text(xMinForRa, yFpPix.max(), str("{:.2f}".format(raDataMax)), **textKwargs)
-                    if np.degrees(boresightRotAng)%180 != 0:
-                        xCoordStr = "Dec (deg)"
-                        yCoordStr = "RA (deg)"
-                    textKwargs.update(dict(transform=axes.transAxes))
-                    plt.text(0.45, -0.12, xCoordStr, **textKwargs)
-                    plt.text(-0.16, 0.5, yCoordStr, rotation=90, **textKwargs)
-
+        axes = plotSkyLimitLabels(axes, raDecProj, plt=plt, butler=butler, dataId=dataId, camera=camera,
+                                  ccdList=ccdList, tractInfo=tractInfo, xPlotMin=xPlotMin, xPlotMax=xPlotMax,
+                                  yPlotMin=yPlotMin, yPlotMax=yPlotMax, raDecMin=raDecMin, raDecMax=raDecMax,
+                                  filterLabelStr=filterLabelStr)
         axes.set_xlim(xPlotMin, xPlotMax)
         axes.set_ylim(yPlotMin, yPlotMax)
 
@@ -1296,13 +1152,13 @@ class Analysis(object):
             plotText(forcedStr, plt, axes, 0.85, -0.12, prefix="cat: ", fontSize=7, color="green")
         axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.15), fancybox=True, fontsize=5)
 
-        dpi = 350 if tractImage else 150
+        dpi = 350 if fullImage else 150
         fig.savefig(filename, dpi=dpi)
         plt.close(fig)
 
     def plotInputCounts(self, catalog, filename, log, dataId, butler, tractInfo, patchList=None, camera=None,
                         forcedStr=None, uberCalLabel=None, cmap=plt.cm.viridis, alpha=0.5,
-                        tractImage=None, doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000,
+                        fullImage=None, doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000,
                         coaddName="deep"):
         """Plot grayscale image of tract with base_InputCounts_value overplotted
 
@@ -1325,8 +1181,8 @@ class Analysis(object):
         patchList : `list` of `str`, optional
            List of patch IDs with data to be plotted.
         camera : `lsst.afw.cameraGeom.Camera`, optional
-           The base name of the coadd (e.g. deep or goodSeeing).
-           Default is `None`.
+           The camera associated with the observation.  Used here to annotate
+           the figure with the name of the ``camera``.  Default is `None`.
         forcedStr : `str`, optional
            String to label the catalog type (forced vs. unforced) on the plot.
         cmap : `matplotlib.colors.ListedColormap`, optional
@@ -1358,24 +1214,21 @@ class Analysis(object):
             patchBoundary = getMinMaxPatchList(patchList, tractInfo)
             plotLimits = computeEqualAspectLimits(patchBoundary.xMin, patchBoundary.xMax,
                                                   patchBoundary.yMin, patchBoundary.yMax)
-            minPatchX, maxPatchX = plotLimits.xPlotMin, plotLimits.xPlotMax
-            minPatchY, maxPatchY = plotLimits.yPlotMin, plotLimits.yPlotMax
+            minPlotX, maxPlotX = plotLimits.xPlotMin, plotLimits.xPlotMax
+            minPlotY, maxPlotY = plotLimits.yPlotMin, plotLimits.yPlotMax
         else:
-            minPatchX = tractBbox.getMinX()
-            maxPatchX = tractBbox.getMaxX()
-            minPatchY = tractBbox.getMinY()
-            maxPatchY = tractBbox.getMaxY()
+            minPlotX = tractBbox.getMinX()
+            maxPlotX = tractBbox.getMaxX()
+            minPlotY = tractBbox.getMinY()
+            maxPlotY = tractBbox.getMaxY()
 
         fig, axes = plt.subplots(1, 1)
         axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=7)
-        if tractImage:
-            med = np.nanmedian(tractImage.array)
-            mad = np.nanmedian(abs(tractImage.array - med))
-            imMin = med - 3.0*1.4826*mad
-            imMax = med + 10.0*1.4826*mad
-            norm = AsinhNormalize(minimum=imMin, dataRange=imMax - imMin, Q=8)
+        if fullImage:
+            fullImageArray = getArrayFromImage(fullImage)
+            asinhNorm = makeAsinhNormFromArray(fullImageArray, nMinDev=3.0, nMaxDev=10.0, Q=8)
             extent = tractBbox.getMinX(), tractBbox.getMaxX(), tractBbox.getMinY(), tractBbox.getMaxY()
-            axes.imshow(tractImage.array, extent=extent, cmap="gray_r", norm=norm)
+            axes.imshow(fullImageArray, extent=extent, cmap="gray_r", norm=asinhNorm.norm)
 
         centStr = "slot_Centroid"
         shapeStr = "slot_Shape"
@@ -1425,8 +1278,8 @@ class Analysis(object):
                        format(sizeFactor, maxDiamPix), fontsize=7)
         cbar.ax.tick_params(direction="in", labelsize=7)
 
-        axes.set_xlim(minPatchX, maxPatchX)
-        axes.set_ylim(minPatchY, maxPatchY)
+        axes.set_xlim(minPlotX, maxPlotX)
+        axes.set_ylim(minPlotY, maxPlotY)
 
         filterStr = dataId["filter"]
         if filterStr and camera is not None:
@@ -1437,19 +1290,23 @@ class Analysis(object):
         axes.set_xlabel("xTract (pixels) {0:s}".format(filterLabelStr), size=9)
         axes.set_ylabel("yTract (pixels) {0:s}".format(filterLabelStr), size=9)
 
-        # Get Ra and DEC tract limits to add to plot axis labels
-        tract00 = tractWcs.pixelToSky(minPatchX, minPatchY).getPosition(units=geom.degrees)
-        tract0N = tractWcs.pixelToSky(minPatchX, maxPatchY).getPosition(units=geom.degrees)
-        tractN0 = tractWcs.pixelToSky(maxPatchX, minPatchY).getPosition(units=geom.degrees)
+        axes = plotSkyLimitLabels(axes, raDecProj=False, plt=None, butler=butler, dataId=dataId, camera=camera,
+                                  ccdList=None, tractInfo=tractInfo, xPlotMin=xPlotMin, xPlotMax=xPlotMax,
+                                  yPlotMin=yPlotMin, yPlotMax=yPlotMax, raDecMin=None, raDecMax=None,
+                                  filterLabelStr=filterLabelStr)
+        ## Get Ra and DEC tract limits to add to plot axis labels
+        # tract00 = tractWcs.pixelToSky(minPlotX, minPlotY).getPosition(units=geom.degrees)
+        # tract0N = tractWcs.pixelToSky(minPlotX, maxPlotY).getPosition(units=geom.degrees)
+        # tractN0 = tractWcs.pixelToSky(maxPlotX, minPlotY).getPosition(units=geom.degrees)
 
-        textKwargs = dict(ha="left", va="center", transform=axes.transAxes, fontsize=7, color="blue")
-        plt.text(-0.05, -0.07, str("{:.2f}".format(tract00.getX())), **textKwargs)
-        plt.text(-0.17, 0.00, str("{:.2f}".format(tract00.getY())), **textKwargs)
-        plt.text(0.96, -0.07, str("{:.2f}".format(tractN0.getX())), **textKwargs)
-        plt.text(-0.17, 0.97, str("{:.2f}".format(tract0N.getY())), **textKwargs)
-        textKwargs["fontsize"] = 8
-        plt.text(0.45, -0.11, "RA (deg)", **textKwargs)
-        plt.text(-0.19, 0.5, "Dec (deg)", rotation=90, **textKwargs)
+        # textKwargs = dict(ha="left", va="center", transform=axes.transAxes, fontsize=7, color="blue")
+        # plt.text(-0.05, -0.07, str("{:.2f}".format(tract00.getX())), **textKwargs)
+        # plt.text(-0.17, 0.00, str("{:.2f}".format(tract00.getY())), **textKwargs)
+        # plt.text(0.96, -0.07, str("{:.2f}".format(tractN0.getX())), **textKwargs)
+        # plt.text(-0.17, 0.97, str("{:.2f}".format(tract0N.getY())), **textKwargs)
+        # textKwargs["fontsize"] = 8
+        # plt.text(0.45, -0.11, "RA (deg)", **textKwargs)
+        # plt.text(-0.19, 0.5, "Dec (deg)", rotation=90, **textKwargs)
 
         if doPlotPatchOutline:
             plotPatchOutline(axes, tractInfo, patchList, plotUnits="pixel", idFontSize=5)
@@ -1464,8 +1321,9 @@ class Analysis(object):
         fig.savefig(filename, dpi=1200)  # Needs to be fairly hi-res to see enough detail
         plt.close(fig)
 
-    def plotImageOnly(self, filename, log, dataId, butler, tractImage, tractInfo, patchList=None, camera=None,
-                      uberCalLabel=None, cmap="gray_r", doPlotPatchOutline=True, coaddName="deep"):
+    def plotImageOnly(self, filename, log, dataId, butler, fullImage, tractInfo=None, patchList=None,
+                      ccdList=None, camera=None, uberCalLabel=None, cmap="gray_r", doPlotPatchOutline=True,
+                      coaddName="deep", doPlotCcdOutline=True, zpLabel=None, binSize=None):
         """Plot grayscale image of tract or list of patches
 
         Parameters
@@ -1478,50 +1336,76 @@ class Analysis(object):
            An instance of `lsst.daf.persistence.DataId` from which to extract
            the filter name.
         butler : `lsst.daf.persistence.Butler`
-        tractImage : `numpy.ndarray` of `float`
+        fullImage : `numpy.ndarray` of `float`
            The array comprising the tract image to be plotted.
         tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
            Tract information object.
         patchList : `list` of `str`, optional
            List of patch IDs with data to be plotted.
         camera : `lsst.afw.cameraGeom.Camera`, optional
-           The base name of the coadd (e.g. deep or goodSeeing).
-           Default is `None`.
+           The camera associated with the observation.  Used here to annotate
+           the figure with the name of the ``camera``.  Default is `None`.
         cmap : `matplotlib.colors.ListedColormap`, optional
            The matplotlib colormap to use.  Default is gray_r.
         doPlotPatchOutline : `bool`, optional
            A boolean indicating whether to overplot the patch outlines and
            index labels.  Default is `True`.
         """
-        tractBbox = tractInfo.getBBox()
-        tractWcs = tractInfo.getWcs()
-        if patchList:
-            patchBoundary = getMinMaxPatchList(patchList, tractInfo)
-            plotLimits = computeEqualAspectLimits(patchBoundary.xMin, patchBoundary.xMax,
-                                                 patchBoundary.yMin, patchBoundary.yMax)
-            minPatchX, maxPatchX = plotLimits.xPlotMin, plotLimits.xPlotMax
-            minPatchY, maxPatchY = plotLimits.yPlotMin, plotLimits.yPlotMax
-        else:
-            minPatchX = tractBbox.getMinX()
-            maxPatchX = tractBbox.getMaxX()
-            minPatchY = tractBbox.getMinY()
-            maxPatchY = tractBbox.getMaxY()
+        labelStr = ""
+        if tractInfo is not None and ccdList is None:
+            labelStr="Tract"
+            imageBbox = tractInfo.getBBox()
+            imageWcs = tractInfo.getWcs()
+            if patchList:
+                patchBoundary = getMinMaxPatchList(patchList, tractInfo)
+                plotLimits = computeEqualAspectLimits(patchBoundary.xMin, patchBoundary.xMax,
+                                                      patchBoundary.yMin, patchBoundary.yMax)
+                xPlotMin, xPlotMax = plotLimits.xPlotMin, plotLimits.xPlotMax
+                yPlotMin, yPlotMax = plotLimits.yPlotMin, plotLimits.yPlotMax
+            else:
+                xPlotMin = imageBbox.getMinX()
+                xPlotMax = imageBbox.getMaxX()
+                yPlotMin = imageBbox.getMinY()
+                yPlotMax = imageBbox.getMaxY()
+
+        if ccdList is not None:
+            labelStr = "FocalPlane"
+            calexp = butler.get("calexp", dataId)
+            imageWcs = calexp.getWcs()
+            ccdBoundary = getMinMaxCcdList(ccdList, dataId, butler, fpUnits="pixels")
+            pixMin = geom.Point2I(int(ccdBoundary.xMin), int(ccdBoundary.yMin))
+            pixMax = geom.Point2I(int(ccdBoundary.xMax), int(ccdBoundary.yMax))
+            raDecMin = geom.Point2D(ccdBoundary.raMin, ccdBoundary.decMin)
+            raDecMax = geom.Point2D(ccdBoundary.raMax, ccdBoundary.decMax)
+            imageBbox = geom.Box2I(pixMin, pixMax)
+
+            plotLimits = computeEqualAspectLimits(ccdBoundary.xMin, ccdBoundary.xMax,
+                                                  ccdBoundary.yMin, ccdBoundary.yMax)
+            xPlotMin, xPlotMax = plotLimits.xPlotMin, plotLimits.xPlotMax
+            yPlotMin, yPlotMax = plotLimits.yPlotMin, plotLimits.yPlotMax
 
         fig, axes = plt.subplots(1, 1)
         axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=7)
-        if tractImage:
-            med = np.nanmedian(tractImage.array)
-            mad = np.nanmedian(abs(tractImage.array - med))
-            imMin = med - 3.0*1.4826*mad
-            imMax = med + 10.0*1.4826*mad
-            norm = AsinhNormalize(minimum=imMin, dataRange=imMax - imMin, Q=8)
-            extent = tractBbox.getMinX(), tractBbox.getMaxX(), tractBbox.getMinY(), tractBbox.getMaxY()
-            axes.imshow(tractImage.array, extent=extent, cmap=cmap, norm=norm)
+        if fullImage:
+            fullImageArray = getArrayFromImage(fullImage)
+            asinhNorm = makeAsinhNormFromArray(fullImageArray, nMinDev=2.5, nMaxDev=8.0, Q=8)
+            extent = imageBbox.getMinX(), imageBbox.getMaxX(), imageBbox.getMinY(), imageBbox.getMaxY()
+            axes.imshow(fullImageArray, extent=extent, cmap=cmap, norm=asinhNorm.norm)
+            medianStr = "{:.3f}".format(asinhNorm.imMed)
+            madStr = "{:.3f}".format(asinhNorm.imMad)
+            x0 = 0.90
+            lenStr = 0.016*(max(len(medianStr), len(madStr)))
+            strKwargs = dict(xycoords="axes fraction", va="center", fontsize=7)
+            axes.annotate("median = ", xy=(x0, 1.08), ha="right", **strKwargs)
+            axes.annotate(medianStr, xy=(x0 + lenStr, 1.08), ha="right", **strKwargs)
+            axes.annotate("   mad = ", xy=(x0, 1.035), ha="right", **strKwargs)
+            axes.annotate(madStr, xy=(x0 + lenStr, 1.04), ha="right", **strKwargs)
 
         filterStr = dataId["filter"]
         filterLabelStr = "[" + filterStr + "]"
 
-        mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=imMin, vmax=imMax))
+        mappable = plt.cm.ScalarMappable(cmap=cmap,
+                                         norm=plt.Normalize(vmin=asinhNorm.imMin, vmax=asinhNorm.imMax))
         mappable._A = []        # fake up the array of the scalar mappable. Urgh...
         cb = plt.colorbar(mappable)
         unitStr = "(\"counts\") "
@@ -1532,31 +1416,27 @@ class Analysis(object):
         cb.ax.tick_params(labelsize=max(6, fontSize - 1))
         cb.set_label(colorbarLabel, fontsize=fontSize, rotation=270, labelpad=15)
 
-        axes.set_xlim(minPatchX, maxPatchX)
-        axes.set_ylim(minPatchY, maxPatchY)
+        axes.set_xlim(xPlotMin, xPlotMax)
+        axes.set_ylim(yPlotMin, yPlotMax)
 
-        axes.set_xlabel("xTract (pixels) {0:s}".format(filterLabelStr), size=9)
-        axes.set_ylabel("yTract (pixels) {0:s}".format(filterLabelStr), size=9)
+        axes = plotSkyLimitLabels(axes, False, plt=plt, butler=butler, dataId=dataId, camera=camera,
+                                  ccdList=ccdList, tractInfo=tractInfo, xPlotMin=xPlotMin, xPlotMax=xPlotMax,
+                                  yPlotMin=yPlotMin, yPlotMax=yPlotMax, raDecMin=raDecMin, raDecMax=raDecMax,
+                                  filterLabelStr=filterLabelStr)
 
-        # Get Ra and DEC tract limits to add to plot axis labels
-        tract00 = tractWcs.pixelToSky(minPatchX, minPatchY).getPosition(units=geom.degrees)
-        tract0N = tractWcs.pixelToSky(minPatchX, maxPatchY).getPosition(units=geom.degrees)
-        tractN0 = tractWcs.pixelToSky(maxPatchX, minPatchY).getPosition(units=geom.degrees)
-
-        textKwargs = dict(ha="left", va="center", transform=axes.transAxes, fontsize=7, color="blue")
-        plt.text(-0.05, -0.07, str("{:.2f}".format(tract00.getX())), **textKwargs)
-        plt.text(-0.17, 0.00, str("{:.2f}".format(tract00.getY())), **textKwargs)
-        plt.text(0.96, -0.07, str("{:.2f}".format(tractN0.getX())), **textKwargs)
-        plt.text(-0.17, 0.97, str("{:.2f}".format(tract0N.getY())), **textKwargs)
-        textKwargs["fontsize"] = 8
-        plt.text(0.45, -0.11, "RA (deg)", **textKwargs)
-        plt.text(-0.19, 0.5, "Dec (deg)", rotation=90, **textKwargs)
-
-        if doPlotPatchOutline:
+        if doPlotPatchOutline and tractInfo is not None:
             plotPatchOutline(axes, tractInfo, patchList, plotUnits="pixel", idFontSize=5)
+        if doPlotCcdOutline:
+            plotCcdOutline(axes, butler, dataId, camera, ccdList, tractInfo=None, zpLabel=zpLabel,
+                           raDecProj=False)
         if camera is not None:
             labelCamera(camera, plt, axes, 0.5, 1.09)
         labelVisit(filename, plt, axes, 0.5, 1.04)
+        if binSize is not None:
+            plotText(str(binSize), plt, axes, 0.91, -0.11, prefix="binSize: ", fontSize=7, color="green")
+        if zpLabel is not None:
+            prefix = "" if "GalExt" in zpLabel else "zp: "
+            plotText(zpLabel, plt, axes, 0.13, -0.11, prefix=prefix, fontSize=7, color="green")
         if uberCalLabel:
             plotText(uberCalLabel, plt, axes, 0.01, -0.11, prefix="uberCal: ", fontSize=7, color="green")
 
@@ -1566,7 +1446,7 @@ class Analysis(object):
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
                 tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
                 zpLabel=None, forcedStr=None, postFix="", plotRunStats=True, highlightList=None,
-                extraLabels=None, uberCalLabel=None, doPrintMedian=False, tractImage=None):
+                extraLabels=None, uberCalLabel=None, doPrintMedian=False, fullImage=None):
         """Make all plots"""
         stats = self.stats
         # Dict of all parameters common to plot* functions
@@ -1590,9 +1470,9 @@ class Analysis(object):
                              [self.config.skyProjection,])
         for projStr in skyProjectionList:
             raDecProj = (projStr == "RaDec")
-            plotTractImage = None if raDecProj else tractImage  # only plot image if pixels projection
+            plotTractImage = None if raDecProj else fullImage  # only plot image if pixels projection
             skyPositionKwargs = dict(dataId=dataId, butler=butler, highlightList=highlightList,
-                                     tractImage=plotTractImage, raDecProj=raDecProj)
+                                     fullImage=plotTractImage, raDecProj=raDecProj)
             skyPositionKwargs.update(plotKwargs)
             if "all" in self.data:
                 styleStr = "sky" + projStr + "-all"
@@ -1667,7 +1547,7 @@ class Analysis(object):
                 stats = None
         return stats
 
-    def calculateStats(self, quantity, selection, forcedMean=None, thresholdType="", thresholdValue=None):
+    def calculateStats(self, quantity, selection=None, forcedMean=None, thresholdType="", thresholdValue=None):
         """Calculate some basic statistics for a (sub-selection of a) quanatity
 
         Parameters
@@ -1675,7 +1555,7 @@ class Analysis(object):
         quantity : `numpy.ndarray` of `float`
            Array containing the values of the quantity on which the statistics
            are to be computed.
-        selection : `numpy.ndarray` of `bool`
+        selection : `numpy.ndarray` of `bool`, optional
            Boolean array indicating the sub-selection of data points in
            ``quantity`` to be considered for the statistics computation.
         forcedMean : `float`, `int`, or `None`, optional
@@ -1738,6 +1618,7 @@ class Analysis(object):
               Value provided in input variable ``thresholdValue`` representing
               the value used for the threshold culling of the data (`float`).
         """
+        selection = np.ones(len(quantity), dtype=bool) if selection is None else selection
         total = selection.sum()  # Total number we're considering
         if total == 0:
             return Stats(dataUsed=0, num=0, total=0, mean=np.nan, stdev=np.nan, forcedMean=np.nan,
