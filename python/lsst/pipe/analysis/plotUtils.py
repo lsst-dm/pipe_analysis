@@ -4,10 +4,12 @@ import matplotlib.patches as patches
 import numpy as np
 
 import lsst.afw.cameraGeom as cameraGeom
+import lsst.afw.cameraGeom.utils as cgUtils
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 import lsst.daf.persistence as dafPersist
 import lsst.geom as geom
+from lsst.display.matplotlib.matplotlib import AsinhNormalize
 from lsst.pipe.base import Struct
 
 from .utils import checkHscStack, findCcdKey, popIdAndCcdKeys
@@ -22,7 +24,8 @@ __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "M
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
            "plotCcdOutline", "rotatePixelCoords", "rotatePoint", "bboxToXyCoordLists", "getMinMaxPatchList",
            "getMinMaxCcdList", "computeEqualAspectLimits", "percent", "setPtSize", "getQuiver",
-           "makeAlphaCmap", "buildTractImage", "determineUberCalLabel"]
+           "makeAlphaCmap", "buildTractImage", "buildVisitImage", "getArrayFromImage", "makeDiffImages",
+           "makeAsinhNormFromArray", "determineUberCalLabel", "plotDirectionArrows", "plotSkyLimitLabels"]
 
 
 class AllLabeller(object):
@@ -600,7 +603,7 @@ def plotPatchOutline(axes, tractInfo, patchList, plotUnits="deg", idFontSize=Non
                 yCoords = yCoord + [yCoord[0], ]
                 axes.plot(xCoords, yCoords, color="black", lw=0.5, linestyle="solid")
             if plotUnits in validWcsUnits:
-                xCoord, yCoord = bboxToXyCoordLists(patch.getInnerBBox(), tractInfo.getWcs(),
+                xCoord, yCoord = bboxToXyCoordLists(patch.getInnerBBox(), wcs=tractInfo.getWcs(),
                                                     wcsUnits=plotUnits)
             else:
                 xCoord, yCoord = bboxToXyCoordLists(patch.getInnerBBox(), wcs=None)
@@ -656,7 +659,7 @@ def rotatePoint(x0, y0, xToRotate, yToRotate, rotationAngle):
     return xRotated, yRotated
 
 
-def bboxToXyCoordLists(bbox, wcs=None, wcsUnits="deg"):
+def bboxToXyCoordLists(bbox, detector=None, wcs=None, wcsUnits="deg"):
     """Get the corners of a BBox and convert them to x and y coord lists.
 
     Parameters
@@ -682,7 +685,13 @@ def bboxToXyCoordLists(bbox, wcs=None, wcsUnits="deg"):
     """
     validWcsUnits = ["deg", "rad"]
     corners = []
-    for corner in bbox.getCorners():
+    if detector is not None:
+        if wcs is not None:
+            raise RuntimeError("wcs must be None if detector is set (i.e. want coord in focal plane pixels)")
+        bboxCorners = detector.getCorners(cameraGeom.FOCAL_PLANE)
+    else:
+        bboxCorners = bbox.getCorners()
+    for corner in bboxCorners:
         p = geom.Point2D(corner.getX(), corner.getY())
         if wcs:
             if wcsUnits not in validWcsUnits:
@@ -758,8 +767,9 @@ def getMinMaxPatchList(patchList, tractInfo, nDecimals=None, raMin=360.0, raMax=
     )
 
 
-def getMinMaxCcdList(ccdList, dataId, butler, nDecimals=None, zpLabel=None, raMin=360.0, raMax=0.0,
-                     decMin=90.0, decMax=-90.0, xMin=1e15, xMax=-1e15, yMin=1e15, yMax=-1e15):
+def getMinMaxCcdList(ccdList, dataId, butler, fpUnits="pixels", nDecimals=None, zpLabel=None,
+                     raMin=360.0, raMax=0.0, decMin=90.0, decMax=-90.0, xMin=1e15, xMax=-1e15,
+                     yMin=1e15, yMax=-1e15):
     """Find the min/max boundaries encompased in the ccdList
 
     Results are provided in RA/Dec (deg) and tract x/y (pixels)
@@ -810,7 +820,11 @@ def getMinMaxCcdList(ccdList, dataId, butler, nDecimals=None, zpLabel=None, raMi
         else:
             wcs = calexp.getWcs()
 
-        xCcd, yCcd = bboxToXyCoordLists(calexp.getBBox(), wcs=None)
+        xCcd, yCcd = bboxToXyCoordLists(calexp.getBBox(), detector=detector, wcs=None)
+        if "pix" in fpUnits:
+            for i in enumerate(xCcd):
+                xCcd[i[0]] = xCcd[i[0]]//detector.getPixelSize()[0]
+                yCcd[i[0]] = yCcd[i[0]]//detector.getPixelSize()[1]
         xMin, xMax = min(min(xCcd), xMin), max(max(xCcd), xMax)
         yMin, yMax = min(min(yCcd), yMin), max(max(yCcd), yMax)
         raCcd, decCcd = bboxToXyCoordLists(calexp.getBBox(), wcs=wcs)
@@ -977,6 +991,207 @@ def buildTractImage(butler, dataId, tractInfo, patchList=None, coaddName="deep")
     return image
 
 
+def buildVisitImage(butler, dataId, camera, ccdList=None, dataType="calexp", dimensionLimit=4000,
+                    doApplyExternalPhotoCalib=False, photoCalibType="jointcal", asMaskedImage=False):
+    """Build up an image of an entire visit or list of ccds
+
+    Parameters
+    ----------
+    butler : `lsst.daf.persistence.Butler`
+       The butler associated with the dataset.
+    dataId : `lsst.daf.persistence.DataId`
+       An instance of `lsst.daf.persistence.DataId` from which to extract the
+       filter name.
+    camera : `lsst.afw.cameraGeom.Camera`
+       The camera associated with the observation from which to build the
+       visit image.
+    ccdList : `list` of `str`, optional
+       A list of the CCDs to include.  If `None`, the full list of CCDs
+       in ``tractInfo`` will be included.
+    dataType : `str`, optional
+       The base name of the dataset (e.g. "raw" or "calexp").
+       Default is "calexp".
+    dimensionLimit : `int`, optional
+       The mamximum dimension on a side in pixels.  The image will be binned
+       by a factor of ceil(``dimensionLimit``/``dimensionMax``), where
+       ``dimensionMax`` is the maximum dimention in Focal Plane pixels
+       spanned by the ccds in ``ccdList``.  The maximum this value can
+       be (per `lsst.afw.image.Image` limits) is 2**15 = 32768
+    doApplyExternalPhotoCalib : `bool`, optional
+       Whether to apply an external photometric calibration to the image.
+       Default is `False`.
+    photoCalibType : `str`, optional
+       The butler-recognized datatype of the uber-calibration to apply.
+       Currently, the only options are "jointcal", "fgcmcal", and
+       "fgcmcal_tract" (but, to date, the latter two are still undergoing
+       integration testing and only for obs_subaru).  Default is "jointcal".
+    asMaskedImage : `bool`, optional
+       Set to `True` if the desired return image type is
+       `lsst.afw.image.MaskedImageF`.  Default is `False`.
+
+    Returns
+    -------
+    image : `lsst.afw.image.ImageF` or `lsst.afw.image.MaskedImageF`
+       Image of the full visit or just the CCDs in ``ccdList``.
+    """
+    if not ccdList:
+        ccdList = []
+        for ccd in camera:
+            if ccd.getType() == cameraGeom.DetectorType.SCIENCE:
+                ccdList.append(ccd.getId())
+
+    visitLimits = getMinMaxCcdList(ccdList, dataId, butler, fpUnits="pixels")
+    pixMin = geom.Point2I(int(visitLimits.xMin), int(visitLimits.yMin))
+    pixMax = geom.Point2I(int(visitLimits.xMax), int(visitLimits.yMax))
+    dimensionMax = max(pixMax[0] - pixMin[0], pixMax[1] - pixMin[1])
+    binSize = int(-(dimensionMax//-dimensionLimit)) if dimensionMax > dimensionLimit else 1
+    # DECam has a mismatch between the "detector" and "ccd/calexp" bboxes (both the rows and cols of
+    # the latter are smaller by 2 pixels).  Need to bin by at least 10 to "avoid" this problem
+    # in the cgUtils functions
+    binSize = max(binSize, 10) if camera.getName() == "DECam" else binSize
+    if any(isinstance(ccd, str) for ccd in ccdList):
+        ccdList = list(map(int, ccdList))
+    if doApplyExternalPhotoCalib:
+        callback = (lambda im, ccd, imageSource:
+                    cgUtils.applyExternalPhotoCalibCallback(im, ccd, imageSource,
+                                                            photoCalibType=photoCalibType))
+    else:
+        callback = cgUtils.rawCallback if dataType == "raw" else None
+    imageSource = cgUtils.ButlerImage(butler, dataType, callback=callback, verbose=True,
+                                      visit=dataId["visit"], tract=dataId["tract"])
+    imageFactory = afwImage.MaskedImageF if asMaskedImage else afwImage.ImageF
+    visitImage = cgUtils.makeImageFromCamera(camera, detectorNameList=ccdList, background=0.0, bufferSize=0,
+                                             imageSource=imageSource, imageFactory=imageFactory,
+                                             binSize=binSize, asMaskedImage=asMaskedImage)
+
+    visitArray = visitImage.image.array if hasattr(visitImage, "image") else visitImage.array
+    visitArray = np.flipud(visitArray)
+    if hasattr(visitImage, "image"):
+        visitImage.image.array[:] = visitArray
+    else:
+        visitImage.array[:] = visitArray
+    visitImage.setXY0(geom.Point2I(pixMin[0], pixMin[1]))
+    return visitImage, binSize
+
+
+def getArrayFromImage(image):
+    """Extract the image array from any afwImage-like type
+
+    Parameters
+    ----------
+    image : `lsst.afw.image.Image` or `lsst.afw.image.MaskedImage` or `lsst.afw.image.Exposure`
+       Image from which to extract the `numpy.ndarray`.
+
+    Returns
+    -------
+    imageArray : `numpy.ndarray` of `float`
+       Array of ``image``.  If ``image`` is of type `numpy.ndarray`, just returns
+       ``image`` itself.
+    """
+    if isinstance(image, np.ndarray):
+        return image
+    if hasattr(image, "image"):
+        imageArray = image.image.array
+    elif hasattr(image, "maskedImage"):
+        imageArray = image.maskedImage.image.array
+    else:
+        imageArray = image.array
+    return imageArray
+
+
+def makeDiffImages(image1, image2):
+    """Helper function to make direct and percentage difference images
+
+    Parameters
+    ----------
+    image1, image2 : `lsst.afw.image.Image` or `lsst.afw.image.MaskedImage` or `lsst.afw.image.Exposure`
+       Images from which to create the difference images.
+
+    Raises
+    ------
+    `RuntimeError`
+       If the bounding boxes of ``image1`` and ``image2`` do not match.
+
+    Returns
+    -------
+    differenceImages : `lsst.pipe.base.Struct`
+       The direct and percent difference images of ``image1`` and ``image2``.
+
+       ``diffImage``
+          The direct difference image (``image1 - ``image2``) (`lsst.afw.image.imageF`).
+       ``percentDiffImage``
+          The percent difference image (`lsst.afw.image.imageF`).
+    """
+    if not image1.getBBox() == image2.getBBox():
+        raise RuntimeError("Bounding boxes of two input images must match (image1 bbox = {0:} "
+                           "vs. image2 bbox {1:}".format(image1.getBBox(), image2.getBBox()))
+    diffImage = afwImage.ImageF(image1.getBBox())
+    imageArray1 = getArrayFromImage(image1)
+    imageArray2 = getArrayFromImage(image2)
+    diffImage.array[:] = imageArray1 - imageArray2
+    percentDiffImage = afwImage.ImageF(image1.getBBox())
+    percentDiffImage.array[:] = 200*(imageArray1 - imageArray2)/(imageArray1 + imageArray2)
+
+    return Struct(
+        diffImage=diffImage,
+        percentDiffImage=percentDiffImage,
+    )
+
+
+def makeAsinhNormFromArray(imageArray, nMinDev=2.5, nMaxDev=8.0, Q=8.0):
+    """Create an Asinh normalization for a given image array
+
+    The minimum and maximum values used for the normalization are set by
+    the (user definable) number of "standard deviations" (the factor 1.4826
+    assumes normally distributed data) below and above the mean absolute
+    deviation (imMad) of the image array, respectively.
+
+    Parameters
+    ----------
+    imageArray : `numpy.ndarray`
+       Image array from which to calculate the Asinh normalization.
+    nMinDev : `float`, optional
+       Number of deviations below 1.4826*imMad of the image to set the scaling
+       minimum value.  Default is 2.5.
+    nMinDev : `float`, optional
+       Number of deviations above 1.4826*imMad of the image to set the scaling
+       maximum value.  Default is 8.0.
+    Q : `float`, optional
+       The asinh softening parameter for asinh stretch.  Use Q=0 for linear stretch,
+       increase Q to make brighter features visible.  Default is 8.0.
+
+    Returns
+    -------
+    asinhNormalization : `lsst.pipe.base.Struct`
+       The asinh nomalization with attrubutes:
+
+       ``norm``
+          The asinh normalization
+          (`lsst.display.matplotlib.matplotlib.AsinhNormalize`).
+       ``imMin``
+          The minimum value used in the data range for the normalization
+          (`float`).
+       ``imMax``
+          The maximum value used in the data range for the normalization
+          (`float`).
+    """
+    imMed = np.nanmedian(imageArray)
+    imMad = np.nanmedian(abs(imageArray - imMed))
+    imMin = imMed - nMinDev*1.4826*imMad
+    imMax = imMed + nMaxDev*1.4826*imMad
+    imMin = -1e-3 if imMin == 0.0 else imMin
+    imMax = 1e-3 if imMax == 0.0 else imMax
+    norm = AsinhNormalize(minimum=imMin, dataRange=imMax - imMin, Q=Q)
+
+    return Struct(
+        norm=norm,
+        imMin=imMin,
+        imMax=imMax,
+        imMed=imMed,
+        imMad=imMad,
+    )
+
+
 def determineUberCalLabel(repoInfo, patch, coaddName="deep"):
     """Determine uber-calibration (meas_mosaic/jointcal) applied to make coadd.
 
@@ -1018,3 +1233,125 @@ def determineUberCalLabel(repoInfo, patch, coaddName="deep"):
         uberCalLabel = "None"
 
     return uberCalLabel
+
+
+def plotDirectionArrows(axes, butler, dataId, camera, xPlotMin, xPlotMax, yPlotMin, yPlotMax):
+    """Plot direction arrows according to the boresight rotation angle
+    This assumes (the LSST defined) FP projected as:
+          +x: E->W (-ve RA), +y: S->N (+ve Dec)
+    at a boresight rotation angle of 0.
+
+    Parameters
+    ----------
+    axes : `matplotlib.axes._axes.Axes`
+       Particular matplotlib axes of ``plt`` on which to plot the annotations.
+    butler : `lsst.daf.persistence.Butler`
+       The butler associated with the dataset.
+    dataId : `lsst.daf.persistence.DataId`
+       An instance of `lsst.daf.persistence.DataId` from which to extract the
+       filter name.
+    camera : `lsst.afw.cameraGeom.Camera`
+       The camera associated with the observation from which to build the
+       visit image.
+    xPlotMin, xPlotMax, yPlotMin, yPlotMax : `float`
+       Plotting limits for the \"x\" and \"y\" coordinates.
+    """
+    calexp = butler.get("calexp", dataId)
+    boresightRotAng = calexp.getInfo().getVisitInfo().getBoresightRotAngle().asRadians()
+    dPix = int(0.08*max((xPlotMax - xPlotMin), (yPlotMax - yPlotMin)))
+    xy0 = (xPlotMin + 1.5*dPix, yPlotMax - 1.6*dPix)
+    # The following just moves the arrows to be as close to the upper left
+    # corner as possible based on the boresight rotation angel.
+    xy0 = (xy0[0] - abs(np.sin(boresightRotAng)*np.cos(boresightRotAng/3.0))*dPix,
+           xy0[1] + abs(np.sin(boresightRotAng/6.0)*np.cos(np.pi/2.0 - boresightRotAng))*dPix)
+    xyNorth = (xy0[0], xy0[1] + dPix)
+    xyEast = (xy0[0] - dPix, xy0[1])
+    rotatedNorth = (rotatePoint(xy0[0], xy0[1], xyNorth[0], xyNorth[1], boresightRotAng))
+    rotatedEast = (rotatePoint(xy0[0], xy0[1], xyEast[0], xyEast[1], boresightRotAng))
+    deltaNx, deltaNy = rotatedNorth[0] - xy0[0], rotatedNorth[1] - xy0[1]
+    deltaEx, deltaEy = rotatedEast[0] - xy0[0], rotatedEast[1] - xy0[1]
+    deltaFrac = 0.06
+    axes.plot(xy0[0], xy0[1], markersize=3, marker="o", color="black")
+    arrowKwargs = dict(xycoords="data", textcoords="data", ha="center", va="center",
+                       arrowprops=dict(arrowstyle="<|-", facecolor="springgreen"))
+    axes.annotate("", xy=xy0, xytext=rotatedNorth, **arrowKwargs)
+    # DECam has flipX = True, but can't access this info until RFC-605 is implemented
+    # on DM-20746
+    if camera.getName() == "DECam":
+        axes.annotate("S", xy=(rotatedNorth[0] + deltaFrac*deltaNx,
+                               rotatedNorth[1] + deltaFrac*deltaNy), fontsize=7, **arrowKwargs)
+    else:
+        axes.annotate("N", xy=(rotatedNorth[0] + deltaFrac*deltaNx,
+                               rotatedNorth[1] + deltaFrac*deltaNy), fontsize=7, **arrowKwargs)
+    axes.annotate("", xy=xy0, xytext=rotatedEast, **arrowKwargs)
+    axes.annotate("E", xy=(rotatedEast[0] + deltaFrac*deltaEx,
+                           rotatedEast[1] + deltaFrac*deltaEy), fontsize=7, **arrowKwargs)
+    return axes
+
+
+def plotSkyLimitLabels(axes, raDecProj, plt=None, butler=None, dataId=None, camera=None, ccdList=None,
+                       tractInfo=None, xPlotMin=None, xPlotMax=None, yPlotMin=None, yPlotMax=None,
+                       raDecMin=None, raDecMax=None, filterLabelStr=""):
+    """Plot limits in pixel and/or RA/Dec units
+
+    Parameters
+    ----------
+    axes : `matplotlib.axes._axes.Axes`
+       Particular matplotlib axes of ``plt`` on which to plot the annotations.
+    plt : `matplotlib.pyplot`
+       Instance of matplotlib pyplot to plot ``textStr``.
+    butler : `lsst.daf.persistence.Butler`, optional
+       The butler associated with the dataset.
+    dataId : `lsst.daf.persistence.DataId`, optional
+       An instance of `lsst.daf.persistence.DataId` from which to extract the
+       filter name.
+    camera : `lsst.afw.cameraGeom.Camera`, optional
+       The camera associated with the observation from which to build the
+       visit image.
+    xPlotMin, xPlotMax, yPlotMin, yPlotMax : `float`, optional
+       Plotting limits for the \"x\" and \"y\" coordinates.
+    """
+    if raDecProj:
+        axes.set_xlabel("RA (deg) {0:s}".format(filterLabelStr))
+        axes.set_ylabel("Dec (deg) {0:s}".format(filterLabelStr))
+    else:
+        axes.set_xlabel("x (pixels) {0:s}".format(filterLabelStr), size=7, labelpad=6)
+        axes.set_ylabel("y (pixels) {0:s}".format(filterLabelStr), size=7)
+        # Get RA and Dec tract/visit limits to add to plot axis labels
+        if tractInfo is not None and ccdList is None:
+            tract00 = tractInfo.getWcs().pixelToSky(xPlotMin, yPlotMin).getPosition(units=geom.degrees)
+            tract0N = tractInfo.getWcs().pixelToSky(xPlotMin, yPlotMax).getPosition(units=geom.degrees)
+            tractN0 = tractInfo.getWcs().pixelToSky(xPlotMax, yPlotMin).getPosition(units=geom.degrees)
+            plot00 = (tract00.getX(), tract00.getY())
+            plot0N = (tract0N.getX(), tract0N.getY())
+            plotN0 = (tractN0.getX(), tractN0.getY())
+
+        xCoordStr = "RA (deg)"
+        yCoordStr = "Dec (deg)"
+        if ccdList is not None and not raDecProj:
+            axes = plotDirectionArrows(axes, butler, dataId, camera, xPlotMin, xPlotMax,
+                                       yPlotMin, yPlotMax)
+            # If boresight is rotated a factor of 90 deg, print the RA and Dec
+            # at the min/max positions of the data
+            calexp = butler.get("calexp", dataId)
+            boresightRotAng = calexp.getInfo().getVisitInfo().getBoresightRotAngle().asRadians()
+            if np.degrees(boresightRotAng)%90 == 0:
+                if np.degrees(boresightRotAng)%180 != 0:
+                    xCoordStr = "Dec (deg)"
+                    yCoordStr = "RA (deg)"
+                    plot00 = geom.Point2D(raDecMin[1], raDecMin[0])
+                    plot0N = geom.Point2D(raDecMin[1], raDecMax[0])
+                    plotN0 = geom.Point2D(raDecMax[1], raDecMin[0])
+                else:
+                    plot00 = raDecMin
+                    plot0N = geom.Point2D(raDecMin[0], raDecMax[1])
+                    plotN0 = geom.Point2D(raDecMax[0], raDecMin[1])
+
+            textKwargs = dict(ha="center", va="center", transform=axes.transAxes, fontsize=6, color="blue")
+            plt.text(0.00, -0.06, str("{:.2f}".format(plot00[0])), **textKwargs)
+            plt.text(-0.16, 0.00, str("{:.2f}".format(plot00[1])), **textKwargs)
+            plt.text(0.99, -0.06, str("{:.2f}".format(plotN0[0])), **textKwargs)
+            plt.text(-0.16, 0.99, str("{:.2f}".format(plot0N[1])), **textKwargs)
+            plt.text(0.5, -0.11, xCoordStr, **textKwargs)
+            plt.text(-0.18, 0.5, yCoordStr, rotation=90, **textKwargs)
+    return axes
