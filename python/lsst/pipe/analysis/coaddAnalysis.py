@@ -33,7 +33,8 @@ from .utils import (Filenamer, Enforcer, MagDiff, MagDiffMatches, MagDiffCompare
                     fluxToPlotString, andCatalog, writeParquet, getRepoInfo, setAliasMaps,
                     addPreComputedColumns, computeMeanOfFrac)
 from .plotUtils import (CosmosLabeller, AllLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
-                        MatchesStarGalaxyLabeller, determineUberCalLabel, buildTractImage)
+                        MatchesStarGalaxyLabeller, determineUberCalLabel, buildTractImage,
+                        getArrayFromImage)
 
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
@@ -357,14 +358,14 @@ class CoaddAnalysisTask(CmdLineTask):
                 self.plotPsfFluxSnHists(unforced,
                                         filenamer(repoInfo.dataId, description="base_PsfFlux_cal",
                                                   style="hist"),
-                                        repoInfo.dataId, tractImage=self.tractImage,
+                                        repoInfo.dataId, fullImage=self.tractImage,
                                         forcedStr="unforced" + self.catLabel, **plotKwargs)
             if self.config.doPlotFootprintNpix:
                 self.plotFootprintHist(forced,
                                        filenamer(repoInfo.dataId, description="footNpix", style="hist"),
                                        repoInfo.dataId, flagsCat=flagsCat, **plotKwargs)
                 self.plotFootprint(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr, flagsCat=flagsCat,
-                                   tractImage=self.tractImage, **plotKwargs)
+                                   fullImage=self.tractImage, **plotKwargs)
 
             if self.config.doPlotQuiver:
                 self.plotQuiver(unforced,
@@ -376,11 +377,11 @@ class CoaddAnalysisTask(CmdLineTask):
                 self.plotInputCounts(unforced, filenamer(repoInfo.dataId, description="inputCounts",
                                                          style="tract"), dataId=repoInfo.dataId,
                                      forcedStr="unforced" + self.catLabel, alpha=0.5,
-                                     tractImage=self.tractImage, doPlotPatchOutline=True, sizeFactor=5.0,
+                                     fullImage=self.tractImage, doPlotPatchOutline=True, sizeFactor=5.0,
                                      maxDiamPix=1000, **plotKwargs)
                 self.plotImageOnly(unforced, filenamer(repoInfo.dataId, description="imageOnly",
                                                        style="tract"), dataId=repoInfo.dataId,
-                                   tractImage=self.tractImage, doPlotPatchOutline=True, **plotKwargs)
+                                   fullImage=self.tractImage, doPlotPatchOutline=True, **plotKwargs)
 
             if self.config.doPlotMags:
                 self.plotMags(unforced, filenamer, repoInfo.dataId, forcedStr="unforced " + self.catLabel,
@@ -592,7 +593,7 @@ class CoaddAnalysisTask(CmdLineTask):
     def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                  patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None,
                  forcedStr=None, fluxToPlotList=None, postFix="", flagsCat=None, highlightList=None,
-                 uberCalLabel=None, tractImage=None):
+                 uberCalLabel=None, fullImage=None):
         if not fluxToPlotList:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
@@ -613,17 +614,17 @@ class CoaddAnalysisTask(CmdLineTask):
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                              zpLabel=zpLabel, forcedStr=forcedStr, uberCalLabel=uberCalLabel,
-                                             highlightList=highlightList, tractImage=tractImage)
+                                             highlightList=highlightList, fullImage=fullImage)
 
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                   patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None, postFix="",
-                  flagsCat=None, uberCalLabel=None, tractImage=None):
+                  flagsCat=None, uberCalLabel=None, fullImage=None):
         enforcer = None
         unitStr = " (milli)" if self.config.toMilli else ""
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                              zpLabel=zpLabel, forcedStr=forcedStr, uberCalLabel=uberCalLabel,
-                             tractImage=tractImage)
+                             fullImage=fullImage)
         for col in ["base_PsfFlux", ]:
             if col + "_instFlux" in catalog.schema:
                 compareCol = "base_SdssShape"
@@ -771,7 +772,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def plotCentroidXY(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                        tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                       forcedStr=None, flagsCat=None, uberCalLabel=None, tractImage=None):
+                       forcedStr=None, flagsCat=None, uberCalLabel=None, fullImage=None):
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in ["base_SdssCentroid_x", "base_SdssCentroid_y"]:
             if col in catalog.schema:
@@ -779,19 +780,19 @@ class CoaddAnalysisTask(CmdLineTask):
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog, catalog[col], "(%s)" % col, shortName, self.config.analysis,
                                    labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
-                                   ).plotFP(dataId, filenamer, self.log, enforcer=enforcer, camera=camera,
-                                            ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
-                                            zpLabel=zpLabel, forcedStr=forcedStr)
+                                   ).plotFP(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
+                                            camera=camera, ccdList=ccdList, hscRun=hscRun,
+                                            matchRadius=matchRadius, zpLabel=zpLabel, forcedStr=forcedStr)
 
     def plotFootprint(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                       tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
                       forcedStr=None, postFix="", flagsCat=None, plotRunStats=False, highlightList=None,
-                      uberCalLabel=None, tractImage=None):
+                      uberCalLabel=None, fullImage=None):
         enforcer = None
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                              zpLabel=zpLabel, forcedStr=forcedStr, uberCalLabel=uberCalLabel,
-                             tractImage=tractImage)
+                             fullImage=fullImage)
         if "calib_psf_used" in catalog.schema:
             shortName = "footNpix_calib_psf_used"
             self.log.info("shortName = {:s}".format(shortName))
@@ -826,7 +827,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def plotPsfFluxSnHists(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                            tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                           forcedStr=None, uberCalLabel=None, tractImage=None, postFix="", flagsCat=None,
+                           forcedStr=None, uberCalLabel=None, fullImage=None, postFix="", flagsCat=None,
                            logPlot=True, density=True, cumulative=-1):
         stats = None
         shortName = "psfInstFlux" if zpLabel == "raw" else "psfCalFlux"
@@ -893,11 +894,11 @@ class CoaddAnalysisTask(CmdLineTask):
                              [self.config.analysis.skyProjection,])
         for raDecProjStr in skyProjectionList:
             raDecProj = (raDecProjStr == "RaDec")
-            plotTractImage = None if raDecProj else tractImage  # only plot image if pixels projection
+            plotTractImage = None if raDecProj else fullImage  # only plot image if pixels projection
             skyplotKwargs = dict(dataId=dataId, butler=butler, stats=stats, camera=camera, ccdList=ccdList,
                                  tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
                                  matchRadius=matchRadius, matchRadiusUnitStr=None, zpLabel=zpLabel,
-                                 tractImage=plotTractImage, raDecProj=raDecProj)
+                                 fullImage=plotTractImage, raDecProj=raDecProj)
             filenamer = filenamer.replace("hist", "sky" + raDecProjStr + "-all")
 
             self.AnalysisClass(catalog, psfSn, "%s" % "S/N = " + shortName, shortName,
@@ -908,12 +909,12 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def plotStarGal(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                     patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
-                    flagsCat=None, uberCalLabel=None, tractImage=None):
+                    flagsCat=None, uberCalLabel=None, fullImage=None):
         enforcer = None
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                              zpLabel=zpLabel, forcedStr=forcedStr, uberCalLabel=uberCalLabel,
-                             tractImage=tractImage)
+                             fullImage=fullImage)
         shortName = "pStar"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(catalog, deconvMomStarGal, "P(star) from deconvolved moments",
@@ -940,7 +941,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def plotCompareUnforced(self, forced, unforced, filenamer, dataId, butler=None, camera=None, ccdList=None,
                             tractInfo=None, patchList=None, hscRun=None, zpLabel=None, fluxToPlotList=None,
-                            uberCalLabel=None, tractImage=None, matchRadius=None, matchRadiusUnitStr=None,
+                            uberCalLabel=None, fullImage=None, matchRadius=None, matchRadiusUnitStr=None,
                             matchControl=None):
         fluxToPlotList = fluxToPlotList if fluxToPlotList else self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
@@ -959,7 +960,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                              matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel,
-                                             uberCalLabel=uberCalLabel, tractImage=tractImage)
+                                             uberCalLabel=uberCalLabel, fullImage=fullImage)
 
     def isBad(self, source):
         """Return True if any of config.badFlags are set for this source."""
@@ -980,7 +981,7 @@ class CoaddAnalysisTask(CmdLineTask):
     def plotOverlaps(self, overlaps, filenamer, dataId, butler=None, camera=None, ccdList=None,
                      tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
                      zpLabel=None, forcedStr=None, postFix="", fluxToPlotList=None, flagsCat=None,
-                     uberCalLabel=None, tractImage=None):
+                     uberCalLabel=None, fullImage=None):
         if not fluxToPlotList:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
@@ -988,7 +989,7 @@ class CoaddAnalysisTask(CmdLineTask):
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                              matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, forcedStr=forcedStr,
-                             uberCalLabel=uberCalLabel, tractImage=tractImage)
+                             uberCalLabel=uberCalLabel, fullImage=fullImage)
         for col in fluxToPlotList:
             shortName = "overlap_" + col + postFix
             self.log.info("shortName = {:s}".format(shortName))
@@ -1017,14 +1018,14 @@ class CoaddAnalysisTask(CmdLineTask):
     def plotMatches(self, matches, filterName, filenamer, dataId, description="matches", butler=None,
                     camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None,
                     matchRadiusUnitStr=None, zpLabel=None, forcedStr=None, flagsCat=None, uberCalLabel=None,
-                    tractImage=None):
+                    fullImage=None):
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.030*self.unitScale}}),
         fluxToPlotList = ["base_PsfFlux_instFlux", "base_CircularApertureFlux_12_0_instFlux"]
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                              matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, forcedStr=forcedStr,
-                             uberCalLabel=uberCalLabel, tractImage=tractImage)
+                             uberCalLabel=uberCalLabel, fullImage=fullImage)
         if self.config.doApplyColorTerms:
             ct = self.config.colorterms.getColorterm(filterName, self.config.refObjLoader.ref_dataset_name)
         else:
@@ -1187,14 +1188,14 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def plotQuiver(self, catalog, filenamer, dataId=None, butler=None, camera=None, ccdList=None,
                    tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                   forcedStr=None, postFix="", flagsCat=None, uberCalLabel=None, scale=1, tractImage=None):
+                   forcedStr=None, postFix="", flagsCat=None, uberCalLabel=None, scale=1, fullImage=None):
         stats = None
         shortName = "quiver"
         skyProjectionList = (["RaDec", "Pixels"] if self.config.analysis.skyProjection == "both" else
                              [self.config.analysis.skyProjection,])
         for raDecProjStr in skyProjectionList:
             raDecProj = (raDecProjStr == "RaDec")
-            plotTractImage = None if raDecProj else tractImage  # only plot image if pixels projection
+            plotTractImage = None if raDecProj else fullImage  # only plot image if pixels projection
             self.log.info("shortName = {:s}".format(shortName + raDecProjStr))
             filenamer = filenamer.replace("quiver", "quiver-sky" + raDecProjStr + "-stars")
             self.AnalysisClass(catalog, None, "%s" % shortName, shortName,
@@ -1203,12 +1204,12 @@ class CoaddAnalysisTask(CmdLineTask):
                                             butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                             patchList=patchList, hscRun=hscRun, zpLabel=zpLabel,
                                             forcedStr=forcedStr, uberCalLabel=uberCalLabel, scale=scale,
-                                            tractImage=plotTractImage, raDecProj=raDecProj)
+                                            fullImage=plotTractImage, raDecProj=raDecProj)
             filenamer = filenamer.replace("quiver-sky" + raDecProjStr + "-stars", "quiver")
 
     def plotInputCounts(self, catalog, filenamer, dataId, butler=None, tractInfo=None, patchList=None,
                         camera=None, hscRun=None, zpLabel=None, forcedStr=None, uberCalLabel=None,
-                        tractImage=None, doPlotPatchOutline=True, alpha=0.5, sizeFactor=5.0,
+                        fullImage=None, doPlotPatchOutline=True, alpha=0.5, sizeFactor=5.0,
                         maxDiamPix=1000):
         shortName = "inputCounts"
         self.log.info("shortName = {:s}".format(shortName))
@@ -1216,20 +1217,27 @@ class CoaddAnalysisTask(CmdLineTask):
                            self.config.analysis, labeller=None,
                            ).plotInputCounts(catalog, filenamer, self.log, dataId, butler, tractInfo,
                                              patchList=patchList, camera=camera, forcedStr=forcedStr,
-                                             uberCalLabel=uberCalLabel, alpha=alpha, tractImage=tractImage,
+                                             uberCalLabel=uberCalLabel, alpha=alpha, fullImage=fullImage,
                                              doPlotPatchOutline=doPlotPatchOutline, sizeFactor=sizeFactor,
                                              maxDiamPix=maxDiamPix)
 
-    def plotImageOnly(self, catalog, filenamer, dataId=None, butler=None, tractImage=None, tractInfo=None,
-                      patchList=None, camera=None, hscRun=None, zpLabel=None, forcedStr=None,
-                      uberCalLabel=None, doPlotPatchOutline=True):
+    def plotImageOnly(self, catalog, filenamer, dataId=None, butler=None, fullImage=None, tractInfo=None,
+                      patchList=None, ccdList=None, camera=None, hscRun=None, zpLabel=None, forcedStr=None,
+                      uberCalLabel=None, doPlotPatchOutline=True, binSize=None):
         shortName = "imageOnly"
-        self.log.info("shortName = {:s}".format(shortName))
+        searchStr = "-visit" if filenamer.find("-visit") > 0 else "-tract"
+        if filenamer.startswith("compare"):
+            descriptionStr = filenamer[filenamer.find("Only") + 4:filenamer.find(searchStr)]
+        else:
+            descriptionStr = searchStr[1:]
+        self.log.info("shortName = {:s} (description = {:s})".format(shortName, descriptionStr))
         self.AnalysisClass(catalog, None, "%s" % shortName, shortName,
                            self.config.analysis, labeller=None,
-                           ).plotImageOnly(filenamer, self.log, dataId, butler, tractImage, tractInfo,
-                                           patchList=patchList, camera=camera, uberCalLabel=uberCalLabel,
-                                           doPlotPatchOutline=doPlotPatchOutline)
+                           ).plotImageOnly(filenamer, self.log, dataId, butler, fullImage,
+                                           tractInfo=tractInfo, patchList=patchList, ccdList=ccdList,
+                                           camera=camera, uberCalLabel=uberCalLabel,
+                                           doPlotPatchOutline=doPlotPatchOutline, zpLabel=zpLabel,
+                                           binSize=binSize)
 
     def _getConfigName(self):
         return None
@@ -1427,12 +1435,12 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                            zpLabel=self.zpLabel, uberCalLabel=self.uberCalLabel)
 
         self.plotImageOnly(unforced, filenamer(repoInfo1.dataId, description="imageOnlyDiff", style="tract"),
-                           repoInfo1.dataId, butler=repoInfo1.butler, tractImage=self.tractImageDiff,
+                           repoInfo1.dataId, butler=repoInfo1.butler, fullImage=self.tractImageDiff,
                            tractInfo=repoInfo1.tractInfo, patchList=patchList1, camera=repoInfo1.camera,
                            cmap="viridis", uberCalLabel=self.uberCalLabel)
         self.plotImageOnly(unforced, filenamer(repoInfo1.dataId, description="imageOnlyPercentDiff",
                                                style="tract"),
-                           repoInfo1.dataId, butler=repoInfo1.butler, tractImage=self.tractImagePercDiff,
+                           repoInfo1.dataId, butler=repoInfo1.butler, fullImage=self.tractImagePercDiff,
                            tractInfo=repoInfo1.tractInfo, patchList=patchList1, camera=repoInfo1.camera,
                            cmap="viridis", uberCalLabel=self.uberCalLabel)
 
@@ -1443,7 +1451,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             if ("first_base_SdssShape_psf_xx" in forced.schema and
                "second_base_SdssShape_psf_xx" in forced.schema):
                 self.plotSizes(forced, filenamer, repoInfo1.dataId, forcedStr=forcedStr,
-                               tractImage=self.tractImagePercDiff, **plotKwargs1)
+                               fullImage=self.tractImagePercDiff, **plotKwargs1)
             else:
                 self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
 
@@ -1489,7 +1497,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
     def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                  patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None,
                  forcedStr=None, fluxToPlotList=None, postFix="", flagsCat=None, highlightList=None,
-                 uberCalLabel=None, tractImage=None):
+                 uberCalLabel=None, fullImage=None):
         if not fluxToPlotList:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
@@ -1510,12 +1518,12 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                    hscRun=hscRun, matchRadius=matchRadius,
                                    matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel,
                                    uberCalLabel=uberCalLabel, forcedStr=forcedStr,
-                                   highlightList=highlightList, tractImage=tractImage)
+                                   highlightList=highlightList, fullImage=fullImage)
 
     def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                       tractInfo=None, patchList=None, hscRun=None, hscRun1=None, hscRun2=None,
                       matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None,
-                      flagsCat=None, highlightList=None, uberCalLabel=None, tractImage=None):
+                      flagsCat=None, highlightList=None, uberCalLabel=None, fullImage=None):
         unitStr = "milliPixels" if self.config.toMilli else "pixels"
         distEnforcer = None
         centroidStr1, centroidStr2 = "base_SdssCentroid", "base_SdssCentroid"
@@ -1527,7 +1535,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                              matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, forcedStr=forcedStr,
-                             uberCalLabel=uberCalLabel, tractImage=tractImage)
+                             uberCalLabel=uberCalLabel, fullImage=fullImage)
 
         shortName = "diff_x"
         self.log.info("shortName = {:s}".format(shortName))
@@ -1573,13 +1581,13 @@ class CompareCoaddAnalysisTask(CmdLineTask):
     def plotFootprint(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                       tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
                       zpLabel=None, forcedStr=None, postFix="", flagsCat=None, highlightList=None,
-                      uberCalLabel=None, tractImage=None):
+                      uberCalLabel=None, fullImage=None):
         enforcer = None
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                              matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel,
                              forcedStr=forcedStr, uberCalLabel=uberCalLabel, postFix=postFix,
-                             tractImage=tractImage)
+                             fullImage=fullImage)
         shortName = "diff_footNpix"
         col = "base_Footprint_nPix"
         self.log.info("shortName = {:s}".format(shortName))
@@ -1598,12 +1606,12 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                   patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None,
-                  forcedStr=None, uberCalLabel=None, tractImage=None):
+                  forcedStr=None, uberCalLabel=None, fullImage=None):
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                              matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, forcedStr=forcedStr,
-                             uberCalLabel=uberCalLabel, tractImage=tractImage)
+                             uberCalLabel=uberCalLabel, fullImage=fullImage)
         for col in ["base_PsfFlux"]:
             if ("first_" + col + "_instFlux" in catalog.schema and
                "second_" + col + "_instFlux" in catalog.schema):
@@ -1678,12 +1686,12 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
     def plotStarGal(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                     patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None,
-                    forcedStr=None, flagsCat=None, uberCalLabel=None, tractImage=None):
+                    forcedStr=None, flagsCat=None, uberCalLabel=None, fullImage=None):
         enforcer = None
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                              matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, forcedStr=forcedStr,
-                             uberCalLabel=uberCalLabel, tractImage=tractImage)
+                             uberCalLabel=uberCalLabel, fullImage=fullImage)
         col = "ext_shapeHSM_HsmShapeRegauss_resolution"
         if "first_" + col in catalog.schema:
             shortName = "diff_resolution"
@@ -1742,15 +1750,18 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                 else:
                     self.log.warn("No valid data points for shortName = {:s}.  Skipping...".format(shortName))
 
-    def plotImageOnly(self, catalog, filenamer, dataId=None, butler=None, tractImage=None, tractInfo=None,
-                      patchList=None, camera=None, uberCalLabel=None, cmap="viridis", doPlotPatchOutline=True):
+    def plotImageOnly(self, catalog, filenamer, dataId=None, butler=None, fullImage=None, tractInfo=None,
+                      patchList=None, ccdList=None, camera=None, uberCalLabel=None, cmap="viridis",
+                      doPlotPatchOutline=True, zpLabel=None, binSize=None):
         shortName = "imageOnly"
-        self.log.info("shortName = {:s}".format(shortName))
-
+        self.log.info("shortName = {:s} (description = {:s})".format(
+            shortName, filenamer[filenamer.find("Only") + 4:filenamer.find("-visit")]))
         Analysis(catalog, None, "%s" % shortName, shortName, self.config.analysis, prefix="first_",
-                 labeller=None).plotImageOnly(filenamer, self.log, dataId, butler, tractImage, tractInfo,
-                                              patchList=patchList, camera=camera, uberCalLabel=uberCalLabel,
-                                              cmap=cmap, doPlotPatchOutline=doPlotPatchOutline)
+                 labeller=None).plotImageOnly(filenamer, self.log, dataId, butler, fullImage,
+                                              tractInfo=tractInfo, patchList=patchList, ccdList=ccdList,
+                                              camera=camera, uberCalLabel=uberCalLabel, cmap=cmap,
+                                              doPlotPatchOutline=doPlotPatchOutline, zpLabel=zpLabel,
+                                              binSize=binSize)
 
     def _getConfigName(self):
         return None
