@@ -1289,7 +1289,7 @@ def plotDirectionArrows(axes, butler, dataId, camera, xPlotMin, xPlotMax, yPlotM
     return axes
 
 
-def plotSkyLimitLabels(axes, raDecProj, plt=None, butler=None, dataId=None, camera=None, ccdList=None,
+def plotSkyLimitLabels(axes, raDecProj, plt, butler=None, dataId=None, camera=None, ccdList=None,
                        tractInfo=None, xPlotMin=None, xPlotMax=None, yPlotMin=None, yPlotMax=None,
                        raDecMin=None, raDecMax=None, filterLabelStr=""):
     """Plot limits in pixel and/or RA/Dec units
@@ -1347,11 +1347,11 @@ def plotSkyLimitLabels(axes, raDecProj, plt=None, butler=None, dataId=None, came
                     plot0N = geom.Point2D(raDecMin[0], raDecMax[1])
                     plotN0 = geom.Point2D(raDecMax[0], raDecMin[1])
 
-            textKwargs = dict(ha="center", va="center", transform=axes.transAxes, fontsize=6, color="blue")
-            plt.text(0.00, -0.06, str("{:.2f}".format(plot00[0])), **textKwargs)
-            plt.text(-0.16, 0.00, str("{:.2f}".format(plot00[1])), **textKwargs)
-            plt.text(0.99, -0.06, str("{:.2f}".format(plotN0[0])), **textKwargs)
-            plt.text(-0.16, 0.99, str("{:.2f}".format(plot0N[1])), **textKwargs)
-            plt.text(0.5, -0.11, xCoordStr, **textKwargs)
-            plt.text(-0.18, 0.5, yCoordStr, rotation=90, **textKwargs)
+        textKwargs = dict(ha="center", va="center", transform=axes.transAxes, fontsize=6, color="blue")
+        plt.text(0.00, -0.06, str("{:.2f}".format(plot00[0])), **textKwargs)
+        plt.text(-0.16, 0.00, str("{:.2f}".format(plot00[1])), **textKwargs)
+        plt.text(0.99, -0.06, str("{:.2f}".format(plotN0[0])), **textKwargs)
+        plt.text(-0.16, 0.99, str("{:.2f}".format(plot0N[1])), **textKwargs)
+        plt.text(0.5, -0.11, xCoordStr, **textKwargs)
+        plt.text(-0.18, 0.5, yCoordStr, rotation=90, **textKwargs)
     return axes
