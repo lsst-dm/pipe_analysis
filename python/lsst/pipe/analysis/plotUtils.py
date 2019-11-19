@@ -229,7 +229,8 @@ def annotateAxes(filename, plt, axes, statsConf, dataSet, magThresholdConf, sign
        values (used for plot legends).
     """
     xThresh = axes.get_xlim()[0] + 0.58*(axes.get_xlim()[1] - axes.get_xlim()[0])
-    for stats, magThreshold, signalToNoiseStr, y00 in [[statsConf, magThresholdConf, signalToNoiseStrConf, y0],
+    for stats, magThreshold, signalToNoiseStr, y00 in [[statsConf, magThresholdConf, signalToNoiseStrConf,
+                                                        y0],
                                                        [statsHigh, magThresholdHigh, signalToNoiseHighStr,
                                                         0.18]]:
         axes.annotate(dataSet + r" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]),
@@ -345,7 +346,7 @@ def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
             break
     for ic, ccd in enumerate(camera):
         ccdCorners = ccd.getCorners(cameraGeom.FOCAL_PLANE)
-        if ccd.getType() == cameraGeom.SCIENCE:
+        if ccd.getType() == cameraGeom.DetectorType.SCIENCE:
             plt.gca().add_patch(patches.Rectangle(ccdCorners[0], *list(ccdCorners[2] - ccdCorners[0]),
                                                   facecolor="none", edgecolor="k", ls="solid", lw=0.5,
                                                   alpha=0.5))
@@ -356,7 +357,7 @@ def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
             elif ccd.getName()[0] == "R":
                 try:
                     fillColor = colors[(int(ccd.getName()[1]) + int(ccd.getName()[2]))%len(colors)]
-                except:
+                except Exception:
                     fillColor = colors[ic%len(colors)]
             else:
                 fillColor = colors[ic%len(colors)]
@@ -484,7 +485,7 @@ def plotCcdOutline(axes, butler, dataId, camera, ccdList, tractInfo=None, zpLabe
         dataIdCopy[ccdKey] = ccd
         calexp = butler.get("calexp", dataIdCopy)
         dataRef = butler.dataRef("raw", dataId=dataIdCopy)
-        detector = camera[ccd]
+        detector = calexp.getDetector()
         # Check metadata to see if stack used was HSC
         metadata = butler.get("calexp_md", dataIdCopy)
         hscRun = checkHscStack(metadata)
@@ -781,17 +782,17 @@ def getMinMaxCcdList(ccdList, dataId, butler, nDecimals=None, zpLabel=None, raMi
        Initiate minimum[maximum] Dec determination in degrees at
        ``decMin``[``decMax``].
     xMin, xMax : `float`, optional
-       Initiate minimum[maximum] x determination in pixels at
+       Initiate minimum[maximum] x determination in focal plane pixels at
        ``xMin``[``xMax``].
     yMin, yMax : `float`, optional
-       Initiate minimum[maximum] y determination in pixels at
+       Initiate minimum[maximum] y determination in focal plane pixels at
        ``yMin``[``yMax``].
 
     Returns
     -------
     `lsst.pipe.base.Struct`
        Contains the min and max values for the ccd list provided in
-       RA/Dec (degrees) and tract x/y (pixels).
+       RA/Dec (degrees) and focal plane x/y (pixels).
     """
     dataIdCopy = dataId.copy()
     dataIdCopy = popIdAndCcdKeys(dataIdCopy)
@@ -799,6 +800,7 @@ def getMinMaxCcdList(ccdList, dataId, butler, nDecimals=None, zpLabel=None, raMi
     for ccd in ccdList:
         dataIdCopy[ccdKey] = ccd
         calexp = butler.get("calexp", dataIdCopy)
+        detector = calexp.getDetector()
         dataRef = butler.dataRef("raw", dataId=dataIdCopy)
         if zpLabel and (zpLabel == "MEAS_MOSAIC" or "MEAS_MOSAIC_1" in zpLabel):
             applyMosaicResultsExposure(dataRef, calexp=calexp)
