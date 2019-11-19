@@ -403,7 +403,7 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
 
     tractRa, tractDec = bboxToXyCoordLists(tractInfo.getBBox(), wcs=tractInfo.getWcs())
     patchBoundary = getMinMaxPatchList(patchList, tractInfo)
-    if maxDegBeyondPatch > 0 :
+    if maxDegBeyondPatch > 0:
         patchBoundary.raMin -= maxDegBeyondPatch
         patchBoundary.raMax += maxDegBeyondPatch
         patchBoundary.decMin -= maxDegBeyondPatch
