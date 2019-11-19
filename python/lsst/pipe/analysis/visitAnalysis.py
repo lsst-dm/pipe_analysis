@@ -22,7 +22,9 @@ from .utils import (Filenamer, AngularDistance, concatenateCatalogs, addAperture
                     calibrateSourceCatalog, backoutApCorr, matchNanojanskyToAB, andCatalog, writeParquet,
                     getRepoInfo, getCcdNameRefList, getDataExistsRefList, setAliasMaps,
                     addPreComputedColumns)
-from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText
+from .plotUtils import (annotateAxes, labelVisit, labelCamera, plotText, getMinMaxCcdList,
+                        computeEqualAspectLimits, makeAlphaCmap, buildVisitImage, getArrayFromImage,
+                        makeDiffImages, makeAsinhNormFromArray, plotDirectionArrows)
 from .fakesAnalysis import (addDegreePositions, matchCatalogs, addNearestNeighbor, fakesPositionCompare,
                             getPlotInfo, fakesAreaDepth, fakesMagnitudeCompare, fakesMagnitudeNearestNeighbor,
                             fakesMagnitudeBlendedness, fakesCompletenessPlot)
@@ -35,7 +37,7 @@ class CcdAnalysis(Analysis):
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
                 tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
                 zpLabel=None, forcedStr=None, uberCalLabel=None, postFix="", plotRunStats=True,
-                highlightList=None, haveFpCoords=None, doPrintMedian=False, tractImage=None):
+                highlightList=None, haveFpCoords=None, doPrintMedian=False, fullImage=None):
         stats = self.stats
         if self.config.doPlotCcdXy:
             self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix),
@@ -43,7 +45,7 @@ class CcdAnalysis(Analysis):
                          matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel)
         if self.config.doPlotFP and haveFpCoords:
             self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa" + postFix),
-                                stats=stats, camera=camera, ccdList=ccdList, hscRun=hscRun,
+                                stats=stats, butler=butler, camera=camera, ccdList=ccdList, hscRun=hscRun,
                                 matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
                                 zpLabel=zpLabel)
 
@@ -53,11 +55,12 @@ class CcdAnalysis(Analysis):
                                 plotRunStats=plotRunStats, highlightList=highlightList,
                                 doPrintMedian=doPrintMedian)
 
-    def plotFP(self, dataId, filenamer, log, enforcer=None, camera=None, ccdList=None, hscRun=None,
-               matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None):
+    def plotFP(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
+               hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None):
         self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa"), stats=self.stats,
-                            camera=camera, ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
-                            matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, forcedStr=forcedStr)
+                            butler=butler, camera=camera, dataId=dataId, ccdList=ccdList, hscRun=hscRun,
+                            matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                            zpLabel=zpLabel, forcedStr=forcedStr)
 
     def plotCcd(self, filename, centroid="base_SdssCentroid", cmap=plt.cm.nipy_spectral, idBits=32,
                 visitMultiplier=200, stats=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
@@ -118,12 +121,18 @@ class CcdAnalysis(Analysis):
         fig.savefig(filename)
         plt.close(fig)
 
-    def plotFocalPlane(self, filename, cmap=plt.cm.Spectral, stats=None, camera=None, ccdList=None,
-                       hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None,
-                       fontSize=8):
+    def plotFocalPlane(self, filename, cmap=plt.cm.viridis, stats=None, butler=None, camera=None,
+                       dataId=None, ccdList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
+                       zpLabel=None, forcedStr=None, fontSize=8, doPlotVisitImage=True,
+                       doApplyUberCal=False):
         """Plot quantity colormaped on the focal plane"""
         xFp = self.catalog[self.prefix + "base_FPPosition_x"]
         yFp = self.catalog[self.prefix + "base_FPPosition_y"]
+        unitStr = " (mm)"
+        if doPlotVisitImage:
+            unitStr = " (pixels)"
+            xFp = self.catalog[self.prefix + "base_FPPosition_Pixels_x"]
+            yFp = self.catalog[self.prefix + "base_FPPosition_Pixels_y"]
         good = (self.mag < self.config.magThreshold if self.config.magThreshold > 0 else
                 np.ones(len(self.mag), dtype=bool))
         if "galaxy" in self.data and "calib_psf_used" not in self.goodKeys:
@@ -132,36 +141,73 @@ class CcdAnalysis(Analysis):
             vMin, vMax = self.qMin, self.qMax
         # Set limits to ccd pixel ranges when plotting the centroids (which are in pixel units)
         if filename.find("Centroid") > -1:
-            cmap = plt.cm.pink
+            cmap = plt.cm.pink if not doPlotVisitImage else cmap
             vMin = min(0, np.round(self.data["star"].quantity.min() - 10))
             vMax = np.round(self.data["star"].quantity.max() + 50, -2)
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.7"))
         axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=fontSize)
+
+        if doPlotVisitImage:
+            cmap = makeAlphaCmap(cmap=cmap, alpha=0.5)
+            image, binSize = buildVisitImage(butler, dataId, camera, ccdList=ccdList, dataType="calexp",
+                                             doApplyExternalPhotoCalib=doApplyUberCal)
+            imageArray = getArrayFromImage(image)
+            asinhNorm = makeAsinhNormFromArray(imageArray, nMinDev=2.0, nMaxDev=5.0, Q=8)
+            ccdBoundary = getMinMaxCcdList(ccdList, dataId, butler, nDecimals=3, zpLabel=zpLabel)
+            extent = ccdBoundary.xMin, ccdBoundary.xMax, ccdBoundary.yMin, ccdBoundary.yMax
+            axes.imshow(imageArray, extent=extent, cmap="gray_r", norm=asinhNorm.norm)
+
         for name, data in self.data.items():
             if not data.plot:
                 continue
             if len(data.mag) == 0:
                 continue
             selection = data.selection & good
-            axes.scatter(xFp[selection], yFp[selection], s=2, marker="o", lw=0,
-                         c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax)
-        axes.set_xlabel("x_fpa (mm)")
-        axes.set_ylabel("y_fpa (mm)")
+            marker = "o" if name == "star" else "*"
+            labelStr = "N$_{star}$" if name == "star" else "N$_{gal}$ "
+            axes.scatter(xFp[selection], yFp[selection], s=0.5, marker=marker, lw=0.5,
+                         c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax,
+                         label=labelStr + " = {0} [mag<{1:.1f}]".format(len(xFp[selection]),
+                                                                        self.config.magThreshold))
 
+        filterStr = None
+        if dataId is not None:
+            try:
+                filterStr = dataId["filter"]
+            except Exception:
+                pass
+        if filterStr:
+            if camera is not None:
+                if len(filterStr) < len(camera.getName()):
+                    filterStr = camera.getName() + "-" + filterStr
+            filterStr = " [" + filterStr + "]"
+        axes.set_xlabel("xFocalPlane" + unitStr + filterStr)
+        axes.set_ylabel("yFocalPlane" + unitStr + filterStr)
+        plotLimits = computeEqualAspectLimits(axes.get_xlim()[0], axes.get_xlim()[1],
+                                              axes.get_ylim()[0], axes.get_ylim()[1], percentPad=5.0)
+        xPlotMin, xPlotMax = plotLimits.xPlotMin, plotLimits.xPlotMax
+        yPlotMin, yPlotMax = plotLimits.yPlotMin, plotLimits.yPlotMax
+        axes.set_xlim(xPlotMin, xPlotMax)
+        axes.set_ylim(yPlotMin, yPlotMax)
+
+        axes = plotDirectionArrows(axes, butler, dataId, camera, xPlotMin, xPlotMax, yPlotMin, yPlotMax)
         mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vMin, vmax=vMax))
         mappable._A = []        # fake up the array of the scalar mappable. Urgh...
         cb = plt.colorbar(mappable)
+        cb.ax.tick_params(labelsize=7)
         cb.set_label(self.quantityName, rotation=270, labelpad=15)
+        axes.legend(loc="upper right", markerscale=3, fontsize=5)
         if hscRun:
             axes.set_title("HSC stack run: " + hscRun, color="#800080")
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if camera:
             labelCamera(camera, plt, axes, 0.5, 1.09)
         if zpLabel:
-            plotText(zpLabel, plt, axes, 0.08, -0.1, prefix="zp: ", color="green")
+            plotText(zpLabel, plt, axes, 0.08, -0.1, prefix="zp: ", color="green", size=7)
         if forcedStr:
-            plotText(forcedStr, plt, axes, 0.86, -0.1, prefix="cat: ", color="green")
-        fig.savefig(filename)
+            plotText(forcedStr, plt, axes, 0.86, -0.1, prefix="cat: ", color="green", size=7)
+        dpi = 600 if doPlotVisitImage else 150
+        fig.savefig(filename, dpi=dpi)
         plt.close(fig)
 
 
@@ -316,6 +362,22 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                         self.log.info("Exiting after writing Parquet tables.  No plots generated.")
                         return
 
+                # Build visit image for imageOnly plot and/or sky backdrop
+                self.visitImageRaw = None
+                if repoInfo.butler.datasetExists("raw", repoInfo.dataId):
+                    self.visitImageRaw, binSize = buildVisitImage(
+                        repoInfo.butler, repoInfo.dataId, repoInfo.camera, ccdList=ccdListPerTract,
+                        dataType="raw", doApplyExternalPhotoCalib=None)
+                else:
+                    self.log.info("Butler could not locate \"raw\" for dataId: {:}.  Skipping "
+                                  "imageOnlyRaw plots.".format(repoInfo.dataId))
+                self.visitImage, binSize = buildVisitImage(
+                    repoInfo.butler, repoInfo.dataId, repoInfo.camera, ccdList=ccdListPerTract,
+                    doApplyExternalPhotoCalib=None)
+                if self.config.doApplyUberCal:
+                    self.visitImageUberCal, binSize = buildVisitImage(
+                        repoInfo.butler, repoInfo.dataId, repoInfo.camera, ccdList=ccdListPerTract,
+                        doApplyExternalPhotoCalib=self.config.doApplyUberCal)
                 # purge the catalogs of flagged sources
                 catalog = catalog[~bad].copy(deep=True)
                 commonZpCat = commonZpCat[~badCommonZp].copy(deep=True)
@@ -352,7 +414,23 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
                 # Dict of all parameters common to plot* functions
                 plotKwargs = dict(butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
-                                  hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo)
+                                  hscRun=repoInfo.hscRun, tractInfo=None)
+                if self.visitImageRaw is not None:
+                    self.plotImageOnly(catalog, filenamer(repoInfo.dataId, description="imageOnlyRaw",
+                                                          style="visit"),
+                                       dataId=repoInfo.dataId, fullImage=self.visitImageRaw, zpLabel="Raw",
+                                       binSize=binSize, **plotKwargs)
+                self.plotImageOnly(catalog, filenamer(repoInfo.dataId, description="imageOnlyCalexp",
+                                                      style="visit"),
+                                   dataId=repoInfo.dataId, fullImage=self.visitImage, zpLabel=None,
+                                   binSize=binSize, **plotKwargs)
+                if self.config.doApplyUberCal:
+                    self.plotImageOnly(catalog, filenamer(repoInfo.dataId, description="imageOnlyUberCal",
+                                                          style="visit"),
+                                       dataId=repoInfo.dataId, fullImage=self.visitImageUberCal,
+                                       zpLabel=self.zpLabel, binSize=binSize, **plotKwargs)
+                plotKwargs.update(dict(tractInfo=repoInfo.tractInfo))
+
                 if self.config.doPlotPsfFluxSnHists:
                     self.plotPsfFluxSnHists(commonZpCat,
                                             filenamer(repoInfo.dataId, description="base_PsfFlux_raw",
@@ -920,12 +998,56 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
 
             # Dict of all parameters common to plot* functions
+            plotKwargs1 = dict(butler=repoInfo1.butler, camera=repoInfo1.camera, ccdList=ccdListPerTract1,
+                              tractInfo=None)
+            # Build visit image for imageOnly comparison plot
+            self.visitImage1, binSize1 = buildVisitImage(repoInfo1.butler, repoInfo1.dataId, repoInfo1.camera,
+                                                         ccdList=ccdListPerTract1,
+                                                         doApplyExternalPhotoCalib=None)
+            self.visitImage2, binSize2 = buildVisitImage(repoInfo2.butler, repoInfo2.dataId, repoInfo2.camera,
+                                                         ccdList=ccdListPerTract2,
+                                                         doApplyExternalPhotoCalib=None)
+            visitDiffCalexps = makeDiffImages(self.visitImage1, self.visitImage2)
+            self.plotImageOnly(catalog, filenamer(repoInfo1.dataId, description="imageOnlyCalexpDiff",
+                                                   style="visit"), dataId=repoInfo1.dataId,
+                               # butler=repoInfo1.butler, camera=repoInfo1.camera, ccdList=ccdListPerTract1,
+                               fullImage=visitDiffCalexps.diffImage, cmap="viridis", zpLabel="FLUXMAG0",
+                               binSize=binSize1, **plotKwargs1)
+            self.plotImageOnly(catalog, filenamer(repoInfo1.dataId, description="imageOnlyCalexpPercentDiff",
+                                                   style="visit"), dataId=repoInfo1.dataId,
+                               fullImage=visitDiffCalexps.percentDiffImage, cmap="viridis",
+                               zpLabel="FLUXMAG0", binSize=binSize1, **plotKwargs1)
+
+            if self.config.doApplyUberCal1 or self.config.doApplyUberCal2:
+                self.visitImageExternalPhotoCalib1, binSize1 = (
+                    buildVisitImage(repoInfo1.butler, repoInfo1.dataId,
+                                    repoInfo1.camera, ccdList=ccdListPerTract1,
+                                    doApplyExternalPhotoCalib=self.config.doApplyUberCal1))
+                self.visitImageExternalPhotoCalib2, binSize2 = (
+                    buildVisitImage(repoInfo2.butler, repoInfo2.dataId,
+                                    repoInfo2.camera, ccdList=ccdListPerTract2,
+                                    doApplyExternalPhotoCalib=self.config.doApplyUberCal2))
+                visitDiffExternalPhotoCalibs = makeDiffImages(self.visitImageExternalPhotoCalib1,
+                                                              self.visitImageExternalPhotoCalib2)
+                self.plotImageOnly(catalog, filenamer(repoInfo1.dataId, description="imageOnlyPhotoCalibDiff",
+                                                      style="visit"), dataId=repoInfo1.dataId,
+                                   fullImage=visitDiffExternalPhotoCalibs.diffImage, cmap="viridis",
+                                   zpLabel=self.zpLabel, binSize=binSize1, **plotKwargs1)
+                self.plotImageOnly(catalog, filenamer(repoInfo1.dataId,
+                                                      description="imageOnlyPhotoCalibPercentDiff",
+                                                      style="visit"), dataId=repoInfo1.dataId,
+                                   fullImage=visitDiffExternalPhotoCalibs.percentDiffImage, cmap="viridis",
+                                   zpLabel=self.zpLabel, binSize=binSize1, **plotKwargs1)
+
+
+            # Dict of all parameters common to plot* functions
             tractInfo1 = repoInfo1.tractInfo if self.config.doApplyUberCal1 else None
             tractInfo2 = repoInfo2.tractInfo if self.config.doApplyUberCal2 else None
             tractInfo = tractInfo1 if (tractInfo1 or tractInfo2) else None
-            plotKwargs1 = dict(butler=repoInfo1.butler, camera=repoInfo1.camera, hscRun=hscRun,
+            plotKwargs1 = dict(butler=repoInfo1.butler, camera=repoInfo1.camera, zpLabel=self.zpLabel,
                                matchRadius=self.matchRadius, matchRadiusUnitStr=self.matchRadiusUnitStr,
-                               zpLabel=self.zpLabel, tractInfo=tractInfo)
+                               tractInfo=tractInfo, hscRun=hscRun)
+
 
             if self.config.doPlotFootprintNpix:
                 self.plotFootprint(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
@@ -1006,8 +1128,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         catList2 = []
         commonZpCatList2 = []
         self.haveFpCoords = True
-        self.zpLabel1 = "FLUXMAG0"
-        self.zpLabel2 = "FLUXMAG0"
+        self.zpLabel1 = None
+        self.zpLabel2 = None
         for iCat, catList, commonZpCatList, dataRefList, repoInfo, doApplyUberCal, useMeasMosaic in [
                 [1, catList1, commonZpCatList1, dataRefList1, repoInfo1,
                  self.config.doApplyUberCal1, self.config.useMeasMosaic1],
