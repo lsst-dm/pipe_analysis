@@ -1,12 +1,13 @@
+setupRequired(astropy)
 setupRequired(matplotlib)
 setupRequired(numpy)
 setupRequired(scipy)
 
 setupRequired(afw)
 setupRequired(daf_persistence)
+setupRequired(geom)
 setupRequired(meas_astrom)
 setupRequired(meas_base)
-setupRequired(meas_mosaic)
 setupRequired(pex_config)
 setupRequired(pipe_base)
 setupRequired(pipe_drivers)
@@ -14,6 +15,7 @@ setupRequired(pipe_tasks)
 setupRequired(sconsUtils)
 setupRequired(verify)
 
+setupOptional(meas_mosaic)
 setupOptional(qa_explorer)
 
 envPrepend(PYTHONPATH, ${PRODUCT_DIR}/python)
