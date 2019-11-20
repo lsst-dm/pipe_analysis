@@ -26,8 +26,7 @@ colorList = ["blue", "red", "green", "black", "yellow", "cyan", "magenta", ]
 class AnalysisConfig(Config):
     flags = ListField(dtype=str, doc="Flags of objects to ignore",
                       default=["base_SdssCentroid_flag", "slot_Centroid_flag", "base_PsfFlux_flag",
-                               "base_PixelFlags_flag_saturatedCenter",
-                               "base_ClassificationExtendedness_flag"])
+                               "base_PixelFlags_flag_saturatedCenter"])
     clip = Field(dtype=float, default=4.0, doc="Rejection threshold (stdev)")
     useSignalToNoiseThreshold = Field(dtype=bool, default=True, doc="Use a Signal-to-Noise threshold "
                                       "to set the limit for the statistics computation?  If True, the "
