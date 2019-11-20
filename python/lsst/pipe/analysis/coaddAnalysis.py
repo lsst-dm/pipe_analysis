@@ -114,6 +114,32 @@ class CoaddAnalysisConfig(Config):
                                       "issued and table writing is skipped."))
     writeParquetOnly = Field(dtype=bool, default=False,
                              doc="Only write out Parquet tables (i.e. do not produce any plots)?")
+    baseColStrList = ListField(
+        dtype=str,
+        default=["coord", "tract", "patch", "visit", "ccd", "base_PixelFlags",
+                 "base_GaussianFlux", "base_PsfFlux", "base_CircularApertureFlux_12_0",
+                 "base_CircularApertureFlux_25_0", "ext_photometryKron_KronFlux", "modelfit_CModel",
+                 "base_Sdss", "slot_Centroid", "slot_Shape", "ext_shapeHSM_HsmSourceMoments_",
+                 "base_ClassificationExtendedness", "parent", "detect", "deblend_nChild",
+                 "base_Blendedness_abs", "base_Blendedness_flag", "base_InputCount",
+                 "merge_peak_sky", "merge_measurement", "calib"],
+        doc=("List of \"startswith\" strings of column names to load from deepCoadd_obj parquet table. "
+             "All columns that start with one of these strings will be loaded UNLESS the full column "
+             "name contains one of the strings listed in the notInColumnStrList config."))
+    fromRefColStrList = ListField(
+        dtype=str,
+        default=["merge_peak_sky", "merge_measurement", "calib", "detect"],
+        doc=("List of \"startswith\" strings of column names to add from the \"ref\" catalog to the "
+             "forced catalog from the deepCoadd_obj parquet table. "
+             "All columns that start with one of these strings will be added UNLESS the full column "
+             "name contains one of the strings listed in the notInColumnStrList config."))
+    notInColStrList = ListField(
+        dtype=str,
+        default=["flag_bad", "flag_no", "_region_", "_edge", "Truncated", "_radius", "_bad_", "initial",
+                 "_exp_", "_dev_", "fracDev", "objective", "SdssCentroid_flag_", "SdssShape_flag_",
+                 "_Cov", "_child_", "_parent_"],
+        doc=("List of substrings to select against when creating list of columns to load from the "
+             "deepCoadd_obj parquet table."))
 
     def saveToStream(self, outfile, root="root"):
         """Required for loading colorterms from a Config outside the 'lsst' namespace"""
