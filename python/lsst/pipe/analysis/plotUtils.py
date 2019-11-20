@@ -347,7 +347,7 @@ def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
             break
     for ic, ccd in enumerate(camera):
         ccdCorners = ccd.getCorners(cameraGeom.FOCAL_PLANE)
-        if ccd.getType() == cameraGeom.SCIENCE:
+        if ccd.getType() == cameraGeom.DetectorType.SCIENCE:
             plt.gca().add_patch(patches.Rectangle(ccdCorners[0], *list(ccdCorners[2] - ccdCorners[0]),
                                                   facecolor="none", edgecolor="k", ls="solid", lw=0.5,
                                                   alpha=0.5))
