@@ -125,7 +125,7 @@ class Analysis(object):
             self.good &= np.isfinite(self.quantityError)
         if flagsCat is None:
             flagsCat = catalog
-        if not checkIdLists(catalog, flagsCat, prefix=prefix):
+        if not isinstance(catalog, pd.DataFrame) and not checkIdLists(catalog, flagsCat, prefix=prefix):
             raise RuntimeError(
                 "Catalog being used for flags does not have the same object list as the data catalog")
         # Don't have flags in match and overlap catalogs (already removed in the latter)
