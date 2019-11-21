@@ -103,7 +103,7 @@ class Analysis(object):
         self.prefix = prefix
         self.errFunc = errFunc
         if func is not None:
-            if type(func) == np.ndarray:
+            if isinstance(func, np.ndarray) or isinstance(func, pd.Series):
                 self.quantity = func
             else:
                 self.quantity = func(catalog)
@@ -122,7 +122,7 @@ class Analysis(object):
             self.good &= np.isfinite(self.quantityError)
         if flagsCat is None:
             flagsCat = catalog
-        if not checkIdLists(catalog, flagsCat, prefix=prefix):
+        if not isinstance(catalog, pd.DataFrame) and not checkIdLists(catalog, flagsCat, prefix=prefix):
             raise RuntimeError(
                 "Catalog being used for flags does not have the same object list as the data catalog")
         # Don't have flags in match and overlap catalogs (already removed in the latter)

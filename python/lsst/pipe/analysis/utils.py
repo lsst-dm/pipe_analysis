@@ -1915,6 +1915,7 @@ def computeMeanOfFrac(valueArray, tailStr="upper", fraction=0.1, floorFactor=1):
        The mean of the upper/lower ``fraction`` of the values in
        ``valueArray``.
     """
+    valueArray = valueArray.array if hasattr(valueArray, "array") else valueArray
     pad = 0.49
     ptFrac = max(2, int(fraction*len(valueArray)))
     if tailStr == "upper":
