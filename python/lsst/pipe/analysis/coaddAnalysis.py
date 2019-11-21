@@ -126,6 +126,9 @@ class CoaddAnalysisConfig(Config):
                                       "issued and table writing is skipped."))
     writeParquetOnly = Field(dtype=bool, default=False,
                              doc="Only write out Parquet tables (i.e. do not produce any plots)?")
+    doReadParquetTables = Field(dtype=bool, default=True,
+                                doc=("Read parquet tables from postprocessing (e.g. deepCoadd_obj) as "
+                                     "input data instead of afwTable catalogs."))
     baseColStrList = ListField(
         dtype=str,
         default=["coord", "tract", "patch", "visit", "ccd", "base_PixelFlags", "base_GaussianFlux",
@@ -181,12 +184,17 @@ class CoaddAnalysisRunner(TaskRunner):
         kwargs["cosmos"] = parsedCmd.cosmos
         kwargs["subdir"] = parsedCmd.subdir
 
+        # Check for existance of appropriate dataset: parquet obj vs.
+        # afwTable catalogs.
+        datasetList = ["obj"] if parsedCmd.config.doReadParquetTables else ["forced_src", "meas"]
         # Partition all inputs by tract,filter
         FilterRefsDict = functools.partial(defaultdict, list)  # Dict for filter-->dataRefs
-        # Make sure the actual input files requested exist (i.e. do not follow the parent chain)
-        # First check for forced catalogs.  Break out of datasets loop if forced catalogs were found,
-        # otherwise continue search for existence of unforced catalogs
-        for dataset in ["forced_src", "meas"]:
+        # Make sure the actual input files requested exist (i.e. do not follow
+        # the parent chain).  For afwTable catalogs, first check for forced
+        # catalogs.  Break out of datasets loop if forced catalogs were found,
+        # otherwise continue search for existence of unforced (i.e. meas)
+        # catalogs.
+        for dataset in datasetList:
             tractFilterRefs = defaultdict(FilterRefsDict)  # tract-->filter-->dataRefs
             for patchRef in sum(parsedCmd.id.refList, []):
                 tract = patchRef.dataId["tract"]
@@ -235,7 +243,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def runDataRef(self, patchRefList, subdir="", cosmos=None):
         haveForced = False  # do forced datasets exits (may not for single band datasets)
-        dataset = "Coadd_forced_src"
+        dataset = "Coadd_obj" if self.config.doReadParquetTables else "Coadd_forced_src"
         # Explicit input file was checked in CoaddAnalysisRunner, so a check on datasetExists
         # is sufficient here (modulo the case where a forced dataset exists higher up the parent
         # tree than the specified input, but does not exist in the input directory as the former
@@ -277,42 +285,16 @@ class CoaddAnalysisTask(CmdLineTask):
                                       self.config.doPlotSkyObjects, self.config.doPlotSkyObjectsSky,
                                       cosmos, self.config.externalCatalogs,
                                       self.config.doWriteParquetTables]):
-            if haveForced:
-                forced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_forced_src")
-                forced = self.calibrateCatalogs(forced, wcs=repoInfo.wcs)
-            unforced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_meas")
-            unforced = self.calibrateCatalogs(unforced, wcs=repoInfo.wcs)
-            plotKwargs.update(dict(zpLabel=self.zpLabel))
-            if haveForced:
-                # copy over some fields from _ref and _meas catalogs to _forced_src catalog
-                refCat = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_ref")
-                if len(forced) != len(refCat):
-                    raise RuntimeError(("Lengths of forced (N = {0:d}) and ref (N = {0:d}) cats don't match").
-                                       format(len(forced), len(refCat)))
-                refColList = [s for s in refCat.schema.getNames() if
-                              s.startswith(tuple(self.config.columnsToCopyFromRef))]
-                refColsToCopy = [col for col in refColList if col not in forced.schema and
-                                 col in refCat.schema and not
-                                 (repoInfo.hscRun and col == "slot_Centroid_flag")]
-                forced = addColumnsToSchema(refCat, forced, refColsToCopy)
-                measColList = [s for s in unforced.schema.getNames() if
-                               s.startswith(tuple(self.config.columnsToCopyFromMeas))]
-                measColsToCopy = [col for col in measColList if col not in forced.schema and
-                                  col in unforced.schema and not
-                                  (repoInfo.hscRun and col == "slot_Centroid_flag")]
-                forced = addColumnsToSchema(unforced, forced, measColsToCopy)
-
-            # Set some aliases for differing schema naming conventions
-            coaddList = [unforced, ]
-            if haveForced:
-                coaddList += [forced]
-            for cat in coaddList:
-                cat = setAliasMaps(cat, aliasDictList)
-
-            if self.config.doPlotFootprintNpix:
-                unforced = addFootprintNPix(unforced, fromCat=unforced)
+            if self.config.doReadParquetTables:
                 if haveForced:
-                    forced = addFootprintNPix(forced, fromCat=unforced)
+                    forced = self.readParquetTables(patchRefList, self.config.coaddName + "Coadd_obj",
+                                                    "forced_src")
+                    forced = self.calibrateCatalogs(forced, wcs=repoInfo.wcs)
+                unforced = self.readParquetTables(patchRefList, self.config.coaddName + "Coadd_obj", "meas")
+                unforced = self.calibrateCatalogs(unforced, wcs=repoInfo.wcs)
+            else:
+                forced, unforced = self.readAfwTables(patchRefList, self.config.coaddName, repoInfo,
+                                                      haveForced, aliasDictList=aliasDictList)
 
             # Make sub-catalog of sky objects before flag culling as many of
             # these will have flags set due to measurement difficulties in
@@ -323,11 +305,6 @@ class CoaddAnalysisTask(CmdLineTask):
                 goodSky = (unforced["merge_peak_sky"] & (unforced["base_InputCount_value"] > 0)
                            & (unforced["deblend_nChild"] == 0) & ~unforced["base_PixelFlags_flag_edge"])
                 skyObjCat = unforced[goodSky].copy(deep=True)
-
-            # Convert to pandas DataFrames
-            unforced = unforced.asAstropy().to_pandas()
-            if haveForced:
-                forced = forced.asAstropy().to_pandas()
 
             # Optionally backout aperture corrections
             if self.config.doBackoutApCorr:
@@ -534,6 +511,89 @@ class CoaddAnalysisTask(CmdLineTask):
                     self.log.warn("Could not create match catalog for {:}.  Is "
                                   "lsst.meas.extensions.astrometryNet setup?".format(cat))
 
+    def readParquetTables(self, patchRefList, datasetType, dataset):
+        """Read in and concatenate parquet tables from list of dataRefs.
+
+        Parameters
+        ----------
+        patchRefList : `list` of `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+            A list of butler data references whose catalogs of datasetType are
+            to be read in.
+        datasetType : `str`
+            Name of the catalog ``datasetType`` to be read in, e.g.
+            "deepCoadd_obj".
+        dataset : `str`
+            Name of the catalog dataset to be read in.  Can be one of
+            "forced_src", "meas", or "ref".
+
+        Raises
+        ------
+        `TaskError`
+            If no data is read in for the dataRefList.
+
+        Returns
+        -------
+        `allCats` : `pandas.core.frame.DataFrame`
+            The concatenated catalogs as a pandas DataFrame.
+        """
+        # It is much faster to concatenate a list of DataFrames than to concatenate
+        # successively within the for loop.
+        catList = []
+        colsToLoadList = None
+        refColsToLoadList = None
+        measColsToLoadList = None
+        for patchRef in patchRefList:
+            if patchRef.datasetExists(datasetType):
+                parquetTable = patchRef.get(datasetType, immediate=True)
+                # On the first dataRef read in, create list of columns to load
+                # based on config lists and their existence in the catalog
+                # table.
+                if colsToLoadList is None:
+                    cat = parquetTable.toDataFrame(columns={"dataset": dataset,
+                                                            "filter": patchRef.dataId["filter"]})
+                    colsToLoadList = [col for col in cat.columns if
+                                      (col.startswith(tuple(self.config.baseColStrList)) and
+                                       not any(s in col for s in self.config.notInColStrList))]
+                    cat = cat[colsToLoadList]
+                else:
+                    cat = parquetTable.toDataFrame(columns={"dataset": dataset,
+                                                            "filter": patchRef.dataId["filter"],
+                                                            "column": colsToLoadList})
+                if dataset == "forced_src":  # insert some columns from the ref and meas cats for forced cats
+                    if refColsToLoadList is None:
+                        ref = parquetTable.toDataFrame(columns={"dataset": "ref",
+                                                                "filter": patchRef.dataId["filter"]})
+                        refColsToLoadList = [col for col in ref.columns if
+                                             (col.startswith(tuple(self.config.columnsToCopyFromRef))
+                                              and not any(s in col for s in self.config.notInColStrList))]
+                        ref = ref[refColsToLoadList]
+                    else:
+                        ref = parquetTable.toDataFrame(columns={"dataset": "ref",
+                                                                "filter": patchRef.dataId["filter"],
+                                                                "column": refColsToLoadList})
+                    cat = pd.concat([cat, ref], axis=1)
+                    if measColsToLoadList is None:
+                        meas = parquetTable.toDataFrame(columns={"dataset": "meas",
+                                                                 "filter": patchRef.dataId["filter"]})
+                        measColsToLoadList = [col for col in meas.columns if
+                                              (col.startswith(tuple(self.config.columnsToCopyFromMeas))
+                                               and not any(s in col for s in self.config.notInColStrList))]
+                        meas = meas[measColsToLoadList]
+                    else:
+                        meas = parquetTable.toDataFrame(columns={"dataset": "meas",
+                                                                 "filter": patchRef.dataId["filter"],
+                                                                 "column": measColsToLoadList})
+                    cat = pd.concat([cat, meas], axis=1)
+                catList.append(cat)
+        if not catList:
+            raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
+        allCats = pd.concat(catList, axis=0)
+        # The object "id" is associated with the dataframe index.  Add a
+        # column that is the id so that it is available for operations on it,
+        # e.g. cat["id"].
+        allCats["id"] = allCats.index
+        return allCats
+
     def readAfwTables(self, patchRefList, coaddName, repoInfo, haveForced, aliasDictList=None):
         if haveForced:
             forced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_forced_src",
@@ -578,8 +638,9 @@ class CoaddAnalysisTask(CmdLineTask):
             if haveForced:
                 forced = addAliasColumns(forced, aliasDictList)
 
-        if self.config.doPlotFootprintArea and "base_FootprintArea_value" not in unforced.schema:
-            unforced = addFootprintArea(unforced, fromCat=unforced)
+        if self.config.doPlotFootprintNpix and "base_FootprintNpix_value" not in unforced.schema:
+            unforced = addFootprintNpix(unforced, fromCat=unforced)
+
         # Convert to pandas DataFrames
         unforced = unforced.asAstropy().to_pandas()
         if haveForced:
@@ -651,55 +712,64 @@ class CoaddAnalysisTask(CmdLineTask):
             # Generate unnormalized match list (from normalized persisted
             # one) with loadDenormalizeAndUnpackMatches (which requires a
             # refObjLoader to be initialized).
-            catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-            # Set some aliases for differing schema naming conventions
-            if aliasDictList:
-                catalog = setAliasMaps(catalog, aliasDictList)
-            schema = getSchema(catalog)
-            needToAddColumns = any(ss not in schema for ss in
-                                   list(self.config.columnsToCopyFromMeas) +
-                                   list(self.config.columnsToCopyFromRef))
-            if dataset != self.config.coaddName + "Coadd_meas" and needToAddColumns:
-                # copy over some fields from _ref and _meas catalogs to _forced_src catalog
-                refCat = dataRef.get(self.config.coaddName + "Coadd_ref", immediate=True,
-                                     flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-                refCatSchema = getSchema(refCat)
-                unforced = dataRef.get(self.config.coaddName + "Coadd_meas", immediate=True,
-                                       flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-                unforcedSchema = getSchema(unforced)
-                if len(catalog) != len(refCat):
-                    raise RuntimeError(("Lengths of forced (N = {0:d}) and ref (N = {0:d}) cats don't match").
-                                       format(len(catalog), len(refCat)))
-                refColList = [s for s in refCatSchema.getNames() if
-                              s.startswith(tuple(self.config.columnsToCopyFromRef))]
-                refColsToCopy = [col for col in refColList if col not in schema and
-                                 col in refCatSchema and not
-                                 (hscRun and col == "slot_Centroid_flag")]
-                catalog = addColumnsToSchema(refCat, catalog, refColsToCopy)
-                measColList = [s for s in unforcedSchema.getNames() if
-                               s.startswith(tuple(self.config.columnsToCopyFromMeas))]
-                measColsToCopy = [col for col in measColList if col not in schema and
-                                  col in unforcedSchema and not
-                                  (hscRun and col == "slot_Centroid_flag")]
-                catalog = addColumnsToSchema(unforced, catalog, measColsToCopy)
-
+            if self.config.doReadParquetTables:
+                catalog = self.readParquetTables([dataRef, ],
+                                                 dataset[:dataset.find("Coadd_") + len("Coadd_")] + "obj",
+                                                 dataset[dataset.find("Coadd_") + len("Coadd_"):])
+            else:
+                catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+                # Set some aliases for differing schema naming conventions
                 if aliasDictList:
                     catalog = addAliasColumns(catalog, aliasDictList)
+                schema = getSchema(catalog)
+                needToAddColumns = any(ss not in schema for ss in
+                                       list(self.config.columnsToCopyFromMeas) +
+                                       list(self.config.columnsToCopyFromRef))
+                if dataset != self.config.coaddName + "Coadd_meas" and needToAddColumns:
+                    # Copy over some fields from _ref and _meas catalogs to
+                    # _forced_src catalog.
+                    refCat = dataRef.get(self.config.coaddName + "Coadd_ref", immediate=True,
+                                         flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+                    refCatSchema = getSchema(refCat)
+                    unforced = dataRef.get(self.config.coaddName + "Coadd_meas", immediate=True,
+                                           flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+                    unforcedSchema = getSchema(unforced)
+                    if len(catalog) != len(refCat):
+                        raise RuntimeError(("Lengths of forced (N = {0:d}) and ref (N = {0:d}) cats don't "
+                                            "match").format(len(catalog), len(refCat)))
+                    refColList = []
+                    for strPrefix in self.config.columnsToCopyFromRef:
+                        refColList.extend(refCat.schema.extract(strPrefix + "*"))
+                    refColsToCopy = [col for col in refColList if col not in schema
+                                     and not any(s in col for s in self.config.notInColStrList)
+                                     and col in refCatSchema
+                                     and not (hscRun and col == "slot_Centroid_flag")]
+                    catalog = addColumnsToSchema(refCat, catalog, refColsToCopy)
+                    measColList = []
+                    for strPrefix in self.config.columnsToCopyFromMeas:
+                        measColList.extend(refCat.schema.extract(strPrefix + "*"))
+                    measColsToCopy = [col for col in measColList if col not in schema
+                                      and not any(s in col for s in self.config.notInColStrList)
+                                      and col in unforcedSchema
+                                      and not (hscRun and col == "slot_Centroid_flag")]
+                    catalog = addColumnsToSchema(unforced, catalog, measColsToCopy)
+
+                # Compute Focal Plane coordinates for each source if not already there
+                if self.config.analysisMatches.doPlotFP:
+                    if "base_FPPosition_x" not in schema and "focalplane_x" not in schema:
+                        coaddType = dataset[:dataset.find("_")]
+                        det = butler.get(coaddType + "_calexp_detector", dataRef.dataId)
+                        catalog = addFpPoint(det, catalog)
+
+                # Convert to pandas DataFrames
+                catalog = catalog.asAstropy().to_pandas()
+
             catalog = self.calibrateCatalogs(catalog, wcs=wcs)
-            # Compute Focal Plane coordinates for each source if not already there
-            if self.config.analysisMatches.doPlotFP:
-                if "base_FPPosition_x" not in schema and "focalplane_x" not in schema:
-                    coaddType = dataset[:dataset.find("_")]
-                    exp = butler.get(coaddType + "_calexp", dataRef.dataId)
-                    det = exp.getDetector()
-                    catalog = addFpPoint(det, catalog)
+            schema = getSchema(catalog)
+
             # Optionally backout aperture corrections
             if self.config.doBackoutApCorr:
                 catalog = backoutApCorr(catalog)
-
-            # Convert to pandas DataFrames
-            catalog = catalog.asAstropy().to_pandas()
-            schema = getSchema(catalog)
 
             # Set boolean array indicating sources deemed unsuitable for qa analyses
             transCentFlag = "base_TransformedCentroid_flag"
@@ -1581,29 +1651,37 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             # copy over some fields from _ref and _meas catalogs to _forced_src catalog
             refCat1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_ref")
             refCat1Schema = getSchema(refCat1)
-            refColList1 = [s for s in refCat1Schema.getNames() if
-                           s.startswith(tuple(self.config.columnsToCopyFromRef))]
+            refColList1 = []
+            for strPrefix in self.config.columnsToCopyFromRef:
+                refColList1.extend(refCat1Schema.extract(strPrefix + "*"))
             refCat2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_ref")
             refCat2Schema = getSchema(refCat2)
-            refColList2 = [s for s in refCat2Schema.getNames() if
-                           s.startswith(tuple(self.config.columnsToCopyFromRef))]
+            refColList2 = []
+            for strPrefix in self.config.columnsToCopyFromRef:
+                refColList2.extend(refCat2Schema.extract(strPrefix + "*"))
             refColsToCopy1 = [col for col in refColList1 if col not in forced1Schema
+                              and not any(s in col for s in self.config.notInColStrList)
                               and col in refCat1Schema
                               and not (repoInfo1.hscRun and col == "slot_Centroid_flag")]
             refColsToCopy2 = [col for col in refColList2 if col not in forced2Schema
+                              and not any(s in col for s in self.config.notInColStrList)
                               and col in refCat2Schema
                               and not (repoInfo2.hscRun and col == "slot_Centroid_flag")]
             forced1 = addColumnsToSchema(refCat1, forced1, refColsToCopy1)
             forced2 = addColumnsToSchema(refCat2, forced2, refColsToCopy2)
-            measColList1 = [s for s in unforced1Schema.getNames() if
-                            s.startswith(tuple(self.config.columnsToCopyFromMeas))]
-            measColList2 = [s for s in unforced2Schema.getNames() if
-                            s.startswith(tuple(self.config.columnsToCopyFromMeas))]
-            measColsToCopy1 = [col for col in measColList1 if col not in forced1Schema and
-                               col in unforced1Schema and not
+            measColList1 = []
+            for strPrefix in self.config.columnsToCopyFromMeas:
+                measColList1.extend(unforced1Schema.extract(strPrefix + "*"))
+            measColList2 = []
+            for strPrefix in self.config.columnsToCopyFromMeas:
+                measColList2.extend(unforced2Schema.extract(strPrefix + "*"))
+            measColsToCopy1 = [col for col in measColList1 if col not in forced1Schema
+                               and not any(s in col for s in self.config.notInColStrList)
+                               and col in unforced1Schema and not
                                (repoInfo1.hscRun and col == "slot_Centroid_flag")]
-            measColsToCopy2 = [col for col in measColList2 if col not in forced2Schema and
-                               col in unforced2Schema and not
+            measColsToCopy2 = [col for col in measColList2 if col not in forced2Schema
+                               and not any(s in col for s in self.config.notInColStrList)
+                               and col in unforced2Schema and not
                                (repoInfo2.hscRun and col == "slot_Centroid_flag")]
             forced1 = addColumnsToSchema(unforced1, forced1, measColsToCopy1)
             forced2 = addColumnsToSchema(unforced2, forced2, measColsToCopy2)

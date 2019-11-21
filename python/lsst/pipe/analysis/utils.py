@@ -1392,9 +1392,11 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyExternalPhoto
         dataId['filter'] = filterName
     genericFilterName = afwImage.Filter(afwImage.Filter(filterName).getId()).getName()
     ccdKey = None if isCoadd else findCcdKey(dataId)
-    # Check metadata to see if stack used was HSC
-    metaStr = coaddName + coaddDataset + "_md" if coaddName else "calexp_md"
-    metadata = butler.get(metaStr, dataId)
+    try:  # Check metadata to see if stack used was HSC
+        metaStr = coaddName + coaddDataset + "_md" if coaddName else "calexp_md"
+        metadata = butler.get(metaStr, dataId)
+    except AttributeError:
+        metadata = None
     hscRun = checkHscStack(metadata)
     catDataset = "src"
     skymap = butler.get(coaddName + "Coadd_skyMap") if coaddName else None
