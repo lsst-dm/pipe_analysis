@@ -20,8 +20,8 @@ from .utils import (Filenamer, AngularDistance, concatenateCatalogs, addAperture
                     addFootprintNPix, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
                     calibrateSourceCatalogMosaic, calibrateSourceCatalogPhotoCalib,
                     calibrateSourceCatalog, backoutApCorr, matchNanojanskyToAB, andCatalog, writeParquet,
-                    getRepoInfo, getCcdNameRefList, getDataExistsRefList, setAliasMaps,
-                    addPreComputedColumns)
+                    getRepoInfo, addAliasColumns, getCcdNameRefList, getDataExistsRefList,
+                    addPreComputedColumns, getSchema)
 from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText
 from .fakesAnalysis import (addDegreePositions, matchCatalogs, addNearestNeighbor, fakesPositionCompare,
                             getPlotInfo, fakesAreaDepth, fakesMagnitudeCompare, fakesMagnitudeNearestNeighbor,
@@ -353,16 +353,17 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 else:
                     commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", repoInfo,
                                                              aliasDictList=aliasDictList)
+                schema = getSchema(catalog)
                 # Make sub-catalog of sky sources before flag culling as many of
                 # these will have flags set due to measurement difficulties in
                 # regions that are really blank sky
                 skySrcCat = None
                 if self.config.doPlotSkyObjects:
-                    if "sky_source" in catalog.schema:
+                    if "sky_source" in schema:
                         skySrcCat = catalog[catalog["sky_source"]].copy(deep=True)
                     else:
                         self.log.warn("doPlotSkyObjects is True, but the \"sky_source\" "
-                                 "column does not exist in catalog.schema.  Skipping "
+                                 "column does not exist in the catalog schema.  Skipping "
                                  "skyObjects plot.")
                 # Set boolean arrays indicating sources deemed unsuitable for qa analyses
                 self.catLabel = "nChild = 0"
@@ -462,16 +463,16 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 if self.config.doPlotMags:
                     self.plotMags(catalog, filenamer, repoInfo.dataId, **plotKwargs)
                 if self.config.doPlotStarGalaxy:
-                    if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+                    if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
                         self.plotStarGal(catalog, filenamer, repoInfo.dataId, **plotKwargs)
                     else:
                         self.log.warn("Cannot run plotStarGal: " +
-                                      "ext_shapeHSM_HsmSourceMoments_xx not in catalog.schema")
+                                      "ext_shapeHSM_HsmSourceMoments_xx not in the catalog schema")
                 if self.config.doPlotSizes:
-                    if "base_SdssShape_psf_xx" in catalog.schema:
+                    if "base_SdssShape_psf_xx" in schema:
                         self.plotSizes(catalog, filenamer, repoInfo.dataId, **plotKwargs)
                     else:
-                        self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
+                        self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in the catalog schema")
                 if self.config.doPlotCentroids and self.haveFpCoords:
                     self.plotCentroidXY(catalog, filenamer, repoInfo.dataId, **plotKwargs)
 
@@ -610,8 +611,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                         onCcdList.append(rowId)
                 fakeCat["onCcd"].iloc[np.array(onCcdList)] = dataRef.dataId["ccd"]
 
+            schema = getSchema(catalog)
             if self.config.doPlotCentroids or self.config.analysis.doPlotFP and self.haveFpCoords:
-                if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
+                if "base_FPPosition_x" not in schema and "focalplane_x" not in schema:
                     det = repoInfo.butler.get("calexp_detector", dataRef.dataId)
                     catalog = addFpPoint(det, catalog)
                 xFp = catalog["base_FPPosition_x"]
@@ -620,7 +622,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if self.config.doPlotFootprintNpix:
                 catalog = addFootprintNPix(catalog)
             if repoInfo.hscRun and self.config.doAddAperFluxHsc:
-                self.log.info("HSC run: adding aperture flux to schema...")
+                self.log.info("HSC run: adding aperture flux to catalog schema...")
                 catalog = addApertureFluxesHSC(catalog, prefix="")
             # Optionally backout aperture corrections
             if self.config.doBackoutApCorr:
@@ -1084,6 +1086,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             commonZpCat1, catalog1, commonZpCat2, catalog2 = (
                 self.readCatalogs(dataRefListTract1, dataRefListTract2, "src", repoInfo1, repoInfo2,
                                   doReadFootprints=doReadFootprints, aliasDictList=aliasDictList))
+            schema1 = getSchema(catalog1)
 
             # Set boolean arrays indicating sources deemed unsuitable for qa analyses
             self.catLabel = "nChild = 0"
@@ -1153,12 +1156,11 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             if self.config.doPlotMags:
                 self.plotMags(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList, **plotKwargs1)
             if self.config.doPlotSizes:
-                if ("first_base_SdssShape_psf_xx" in catalog.schema and
-                        "second_base_SdssShape_psf_xx" in catalog.schema):
+                if ("first_base_SdssShape_psf_xx" in schema1 and "second_base_SdssShape_psf_xx" in schema1):
                     self.plotSizes(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
                                    **plotKwargs1)
                 else:
-                    self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
+                    self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in the catalog schema")
             if self.config.doApCorrs:
                 self.plotApCorrs(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
                                  **plotKwargs1)
@@ -1239,6 +1241,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                     srcCat = backoutApCorr(srcCat)
 
                 fluxMag0 = None
+                schema = getSchema(srcCat)
                 if not doApplyExternalPhotoCalib:
                     photoCalib = repoInfo.butler.get("calexp_photoCalib", dataRef.dataId)
                     fluxMag0 = photoCalib.getInstFluxAtZeroMagnitude()
