@@ -31,7 +31,7 @@ from .utils import (Filenamer, Enforcer, MagDiff, MagDiffMatches, MagDiffCompare
                     addFootprintNPix, makeBadArray, addIntFloatOrStrColumn,
                     calibrateCoaddSourceCatalog, backoutApCorr, matchNanojanskyToAB,
                     fluxToPlotString, andCatalog, writeParquet, getRepoInfo, setAliasMaps,
-                    addPreComputedColumns, computeMeanOfFrac)
+                    addPreComputedColumns, computeMeanOfFrac, getSchema)
 from .plotUtils import (CosmosLabeller, AllLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
                         MatchesStarGalaxyLabeller, determineUberCalLabel)
 
@@ -280,6 +280,11 @@ class CoaddAnalysisTask(CmdLineTask):
                 if haveForced:
                     forced = addFootprintNPix(forced, fromCat=unforced)
 
+            unforcedSchema = getSchema(unforced)
+            if haveForced:
+                forcedSchema = getSchema(forced)
+            plotKwargs.update(dict(zpLabel=self.zpLabel))
+
             # Must do the overlaps before purging the catalogs of non-primary sources
             if self.config.doPlotOverlaps and not self.config.writeParquetOnly:
                 # Determine if any patches in the patchList actually overlap
@@ -383,26 +388,26 @@ class CoaddAnalysisTask(CmdLineTask):
                                   highlightList=[("merge_measurement_" + repoInfo.genericFilterName, 0,
                                                   "yellow"), ], **plotKwargs)
             if self.config.doPlotStarGalaxy:
-                if "ext_shapeHSM_HsmSourceMoments_xx" in unforced.schema:
+                if "ext_shapeHSM_HsmSourceMoments_xx" in unforcedSchema:
                     self.plotStarGal(unforced, filenamer, repoInfo.dataId,
                                      forcedStr="unforced " + self.catLabel, **plotKwargs)
                 else:
                     self.log.warn("Cannot run plotStarGal: ext_shapeHSM_HsmSourceMoments_xx not "
-                                  "in forced.schema")
+                                  "in unforcedSchema")
 
             if self.config.doPlotSizes:
-                if all(ss in unforced.schema for ss in ["base_SdssShape_psf_xx", "calib_psf_used"]):
+                if all(ss in unforcedSchema for ss in ["base_SdssShape_psf_xx", "calib_psf_used"]):
                     self.plotSizes(unforced, filenamer, repoInfo.dataId, forcedStr="unforced " + self.catLabel,
                                    postFix="_unforced", **plotKwargs)
                 else:
                     self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx and/or calib_psf_used "
-                                  "not in unforced.schema")
+                                  "not in unforcedSchema")
                 if haveForced:
-                    if all(ss in forced.schema for ss in ["base_SdssShape_psf_xx", "calib_psf_used"]):
+                    if all(ss in forcedSchema for ss in ["base_SdssShape_psf_xx", "calib_psf_used"]):
                         self.plotSizes(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr, **plotKwargs)
                     else:
                         self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx and/or calib_psf_used "
-                                      "not in forced.schema")
+                                      "not in forcedSchema")
             if cosmos:
                 self.plotCosmos(forced, filenamer, cosmos, repoInfo.dataId)
             if self.config.doPlotCompareUnforced and haveForced:
@@ -481,15 +486,16 @@ class CoaddAnalysisTask(CmdLineTask):
             # Set some aliases for differing schema naming conventions
             if aliasDictList:
                 catalog = setAliasMaps(catalog, aliasDictList)
-            if dataset != "deepCoadd_meas" and any(ss not in catalog.schema
-                                                   for ss in self.config.columnsToCopy):
+            schema = getSchema(catalog)
+            if dataset != "deepCoadd_meas" and any(ss not in schema for ss in self.config.columnsToCopy):
                 unforced = dataRef.get("deepCoadd_meas", immediate=True,
                                        flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+                unforcedSchema = getSchema(unforced)
                 # copy over some fields from unforced to forced catalog
                 catalog = addColumnsToSchema(unforced, catalog,
                                              [col for col in list(self.config.columnsToCopy) +
                                               list(self.config.analysis.flags) if
-                                              col not in catalog.schema and col in unforced.schema and
+                                              col not in schema and col in unforcedSchema and
                                               not (hscRun and col == "slot_Centroid_flag")])
                 if aliasDictList:
                     catalog = setAliasMaps(catalog, aliasDictList)
@@ -589,9 +595,10 @@ class CoaddAnalysisTask(CmdLineTask):
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
+        schema = getSchema(catalog)
         for col in fluxToPlotList:
             isForced = False if forcedStr is None else ("forced" in forcedStr)
-            if col + "_instFlux" in catalog.schema and not (isForced and "CircularAper" in col):
+            if col + "_instFlux" in schema and not (isForced and "CircularAper" in col):
                 shortName = "mag_" + col + postFix
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog,
@@ -615,8 +622,9 @@ class CoaddAnalysisTask(CmdLineTask):
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                              zpLabel=zpLabel, forcedStr=forcedStr, uberCalLabel=uberCalLabel)
+        schema = getSchema(catalog)
         for col in ["base_PsfFlux", ]:
-            if col + "_instFlux" in catalog.schema:
+            if col + "_instFlux" in schema:
                 compareCol = "base_SdssShape"
                 # Set limits dynamically...can be very different visit-to-visit due to seeing differences
                 # SDSS and HSM should be similar, so limits based on one should be valid for the other and
@@ -640,7 +648,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                    goodKeys=["calib_psf_used"], qMin=qMin, qMax=qMax,
                                    labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
-                if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+                if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
                     shortName = "hsmTrace" + postFix + "_calib_psf_used"
                     compareCol = "ext_shapeHSM_HsmSourceMoments"
                     self.log.info("shortName = {:s}".format(shortName))
@@ -662,7 +670,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                    self.config.analysis, flags=[col + "_flag"], qMin=qMin, qMax=qMax,
                                    labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
-                if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+                if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
                     shortName = "hsmTrace" + postFix
                     compareCol = "ext_shapeHSM_HsmSourceMoments"
                     self.log.info("shortName = {:s}".format(shortName))
@@ -673,7 +681,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                        ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
                                                  **plotAllKwargs)
 
-            if col + "_instFlux" in catalog.schema:
+            if col + "_instFlux" in schema:
                 shortName = "psfTraceDiff" + postFix
                 compareCol = "base_SdssShape"
                 psfCompareCol = "base_SdssShape_psf"
@@ -703,7 +711,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                    unitScale=self.unitScale,
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
 
-                if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+                if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
                     shortName = "psfHsmTraceDiff" + postFix
                     compareCol = "ext_shapeHSM_HsmSourceMoments"
                     psfCompareCol = "ext_shapeHSM_HsmPsfMoments"
@@ -764,8 +772,9 @@ class CoaddAnalysisTask(CmdLineTask):
                        tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
                        forcedStr=None, flagsCat=None, uberCalLabel=None):
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
+        schema = getSchema(catalog)
         for col in ["base_SdssCentroid_x", "base_SdssCentroid_y"]:
-            if col in catalog.schema:
+            if col in schema:
                 shortName = col
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog, catalog[col], "(%s)" % col, shortName, self.config.analysis,
@@ -782,7 +791,8 @@ class CoaddAnalysisTask(CmdLineTask):
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                              zpLabel=zpLabel, forcedStr=forcedStr, uberCalLabel=uberCalLabel)
-        if "calib_psf_used" in catalog.schema:
+        schema = getSchema(catalog)
+        if "calib_psf_used" in schema:
             shortName = "footNpix_calib_psf_used"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
@@ -818,6 +828,7 @@ class CoaddAnalysisTask(CmdLineTask):
                            tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
                            forcedStr=None, uberCalLabel=None, postFix="", flagsCat=None, logPlot=True,
                            density=True, cumulative=-1):
+        schema = getSchema(catalog)
         stats = None
         shortName = "psfInstFlux" if zpLabel == "raw" else "psfCalFlux"
         self.log.info("shortName = {:s}".format(shortName))
@@ -828,7 +839,7 @@ class CoaddAnalysisTask(CmdLineTask):
         psfSn = psfFlux/psfFluxErr
 
         # Scale S/N threshold by ~sqrt(#exposures) if catalog is coadd data
-        if "base_InputCount_value" in catalog.schema:
+        if "base_InputCount_value" in schema:
             inputCounts = catalog["base_InputCount_value"]
             scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=10)
             highSn = np.floor(
@@ -894,6 +905,7 @@ class CoaddAnalysisTask(CmdLineTask):
     def plotStarGal(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                     patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
                     flagsCat=None, uberCalLabel=None):
+        schema = getSchema(catalog)
         enforcer = None
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
@@ -913,7 +925,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.2}}),
                                      **plotAllKwargs)
 
-        if "ext_shapeHSM_HsmShapeRegauss_resolution" in catalog.schema:
+        if "ext_shapeHSM_HsmShapeRegauss_resolution" in schema:
             shortName = "resolution"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(catalog, catalog["ext_shapeHSM_HsmShapeRegauss_resolution"],
@@ -925,6 +937,7 @@ class CoaddAnalysisTask(CmdLineTask):
     def plotCompareUnforced(self, forced, unforced, filenamer, dataId, butler=None, camera=None, ccdList=None,
                             tractInfo=None, patchList=None, hscRun=None, zpLabel=None, fluxToPlotList=None,
                             uberCalLabel=None, matchRadius=None, matchRadiusUnitStr=None, matchControl=None):
+        forcedSchema = getSchema(forced)
         fluxToPlotList = fluxToPlotList if fluxToPlotList else self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = None
@@ -932,7 +945,7 @@ class CoaddAnalysisTask(CmdLineTask):
             magDiffFunc = MagDiff(col + "_instFlux", col + "_instFlux", unitScale=self.unitScale)
             shortName = "compareUnforced_" + col
             self.log.info("shortName = {:s}".format(shortName))
-            if col + "_instFlux" in forced.schema:
+            if col + "_instFlux" in forcedSchema:
                 self.AnalysisClass(forced, magDiffFunc(forced, unforced),
                                    "  Forced - Unforced mag [%s] (%s)" % (fluxToPlotString(col), unitStr),
                                    shortName, self.config.analysis, prefix="", flags=[col + "_flag"],
@@ -964,6 +977,7 @@ class CoaddAnalysisTask(CmdLineTask):
                      tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
                      zpLabel=None, forcedStr=None, postFix="", fluxToPlotList=None, flagsCat=None,
                      uberCalLabel=None):
+        schema = getSchema(overlaps)
         if not fluxToPlotList:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
@@ -975,7 +989,7 @@ class CoaddAnalysisTask(CmdLineTask):
         for col in fluxToPlotList:
             shortName = "overlap_" + col + postFix
             self.log.info("shortName = {:s}".format(shortName))
-            if "first_" + col + "_instFlux" in overlaps.schema:
+            if "first_" + col + "_instFlux" in schema:
                 self.AnalysisClass(overlaps, MagDiff("first_" + col + "_instFlux",
                                                      "second_" + col + "_instFlux",
                                                      unitScale=self.unitScale),
@@ -1000,6 +1014,7 @@ class CoaddAnalysisTask(CmdLineTask):
     def plotMatches(self, matches, filterName, filenamer, dataId, description="matches", butler=None,
                     camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None,
                     matchRadiusUnitStr=None, zpLabel=None, forcedStr=None, flagsCat=None, uberCalLabel=None):
+        schema = getSchema(matches)
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.030*self.unitScale}}),
         fluxToPlotList = ["base_PsfFlux_instFlux", "base_CircularApertureFlux_12_0_instFlux"]
@@ -1022,7 +1037,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
         # Magnitude difference plots
         for fluxName in fluxToPlotList:
-            if "src_calib_psf_used" in matches.schema:
+            if "src_calib_psf_used" in schema:
                 shortName = description + "_" + fluxToPlotString(fluxName) + "_mag_calib_psf_used"
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(matches, MagDiffMatches(fluxName, ct, zp=0.0, unitScale=self.unitScale),
@@ -1032,7 +1047,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                    qMin=-0.15, qMax=0.1, labeller=MatchesStarGalaxyLabeller(),
                                    flagsCat=flagsCat, unitScale=self.unitScale,
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
-            if "src_calib_photometry_used" in matches.schema:
+            if "src_calib_photometry_used" in schema:
                 shortName = description + "_" + fluxToPlotString(fluxName) + "_mag_calib_photometry_used"
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(matches, MagDiffMatches(fluxName, ct, zp=0.0, unitScale=self.unitScale),
@@ -1055,7 +1070,7 @@ class CoaddAnalysisTask(CmdLineTask):
         # Astrometry (positional) difference plots
         unitStr = "mas" if self.config.toMilli else "arcsec"
         qMatchScale = matchRadius if matchRadius else self.matchRadius
-        if "src_calib_astrometry_used" in matches.schema:
+        if "src_calib_astrometry_used" in schema:
             shortName = description + "_distance_calib_astrometry_used"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(matches,
@@ -1079,7 +1094,7 @@ class CoaddAnalysisTask(CmdLineTask):
                            ).plotAll(dataId, filenamer, self.log,
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
                                      doPrintMedian=True, **plotAllKwargs)
-        if "src_calib_astrometry_used" in matches.schema:
+        if "src_calib_astrometry_used" in schema:
             shortName = description + "_raCosDec_calib_astrometry_used"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra",
@@ -1104,7 +1119,7 @@ class CoaddAnalysisTask(CmdLineTask):
                            ).plotAll(dataId, filenamer, self.log,
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
                                      **plotAllKwargs)
-        if "src_calib_astrometry_used" in matches.schema:
+        if "src_calib_astrometry_used" in schema:
             shortName = description + "_ra_calib_astrometry_used"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(matches,
@@ -1124,7 +1139,7 @@ class CoaddAnalysisTask(CmdLineTask):
                            ).plotAll(dataId, filenamer, self.log,
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
                                      **plotAllKwargs)
-        if "src_calib_astrometry_used" in matches.schema:
+        if "src_calib_astrometry_used" in schema:
             shortName = description + "_dec_calib_astrometry_used"
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(matches,
@@ -1306,17 +1321,21 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
         forcedStr = "forced" if haveForced else "unforced"
 
+        unforced1Schema = getSchema(unforced1)
+        unforced2Schema = getSchema(unforced2)
         if haveForced:
+            forced1Schema = getSchema(forced1)
+            forced2Schema = getSchema(forced2)
             # copy over some fields from unforced to forced catalog
             forced1 = addColumnsToSchema(unforced1, forced1,
                                          [col for col in list(self.config.columnsToCopy) +
                                           list(self.config.analysis.flags) if
-                                          col not in forced1.schema and col in unforced1.schema and
+                                          col not in forced1Schema and col in unforced1Schema and
                                           not (repoInfo1.hscRun and col == "slot_Centroid_flag")])
             forced2 = addColumnsToSchema(unforced2, forced2,
                                          [col for col in list(self.config.columnsToCopy) +
                                           list(self.config.analysis.flags) if
-                                          col not in forced2.schema and col in unforced2.schema and
+                                          col not in forced2Schema and col in unforced2Schema and
                                           not (repoInfo2.hscRun and col == "slot_Centroid_flag")])
 
         # Set an alias map for differing schema naming conventions of different stacks (if any)
@@ -1365,6 +1384,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         if aliasDictList:
             forced = setAliasMaps(forced, aliasDictList)
             unforced = setAliasMaps(unforced, aliasDictList)
+        forcedSchema = getSchema(forced)
 
         self.log.info("\nNumber of sources in forced catalogs: first = {0:d} and second = {1:d}".format(
                       len(forced1), len(forced2)))
@@ -1382,11 +1402,11 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             self.plotMags(forced, filenamer, repoInfo1.dataId, forcedStr=forcedStr, **plotKwargs1)
 
         if self.config.doPlotSizes:
-            if ("first_base_SdssShape_psf_xx" in forced.schema and
-               "second_base_SdssShape_psf_xx" in forced.schema):
+            if ("first_base_SdssShape_psf_xx" in forcedSchema and
+               "second_base_SdssShape_psf_xx" in forcedSchema):
                 self.plotSizes(forced, filenamer, repoInfo1.dataId, forcedStr=forcedStr, **plotKwargs1)
             else:
-                self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
+                self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalogSchema")
 
         if self.config.doApCorrs:
             self.plotApCorrs(unforced, filenamer, repoInfo1.dataId, forcedStr="unforced " + self.catLabel,
@@ -1431,13 +1451,13 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                  patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None,
                  forcedStr=None, fluxToPlotList=None, postFix="", flagsCat=None, highlightList=None,
                  uberCalLabel=None):
+        schema = getSchema(catalog)
         if not fluxToPlotList:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in fluxToPlotList:
-            if ("first_" + col + "_instFlux" in catalog.schema and "second_" + col + "_instFlux" in
-                catalog.schema):
+            if ("first_" + col + "_instFlux" in schema and "second_" + col + "_instFlux" in schema):
                 shortName = "diff_" + col + postFix
                 self.log.info("shortName = {:s}".format(shortName))
                 Analysis(catalog, MagDiffCompare(col + "_instFlux", unitScale=self.unitScale),
@@ -1538,14 +1558,14 @@ class CompareCoaddAnalysisTask(CmdLineTask):
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                   patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None,
                   forcedStr=None, uberCalLabel=None):
+        schema = getSchema(catalog)
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                              matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, forcedStr=forcedStr,
                              uberCalLabel=uberCalLabel)
         for col in ["base_PsfFlux"]:
-            if ("first_" + col + "_instFlux" in catalog.schema and
-               "second_" + col + "_instFlux" in catalog.schema):
+            if ("first_" + col + "_instFlux" in schema and "second_" + col + "_instFlux" in schema):
                 # Make comparison plots for all objects and calib_psf_used only objects
                 for goodFlags in [[], ["calib_psf_used"]]:
                     badFlags = [col + "_flag", "base_SdssShape_flag"]
@@ -1573,7 +1593,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                              ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
 
                     badFlags = [col + "_flag", "ext_shapeHSH_HsmSourceMoments_flag"]
-                    if "first_ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+                    if "first_ext_shapeHSM_HsmSourceMoments_xx" in schema:
                         shortNameBase = "hsmTrace"
                         shortName = (shortNameBase + "_calib_psf_used" if "calib_psf_used" in goodFlags else
                                      shortNameBase)
@@ -1589,7 +1609,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                         shortName = (shortNameBase + "_calib_psf_used" if "calib_psf_used" in goodFlags else
                                      shortNameBase)
                     badFlags = [col + "_flag", "ext_shapeHSH_PsfMoments_flag"]
-                    if "first_ext_shapeHSM_PsfMoments_xx" in catalog.schema:
+                    if "first_ext_shapeHSM_PsfMoments_xx" in schema:
                         compareCol = "ext_shapeHSM_HsmPsfMoments"
                         self.log.info("shortName = {:s}".format(shortName))
                         Analysis(catalog, TraceSizeCompare(compareCol),
@@ -1618,13 +1638,14 @@ class CompareCoaddAnalysisTask(CmdLineTask):
     def plotStarGal(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                     patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None,
                     forcedStr=None, flagsCat=None, uberCalLabel=None):
+        schema = getSchema(catalog)
         enforcer = None
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                              matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, forcedStr=forcedStr,
                              uberCalLabel=uberCalLabel)
         col = "ext_shapeHSM_HsmShapeRegauss_resolution"
-        if "first_" + col in catalog.schema:
+        if "first_" + col in schema:
             shortName = "diff_resolution"
             self.log.info("shortName = {:s}".format(shortName))
             Analysis(catalog, PercentDiff(col),
@@ -1634,7 +1655,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                      labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat,
                      ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
         col = "ext_shapeHSM_HsmShapeRegauss_e1"
-        if "first_" + col in catalog.schema:
+        if "first_" + col in schema:
             shortName = "diff_HsmShapeRegauss_e1"
             self.log.info("shortName = {:s}".format(shortName))
             Analysis(catalog, PercentDiff(col),
@@ -1644,7 +1665,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                      labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat,
                      ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
         col = "ext_shapeHSM_HsmShapeRegauss_e2"
-        if "first_" + col in catalog.schema:
+        if "first_" + col in schema:
             shortName = "diff_HsmShapeRegauss_e2"
             self.log.info("shortName = {:s}".format(shortName))
             Analysis(catalog, PercentDiff(col),
@@ -1657,11 +1678,12 @@ class CompareCoaddAnalysisTask(CmdLineTask):
     def plotApCorrs(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                     tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
                     zpLabel=None, forcedStr=None, fluxToPlotList=None, uberCalLabel=None):
+        schema = getSchema(catalog)
         if not fluxToPlotList:
             fluxToPlotList = self.config.fluxToPlotList
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in fluxToPlotList:
-            if "first_" + col + "_apCorr" in catalog.schema and "second_" + col + "_apCorr" in catalog.schema:
+            if "first_" + col + "_apCorr" in schema and "second_" + col + "_apCorr" in schema:
                 shortName = "diff_" + col + "_apCorr"
                 self.log.info("shortName = {:s}".format(shortName))
                 # apCorrs in coadds can be all nan if they weren't run in sfm, so add a check for valid data

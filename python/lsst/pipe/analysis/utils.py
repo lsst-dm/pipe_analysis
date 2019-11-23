@@ -5,6 +5,7 @@ import re
 
 import astropy.units as units
 import numpy as np
+import pandas as pd
 import scipy.odr as scipyOdr
 import scipy.optimize as scipyOptimize
 import scipy.stats as scipyStats
@@ -41,7 +42,8 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "writeParquet", "getRepoInfo", "findCcdKey", "getCcdNameRefList", "getDataExistsRefList",
            "orthogonalRegression", "distanceSquaredToPoly", "p1CoeffsFromP2x0y0", "p2p1CoeffsFromLinearFit",
            "lineFromP2Coeffs", "linesFromP2P1Coeffs", "makeEqnStr", "catColors", "setAliasMaps",
-           "addPreComputedColumns", "addMetricMeasurement", "updateVerifyJob", "computeMeanOfFrac"]
+           "addPreComputedColumns", "addMetricMeasurement", "updateVerifyJob", "computeMeanOfFrac",
+           "getSchema"]
 
 
 NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
@@ -448,13 +450,14 @@ class CentroidDiff(object):
 class CentroidDiffErr(CentroidDiff):
     """Functor to calculate difference error for astrometry"""
     def __call__(self, catalog):
+        schema = getSchema(catalog)
         firstx = self.first + self.centroid + "_xErr"
         firsty = self.first + self.centroid + "_yErr"
         secondx = self.second + self.centroid + "_xErr"
         secondy = self.second + self.centroid + "_yErr"
 
-        subkeys1 = [catalog.schema[firstx].asKey(), catalog.schema[firsty].asKey()]
-        subkeys2 = [catalog.schema[secondx].asKey(), catalog.schema[secondy].asKey()]
+        subkeys1 = [schema[firstx].asKey(), schema[firsty].asKey()]
+        subkeys2 = [schema[secondx].asKey(), schema[secondy].asKey()]
         menu = {"x": 0, "y": 1}
 
         return np.hypot(catalog[subkeys1[menu[self.component]]],
@@ -463,15 +466,16 @@ class CentroidDiffErr(CentroidDiff):
 
 def deconvMom(catalog):
     """Calculate deconvolved moments"""
-    if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+    schema = getSchema(catalog)
+    if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
         hsm = catalog["ext_shapeHSM_HsmSourceMoments_xx"] + catalog["ext_shapeHSM_HsmSourceMoments_yy"]
     else:
         hsm = np.ones(len(catalog))*np.nan
     sdss = catalog["base_SdssShape_xx"] + catalog["base_SdssShape_yy"]
-    if "ext_shapeHSM_HsmPsfMoments_xx" in catalog.schema:
+    if "ext_shapeHSM_HsmPsfMoments_xx" in schema:
         psfXxName = "ext_shapeHSM_HsmPsfMoments_xx"
         psfYyName = "ext_shapeHSM_HsmPsfMoments_yy"
-    elif "base_SdssShape_psf_xx" in catalog.schema:
+    elif "base_SdssShape_psf_xx" in schema:
         psfXxName = "base_SdssShape_psf_xx"
         psfYyName = "base_SdssShape_psf_yy"
     else:
@@ -494,7 +498,8 @@ def deconvMomStarGal(catalog):
 def concatenateCatalogs(catalogList):
     assert len(catalogList) > 0, "No catalogs to concatenate"
     template = catalogList[0]
-    catalog = type(template)(template.schema)
+    schema = getSchema(template)
+    catalog = type(template)(schema)
     catalog.reserve(sum(len(cat) for cat in catalogList))
     for cat in catalogList:
         catalog.extend(cat, True)
@@ -530,15 +535,17 @@ def joinMatches(matches, first="first_", second="second_"):
 
 def checkIdLists(catalog1, catalog2, prefix=""):
     # Check to see if two catalogs have an identical list of objects by id
+    schema1 = getSchema(catalog1)
+    schema2 = getSchema(catalog2)
     idStrList = ["", ""]
-    for i, cat in enumerate((catalog1, catalog2)):
-        if "id" in cat.schema:
+    for i, schema in enumerate([schema1, schema2]):
+        if "id" in schema:
             idStrList[i] = "id"
-        elif "objectId" in cat.schema:
+        elif "objectId" in schema:
             idStrList[i] = "objectId"
-        elif prefix + "id" in cat.schema:
+        elif prefix + "id" in schema:
             idStrList[i] = prefix + "id"
-        elif prefix + "objectId" in cat.schema:
+        elif prefix + "objectId" in schema:
             idStrList[i] = prefix + "objectId"
         else:
             raise RuntimeError("Cannot identify object id field (tried id, objectId, " + prefix + "id, and " +
@@ -822,17 +829,18 @@ def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True,
        Boolean array with same length as catalog whose values indicate whether the source was deemed
        inappropriate for qa analyses.
     """
+    schema = getSchema(catalog)
     bad = np.zeros(len(catalog), dtype=bool)
-    if "detect_isPatchInner" in catalog.schema and patchInnerOnly:
+    if "detect_isPatchInner" in schema and patchInnerOnly:
         bad |= ~catalog["detect_isPatchInner"]
-    if "detect_isTractInner" in catalog.schema and tractInnerOnly:
+    if "detect_isTractInner" in schema and tractInnerOnly:
         bad |= ~catalog["detect_isTractInner"]
     bad |= catalog["deblend_nChild"] > 0  # Exclude non-deblended (i.e. parents)
-    if "merge_peak_sky" in catalog.schema:
+    if "merge_peak_sky" in schema:
         bad |= catalog["merge_peak_sky"]  # Exclude "sky" objects (currently only inserted in coadds)
     for flag in flagList:
         bad |= catalog[flag]
-    if onlyReadStars and "base_ClassificationExtendedness_value" in catalog.schema:
+    if onlyReadStars and "base_ClassificationExtendedness_value" in schema:
         bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
     return bad
 
@@ -1928,3 +1936,18 @@ def computeMeanOfFrac(valueArray, tailStr="upper", fraction=0.1, floorFactor=1):
                            "was provided")
 
     return meanOfFrac
+
+
+def getSchema(catalog):
+    """Helper function to determine "schema" of catalog.
+
+    This will be the list of columns if the catlaog type is a pandas DataFrame,
+    or the schema object if it is an `lsst.afw.table.SourceCatalog`.
+    """
+    if isinstance(catalog, pd.DataFrame):
+        schema = catalog.columns
+    elif isinstance(catalog, pd.Series):
+        schema = [catalog.name, ]
+    else:
+        schema = catalog.schema
+    return schema
