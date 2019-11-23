@@ -5,13 +5,15 @@ matplotlib.use("Agg")  # noqa E402
 import matplotlib.pyplot as plt
 from matplotlib.ticker import NullFormatter, AutoMinorLocator, FormatStrFormatter
 import numpy as np
+import pandas as pd
 np.seterr(all="ignore")  # noqa E402
 
 import lsst.afw.geom as afwGeom
 from lsst.display.matplotlib.matplotlib import AsinhNormalize
 from lsst.pex.config import Config, Field, ListField, DictField
 
-from .utils import Data, Stats, E1Resids, E2Resids, checkIdLists, fluxToPlotString, computeMeanOfFrac
+from .utils import (Data, Stats, E1Resids, E2Resids, checkIdLists, fluxToPlotString, computeMeanOfFrac,
+                    getSchema)
 from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotText, plotCameraOutline,
                         plotTractOutline, plotPatchOutline, plotCcdOutline, labelCamera, getQuiver,
                         getRaDecMinMaxPatchList, bboxToXyCoordLists, makeAlphaCmap, buildTractImage)
@@ -111,7 +113,8 @@ class Analysis(object):
             self.quantity = None
 
         self.quantityError = errFunc(catalog) if errFunc is not None else None
-        if prefix + self.config.fluxColumn in catalog.schema:
+        schema = getSchema(catalog)
+        if prefix + self.config.fluxColumn in schema:
             self.fluxColumn = self.config.fluxColumn
         else:
             self.fluxColumn = "flux_psf_flux"
@@ -128,8 +131,9 @@ class Analysis(object):
         # Don't have flags in match and overlap catalogs (already removed in the latter)
         if ("matches" not in self.shortName and "overlap" not in self.shortName and
                 "quiver" not in self.shortName and "inputCounts" not in self.shortName):
+            flagsCatSchema = getSchema(flagsCat)
             for ff in set(list(self.config.flags) + flags):
-                if prefix + ff in flagsCat.schema:
+                if prefix + ff in flagsCatSchema:
                     self.good &= ~flagsCat[prefix + ff]
         for kk in goodKeys:
             self.good &= flagsCat[prefix + kk]
@@ -137,7 +141,7 @@ class Analysis(object):
         # If the input catalog is a coadd, scale the S/N threshold by roughly
         # the sqrt of the number of input visits (actually the mean of the
         # upper 10% of the base_InputCount_value distribution)
-        if prefix + "base_InputCount_value" in catalog.schema:
+        if prefix + "base_InputCount_value" in schema:
             inputCounts = catalog[prefix + "base_InputCount_value"]
             scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=10)
             self.signalToNoiseThreshold = np.floor(
@@ -168,9 +172,9 @@ class Analysis(object):
         # objects classified as stars exist with the configured value, decrease the S/N threshold
         # by 10 until a sample with N > self.config.minHighSampleN is achieved.
         goodSnHigh = np.logical_and(goodSn0, self.signalToNoise >= self.signalToNoiseHighThreshold)
-        if prefix + "base_ClassificationExtendedness_value" in catalog.schema:
+        if prefix + "base_ClassificationExtendedness_value" in schema:
             isStar = catalog[prefix + "base_ClassificationExtendedness_value"] < 0.5
-        elif "numStarFlags" in catalog.schema:
+        elif "numStarFlags" in schema:
             isStar = catalog["numStarFlags"] >= 3
         else:
             isStar = np.ones(len(self.mag), dtype=bool)
@@ -891,9 +895,9 @@ class Analysis(object):
                    matchRadius=None, zpLabel=None, forcedStr=None, dataName="star", uberCalLabel=None,
                    scale=1):
         """Plot ellipticity residuals quiver plot"""
-
+        schema = getSchema(catalog)
         # Use HSM algorithm results if present, if not, use SDSS Shape
-        if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+        if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
             compareCol = "ext_shapeHSM_HsmSourceMoments"
             psfCompareCol = "ext_shapeHSM_HsmPsfMoments"
             shapeAlgorithm = "HSM"
@@ -910,12 +914,12 @@ class Analysis(object):
         for flag in flags:
             bad |= catalog[flag]
         # Cull the catalog down to calibration candidates (or stars if calibration flags not available)
-        if "calib_psf_used" in catalog.schema:
+        if "calib_psf_used" in schema:
             bad |= ~catalog["calib_psf_used"]
             catStr = "psf_used"
             thresholdType = "calib_psf_used"
             thresholdValue = None
-        elif "base_ClassificationExtendedness_value" in catalog.schema:
+        elif "base_ClassificationExtendedness_value" in schema:
             bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
             bad |= -2.5*np.log10(catalog[self.fluxColumn]) > self.magThreshold
             catStr = "ClassExtendedness"
