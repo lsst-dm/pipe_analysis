@@ -3,9 +3,11 @@
 from __future__ import print_function
 
 import os
+import astropy.coordinates as coord
 import astropy.units as units
 import numpy as np
 np.seterr(all="ignore")  # noqa E402
+import pandas as pd
 import functools
 
 from collections import defaultdict
@@ -280,6 +282,11 @@ class CoaddAnalysisTask(CmdLineTask):
                 if haveForced:
                     forced = addFootprintNPix(forced, fromCat=unforced)
 
+            # Convert to pandas DataFrames
+            unforced = unforced.asAstropy().to_pandas()
+            if haveForced:
+                forced = forced.asAstropy().to_pandas()
+
             unforcedSchema = getSchema(unforced)
             if haveForced:
                 forcedSchema = getSchema(forced)
@@ -294,7 +301,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 else:
                     if haveForced:
                         forcedOverlaps = self.overlaps(forced)
-                        if forcedOverlaps:
+                        if not forcedOverlaps.empty:
                             self.plotOverlaps(forcedOverlaps, filenamer, repoInfo.dataId,
                                               matchRadius=self.config.matchOverlapRadius,
                                               matchRadiusUnitStr="\"",
@@ -303,7 +310,7 @@ class CoaddAnalysisTask(CmdLineTask):
                             self.log.info("Number of forced overlap objects matched = {:d}".
                                           format(len(forcedOverlaps)))
                     unforcedOverlaps = self.overlaps(unforced)
-                    if unforcedOverlaps:
+                    if not unforcedOverlaps.empty:
                         self.plotOverlaps(unforcedOverlaps, filenamer, repoInfo.dataId,
                                           matchRadius=self.config.matchOverlapRadius,
                                           matchRadiusUnitStr="\"",
@@ -499,12 +506,14 @@ class CoaddAnalysisTask(CmdLineTask):
                                               not (hscRun and col == "slot_Centroid_flag")])
                 if aliasDictList:
                     catalog = setAliasMaps(catalog, aliasDictList)
+            catalog = self.calibrateCatalogs(catalog, wcs=wcs)
+
+            # Convert to pandas DataFrames
+            catalog = catalog.asAstropy().to_pandas()
 
             # Set boolean array indicating sources deemed unsuitable for qa analyses
             bad = makeBadArray(catalog, flagList=self.config.analysis.flags,
                                onlyReadStars=self.config.onlyReadStars)
-
-            catalog = self.calibrateCatalogs(catalog, wcs=wcs)
 
             if dataset.startswith("deepCoadd_"):
                 packedMatches = butler.get("deepCoadd_measMatch", dataRef.dataId)
@@ -512,7 +521,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 packedMatches = butler.get(dataset + "Match", dataRef.dataId)
 
             # Purge the match list of sources flagged in the catalog
-            badIds = catalog["id"][bad]
+            badIds = catalog["id"][bad].array
             badMatch = np.zeros(len(packedMatches), dtype=bool)
             for iMat, iMatch in enumerate(packedMatches):
                 if iMatch["second"] in badIds:
@@ -967,11 +976,32 @@ class CoaddAnalysisTask(CmdLineTask):
     def overlaps(self, catalog):
         badForOverlap = makeBadArray(catalog, flagList=self.config.analysis.flags,
                                      onlyReadStars=self.config.onlyReadStars, patchInnerOnly=False)
-        goodCat = catalog[~badForOverlap]
-        matches = afwTable.matchRaDec(goodCat, self.config.matchOverlapRadius*afwGeom.arcseconds)
-        if not matches:
+        goodCat = catalog[~badForOverlap].copy(deep=True)
+        skyCoords = coord.SkyCoord(goodCat["coord_ra"], goodCat["coord_dec"], unit=units.rad)
+        # Setting nthneighbor to 2 to avoid self-matches, but this is not
+        # robust agaist other zero distance matches (i.e. if any object other
+        # than the source itself has identical coordinates, the returned index
+        # may still be that of "self").
+        # TODO: file an issue with astropy to robustly preclude self-matches
+        inds, dists, _ = coord.match_coordinates_sky(skyCoords, skyCoords, nthneighbor=2)
+        selfMatches = [i == ind for i, ind in enumerate(inds)]
+        if sum(selfMatches) > 0:
+            self.log.warn("There were {} objects self-matched by "
+                          "astropy.coordinates.match_coordinates_sky()").format(sum(selfMatches))
+        matchedIds = dists < self.config.matchOverlapRadius*units.arcsec
+        matchedIndices = inds[matchedIds]
+        matchedDistances = dists[matchedIds]
+        matchFirst = goodCat[matchedIds].copy(deep=True)
+        matchSecond = goodCat.iloc[matchedIndices].copy(deep=True)
+        matchFirst.rename(columns=lambda x: "first_" + x, inplace=True)
+        matchSecond.rename(columns=lambda x: "second_" + x, inplace=True)
+        matchFirst.index = pd.RangeIndex(len(matchFirst.index))
+        matchSecond.index = pd.RangeIndex(len(matchSecond.index))
+        matches = pd.concat([matchFirst, matchSecond], axis=1)
+        matches["distance"] = matchedDistances.rad
+        if matches.empty:
             self.log.info("Did not find any overlapping matches")
-        return joinMatches(matches, "first_", "second_")
+        return matches
 
     def plotOverlaps(self, overlaps, filenamer, dataId, butler=None, camera=None, ccdList=None,
                      tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,

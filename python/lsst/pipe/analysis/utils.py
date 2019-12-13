@@ -170,7 +170,7 @@ class MagDiff(object):
         self.unitScale = unitScale
 
     def __call__(self, catalog1, catalog2=None):
-        catalog2 = catalog2 if catalog2 else catalog1
+        catalog2 = catalog2 if catalog2 is not None else catalog1
         return -2.5*np.log10(catalog1[self.col1]/catalog2[self.col2])*self.unitScale
 
 
@@ -548,10 +548,10 @@ def checkIdLists(catalog1, catalog2, prefix=""):
         elif prefix + "objectId" in schema:
             idStrList[i] = prefix + "objectId"
         else:
-            raise RuntimeError("Cannot identify object id field (tried id, objectId, " + prefix + "id, and " +
-                               prefix + "objectId)")
-
-    return np.all(catalog1[idStrList[0]] == catalog2[idStrList[1]])
+            raise RuntimeError("Cannot identify object id field (tried id, objectId, " +
+                               prefix + "id, and " + prefix + "objectId)")
+    identicalIds = np.all(catalog1[idStrList[0]] == catalog2[idStrList[1]])
+    return identicalIds
 
 
 def checkPatchOverlap(patchList, tractInfo):
@@ -831,17 +831,30 @@ def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True,
     """
     schema = getSchema(catalog)
     bad = np.zeros(len(catalog), dtype=bool)
-    if "detect_isPatchInner" in schema and patchInnerOnly:
-        bad |= ~catalog["detect_isPatchInner"]
-    if "detect_isTractInner" in schema and tractInnerOnly:
-        bad |= ~catalog["detect_isTractInner"]
-    bad |= catalog["deblend_nChild"] > 0  # Exclude non-deblended (i.e. parents)
-    if "merge_peak_sky" in schema:
-        bad |= catalog["merge_peak_sky"]  # Exclude "sky" objects (currently only inserted in coadds)
-    for flag in flagList:
-        bad |= catalog[flag]
-    if onlyReadStars and "base_ClassificationExtendedness_value" in schema:
-        bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
+    if isinstance(catalog, pd.DataFrame):
+        if "detect_isPatchInner" in schema and patchInnerOnly:
+            bad |= ~catalog["detect_isPatchInner"].values
+        if "detect_isTractInner" in schema and tractInnerOnly:
+            bad |= ~catalog["detect_isTractInner"].values
+        bad |= catalog["deblend_nChild"].values > 0  # Exclude non-deblended (i.e. parents)
+        if "merge_peak_sky" in schema:  # Exclude "sky" objects (currently only inserted in coadds)
+            bad |= catalog["merge_peak_sky"].values
+        for flag in flagList:
+            bad |= catalog[flag].values
+        if onlyReadStars and "base_ClassificationExtendedness_value" in schema:
+            bad |= catalog["base_ClassificationExtendedness_value"].values > 0.5
+    else:
+        if "detect_isPatchInner" in schema and patchInnerOnly:
+            bad |= ~catalog["detect_isPatchInner"]
+        if "detect_isTractInner" in schema and tractInnerOnly:
+            bad |= ~catalog["detect_isTractInner"]
+        bad |= catalog["deblend_nChild"] > 0  # Exclude non-deblended (i.e. parents)
+        if "merge_peak_sky" in schema:  # Exclude "sky" objects (currently only inserted in coadds)
+            bad |= catalog["merge_peak_sky"]
+        for flag in flagList:
+            bad |= catalog[flag]
+        if onlyReadStars and "base_ClassificationExtendedness_value" in schema:
+            bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
     return bad
 
 
@@ -1089,10 +1102,15 @@ def calibrateSourceCatalog(catalog, zp):
 def calibrateCoaddSourceCatalog(catalog, zp):
     """Calibrate coadd catalog
 
-    Requires a SourceCatalog and zeropoint as input.
+    Requires a SourceCatalog or pandas Dataframe and zeropoint as input.
     """
     # Convert to constant zero point, as for the coadds
-    fluxKeys, errKeys = getFluxKeys(catalog.schema)
+    if isinstance(catalog, pd.DataFrame):
+        fluxKeys = {flux: flux for flux in catalog.columns if flux.endswith("_instFlux")}
+        errKeys = {flux + "Err": flux + "Err" for (flux, flux) in fluxKeys.items()}
+    else:
+        fluxKeys, errKeys = getFluxKeys(catalog.schema)
+
     factor = 10.0**(0.4*zp)
     for name, key in list(fluxKeys.items()) + list(errKeys.items()):
         catalog[key] /= factor
@@ -1103,24 +1121,36 @@ def backoutApCorr(catalog):
     """Back out the aperture correction to all fluxes
     """
     ii = 0
-    for k in catalog.schema.getNames():
-        if "_instFlux" in k and k[:-5] + "_apCorr" in catalog.schema.getNames() and "_apCorr" not in k:
+    fluxStr = "_instFlux"
+    apCorrStr = "_apCorr"
+    if isinstance(catalog, pd.DataFrame):
+        keys = {flux: flux for flux in catalog.columns if (
+            flux.endswith(fluxStr) or flux.endswith(apCorrStr))}
+    else:
+        keys = catalog.schema.getNames()
+    for k in keys:
+        if fluxStr in k and k[:-len(fluxStr)] + apCorrStr in keys and apCorrStr not in k:
             if ii == 0:
                 print("Backing out aperture corrections to fluxes")
                 ii += 1
-            catalog[k] /= catalog[k[:-5] + "_apCorr"]
+            catalog[k] /= catalog[k[:-len(fluxStr)] + apCorrStr]
     return catalog
 
 
 def matchNanojanskyToAB(matches):
     # LSST reads in catalogs with flux in "nanojanskys", so must convert to AB.
     # Using astropy units for conversion for consistency with PhotoCalib.
-    schema = matches[0].first.schema
-    keys = [schema[kk].asKey() for kk in schema.getNames() if "_flux" in kk]
-
-    for m in matches:
+    if isinstance(matches, pd.DataFrame):
+        schema = getSchema(matches)
+        keys = [kk for kk in schema if kk.startswith("ref_") and "_flux" in kk]
         for k in keys:
-            m.first[k] /= NANOJANSKYS_PER_AB_FLUX
+            matches[k] = matches[k].apply(lambda x: x/NANOJANSKYS_PER_AB_FLUX)
+    else:
+        schema = matches[0].first.schema
+        keys = [schema[kk].asKey() for kk in schema.getNames() if "_flux" in kk]
+        for m in matches:
+            for k in keys:
+                m.first[k] /= NANOJANSKYS_PER_AB_FLUX
     return matches
 
 
@@ -1923,6 +1953,7 @@ def computeMeanOfFrac(valueArray, tailStr="upper", fraction=0.1, floorFactor=1):
        The mean of the upper/lower ``fraction`` of the values in
        ``valueArray``.
     """
+    valueArray = valueArray.array if hasattr(valueArray, "array") else valueArray
     pad = 0.49
     ptFrac = max(2, int(fraction*len(valueArray)))
     if tailStr == "upper":

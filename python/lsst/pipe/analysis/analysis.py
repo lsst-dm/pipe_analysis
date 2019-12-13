@@ -106,7 +106,7 @@ class Analysis(object):
         self.prefix = prefix
         self.errFunc = errFunc
         if func is not None:
-            if type(func) == np.ndarray:
+            if isinstance(func, np.ndarray) or isinstance(func, pd.Series):
                 self.quantity = func
             else:
                 self.quantity = func(catalog)
@@ -198,7 +198,7 @@ class Analysis(object):
         self.magMax = computeMeanOfFrac(self.mag[goodSn0], tailStr="upper", fraction=0.05, floorFactor=1) + 0.5
 
         if labeller is not None:
-            labels = labeller(catalog, compareCat) if compareCat else labeller(catalog)
+            labels = labeller(catalog, compareCat) if compareCat is not None else labeller(catalog)
             self.data = {name: Data(catalog, self.quantity, self.mag, self.signalToNoise,
                                     self.good & (labels == value),
                                     colorList[value], self.quantityError, name in labeller.plot) for
@@ -1098,7 +1098,7 @@ class Analysis(object):
         thetas = []
         edgeColors = []  # to outline any ellipses truncated at maxDiamPix
 
-        for src in catalog:
+        for _, src in catalog.iterrows():
             edgeColor = "None"
             srcQuad = afwGeom.Quadrupole(src[shapeStr + "_xx"], src[shapeStr + "_yy"], src[shapeStr + "_xy"])
             srcEllip = afwGeom.ellipses.Axes(srcQuad)

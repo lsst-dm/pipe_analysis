@@ -53,7 +53,7 @@ class OverlapsStarGalaxyLabeller(StarGalaxyLabeller):
         self._second = second
 
     def __call__(self, catalog1, catalog2=None):
-        catalog2 = catalog2 if catalog2 else catalog1
+        catalog2 = catalog2 if catalog2 is not None else catalog1
         first = np.where(catalog1[self._first + self._column] < 0.5, 0, 1)
         second = np.where(catalog2[self._second + self._column] < 0.5, 0, 1)
         return np.where(first == second, first, 2)
