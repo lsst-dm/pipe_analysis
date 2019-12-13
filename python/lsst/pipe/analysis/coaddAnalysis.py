@@ -235,6 +235,8 @@ class CoaddAnalysisTask(CmdLineTask):
         self.matchControl.symmetricMatch = False
 
     def runDataRef(self, patchRefList, subdir="", cosmos=None):
+        forced = None
+        unforced = None
         haveForced = False  # do forced datasets exits (may not for single band datasets)
         dataset = "Coadd_forced_src"
         # Explicit input file was checked in CoaddAnalysisRunner, so a check on datasetExists
@@ -315,6 +317,10 @@ class CoaddAnalysisTask(CmdLineTask):
                     unforced = addFootprintNPix(unforced, fromCat=unforced)
                     if haveForced:
                         forced = addFootprintNPix(forced, fromCat=unforced)
+                # Convert to pandas DataFrames
+                unforced = unforced.asAstropy().to_pandas().set_index("id")
+                if haveForced:
+                    forced = forced.asAstropy().to_pandas().set_index("id")
 
             unforcedSchema = getSchema(unforced)
             if haveForced:
@@ -329,7 +335,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 else:
                     if haveForced:
                         forcedOverlaps = self.overlaps(forced)
-                        if forcedOverlaps:
+                        if not forcedOverlaps.empty:
                             self.plotOverlaps(forcedOverlaps, filenamer, repoInfo.dataId,
                                               matchRadius=self.config.matchOverlapRadius,
                                               matchRadiusUnitStr="\"",
@@ -338,7 +344,7 @@ class CoaddAnalysisTask(CmdLineTask):
                             self.log.info("Number of forced overlap objects matched = {:d}".
                                           format(len(forcedOverlaps)))
                     unforcedOverlaps = self.overlaps(unforced)
-                    if unforcedOverlaps:
+                    if not unforcedOverlaps.empty:
                         self.plotOverlaps(unforcedOverlaps, filenamer, repoInfo.dataId,
                                           matchRadius=self.config.matchOverlapRadius,
                                           matchRadiusUnitStr="\"",

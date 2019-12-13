@@ -170,7 +170,7 @@ class MagDiff(object):
         self.unitScale = unitScale
 
     def __call__(self, catalog1, catalog2=None):
-        catalog2 = catalog2 if catalog2 else catalog1
+        catalog2 = catalog2 if catalog2 is not None else catalog1
         return -2.5*np.log10(catalog1[self.col1]/catalog2[self.col2])*self.unitScale
 
 
@@ -833,16 +833,16 @@ def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True,
     schema = getSchema(catalog)
     bad = np.zeros(len(catalog), dtype=bool)
     if "detect_isPatchInner" in schema and patchInnerOnly:
-        bad |= ~catalog["detect_isPatchInner"]
+        bad |= ~catalog["detect_isPatchInner"].values
     if "detect_isTractInner" in schema and tractInnerOnly:
-        bad |= ~catalog["detect_isTractInner"]
-    bad |= catalog["deblend_nChild"] > 0  # Exclude non-deblended (i.e. parents)
+        bad |= ~catalog["detect_isTractInner"].values
+    bad |= catalog["deblend_nChild"].values > 0  # Exclude non-deblended (i.e. parents)
     if "merge_peak_sky" in schema:
-        bad |= catalog["merge_peak_sky"]  # Exclude "sky" objects (currently only inserted in coadds)
+        bad |= catalog["merge_peak_sky"].values  # Exclude "sky" objects (currently only inserted in coadds)
     for flag in flagList:
-        bad |= catalog[flag]
+        bad |= catalog[flag].values
     if onlyReadStars and "base_ClassificationExtendedness_value" in schema:
-        bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
+        bad |= catalog["base_ClassificationExtendedness_value"].values > 0.5
     return bad
 
 
