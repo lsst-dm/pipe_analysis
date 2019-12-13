@@ -21,6 +21,8 @@ import lsst.geom as lsstGeom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 import lsst.pex.config as pexConfig
+import lsst.pex.exceptions as pexExceptions
+import lsst.sphgeom as sphgeom
 import lsst.verify as verify
 
 try:
@@ -43,7 +45,7 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "orthogonalRegression", "distanceSquaredToPoly", "p1CoeffsFromP2x0y0", "p2p1CoeffsFromLinearFit",
            "lineFromP2Coeffs", "linesFromP2P1Coeffs", "makeEqnStr", "catColors", "setAliasMaps",
            "addPreComputedColumns", "addMetricMeasurement", "updateVerifyJob", "computeMeanOfFrac",
-           "getSchema"]
+           "getSchema", "loadAndDenormalizeMatches"]
 
 
 NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
@@ -1953,3 +1955,49 @@ def getSchema(catalog):
     else:
         schema = catalog.schema
     return schema
+
+
+def loadAndDenormalizeMatches(packedMatches, refObjLoader):
+
+    matchmeta = packedMatches.table.getMetadata()
+    rad = matchmeta.getDouble("RADIUS")
+    matchmeta.setDouble("RADIUS", rad*1.05, "field radius in degrees, approximate, padded")
+
+    version = matchmeta.getInt("SMATCHV")
+    if version != 1:
+        raise ValueError("SourceMatchVector version number is {:}, not 1.".format(version))
+    filterName = matchmeta.getString("FILTER").strip()
+    try:
+        epoch = matchmeta.getDouble("EPOCH")
+    except (pexExceptions.NotFoundError, pexExceptions.TypeError):
+        epoch = None  # Not present, or not correct type means it's not set
+    if "RADIUS" in matchmeta:
+        # This is a circle style metadata, call loadSkyCircle
+        ctrCoord = lsstGeom.SpherePoint(matchmeta.getDouble("RA"),
+                                        matchmeta.getDouble("DEC"), lsstGeom.degrees)
+        rad = matchmeta.getDouble("RADIUS")*lsstGeom.degrees
+        refCat = refObjLoader.loadSkyCircle(ctrCoord, rad, filterName, epoch=epoch).refCat
+    elif "INNER_UPPER_LEFT_RA" in matchmeta:
+        # This is the sky box type (only triggers in the LoadReferenceObject class, not task)
+        # Only the outer box is required to be loaded to get the maximum region, all filtering
+        # will be done by the unpackMatches function, and no spatial filtering needs to be done
+        # by the refObjLoader
+        box = []
+        for place in ("UPPER_LEFT", "UPPER_RIGHT", "LOWER_LEFT", "LOWER_RIGHT"):
+            coord = lsstGeom.SpherePoint(matchmeta.getDouble(f"OUTER_{place}_RA"),
+                                         matchmeta.getDouble(f"OUTER_{place}_DEC"),
+                                         lsstGeom.degrees).getVector()
+            box.append(coord)
+        outerBox = sphgeom.ConvexPolygon(box)
+        refCat = refObjLoader.loadRegion(outerBox, filterName=filterName, epoch=epoch).refCat
+
+    print(type(packedMatches))
+    print(packedMatches[0].first)
+    print(packedMatches[0].second)
+    print(type(refCat))
+    print(refCat[0])
+    # refCat.sort()
+    # matches = afwTable.unpackMatches(matchCat, refCat, sourceCat)
+    input()
+
+    return refCat
