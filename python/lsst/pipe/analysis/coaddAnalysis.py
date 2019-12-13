@@ -33,7 +33,7 @@ from .utils import (Filenamer, Enforcer, MagDiff, MagDiffMatches, MagDiffCompare
                     addFootprintNPix, makeBadArray, addIntFloatOrStrColumn,
                     calibrateCoaddSourceCatalog, backoutApCorr, matchNanojanskyToAB,
                     fluxToPlotString, andCatalog, writeParquet, getRepoInfo, setAliasMaps,
-                    addPreComputedColumns, computeMeanOfFrac, getSchema)
+                    addPreComputedColumns, computeMeanOfFrac, getSchema, loadAndDenormalizeMatches)
 from .plotUtils import (CosmosLabeller, AllLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
                         MatchesStarGalaxyLabeller, determineUberCalLabel)
 
@@ -586,28 +586,34 @@ class CoaddAnalysisTask(CmdLineTask):
 
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
-            catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-            # Set some aliases for differing schema naming conventions
-            if aliasDictList:
-                catalog = setAliasMaps(catalog, aliasDictList)
-            if dataset != "deepCoadd_meas" and any(ss not in catalog.schema
-                                                   for ss in self.config.columnsToCopy):
-                unforced = dataRef.get("deepCoadd_meas", immediate=True,
-                                       flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-                # copy over some fields from unforced to forced catalog
-                catalog = addColumnsToSchema(unforced, catalog,
-                                             [col for col in list(self.config.columnsToCopy) +
-                                              list(self.config.analysis.flags) if
-                                              col not in catalog.schema and col in unforced.schema and
-                                              not (hscRun and col == "slot_Centroid_flag")])
+            if self.config.doReadParquetTables:
+                subDataset = dataset[dataset.find("Coadd_") + len("Coadd_"):]
+                catalog = self.readParquetTables([dataRef], self.config.coaddName + "Coadd_obj", subDataset)
+            else:
+                catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+                # Set some aliases for differing schema naming conventions
                 if aliasDictList:
                     catalog = setAliasMaps(catalog, aliasDictList)
+                schema = getSchema(catalog)
+                if dataset != "deepCoadd_meas" and any(ss not in schema for ss in self.config.columnsToCopy):
+                    unforced = dataRef.get("deepCoadd_meas", immediate=True,
+                                           flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+                    unforcedSchema = getSchema(unforced)
+                    # copy over some fields from unforced to forced catalog
+                    catalog = addColumnsToSchema(unforced, catalog,
+                                                 [col for col in list(self.config.columnsToCopy) +
+                                                  list(self.config.analysis.flags) if
+                                                  col not in schema and col in unforcedSchema and
+                                                  not (hscRun and col == "slot_Centroid_flag")])
+                    if aliasDictList:
+                        catalog = setAliasMaps(catalog, aliasDictList)
+                catalog = self.calibrateCatalogs(catalog, wcs=wcs)
 
-            # Set boolean array indicating sources deemed unsuitable for qa analyses
-            bad = makeBadArray(catalog, flagList=self.config.analysis.flags,
-                               onlyReadStars=self.config.onlyReadStars)
-
-            catalog = self.calibrateCatalogs(catalog, wcs=wcs)
+                # Convert to pandas DataFrames
+                catalog = catalog.asAstropy().to_pandas().set_index("id")
+                # Set boolean array indicating sources deemed unsuitable for qa analyses
+                bad = makeBadArray(catalog, flagList=self.config.analysis.flags,
+                                   onlyReadStars=self.config.onlyReadStars)
 
             if dataset.startswith("deepCoadd_"):
                 packedMatches = butler.get("deepCoadd_measMatch", dataRef.dataId)
@@ -615,7 +621,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 packedMatches = butler.get(dataset + "Match", dataRef.dataId)
 
             # Purge the match list of sources flagged in the catalog
-            badIds = catalog["id"][bad]
+            badIds = catalog[bad]
             badMatch = np.zeros(len(packedMatches), dtype=bool)
             for iMat, iMatch in enumerate(packedMatches):
                 if iMatch["second"] in badIds:
@@ -630,11 +636,13 @@ class CoaddAnalysisTask(CmdLineTask):
             # metadata, so some matches may reside outside the circle searched within this radius
             # Thus, increase the radius set in the metadata fed into joinMatchListWithCatalog() to
             # accommodate.
-            matchmeta = packedMatches.table.getMetadata()
-            rad = matchmeta.getDouble("RADIUS")
-            matchmeta.setDouble("RADIUS", rad*1.05, "field radius in degrees, approximate, padded")
+            # matchmeta = packedMatches.table.getMetadata()
+            # rad = matchmeta.getDouble("RADIUS")
+            # matchmeta.setDouble("RADIUS", rad*1.05, "field radius in degrees, approximate, padded")
             refObjLoader = self.config.refObjLoader.apply(butler=butler)
-            matches = refObjLoader.joinMatchListWithCatalog(packedMatches, catalog)
+            denormMatches = loadAndDenormalizeMatches(packedMatches, refObjLoader)
+            # matches = refObjLoader.joinMatchListWithCatalog(packedMatches, catalog)
+            # matches = afwTable.unpackMatches(packedMatches, refCat, sourceCat)
             if not hasattr(matches[0].first, "schema"):
                 raise RuntimeError("Unable to unpack matches.  "
                                    "Do you have the correct reference catalog setup?")
@@ -655,9 +663,10 @@ class CoaddAnalysisTask(CmdLineTask):
             matchMeta = butler.get(dataset, dataRef.dataId,
                                    flags=afwTable.SOURCE_IO_NO_FOOTPRINTS).getTable().getMetadata()
             catalog = matchesToCatalog(matches, matchMeta)
+            schema = getSchema(catalog)
             # Compute Focal Plane coordinates for each source if not already there
             if self.config.analysisMatches.doPlotFP:
-                if "src_base_FPPosition_x" not in catalog.schema and "src_focalplane_x" not in catalog.schema:
+                if "src_base_FPPosition_x" not in schema and "src_focalplane_x" not in schema:
                     exp = butler.get("calexp", dataRef.dataId)
                     det = exp.getDetector()
                     catalog = addFpPoint(det, catalog, prefix="src_")
