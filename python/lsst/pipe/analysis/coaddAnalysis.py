@@ -3,6 +3,7 @@
 from __future__ import print_function
 
 import os
+import astropy.coordinates as coord
 import astropy.units as units
 import numpy as np
 np.seterr(all="ignore")  # noqa E402
@@ -1069,11 +1070,25 @@ class CoaddAnalysisTask(CmdLineTask):
     def overlaps(self, catalog):
         badForOverlap = makeBadArray(catalog, flagList=self.config.analysis.flags,
                                      onlyReadStars=self.config.onlyReadStars, patchInnerOnly=False)
-        goodCat = catalog[~badForOverlap]
-        matches = afwTable.matchRaDec(goodCat, self.config.matchOverlapRadius*afwGeom.arcseconds)
-        if not matches:
+        goodCat = catalog[~badForOverlap].copy(deep=True)
+        skyCoords = coord.SkyCoord(goodCat["coord_ra"], goodCat["coord_dec"], unit=units.rad)
+        inds, dists, _ = coord.match_coordinates_sky(skyCoords, skyCoords, nthneighbor=2)
+        for i in range(0, len(inds) - 1):
+            if i == inds[i]:
+                print(i, inds[i], dists[i])
+                self.log.warn("This object was self-matched by astropy.coordinates.match_coordinates_sky()")
+        matchedIds = dists < self.config.matchOverlapRadius*units.arcsec
+        matchedIndices = inds[matchedIds]
+        matchedDistances = dists[matchedIds]
+        matchFirst = goodCat[matchedIds].copy(deep=True)
+        matchSecond = goodCat.iloc[matchedIndices].copy(deep=True)
+        matchFirst.rename(columns=lambda x: "first_" + x, inplace=True)
+        matchSecond.rename(columns=lambda x: "second_" + x, inplace=True)
+        matches = pd.concat([matchFirst, matchSecond], axis=1)
+        matches["distance"] = matchedDistances.rad
+        if matches.empty:
             self.log.info("Did not find any overlapping matches")
-        return joinMatches(matches, "first_", "second_")
+        return matches
 
     def plotOverlaps(self, overlaps, filenamer, dataId, butler=None, camera=None, ccdList=None,
                      tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
