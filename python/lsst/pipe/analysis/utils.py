@@ -4,6 +4,7 @@ import os
 import re
 
 import astropy.units as units
+import logging
 import numpy as np
 import pandas as pd
 import scipy.odr as scipyOdr
@@ -21,6 +22,8 @@ import lsst.geom as lsstGeom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 import lsst.pex.config as pexConfig
+import lsst.pex.exceptions as pexExceptions
+import lsst.sphgeom as sphgeom
 import lsst.verify as verify
 
 try:
@@ -43,10 +46,11 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "orthogonalRegression", "distanceSquaredToPoly", "p1CoeffsFromP2x0y0", "p2p1CoeffsFromLinearFit",
            "lineFromP2Coeffs", "linesFromP2P1Coeffs", "makeEqnStr", "catColors", "setAliasMaps",
            "addPreComputedColumns", "addMetricMeasurement", "updateVerifyJob", "computeMeanOfFrac",
-           "getSchema"]
+           "getSchema", "loadDenormalizeAndUnpackMatches"]
 
 
 NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
+log = logging.getLogger(__name__)
 
 def writeParquet(dataRef, table, badArray=None):
     """Write an afwTable to a desired ParquetTable butler dataset
@@ -1982,3 +1986,86 @@ def getSchema(catalog):
     else:
         schema = catalog.schema
     return schema
+
+
+def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, padRadiusFactor=1.05):
+    """Function to load and denormalize a catalog of packed matches
+
+    A match list is persisted and unpersisted as a catalog of IDs produced by
+    afw.table.packMatches(), with match metadata (as returned by the astrometry
+    tasks) in the catalog's metadata attribute. This method converts such a
+    match catalog into a match list, with links to source records and reference
+    object records.
+
+    When loading in reference objects for a region defined by an image's
+    current WCS estimate, the reference object loader grows the bbox by the
+    config parameter pixelMargin.  This is set to 50 by default but this is not
+    reflected by the radius parameter set in the metadata, so some matches may
+    reside outside the circle searched within this radius.  Thus, we increase
+    the radius set in the metadata by the factor ``padRadiusFactor`` to
+    accommodate.
+
+    Parameters
+    ----------
+    packedMatches : `lsst.afw.table.BaseCatalog`
+        Catalog of packed matches to be denormalized (i.e. load in associated
+        reference catalogs with full
+    refObjLoader : `lsst.meas.algorithms.loadReferenceObjects.LoadReferenceObjectsTask`
+        Reference object loader to read in the reference catalogs.
+    padRadiusFactor : `float`, optional
+        Factory by which to "pad" (increase) the sky circle radius to be loaded
+        from that stored in the metadata.  Default is 1.05.
+
+    Returns
+    -------
+
+    """
+    matchmeta = packedMatches.table.getMetadata()
+    rad = matchmeta.getDouble("RADIUS")
+    matchmeta.setDouble("RADIUS", rad*padRadiusFactor, "field radius in degrees, approximate, padded")
+
+    version = matchmeta.getInt("SMATCHV")
+    if version != 1:
+        raise ValueError("SourceMatchVector version number is {:}, not 1.".format(version))
+    filterName = matchmeta.getString("FILTER").strip()
+    try:
+        epoch = matchmeta.getDouble("EPOCH")
+    except (pexExceptions.NotFoundError, pexExceptions.TypeError):
+        epoch = None  # Not present, or not correct type means it's not set
+    if "RADIUS" in matchmeta:
+        # This is a circle style metadata, call loadSkyCircle
+        ctrCoord = lsstGeom.SpherePoint(matchmeta.getDouble("RA"),
+                                        matchmeta.getDouble("DEC"), lsstGeom.degrees)
+        rad = matchmeta.getDouble("RADIUS")*lsstGeom.degrees
+        refCat = refObjLoader.loadSkyCircle(ctrCoord, rad, filterName, epoch=epoch).refCat
+    elif "INNER_UPPER_LEFT_RA" in matchmeta:
+        # This is the sky box type (only triggers in the LoadReferenceObject
+        # class, not task).  Only the outer box is required to be loaded to get
+        # the maximum region, all filtering will be done below on the
+        # unpackedMatches catalog, and no spatial filtering needs to be done by
+        # the refObjLoader.
+        box = []
+        for place in ("UPPER_LEFT", "UPPER_RIGHT", "LOWER_LEFT", "LOWER_RIGHT"):
+            coord = lsstGeom.SpherePoint(matchmeta.getDouble(f"OUTER_{place}_RA"),
+                                         matchmeta.getDouble(f"OUTER_{place}_DEC"),
+                                         lsstGeom.degrees).getVector()
+            box.append(coord)
+        outerBox = sphgeom.ConvexPolygon(box)
+        refCat = refObjLoader.loadRegion(outerBox, filterName=filterName, epoch=epoch).refCat
+
+    packedMatches = packedMatches.asAstropy().to_pandas().set_index("first")
+    refCat = refCat.asAstropy().to_pandas().set_index("id")
+    denormMatches = packedMatches.join(refCat)
+    # Check that matches were found for all obects in patchedMatches catalog
+    numUnmatched = denormMatches.coord_ra.isnull().sum()
+    if numUnmatched > 0:
+        logStr = ("No match found for N={0:} objects in the packedMatch catalog. "
+                  "Try increasing padRadiusFactor (currently = {1:}) to load "
+                  "sources over a wider area?".format(numUnmatched, padRadiusFactor))
+        log.warn(logStr)
+    catalog.rename(columns=lambda x: "src_" + x, inplace=True)
+    denormMatches.rename(columns=lambda x: "ref_" + x if x != "distance" else x, inplace=True)
+    unpackedMatches = catalog.join(denormMatches.set_index("ref_second"), on="src_id")
+    unpackedMatches = unpackedMatches[unpackedMatches["distance"].notnull()]
+
+    return unpackedMatches
