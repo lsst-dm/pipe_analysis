@@ -17,7 +17,6 @@ from lsst.pex.config import (Config, Field, ConfigField, ListField, DictField, C
                              ConfigurableField)
 from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError
 from lsst.pipe.drivers.utils import TractDataIdContainer
-from lsst.afw.table.catalogMatches import matchesToCatalog
 from lsst.meas.astrom import AstrometryConfig
 from lsst.pipe.tasks.colorterms import Colorterm, ColortermLibrary
 
@@ -26,14 +25,13 @@ from lsst.meas.algorithms import LoadIndexedReferenceObjectsTask
 from .analysis import AnalysisConfig, Analysis
 from .utils import (Filenamer, Enforcer, MagDiff, MagDiffMatches, MagDiffCompare,
                     AstrometryDiff, TraceSize, PsfTraceSizeDiff, TraceSizeCompare, PercentDiff,
-                    E1Resids, E2Resids, E1ResidsHsmRegauss, E2ResidsHsmRegauss, FootNpixDiffCompare,
-                    MagDiffCompareErr, CentroidDiff, deconvMom,
-                    deconvMomStarGal, concatenateCatalogs, joinMatches, checkPatchOverlap,
-                    addColumnsToSchema, addApertureFluxesHSC, addFpPoint,
-                    addFootprintNPix, makeBadArray, addIntFloatOrStrColumn,
-                    calibrateCoaddSourceCatalog, backoutApCorr, matchNanojanskyToAB,
-                    fluxToPlotString, andCatalog, writeParquet, getRepoInfo, setAliasMaps,
-                    addPreComputedColumns, computeMeanOfFrac, getSchema)
+                    E1Resids, E2Resids, E1ResidsHsmRegauss, E2ResidsHsmRegauss, FootAreaDiffCompare,
+                    MagDiffCompareErr, CentroidDiff, deconvMom, deconvMomStarGal, concatenateCatalogs,
+                    joinMatches, checkPatchOverlap, addColumnsToSchema, addFpPoint, addFootprintArea,
+                    makeBadArray, addIntFloatOrStrColumn, calibrateCoaddSourceCatalog, backoutApCorr,
+                    matchNanojanskyToAB, fluxToPlotString, andCatalog, writeParquet, getRepoInfo,
+                    setAliasMaps, addPreComputedColumns, computeMeanOfFrac, getSchema,
+                    loadDenormalizeAndUnpackMatches)
 from .plotUtils import (CosmosLabeller, AllLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
                         MatchesStarGalaxyLabeller, determineUberCalLabel)
 
@@ -480,15 +478,16 @@ class CoaddAnalysisTask(CmdLineTask):
         return concatenateCatalogs(catList)
 
     def readSrcMatches(self, dataRefList, dataset, hscRun=None, wcs=None, aliasDictList=None):
-        catList = []
+        allMatches = None
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
                 self.log.info("Dataset does not exist: {0:r}, {1:s}".format(dataRef.dataId, dataset))
                 continue
             butler = dataRef.getButler()
 
-            # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
-            # (which requires a refObjLoader to be initialized).
+            # Generate unnormalized match list (from normalized persisted
+            # one) with loadDenormalizeAndUnpackMatches (which requires a
+            # refObjLoader to be initialized).
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
             # Set some aliases for differing schema naming conventions
             if aliasDictList:
@@ -507,6 +506,16 @@ class CoaddAnalysisTask(CmdLineTask):
                 if aliasDictList:
                     catalog = setAliasMaps(catalog, aliasDictList)
             catalog = self.calibrateCatalogs(catalog, wcs=wcs)
+            # Compute Focal Plane coordinates for each source if not already there
+            if self.config.analysisMatches.doPlotFP:
+                if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
+                    coaddType = dataset[:dataset.find("_")]
+                    exp = butler.get(coaddType + "_calexp", dataRef.dataId)
+                    det = exp.getDetector()
+                    catalog = addFpPoint(det, catalog)
+            # Optionally backout aperture corrections
+            if self.config.doBackoutApCorr:
+                catalog = backoutApCorr(catalog)
 
             # Convert to pandas DataFrames
             catalog = catalog.asAstropy().to_pandas()
@@ -531,55 +540,20 @@ class CoaddAnalysisTask(CmdLineTask):
             if not packedMatches:
                 self.log.warn("No good matches for %s" % (dataRef.dataId,))
                 continue
-            # The reference object loader grows the bbox by the config parameter pixelMargin.  This
-            # is set to 50 by default but is not reflected by the radius parameter set in the
-            # metadata, so some matches may reside outside the circle searched within this radius
-            # Thus, increase the radius set in the metadata fed into joinMatchListWithCatalog() to
-            # accommodate.
-            matchmeta = packedMatches.table.getMetadata()
-            rad = matchmeta.getDouble("RADIUS")
-            matchmeta.setDouble("RADIUS", rad*1.05, "field radius in degrees, approximate, padded")
             refObjLoader = self.config.refObjLoader.apply(butler=butler)
-            matches = refObjLoader.joinMatchListWithCatalog(packedMatches, catalog)
-            if not hasattr(matches[0].first, "schema"):
-                raise RuntimeError("Unable to unpack matches.  "
-                                   "Do you have the correct reference catalog setup?")
+            matches = loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader)
             # LSST reads in reference catalogs with flux in "nanojanskys", so must convert to AB
             matches = matchNanojanskyToAB(matches)
-            if hscRun and self.config.doAddAperFluxHsc:
-                addApertureFluxesHSC(matches, prefix="second_")
 
-            if not matches:
+            if matches.empty:
                 self.log.warn("No matches for %s" % (dataRef.dataId,))
                 continue
 
-            # Set the alias maps for the matches sources (i.e. the .second attribute schema for each match)
-            if aliasDictList:
-                for mm in matches:
-                    mm.second = setAliasMaps(mm.second, aliasDictList)
+            allMatches = matches if allMatches is None else pd.concat([allMatches, matches], axis=0)
 
-            matchMeta = butler.get(dataset, dataRef.dataId,
-                                   flags=afwTable.SOURCE_IO_NO_FOOTPRINTS).getTable().getMetadata()
-            catalog = matchesToCatalog(matches, matchMeta)
-            # Compute Focal Plane coordinates for each source if not already there
-            if self.config.analysisMatches.doPlotFP:
-                if "src_base_FPPosition_x" not in catalog.schema and "src_focalplane_x" not in catalog.schema:
-                    exp = butler.get("calexp", dataRef.dataId)
-                    det = exp.getDetector()
-                    catalog = addFpPoint(det, catalog, prefix="src_")
-            # Optionally backout aperture corrections
-            if self.config.doBackoutApCorr:
-                catalog = backoutApCorr(catalog)
-            # Set the alias maps for the matched catalog sources
-            if aliasDictList:
-                catalog = setAliasMaps(catalog, aliasDictList, prefix="src_")
-
-            catList.append(catalog)
-
-        if not catList:
+        if allMatches.empty:
             raise TaskError("No matches read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
-
-        return concatenateCatalogs(catList)
+        return allMatches
 
     def calibrateCatalogs(self, catalog, wcs=None):
         self.zpLabel = "common (" + str(self.config.analysis.coaddZp) + ")"
