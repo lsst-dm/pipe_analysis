@@ -17,7 +17,6 @@ from lsst.pex.config import (Config, Field, ConfigField, ListField, DictField, C
                              ConfigurableField)
 from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError
 from lsst.pipe.drivers.utils import TractDataIdContainer
-from lsst.afw.table.catalogMatches import matchesToCatalog
 from lsst.meas.astrom import AstrometryConfig
 from lsst.pipe.tasks.colorterms import Colorterm, ColortermLibrary
 
@@ -31,7 +30,8 @@ from .utils import (Filenamer, Enforcer, MagDiff, MagDiffMatches, MagDiffCompare
                     joinMatches, matchAndJoinCatalogs, checkPatchOverlap, addColumnsToSchema, addFpPoint,
                     addFootprintNPix, makeBadArray, addIntFloatOrStrColumn, calibrateCoaddSourceCatalog,
                     backoutApCorr, matchNanojanskyToAB, fluxToPlotString, andCatalog, writeParquet,
-                    getRepoInfo, addAliasColumns, addPreComputedColumns, computeMeanOfFrac, getSchema)
+                    getRepoInfo, addAliasColumns, addPreComputedColumns, computeMeanOfFrac, getSchema,
+                    loadDenormalizeAndUnpackMatches)
 from .plotUtils import (CosmosLabeller, AllLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
                         MatchesStarGalaxyLabeller, determineExternalCalLabel)
 
@@ -208,9 +208,6 @@ class CoaddAnalysisTask(CmdLineTask):
         self.unitScale = 1000.0 if self.config.toMilli else 1.0
         self.matchRadius = self.config.matchRadiusXy if self.config.matchXy else self.config.matchRadiusRaDec
         self.matchRadiusUnitStr = " (pixels)" if self.config.matchXy else "\""
-        self.matchControl = afwTable.MatchControl()
-        self.matchControl.findOnlyClosest = True
-        self.matchControl.symmetricMatch = False
 
     def runDataRef(self, patchRefList, subdir="", cosmos=None):
         haveForced = False  # do forced datasets exits (may not for single band datasets)
@@ -604,15 +601,16 @@ class CoaddAnalysisTask(CmdLineTask):
         return concatenateCatalogs(catList)
 
     def readSrcMatches(self, dataRefList, dataset, hscRun=None, wcs=None, aliasDictList=None):
-        catList = []
+        matchList = []
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
                 self.log.info("Dataset does not exist: {0:r}, {1:s}".format(dataRef.dataId, dataset))
                 continue
             butler = dataRef.getButler()
 
-            # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
-            # (which requires a refObjLoader to be initialized).
+            # Generate unnormalized match list (from normalized persisted
+            # one) with loadDenormalizeAndUnpackMatches (which requires a
+            # refObjLoader to be initialized).
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
             # Set some aliases for differing schema naming conventions
             if aliasDictList:
@@ -638,7 +636,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                  col in refCatSchema and not
                                  (hscRun and col == "slot_Centroid_flag")]
                 catalog = addColumnsToSchema(refCat, catalog, refColsToCopy)
-                measColList = [s for s in unforced.schema.getNames() if
+                measColList = [s for s in unforcedSchema.getNames() if
                                s.startswith(tuple(self.config.columnsToCopyFromMeas))]
                 measColsToCopy = [col for col in measColList if col not in schema and
                                   col in unforcedSchema and not
@@ -648,6 +646,16 @@ class CoaddAnalysisTask(CmdLineTask):
                 if aliasDictList:
                     catalog = addAliasColumns(catalog, aliasDictList)
             catalog = self.calibrateCatalogs(catalog, wcs=wcs)
+            # Compute Focal Plane coordinates for each source if not already there
+            if self.config.analysisMatches.doPlotFP:
+                if "base_FPPosition_x" not in schema and "focalplane_x" not in schema:
+                    coaddType = dataset[:dataset.find("_")]
+                    exp = butler.get(coaddType + "_calexp", dataRef.dataId)
+                    det = exp.getDetector()
+                    catalog = addFpPoint(det, catalog)
+            # Optionally backout aperture corrections
+            if self.config.doBackoutApCorr:
+                catalog = backoutApCorr(catalog)
 
             # Convert to pandas DataFrames
             catalog = catalog.asAstropy().to_pandas()
@@ -674,56 +682,19 @@ class CoaddAnalysisTask(CmdLineTask):
             if not packedMatches:
                 self.log.warn("No good matches for %s" % (dataRef.dataId,))
                 continue
-            # The reference object loader grows the bbox by the config parameter pixelMargin.  This
-            # is set to 50 by default but is not reflected by the radius parameter set in the
-            # metadata, so some matches may reside outside the circle searched within this radius
-            # Thus, increase the radius set in the metadata fed into joinMatchListWithCatalog() to
-            # accommodate.
-            matchmeta = packedMatches.table.getMetadata()
-            rad = matchmeta.getDouble("RADIUS")
-            matchmeta.setDouble("RADIUS", rad*1.05, "field radius in degrees, approximate, padded")
             refObjLoader = self.config.refObjLoader.apply(butler=butler)
-            matches = refObjLoader.joinMatchListWithCatalog(packedMatches, catalog)
-            if not hasattr(matches[0].first, "schema"):
-                raise RuntimeError("Unable to unpack matches.  "
-                                   "Do you have the correct reference catalog setup?")
+            matches = loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader)
             # LSST reads in reference catalogs with flux in "nanojanskys", so must convert to AB
             matches = matchNanojanskyToAB(matches)
-            if hscRun and self.config.doAddAperFluxHsc:
-                addApertureFluxesHSC(matches, prefix="second_")
 
-            if not matches:
+            if matches.empty:
                 self.log.warn("No matches for %s" % (dataRef.dataId,))
-                continue
-
-            # Set the alias maps for the matches sources (i.e. the .second attribute schema for each match)
-            if aliasDictList:
-                for mm in matches:
-                    mm.second = setAliasMaps(mm.second, aliasDictList)
-
-            matchMeta = butler.get(dataset, dataRef.dataId,
-                                   flags=afwTable.SOURCE_IO_NO_FOOTPRINTS).getTable().getMetadata()
-            catalog = matchesToCatalog(matches, matchMeta)
-            schema = getSchema(catalog)
-
-            # Compute Focal Plane coordinates for each source if not already there
-            if self.config.analysisMatches.doPlotFP:
-                if "src_base_FPPosition_x" not in schema and "src_focalplane_x" not in schema:
-                    det = butler.get("calexp_detector", dataRef.dataId)
-                    catalog = addFpPoint(det, catalog, prefix="src_")
-            # Optionally backout aperture corrections
-            if self.config.doBackoutApCorr:
-                catalog = backoutApCorr(catalog)
-            # Set the alias maps for the matched catalog sources
-            if aliasDictList:
-                catalog = setAliasMaps(catalog, aliasDictList, prefix="src_")
-
-            catList.append(catalog)
-
-        if not catList:
+            else:
+                matchList.append(matches)
+        if not matchList:
             raise TaskError("No matches read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
-
-        return concatenateCatalogs(catList)
+        allMatches = pd.concat(matchList, axis=0)
+        return allMatches
 
     def calibrateCatalogs(self, catalog, wcs=None):
         self.zpLabel = "common (" + str(self.config.analysis.coaddZp) + ")"
@@ -1517,9 +1488,6 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         self.unitScale = 1000.0 if self.config.toMilli else 1.0
         self.matchRadius = self.config.matchRadiusXy if self.config.matchXy else self.config.matchRadiusRaDec
         self.matchRadiusUnitStr = " (pixels)" if self.config.matchXy else "\""
-        self.matchControl = afwTable.MatchControl()
-        self.matchControl.findOnlyClosest = True
-        self.matchControl.symmetricMatch = False
 
     def runDataRef(self, patchRefList1, patchRefList2, subdir=""):
         haveForced = True  # do forced datasets exits (may not for single band datasets)
@@ -1633,8 +1601,10 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         else:
             forced1 = unforced1
             forced2 = unforced2
-        unforced = self.matchCatalogs(unforced1, unforced2)
-        forced = self.matchCatalogs(forced1, forced2)
+        unforced = matchAndJoinCatalogs(unforced1, unforced2, self.matchRadius, matchXy=self.config.matchXy,
+                                        camera1=repoInfo1.camera, camera2=repoInfo2.camera)
+        forced = matchAndJoinCatalogs(forced1, forced2, self.matchRadius, matchXy=self.config.matchXy,
+                                      camera1=repoInfo1.camera, camera2=repoInfo2.camera)
 
         self.catLabel = "nChild = 0"
         forcedStr = forcedStr + " " + self.catLabel
@@ -1687,17 +1657,6 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         if not catList:
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
         return concatenateCatalogs(catList)
-
-    def matchCatalogs(self, catalog1, catalog2, matchRadius=None, matchControl=None):
-        matchRadius = matchRadius if matchRadius else self.matchRadius
-        matchControl = matchControl if matchControl else self.matchControl
-        if self.config.matchXy:
-            matches = afwTable.matchXy(catalog1, catalog2, matchRadius, matchControl)
-        else:
-            matches = afwTable.matchRaDec(catalog1, catalog2, matchRadius*geom.arcseconds, matchControl)
-        if not matches:
-            raise TaskError("No matches found")
-        return joinMatches(matches, "first_", "second_")
 
     def calibrateCatalogs(self, catalog, wcs=None):
         self.zpLabel = "common (" + str(self.config.analysis.coaddZp) + ")"

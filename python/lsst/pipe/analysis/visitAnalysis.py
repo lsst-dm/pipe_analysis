@@ -6,6 +6,7 @@ matplotlib.use("Agg")  # noqa 402
 import matplotlib.pyplot as plt
 import numpy as np
 np.seterr(all="ignore")  # noqa 402
+import pandas as pd
 
 from collections import defaultdict
 
@@ -21,7 +22,7 @@ from .utils import (Filenamer, AngularDistance, concatenateCatalogs, addAperture
                     calibrateSourceCatalogMosaic, calibrateSourceCatalogPhotoCalib,
                     calibrateSourceCatalog, backoutApCorr, matchNanojanskyToAB, andCatalog, writeParquet,
                     getRepoInfo, addAliasColumns, getCcdNameRefList, getDataExistsRefList,
-                    addPreComputedColumns, getSchema)
+                    addPreComputedColumns, getSchema, loadDenormalizeAndUnpackMatches)
 from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText
 from .fakesAnalysis import (addDegreePositions, matchCatalogs, addNearestNeighbor, fakesPositionCompare,
                             getPlotInfo, fakesAreaDepth, fakesMagnitudeCompare, fakesMagnitudeNearestNeighbor,
@@ -681,7 +682,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             return concatenatedCommonZpCats, concatenatedCats
 
     def readSrcMatches(self, dataRefList, dataset, repoInfo, aliasDictList=None):
-        catList = []
+        allMatches = None
         dataIdSubList = []
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
@@ -707,9 +708,19 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+            # Compute Focal Plane coordinates for each source if not already
+            # there.
+            if self.config.analysisMatches.doPlotFP:
+                if "src_base_FPPosition_x" not in catalog.schema and "src_focalplane_x" not in catalog.schema:
+                    det = repoInfo.butler.get("calexp_detector", dataRef.dataId)
+                    catalog = addFpPoint(det, catalog, prefix="src_")
+            # Optionally backout aperture corrections
+            if self.config.doBackoutApCorr:
+                catalog = backoutApCorr(catalog)
             # Set some aliases for differing schema naming conventions
             if aliasDictList:
-                catalog = setAliasMaps(catalog, aliasDictList)
+                catalog = addAliasColumns(catalog, aliasDictList)
+
             fluxMag0 = None
             if not self.config.doApplyExternalPhotoCalib:
                 photoCalib = repoInfo.butler.get("calexp_photoCalib", dataRef.dataId)
@@ -722,69 +733,33 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             catalog = catalog.asAstropy().to_pandas()
 
             packedMatches = repoInfo.butler.get(dataset + "Match", dataRef.dataId)
-            # The reference object loader grows the bbox by the config parameter pixelMargin.  This
-            # is set to 50 by default but is not reflected by the radius parameter set in the
-            # metadata, so some matches may reside outside the circle searched within this radius
-            # Thus, increase the radius set in the metadata fed into joinMatchListWithCatalog() to
-            # accommodate.
-            matchmeta = packedMatches.table.getMetadata()
-            rad = matchmeta.getDouble("RADIUS")
-            matchmeta.setDouble("RADIUS", rad*1.05, "field radius in degrees, approximate, padded")
             refObjLoader = self.config.refObjLoader.apply(butler=repoInfo.butler)
-            matches = refObjLoader.joinMatchListWithCatalog(packedMatches, catalog)
-            if not hasattr(matches[0].first, "schema"):
-                raise RuntimeError("Unable to unpack matches.  "
-                                   "Do you have the correct astrometry_net_data setup?")
-            noMatches = False
-            if len(matches) < 8:
-                for m in matches:
-                    if not hasattr(m.first, "get"):
-                        matches = []
-                        noMatches = True
-                        break
-
-            # LSST reads in a_net catalogs with flux in "nanojanskys", so must convert to AB
-            if not noMatches:
-                matches = matchNanojanskyToAB(matches)
-                if repoInfo.hscRun and self.config.doAddAperFluxHsc:
-                    addApertureFluxesHSC(matches, prefix="second_")
-
-            if not matches:
+            matches = loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader)
+            if matches.empty:
                 self.log.warn("No matches for {:s}".format(dataRef.dataId))
                 continue
 
-            matchMeta = repoInfo.butler.get(dataset, dataRef.dataId,
-                                            flags=afwTable.SOURCE_IO_NO_FOOTPRINTS).getTable().getMetadata()
-            catalog = matchesToCatalog(matches, matchMeta)
+            # LSST reads in a_net catalogs with flux in "nanojanskys", so must
+            # convert to AB.
+            matches = matchNanojanskyToAB(matches)
             if self.config.doApplyExternalSkyWcs:
                 # Update "distance" between reference and source matches based
                 # on external-calibration positions.
                 angularDist = AngularDistance("ref_coord_ra", "src_coord_ra",
                                               "ref_coord_dec", "src_coord_dec")
-                catalog["distance"] = angularDist(catalog)
+                matches["distance"] = angularDist(matches)
 
-            # Compute Focal Plane coordinates for each source if not already there
-            if self.config.analysisMatches.doPlotFP:
-                if "src_base_FPPosition_x" not in catalog.schema and "src_focalplane_x" not in catalog.schema:
-                    det = repoInfo.butler.get("calexp_detector", dataRef.dataId)
-                    catalog = addFpPoint(det, catalog, prefix="src_")
-            # Optionally backout aperture corrections
-            if self.config.doBackoutApCorr:
-                catalog = backoutApCorr(catalog)
-            # Need to set the alias map for the matched catalog sources
-            if aliasDictList:
-                catalog = setAliasMaps(catalog, aliasDictList, prefix="src_")
             # To avoid multiple counting when visit overlaps multiple tracts
             noTractId = dataRef.dataId.copy()
             noTractId.pop("tract")
             if noTractId not in dataIdSubList:
-                catList.append(catalog)
+                allMatches = matches if allMatches is None else pd.concat([allMatches, matches], axis=0)
             dataIdSubList.append(noTractId)
 
-        if not catList:
+        if allMatches.empty:
             raise TaskError("No matches read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
 
-        return concatenateCatalogs(catList)
+        return allMatches
 
     def calibrateCatalogs(self, dataRef, catalog, fluxMag0, repoInfo, doApplyExternalPhotoCalib,
                           doApplyExternalSkyWcs, useMeasMosaic, iCat=None):
