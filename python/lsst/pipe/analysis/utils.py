@@ -109,7 +109,7 @@ class Filenamer(object):
         # your intention is to write to a different output dir!).  So, here we check for the presence
         # of _parent in the filename and strip it out if present.
         if "_parent/" in filename:
-            print("Note: stripping _parent from filename: ", filename)
+            log.warn("Note: stripping _parent from filename: ", filename)
             filename = filename.replace("_parent/", "")
         if self.subdir:
             lastSlashInd = filename.rfind("/")
@@ -1231,7 +1231,7 @@ def backoutApCorr(catalog):
     for k in keys:
         if fluxStr in k and k[:-len(fluxStr)] + apCorrStr in keys and apCorrStr not in k:
             if ii == 0:
-                print("Backing out aperture corrections to fluxes")
+                log.info("Backing out aperture corrections to fluxes")
                 ii += 1
             catalog[k] /= catalog[k[:-len(fluxStr)] + apCorrStr]
     return catalog
@@ -1285,7 +1285,7 @@ def fluxToPlotString(fluxToPlot):
     if fluxToPlot in fluxStrMap:
         return fluxStrMap[fluxToPlot]
     else:
-        print("WARNING: " + fluxToPlot + " not in fluxStrMap")
+        log.warn("WARNING: " + fluxToPlot + " not in fluxStrMap")
         return fluxToPlot
 
 
