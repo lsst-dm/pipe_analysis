@@ -285,6 +285,13 @@ class CoaddAnalysisTask(CmdLineTask):
             if haveForced:
                 forced = forced.asAstropy().to_pandas()
 
+            # Optionally backout aperture corrections
+            if self.config.doBackoutApCorr:
+                forcedStr += "(noApCorr)"
+                unforced = backoutApCorr(unforced)
+                if haveForced:
+                    forced = backoutApCorr(forced)
+
             unforcedSchema = getSchema(unforced)
             if haveForced:
                 forcedSchema = getSchema(forced)
@@ -310,10 +317,10 @@ class CoaddAnalysisTask(CmdLineTask):
                     unforcedOverlaps = self.overlaps(unforced)
                     if not unforcedOverlaps.empty:
                         self.plotOverlaps(unforcedOverlaps, filenamer, repoInfo.dataId,
-                                          matchRadius=self.config.matchOverlapRadius,
-                                          matchRadiusUnitStr="\"",
-                                          forcedStr="unforced", postFix="_unforced",
-                                          fluxToPlotList=["modelfit_CModel", ], **plotKwargs)
+                                          matchRadius=self.config.matchOverlapRadius, matchRadiusUnitStr="\"",
+                                          forcedStr=forcedStr.replace("forced", "unforced"),
+                                          postFix="_unforced", fluxToPlotList=["modelfit_CModel", ],
+                                          **plotKwargs)
                         self.log.info("Number of unforced overlap objects matched = {:d}".
                                       format(len(unforcedOverlaps)))
 
@@ -362,8 +369,8 @@ class CoaddAnalysisTask(CmdLineTask):
             if self.config.doPlotPsfFluxSnHists:
                 self.plotPsfFluxSnHists(unforced,
                                         filenamer(repoInfo.dataId, description="base_PsfFlux_cal",
-                                                  style="hist"),
-                                        repoInfo.dataId, forcedStr="unforced " + self.catLabel, **plotKwargs)
+                                                  style="hist"), repoInfo.dataId,
+                                        forcedStr=forcedStr.replace("forced", "unforced"), **plotKwargs)
             if self.config.doPlotFootprintNpix:
                 self.plotFootprintHist(forced,
                                        filenamer(repoInfo.dataId, description="footNpix", style="hist"),
@@ -374,18 +381,19 @@ class CoaddAnalysisTask(CmdLineTask):
             if self.config.doPlotQuiver:
                 self.plotQuiver(unforced,
                                 filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
-                                dataId=repoInfo.dataId, forcedStr="unforced " + self.catLabel, scale=2,
-                                **plotKwargs)
+                                dataId=repoInfo.dataId, forcedStr=forcedStr.replace("forced", "unforced"),
+                                scale=2, **plotKwargs)
 
             if self.config.doPlotInputCounts:
                 self.plotInputCounts(unforced, filenamer(repoInfo.dataId, description="inputCounts",
                                                          style="tract"), dataId=repoInfo.dataId,
-                                     forcedStr="unforced " + self.catLabel, alpha=0.5,
-                                     doPlotTractImage=True, doPlotPatchOutline=True, sizeFactor=5.0,
-                                     maxDiamPix=1000, **plotKwargs)
+                                     forcedStr=forcedStr.replace("forced", "unforced"),
+                                     alpha=0.5, doPlotTractImage=True, doPlotPatchOutline=True,
+                                     sizeFactor=5.0, maxDiamPix=1000, **plotKwargs)
 
             if self.config.doPlotMags:
-                self.plotMags(unforced, filenamer, repoInfo.dataId, forcedStr="unforced " + self.catLabel,
+                self.plotMags(unforced, filenamer, repoInfo.dataId,
+                              forcedStr=forcedStr.replace("forced", "unforced"),
                               postFix="_unforced", flagsCat=flagsCat, **plotKwargs)
                 if haveForced:
                     self.plotMags(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr, postFix="_forced",
@@ -395,15 +403,16 @@ class CoaddAnalysisTask(CmdLineTask):
             if self.config.doPlotStarGalaxy:
                 if "ext_shapeHSM_HsmSourceMoments_xx" in unforcedSchema:
                     self.plotStarGal(unforced, filenamer, repoInfo.dataId,
-                                     forcedStr="unforced " + self.catLabel, **plotKwargs)
+                                     forcedStr=forcedStr.replace("forced", "unforced"), **plotKwargs)
                 else:
                     self.log.warn("Cannot run plotStarGal: ext_shapeHSM_HsmSourceMoments_xx not "
                                   "in unforcedSchema")
 
             if self.config.doPlotSizes:
                 if all(ss in unforcedSchema for ss in ["base_SdssShape_psf_xx", "calib_psf_used"]):
-                    self.plotSizes(unforced, filenamer, repoInfo.dataId, forcedStr="unforced " + self.catLabel,
-                                   postFix="_unforced", **plotKwargs)
+                    self.plotSizes(unforced, filenamer, repoInfo.dataId,
+                                   forcedStr=forcedStr.replace("forced", "unforced"), postFix="_unforced",
+                                   **plotKwargs)
                 else:
                     self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx and/or calib_psf_used "
                                   "not in unforcedSchema")
@@ -427,6 +436,13 @@ class CoaddAnalysisTask(CmdLineTask):
                 matches = self.readSrcMatches(patchRefList, self.config.coaddName + "Coadd_meas",
                                               hscRun=repoInfo.hscRun, wcs=repoInfo.wcs,
                                               aliasDictList=aliasDictList)
+            # The apCorr backing out, if requested, and the purging of
+            # deblend_nChild > 0 objects happens in readSrcMatches, but label
+            # won't be set if plotMatchesOnly is True.
+            if self.config.doBackoutApCorr and "noApCorr" not in forcedStr:
+                forcedStr += "(noApCorr)"
+            forcedStr = forcedStr + " nChild = 0" if "nChild = 0" not in forcedStr else forcedStr
+
             plotKwargs.update(dict(zpLabel=self.zpLabel))
             self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId, forcedStr=forcedStr,
                              **plotKwargs)
@@ -564,9 +580,6 @@ class CoaddAnalysisTask(CmdLineTask):
             else:
                 for src in catalog:
                     src.updateCoord(wcs)
-        # Optionally backout aperture corrections
-        if self.config.doBackoutApCorr:
-            catalog = backoutApCorr(catalog)
         calibrated = calibrateCoaddSourceCatalog(catalog, self.config.analysis.coaddZp)
         return calibrated
 
