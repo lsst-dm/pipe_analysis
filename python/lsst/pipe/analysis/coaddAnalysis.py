@@ -84,7 +84,7 @@ class CoaddAnalysisConfig(Config):
     doPlotQuiver = Field(dtype=bool, default=True, doc=("Plot ellipticity residuals quiver plot? "
                                                         "(ignored if plotMatchesOnly is True)"))
     doPlotPsfFluxSnHists = Field(dtype=bool, default=True, doc="Plot histograms of raw PSF fluxes and S/N?")
-    doPlotFootprintNpix = Field(dtype=bool, default=True, doc=("Plot histogram of footprint nPix? "
+    doPlotFootprintArea = Field(dtype=bool, default=True, doc=("Plot histogram of footprint area? "
                                                                "(ignored if plotMatchesOnly is True)"))
     doPlotInputCounts = Field(dtype=bool, default=True, doc=("Make input counts plot? "
                                                              "(ignored if plotMatchesOnly is True)"))
@@ -169,7 +169,7 @@ class CoaddAnalysisConfig(Config):
             self.doPlotOverlaps = False
             self.doPlotCompareUnforced = False
             self.doPlotQuiver = False
-            self.doPlotFootprintNpix = False
+            self.doPlotFootprintArea = False
             self.doPlotInputCounts = False
 
 
@@ -313,10 +313,10 @@ class CoaddAnalysisTask(CmdLineTask):
                 for cat in coaddList:
                     cat = setAliasMaps(cat, aliasDictList)
 
-                if self.config.doPlotFootprintNpix and "base_Footprint_nPix" not in unforced.schema:
-                    unforced = addFootprintNPix(unforced, fromCat=unforced)
+                if self.config.doPlotFootprintArea and "base_FootprintArea_value" not in unforced.schema:
+                    unforced = addFootprintArea(unforced, fromCat=unforced)
                     if haveForced:
-                        forced = addFootprintNPix(forced, fromCat=unforced)
+                        forced = addFootprintArea(forced, fromCat=unforced)
                 # Convert to pandas DataFrames
                 unforced = unforced.asAstropy().to_pandas()
                 if haveForced:
@@ -407,12 +407,16 @@ class CoaddAnalysisTask(CmdLineTask):
                                         filenamer(repoInfo.dataId, description="base_PsfFlux_cal",
                                                   style="hist"), repoInfo.dataId,
                                         forcedStr=forcedStr.replace("forced", "unforced"), **plotKwargs)
-            if self.config.doPlotFootprintNpix:
-                self.plotFootprintHist(forced,
-                                       filenamer(repoInfo.dataId, description="footNpix", style="hist"),
-                                       repoInfo.dataId, flagsCat=flagsCat, **plotKwargs)
-                self.plotFootprint(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr, flagsCat=flagsCat,
-                                   **plotKwargs)
+            if self.config.doPlotFootprintArea:
+                if "base_FootprintArea_value" in forcedSchema:
+                    self.plotFootprintHist(forced,
+                                           filenamer(repoInfo.dataId, description="footArea", style="hist"),
+                                           repoInfo.dataId, flagsCat=flagsCat, **plotKwargs)
+                    self.plotFootprint(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr,
+                                       flagsCat=flagsCat, **plotKwargs)
+                else:
+                    self.log.info("config.doPlotFootprintArea is True, but do not have "
+                                  "base_FootprintArea_value in schema...skipping footArea plots.")
 
             if self.config.doPlotQuiver:
                 self.plotQuiver(unforced,
@@ -901,20 +905,20 @@ class CoaddAnalysisTask(CmdLineTask):
                              zpLabel=zpLabel, forcedStr=forcedStr, uberCalLabel=uberCalLabel)
         schema = getSchema(catalog)
         if "calib_psf_used" in schema:
-            shortName = "footNpix_calib_psf_used"
+            shortName = "footArea_calib_psf_used"
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
-                               self.config.analysis, flags=["base_Footprint_nPix_flag"],
+            self.AnalysisClass(catalog, catalog["base_FootprintArea_value"], "%s" % shortName, shortName,
+                               self.config.analysis, flags=["base_FootprintArea_value_flag"],
                                goodKeys=["calib_psf_used"], qMin=-100, qMax=2000,
                                labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
                                          plotRunStats=plotRunStats, highlightList=highlightList,
                                          **plotAllKwargs)
-        shortName = "footNpix"
+        shortName = "footArea"
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
-                           self.config.analysis, flags=["base_Footprint_nPix_flag"],
-                           qMin=0, qMax=3000, labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+        self.AnalysisClass(catalog, catalog["base_FootprintArea_value"], "%s" % shortName, shortName,
+                           self.config.analysis, qMin=0, qMax=3000, labeller=StarGalaxyLabeller(),
+                           flagsCat=flagsCat,
                            ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
                                      plotRunStats=plotRunStats, **plotAllKwargs)
 
@@ -922,11 +926,11 @@ class CoaddAnalysisTask(CmdLineTask):
                           tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
                           postFix="", flagsCat=None, uberCalLabel=None):
         stats = None
-        shortName = "footNpix"
+        shortName = "footArea"
         self.log.info("shortName = {:s}".format(shortName + "Hist"))
-        self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
-                           self.config.analysis, flags=["base_Footprint_nPix_flag"], qMin=0, qMax=3000,
-                           labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+        self.AnalysisClass(catalog, catalog["base_FootprintArea_value"], "%s" % shortName, shortName,
+                           self.config.analysis, qMin=0, qMax=3000, labeller=StarGalaxyLabeller(),
+                           flagsCat=flagsCat,
                            ).plotHistogram(filenamer, stats=stats, camera=camera, ccdList=ccdList,
                                            tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
                                            matchRadius=matchRadius, zpLabel=zpLabel,
@@ -1668,16 +1672,16 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                              matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel,
                              forcedStr=forcedStr, uberCalLabel=uberCalLabel, postFix=postFix)
-        shortName = "diff_footNpix"
-        col = "base_Footprint_nPix"
+        shortName = "diff_footArea"
+        col = "base_FootprintArea_value"
         self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, FootNpixDiffCompare(col), "  Run Comparison: Footprint nPix difference", shortName,
+        Analysis(catalog, FootAreaDiffCompare(col), "  Run Comparison: Footprint Area difference", shortName,
                  self.config.analysis, prefix="first_", qMin=-250, qMax=250, flags=[col + "_flag"],
                  labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat,
                  ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
-        shortName = "diff_footNpix_calib_psf_used"
+        shortName = "diff_footArea_calib_psf_used"
         self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, FootNpixDiffCompare(col), "     Run Comparison: Footprint nPix diff (psf_used)",
+        Analysis(catalog, FootAreaDiffCompare(col), "     Run Comparison: Footprint Area diff (psf_used)",
                  shortName, self.config.analysis, prefix="first_", goodKeys=["calib_psf_used"],
                  qMin=-150, qMax=150, flags=[col + "_flag"], labeller=OverlapsStarGalaxyLabeller(),
                  flagsCat=flagsCat,

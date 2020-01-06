@@ -17,7 +17,7 @@ from lsst.afw.table.catalogMatches import matchesToCatalog
 from .analysis import Analysis
 from .coaddAnalysis import CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisTask
 from .utils import (Filenamer, AngularDistance, concatenateCatalogs, addApertureFluxesHSC, addFpPoint,
-                    addFootprintNPix, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
+                    addFootprintArea, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
                     calibrateSourceCatalogMosaic, calibrateSourceCatalogPhotoCalib,
                     calibrateSourceCatalog, backoutApCorr, matchNanojanskyToAB, andCatalog, writeParquet,
                     getRepoInfo, getCcdNameRefList, getDataExistsRefList, setAliasMaps,
@@ -277,7 +277,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             aliasDictList = [self.config.flagsToAlias, ]
             if repoInfo.hscRun and self.config.srcSchemaMap is not None:
                 aliasDictList += [self.config.srcSchemaMap]
-            if any(doPlot for doPlot in [self.config.doPlotFootprintNpix, self.config.doPlotQuiver,
+            if any(doPlot for doPlot in [self.config.doPlotFootprintArea, self.config.doPlotQuiver,
                                          self.config.doPlotMags, self.config.doPlotSizes,
                                          self.config.doPlotCentroids, self.config.doPlotStarGalaxy,
                                          self.config.doWriteParquetTables]):
@@ -363,9 +363,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                                       style="hist"),
                                             repoInfo.dataId, zpLabel=self.zpLabel, **plotKwargs)
                 plotKwargs.update(dict(zpLabel=self.zpLabel))
-                if self.config.doPlotFootprintNpix:
+                if self.config.doPlotFootprintArea:
                     self.plotFootprintHist(catalog,
-                                           filenamer(repoInfo.dataId, description="footNpix", style="hist"),
+                                           filenamer(repoInfo.dataId, description="footArea", style="hist"),
                                            repoInfo.dataId, **plotKwargs)
                     self.plotFootprint(catalog, filenamer, repoInfo.dataId, plotRunStats=False,
                                        highlightList=[("parent", 0, "yellow"), ], **plotKwargs)
@@ -531,8 +531,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 xFp = catalog["base_FPPosition_x"]
                 if len(xFp[np.where(np.isfinite(xFp))]) <= 0:
                     self.haveFpCoords = False
-            if self.config.doPlotFootprintNpix:
-                catalog = addFootprintNPix(catalog)
+            if self.config.doPlotFootprintArea and "base_FootprintArea_value" not in catalog.schema:
+                catalog = addFootprintArea(catalog)
             if repoInfo.hscRun and self.config.doAddAperFluxHsc:
                 self.log.info("HSC run: adding aperture flux to schema...")
                 catalog = addApertureFluxesHSC(catalog, prefix="")
@@ -869,7 +869,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             self.log.info("ccdIntersectList: {}".format(ccdIntersectList))
 
             doReadFootprints = None
-            if self.config.doPlotFootprintNpix:
+            if self.config.doPlotFootprintArea:
                 doReadFootprints = "light"
             # Set some aliases for differing schema naming conventions
             aliasDictList = [self.config.flagsToAlias, ]
@@ -927,7 +927,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                matchRadius=self.matchRadius, matchRadiusUnitStr=self.matchRadiusUnitStr,
                                zpLabel=self.zpLabel, tractInfo=tractInfo)
 
-            if self.config.doPlotFootprintNpix:
+            if self.config.doPlotFootprintArea:
                 self.plotFootprint(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
                                    **plotKwargs1)
 
@@ -1033,9 +1033,9 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 calexp = repoInfo.butler.get("calexp", dataRef.dataId)
                 fluxMag0 = calexp.getPhotoCalib().getInstFluxAtZeroMagnitude()
                 nQuarter = calexp.getDetector().getOrientation().getNQuarter()
-                # add footprint nPix column
-                if self.config.doPlotFootprintNpix:
-                    srcCat = addFootprintNPix(srcCat)
+                # add footprint area column if not already there
+                if self.config.doPlotFootprintArea and "base_FootprintArea_value" not in srcCat.schema:
+                    srcCat = addFootprintArea(srcCat)
                 # Add rotated point in LSST cat if comparing with HSC cat to compare centroid pixel positions
                 if repoInfo.hscRun and not (repoInfo1.hscRun and repoInfo2.hscRun):
                     srcCat = addRotPoint(srcCat, calexp.getWidth(), calexp.getHeight(), nQuarter)
