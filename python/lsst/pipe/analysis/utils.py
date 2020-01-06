@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 import os
 import re
 
@@ -52,18 +50,20 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
 NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
 log = logging.getLogger(__name__)
 
+
 def writeParquet(dataRef, table, badArray=None):
-    """Write an afwTable to a desired ParquetTable butler dataset
+    """Write an afwTable to a desired ParquetTable butler dataset.
 
     Parameters
     ----------
     dataRef : `lsst.daf.persistence.butlerSubset.ButlerDataRef`
         Reference to butler dataset.
     table : `lsst.afw.table.SourceCatalog`
-       Table to be written to parquet.
+        Table to be written to parquet.
     badArray : `numpy.ndarray`, optional
-       Boolean array with same length as catalog whose values indicate whether the source was deemed
-       inappropriate for qa analyses (`None` by default).
+        Boolean array with same length as catalog whose values indicate
+        whether the source was deemed inappropriate for qa analyses
+        (`None` by default).
 
     Returns
     -------
@@ -71,12 +71,10 @@ def writeParquet(dataRef, table, badArray=None):
 
     Notes
     -----
-    This function first converts the afwTable to an astropy table,
-    then to a pandas DataFrame, which is then written to parquet
-    format using the butler.  If qa_explorer is not
-    available, then it will do nothing.
+    This function first converts the afwTable to an astropy table, then to a
+    pandas DataFrame, which is then written to parquet format using the butler.
+    If qa_explorer is not available, then it will do nothing.
     """
-
     try:
         from lsst.qa.explorer.parquetTable import ParquetTable
     except ImportError:
@@ -85,16 +83,19 @@ def writeParquet(dataRef, table, badArray=None):
         return
 
     if badArray is not None:
-        # Add flag indicating source "badness" for qa analyses for the benefit of the Parquet files
-        # being written to disk for subsequent interactive QA analysis.
+        # Add flag indicating source "badness" for qa analyses for the benefit
+        # of the Parquet files being written to disk for subsequent interactive
+        # QA analysis.
         table = addFlag(table, badArray, "qaBad_flag", "Set to True for any source deemed bad for qa")
     df = table.asAstropy().to_pandas()
     df = df.set_index('id', drop=True)
 
     dataRef.put(ParquetTable(dataFrame=df))
 
+
 class Filenamer(object):
-    """Callable that provides a filename given a style"""
+    """Callable that provides a filename given a style.
+    """
     def __init__(self, butler, dataset, dataId={}, subdir=""):
         self.butler = butler
         self.dataset = dataset
@@ -103,11 +104,13 @@ class Filenamer(object):
 
     def __call__(self, dataId, **kwargs):
         filename = self.butler.get(self.dataset + "_filename", self.dataId, **kwargs)[0]
-        # When trying to write to a different rerun (or output), if the given dataset exists in the _parent
-        # rerun (or input) directory, _parent is added to the filename, and thus the output files
-        # will actually oversrite those in the _parent rerun (or input) directory (which is bad if
-        # your intention is to write to a different output dir!).  So, here we check for the presence
-        # of _parent in the filename and strip it out if present.
+        # When trying to write to a different rerun (or output), if the given
+        # dataset exists in the _parent rerun (or input) directory, _parent is
+        # added to the filename, and thus the output files will actually
+        # overwrite those in the _parent rerun (or input) directory (which is
+        # bad if your intention is to write to a different output dir!).  So,
+        # here we check for the presence of _parent in the filename and strip
+        # it out if present.
         if "_parent/" in filename:
             log.warn("Note: stripping _parent from filename: ", filename)
             filename = filename.replace("_parent/", "")
@@ -139,7 +142,8 @@ class Stats(Struct):
 
 
 class Enforcer(object):
-    """Functor for enforcing limits on statistics"""
+    """Functor for enforcing limits on statistics.
+    """
     def __init__(self, requireGreater={}, requireLess={}, doRaise=False):
         self.requireGreater = requireGreater
         self.requireLess = requireLess
@@ -167,7 +171,8 @@ class Enforcer(object):
 
 
 class MagDiff(object):
-    """Functor to calculate magnitude difference"""
+    """Functor to calculate magnitude difference.
+    """
     def __init__(self, col1, col2, unitScale=1.0):
         self.col1 = col1
         self.col2 = col2
@@ -179,7 +184,8 @@ class MagDiff(object):
 
 
 class MagDiffErr(object):
-    """Functor to calculate magnitude difference error"""
+    """Functor to calculate magnitude difference error.
+    """
     def __init__(self, col1, col2, unitScale=1.0):
         self.col1 = col1
         self.col2 = col2
@@ -192,7 +198,8 @@ class MagDiffErr(object):
 
 
 class MagDiffMatches(object):
-    """Functor to calculate magnitude difference for match catalog"""
+    """Functor to calculate magnitude difference for match catalog.
+    """
     def __init__(self, column, colorterm, zp=27.0, unitScale=1.0):
         self.column = column
         self.colorterm = colorterm
@@ -208,7 +215,8 @@ class MagDiffMatches(object):
 
 
 class MagDiffCompare(object):
-    """Functor to calculate magnitude difference between two entries in comparison catalogs
+    """Functor to calculate magnitude difference between two entries in
+    comparison catalogs.
 
     Note that the column entries are in flux units and converted to mags here.
     """
@@ -223,7 +231,8 @@ class MagDiffCompare(object):
 
 
 class AstrometryDiff(object):
-    """Functor to calculate difference between astrometry"""
+    """Functor to calculate difference between astrometry.
+    """
     def __init__(self, first, second, declination1=None, declination2=None, unitScale=1.0):
         self.first = first
         self.second = second
@@ -238,38 +247,39 @@ class AstrometryDiff(object):
         cosDec2 = np.cos(catalog[self.declination2]) if self.declination2 is not None else 1.0
         return (first*cosDec1 - second*cosDec2)*(1.0*afwGeom.radians).asArcseconds()*self.unitScale
 
+
 class AngularDistance(object):
-    """Functor to calculate the Haversine angular distance between two points
+    """Functor to calculate the Haversine angular distance between two points.
 
     The Haversine formula, which determines the great-circle distance between
     two points on a sphere given their longitudes (ra) and latitudes (dec), is
     given by:
 
     distance =
-    2arcsin(sqrt(sin**2((dec2-dec1)/2) + cos(del1)cos(del2)sin**2((ra1-ra2)/2)))
+    2arcsin(sqrt(sin^2((dec2-dec1)/2) + cos(del1)cos(del2)sin^2((ra1-ra2)/2)))
 
     Parameters
     ----------
     raStr1 : `str`
-       The name of the column for the ra (in radians) of the first point
+        The name of the column for the ra (in radians) of the first point.
     decStr1 : `str`
-       The name of the column for the dec (in radians) of the first point
+        The name of the column for the dec (in radians) of the first point.
     raStr2 : `str`
-       The name of the column for the ra (in radians) of the second point
+        The name of the column for the ra (in radians) of the second point.
     decStr1 : `str`
-       The name of the column for the dec (in radians) of the second point
+        The name of the column for the dec (in radians) of the second point.
     catalog : `lsst.afw.table.SourceCatalog`
-       The source catalog under consideration containing columns representing
-       the (ra, dec) coordinates for each object with names given by
-       ``raStr1``, ``decStr1``, ``raStr2``, and ``decStr2``.
+        The source catalog under consideration containing columns representing
+        the (ra, dec) coordinates for each object with names given by
+        ``raStr1``, ``decStr1``, ``raStr2``, and ``decStr2``.
 
     Returns
     -------
     angularDistance : `numpy.ndarray`
-       An array containing the Haversine angular distance (in radians) between
-       the points:
-       (``catalog``[``ra1Str``], ``catalog``[``dec1Str``]) and
-       (``catalog``[``ra2Str``], ``catalog``[``dec2Str``]).
+        An array containing the Haversine angular distance (in radians) between
+        the points:
+        (``catalog``[``ra1Str``], ``catalog``[``dec1Str``]) and
+        (``catalog``[``ra2Str``], ``catalog``[``dec2Str``]).
     """
     def __init__(self, raStr1, raStr2, decStr1, decStr2):
         self.raStr1 = raStr1
@@ -292,7 +302,8 @@ class AngularDistance(object):
 
 
 class TraceSize(object):
-    """Functor to calculate trace radius size for sources"""
+    """Functor to calculate trace radius size for sources.
+    """
     def __init__(self, column):
         self.column = column
 
@@ -302,7 +313,9 @@ class TraceSize(object):
 
 
 class PsfTraceSizeDiff(object):
-    """Functor to calculate trace radius size difference (%) between object and psf model"""
+    """Functor to calculate trace radius size difference (%) between object and
+    psf model.
+    """
     def __init__(self, column, psfColumn):
         self.column = column
         self.psfColumn = psfColumn
@@ -315,7 +328,9 @@ class PsfTraceSizeDiff(object):
 
 
 class TraceSizeCompare(object):
-    """Functor to calculate trace radius size difference (%) between objects in matched catalog"""
+    """Functor to calculate trace radius size difference (%) between objects in
+    matched catalog.
+    """
     def __init__(self, column):
         self.column = column
 
@@ -329,7 +344,9 @@ class TraceSizeCompare(object):
 
 
 class PercentDiff(object):
-    """Functor to calculate the percent difference between a given column entry in matched catalog"""
+    """Functor to calculate the percent difference between a given column entry
+    in matched catalog.
+    """
     def __init__(self, column):
         self.column = column
 
@@ -341,7 +358,9 @@ class PercentDiff(object):
 
 
 class E1Resids(object):
-    """Functor to calculate e1 ellipticity residuals for a given object and psf model"""
+    """Functor to calculate e1 ellipticity residuals for a given object and
+    psf model.
+    """
     def __init__(self, column, psfColumn, unitScale=1.0):
         self.column = column
         self.psfColumn = psfColumn
@@ -357,7 +376,9 @@ class E1Resids(object):
 
 
 class E2Resids(object):
-    """Functor to calculate e2 ellipticity residuals for a given object and psf model"""
+    """Functor to calculate e2 ellipticity residuals for a given object and
+    psf model.
+    """
     def __init__(self, column, psfColumn, unitScale=1.0):
         self.column = column
         self.psfColumn = psfColumn
@@ -373,7 +394,9 @@ class E2Resids(object):
 
 
 class E1ResidsHsmRegauss(object):
-    """Functor to calculate HSM e1 ellipticity residuals for a given object and psf model"""
+    """Functor to calculate HSM e1 ellipticity residuals for a given object and
+    psf model.
+    """
     def __init__(self, unitScale=1.0):
         self.unitScale = unitScale
 
@@ -386,7 +409,9 @@ class E1ResidsHsmRegauss(object):
 
 
 class E2ResidsHsmRegauss(object):
-    """Functor to calculate HSM e1 ellipticity residuals for a given object and psf model"""
+    """Functor to calculate HSM e1 ellipticity residuals for a given object and
+    psf model.
+    """
     def __init__(self, unitScale=1.0):
         self.unitScale = unitScale
 
@@ -399,7 +424,8 @@ class E2ResidsHsmRegauss(object):
 
 
 class FootAreaDiffCompare(object):
-    """Functor to calculate footprint area difference between two entries in comparison catalogs
+    """Functor to calculate footprint area difference between two entries in
+    comparison catalogs.
     """
     def __init__(self, column):
         self.column = column
@@ -411,7 +437,8 @@ class FootAreaDiffCompare(object):
 
 
 class MagDiffCompareErr(object):
-    """Functor to calculate magnitude difference error"""
+    """Functor to calculate magnitude difference error.
+    """
     def __init__(self, column, unitScale=1.0):
         self.column = column
         self.unitScale = unitScale
@@ -423,7 +450,8 @@ class MagDiffCompareErr(object):
 
 
 class ApCorrDiffErr(object):
-    """Functor to calculate magnitude difference error"""
+    """Functor to calculate magnitude difference error.
+    """
     def __init__(self, column, unitScale=1.0):
         self.column = column
         self.unitScale = unitScale
@@ -435,7 +463,8 @@ class ApCorrDiffErr(object):
 
 
 class CentroidDiff(object):
-    """Functor to calculate difference in astrometry"""
+    """Functor to calculate difference in astrometry.
+    """
     def __init__(self, component, first="first_", second="second_", centroid1="base_SdssCentroid",
                  centroid2="base_SdssCentroid", unitScale=1.0):
         self.component = component
@@ -452,7 +481,8 @@ class CentroidDiff(object):
 
 
 class CentroidDiffErr(CentroidDiff):
-    """Functor to calculate difference error for astrometry"""
+    """Functor to calculate difference error for astrometry.
+    """
     def __call__(self, catalog):
         schema = getSchema(catalog)
         firstx = self.first + self.centroid + "_xErr"
@@ -469,7 +499,8 @@ class CentroidDiffErr(CentroidDiff):
 
 
 def deconvMom(catalog):
-    """Calculate deconvolved moments"""
+    """Calculate deconvolved moments.
+    """
     schema = getSchema(catalog)
     if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
         hsm = catalog["ext_shapeHSM_HsmSourceMoments_xx"] + catalog["ext_shapeHSM_HsmSourceMoments_yy"]
@@ -489,7 +520,8 @@ def deconvMom(catalog):
 
 
 def deconvMomStarGal(catalog):
-    """Calculate P(star) from deconvolved moments"""
+    """Calculate P(star) from deconvolved moments.
+    """
     rTrace = deconvMom(catalog)
     snr = catalog["base_PsfFlux_instFlux"]/catalog["base_PsfFlux_instFluxErr"]
     poly = (-4.2759879274 + 0.0713088756641*snr + 0.16352932561*rTrace - 4.54656639596e-05*snr*snr -
@@ -559,7 +591,9 @@ def checkIdLists(catalog1, catalog2, prefix=""):
 
 
 def checkPatchOverlap(patchList, tractInfo):
-    # Given a list of patch dataIds along with the associated tractInfo, check if any of the patches overlap
+    """Given a list of patch dataIds along with the associated tractInfo, check
+    if any of the patches overlap.
+    """
     for i, patch0 in enumerate(patchList):
         overlappingPatches = False
         patchIndex = [int(val) for val in patch0.split(",")]
@@ -579,8 +613,8 @@ def checkPatchOverlap(patchList, tractInfo):
 
 
 def joinCatalogs(catalog1, catalog2, prefix1="cat1_", prefix2="cat2_"):
-    # Make sure catalogs entries are all associated with the same object
-
+    """Make sure catalogs entries are all associated with the same object.
+    """
     if not checkIdLists(catalog1, catalog2):
         raise RuntimeError("Catalogs with different sets of objects cannot be joined")
 
@@ -597,16 +631,16 @@ def joinCatalogs(catalog1, catalog2, prefix1="cat1_", prefix2="cat2_"):
 
 
 def getFluxKeys(schema):
-    """Retrieve the flux and flux error keys from a schema
+    """Retrieve the flux and flux error keys from a schema.
 
-    Both are returned as dicts indexed on the flux name (e.g. "base_PsfFlux_instFlux" or
-    "modelfit_CModel_instFlux").
+    Both are returned as dicts indexed on the flux name (e.g.
+    "base_PsfFlux_instFlux" or "modelfit_CModel_instFlux").
     """
-
     fluxTypeStr = "_instFlux"
     fluxSchemaItems = schema.extract("*" + fluxTypeStr)
-    # Do not include any flag fields (as determined by their type).  Also exclude
-    # slot fields, as these would effectively duplicate whatever they point to.
+    # Do not include any flag fields (as determined by their type).  Also
+    # exclude slot fields, as these would effectively duplicate whatever they
+    # point to.
     fluxKeys = dict((name, schemaItem.key) for name, schemaItem in list(fluxSchemaItems.items()) if
                     schemaItem.field.getTypeString() != "Flag" and
                     not name.startswith("slot"))
@@ -633,7 +667,8 @@ def getFluxKeys(schema):
 
 
 def addColumnsToSchema(fromCat, toCat, colNameList, prefix=""):
-    """Copy columns from fromCat to new version of toCat"""
+    """Copy columns from fromCat to new version of toCat.
+    """
     fromMapper = afwTable.SchemaMapper(fromCat.schema)
     fromMapper.addMinimalSchema(toCat.schema, False)
     toMapper = afwTable.SchemaMapper(toCat.schema)
@@ -694,7 +729,9 @@ def addApertureFluxesHSC(catalog, prefix=""):
 
 
 def addFpPoint(det, catalog, prefix=""):
-    # Compute Focal Plane coordinates for SdssCentroid of each source and add to schema
+    """Compute Focal Plane coordinates for SdssCentroid of each source and add
+    to schema.
+    """
     mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
     schema = mapper.getOutputSchema()
@@ -723,7 +760,9 @@ def addFpPoint(det, catalog, prefix=""):
 
 
 def addFootprintArea(catalog, fromCat=None, prefix=""):
-    # Retrieve the area (i.e. number of pixels) of source's footprint and add to schema
+    """Retrieve the area (i.e. number of pixels) of source's footprint and add
+    to schema.
+    """
     mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
     schema = mapper.getOutputSchema()
@@ -752,7 +791,8 @@ def addFootprintArea(catalog, fromCat=None, prefix=""):
 
 
 def rotatePixelCoord(s, width, height, nQuarter):
-    """Rotate single (x, y) pixel coordinate such that LLC of detector in FP is (0, 0)
+    """Rotate single (x, y) pixel coordinate such that LLC of detector in FP
+    is (0, 0).
     """
     xKey = s.schema.find("slot_Centroid_x").key
     yKey = s.schema.find("slot_Centroid_y").key
@@ -797,42 +837,50 @@ def addRotPoint(catalog, width, height, nQuarter, prefix=""):
 
 
 def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True, tractInnerOnly=False):
-    """Create a boolean array indicating sources deemed unsuitable for qa analyses
+    """Create a boolean array indicating sources deemed unsuitable for qa
+    analyses
 
-    Sets value to True for unisolated objects (deblend_nChild > 0), "sky" objects (merge_peak_sky),
-    and any of the flags listed in self.config.analysis.flags.  If onlyReadStars is True, sets boolean
-    as True for all galaxies classified as extended (base_ClassificationExtendedness_value > 0.5).  If
-    patchInnerOnly is True (the default), sets the bad boolean array value to True for any sources
-    for which detect_isPatchInner is False (to avoid duplicates in overlapping patches).  If
-    tractInnerOnly is True, sets the bad boolean value to True for any sources for which
-    detect_isTractInner is False (to avoid duplicates in overlapping patches).  Note, however, that
-    the default for tractInnerOnly is False as we are currently only running these scripts at the
-    per-tract level, so there are no tract duplicates (and omitting the "outer" ones would just leave
-    an empty band around the tract edges).
+    Sets value to True for duplicate parent objects (deblend_nChild > 0),
+    "sky" objects (merge_peak_sky), and any of the flags listed in
+    config.analysis.flags.  If ``onlyReadStars`` is `True`, sets boolean as
+    `True` for all objects classified as extended
+    (base_ClassificationExtendedness_value > 0.5).  If ``patchInnerOnly`` is
+    `True` (the default), sets the bad boolean array value to `True` for any
+    sources for which detect_isPatchInner is `False` (to avoid duplicates in
+    overlapping patches).  If ``tractInnerOnly`` is `True`, sets the bad
+    boolean value to True for any sources for which detect_isTractInner is
+    `False` (to avoid duplicates in overlapping patches).  Note, however, that
+    the default for ``tractInnerOnly`` is `False` as we are currently only
+    running these scripts at the per-tract level, so there are no tract
+    duplicates (and omitting the "outer" ones would just leave an empty band
+    around the tract edges).
 
     Parameters
     ----------
     catalog : `lsst.afw.table.SourceCatalog`
-       The source catalog under consideration.
+        The source catalog under consideration.
     flagList : `list`
-       The list of flags for which, if any is set for a given source, set bad entry to `True` for
-       that source.
+        The list of flags for which, if any is set for a given source, set bad
+        entry to `True` for that source.
     onlyReadStars : `bool`, optional
-       Boolean indicating if you want to select objects classified as stars only (based on
-       base_ClassificationExtendedness_value > 0.5, `False` by default).
+        Boolean indicating if you want to select objects classified as stars
+        only (based on base_ClassificationExtendedness_value > 0.5, `False` by
+        default).
     patchInnerOnly : `bool`, optional
-       Whether to select only sources for which detect_isPatchInner is `True` (`True` by default).
+        Whether to select only sources for which detect_isPatchInner is `True`
+        (`True` by default).
     tractInnerOnly : `bool`, optional
-       Whether to select only sources for which detect_isTractInner is `True` (`False` by default).
-       Note that these scripts currently only ever run at the per-tract level, so we do not need
-       to filter out sources for which detect_isTractInner is `False` as, with only one tract, there
-       are no duplicated tract inner/outer sources.
+        Whether to select only sources for which detect_isTractInner is `True`
+        (`False` by default).  Note that these scripts currently only ever run
+        at the per-tract level, so we do not need to filter out sources for
+        which detect_isTractInner is `False` as, with only one tract, there are
+        no duplicated tract inner/outer sources.
 
     Returns
     -------
     badArray : `numpy.ndarray`
-       Boolean array with same length as catalog whose values indicate whether the source was deemed
-       inappropriate for qa analyses.
+        Boolean array with same length as catalog whose values indicate whether
+        the source was deemed inappropriate for qa analyses.
     """
     schema = getSchema(catalog)
     bad = np.zeros(len(catalog), dtype=bool)
@@ -864,32 +912,32 @@ def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True,
 
 
 def addFlag(catalog, badArray, flagName, doc="General failure flag"):
-    """Add a flag for any sources deemed not appropriate for qa analyses
+    """Add a flag for any sources deemed not appropriate for qa analyses.
 
     Parameters
     ----------
     catalog : `lsst.afw.table.SourceCatalog`
-       Source catalog to which the flag will be added.
+        Source catalog to which the flag will be added.
     badArray : `numpy.ndarray`
-       Boolean array with same length as catalog whose values indicate whether the flag flagName
-       should be set for a given oject.
+        Boolean array with same length as catalog whose values indicate whether
+        the flag flagName should be set for a given oject.
     flagName : `str`
-       Name of flag to be set
+        Name of flag to be set.
     doc : `str`, optional
-       Docstring for ``flagName``
+        Docstring for ``flagName``.
 
     Raises
     ------
     `RuntimeError`
-       If lengths of ``catalog`` and ``badArray`` are not equal.
+        If lengths of ``catalog`` and ``badArray`` are not equal.
 
     Returns
     -------
     newCatalog : `lsst.afw.table.SourceCatalog`
-       Source catalog with ``flagName`` column added.
+        Source catalog with ``flagName`` column added.
     """
     if len(catalog) != len(badArray):
-        raise RuntimeError('Lengths of catalog and bad objects array do not match.')
+        raise RuntimeError("Lengths of catalog and bad objects array do not match.")
 
     mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
@@ -905,33 +953,37 @@ def addFlag(catalog, badArray, flagName, doc="General failure flag"):
 
 
 def addIntFloatOrStrColumn(catalog, values, fieldName, fieldDoc, fieldUnits=""):
-    """Add a column of values with name fieldName and doc fieldDoc to the catalog schema
+    """Add a column of values with name ``fieldName`` and doc ``fieldDoc`` to
+    the catalog schema.
 
     Parameters
     ----------
     catalog : `lsst.afw.table.SourceCatalog`
-       Source catalog to which the column will be added.
-    values : `list`, `numpy.ndarray`, or scalar of type `int`, `float`, or `str`
-       The list of values to be added.  This list must have the same length as ``catalog`` or
-       length 1 (to add a column with the same value for all objects).
+        Source catalog to which the column will be added.
+    values : `list`, `numpy.ndarray`, or scalar of type `int`, `float`,
+             or `str`
+        The list of values to be added.  This list must have the same length as
+        ``catalog`` or length 1 (to add a column with the same value for all
+        objects).
     fieldName : `str`
-       Name of the field to be added to the schema.
+        Name of the field to be added to the schema.
     fieldDoc : `str`
-       Documentation string for the field to be added to the schema.
+        Documentation string for the field to be added to the schema.
     fieldUnits : `str`, optional
-       Units of the column to be added.
+        Units of the column to be added.
 
     Raises
     ------
     `RuntimeError`
-       If type of all ``values`` is not one of `int`, `float`, or `str`.
+        If type of all ``values`` is not one of `int`, `float`, or `str`.
     `RuntimeError`
-       If length of ``values`` list is neither 1 nor equal to the ``catalog`` length.
+        If length of ``values`` list is neither 1 nor equal to the ``catalog``
+        length.
 
     Returns
     -------
     newCatalog : `lsst.afw.table.SourceCatalog`
-       Source catalog with ``fieldName`` column added.
+        Source catalog with ``fieldName`` column added.
     """
     if not isinstance(values, (list, np.ndarray)):
         if type(values) in (int, float, str):
@@ -979,7 +1031,7 @@ def addIntFloatOrStrColumn(catalog, values, fieldName, fieldDoc, fieldUnits=""):
 
 
 def calibrateSourceCatalogMosaic(dataRef, catalog, fluxKeys=None, errKeys=None, zp=27.0):
-    """Calibrate catalog with meas_mosaic results
+    """Calibrate catalog with meas_mosaic results.
 
     Requires a SourceCatalog input.
     """
@@ -999,7 +1051,7 @@ def calibrateSourceCatalogMosaic(dataRef, catalog, fluxKeys=None, errKeys=None, 
 
 
 def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
-    """Calibrate catalog with (e.g. jointcal/meas_mosaic) PhotoCalib results
+    """Calibrate catalog with (e.g. jointcal/meas_mosaic) PhotoCalib results.
 
     Parameters
     ----------
@@ -1022,8 +1074,8 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
 
     Notes
     -----
-    Adds magnitudes to the returned catalog these are in the columns called <flux column>_mag and have
-    errors in the associated _magErr columns.
+    Adds magnitudes to the returned catalog these are in the columns called
+    <flux column>_mag and have errors in the associated _magErr columns.
     """
     wcs = dataRef.get("jointcal_wcs")
     for record in catalog:
@@ -1092,7 +1144,8 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
 
 
 def calibrateSourceCatalog(catalog, zp):
-    """Calibrate catalog in the case of no meas_mosaic results using FLUXMAG0 as zp
+    """Calibrate catalog in the case of no meas_mosaic results using FLUXMAG0
+    as zp.
 
     Requires a SourceCatalog and zeropoint as input.
     """
@@ -1105,7 +1158,7 @@ def calibrateSourceCatalog(catalog, zp):
 
 
 def calibrateCoaddSourceCatalog(catalog, zp):
-    """Calibrate coadd catalog
+    """Calibrate coadd catalog.
 
     Requires a SourceCatalog or pandas Dataframe and zeropoint as input.
     """
@@ -1123,7 +1176,7 @@ def calibrateCoaddSourceCatalog(catalog, zp):
 
 
 def backoutApCorr(catalog):
-    """Back out the aperture correction to all fluxes
+    """Back out the aperture correction to all fluxes.
     """
     ii = 0
     fluxStr = "_instFlux"
@@ -1160,7 +1213,7 @@ def matchNanojanskyToAB(matches):
 
 
 def checkHscStack(metadata):
-    """Check to see if data were processed with the HSC stack
+    """Check to see if data were processed with the HSC stack.
     """
     try:
         hscPipe = metadata.getScalar("HSCPIPE_VERSION")
@@ -1170,7 +1223,7 @@ def checkHscStack(metadata):
 
 
 def fluxToPlotString(fluxToPlot):
-    """Return a more succint string for fluxes for label plotting
+    """Return a more succint string for fluxes for label plotting.
     """
     fluxStrMap = {"base_PsfFlux_instFlux": "PSF",
                   "base_PsfFlux_flux": "PSF",
@@ -1193,7 +1246,7 @@ _eups = None
 
 
 def getEups():
-    """Return a EUPS handle
+    """Return a EUPS handle.
 
     We instantiate this once only, because instantiation is expensive.
     """
@@ -1216,62 +1269,63 @@ def andCatalog(version):
 
 
 def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False):
-    """Obtain the relevant repository information for the given dataRef
+    """Obtain the relevant repository information for the given dataRef.
 
     Parameters
     ----------
     dataRef : `lsst.daf.persistence.butlerSubset.ButlerDataRef`
-       The data reference for which the relevant repository information
-       is to be retrieved.
+        The data reference for which the relevant repository information
+        is to be retrieved.
     coaddName : `str`, optional
-       The base name of the coadd (e.g. deep or goodSeeing) if
-       ``dataRef`` is for coadd level processing (`None` by default).
+        The base name of the coadd (e.g. deep or goodSeeing) if
+        ``dataRef`` is for coadd level processing (`None` by default).
     coaddDataset : `str`, optional
-       The name of the coadd dataset (e.g. Coadd_forced_src or
-       Coadd_meas) if ``dataRef`` is for coadd level processing
-       (`None` by default).
+        The name of the coadd dataset (e.g. Coadd_forced_src or
+        Coadd_meas) if ``dataRef`` is for coadd level processing
+        (`None` by default).
     doApplyUberCal : `bool`, optional
-       If `True`: Set the appropriate dataset type for the uber
-       calibration from meas_mosaic.
-       If `False` (the default): Set the dataset type to the source
-       catalog from single frame processing.
+        If `True`: Set the appropriate dataset type for the uber
+        calibration from meas_mosaic.
+        If `False` (the default): Set the dataset type to the source
+        catalog from single frame processing.
 
     Raises
     ------
     `RuntimeError`
-       If one of ``coaddName`` or ``coaddDataset`` is specified but
-       the other is not.
+        If one of ``coaddName`` or ``coaddDataset`` is specified but
+        the other is not.
 
     Returns
     -------
     result : `lsst.pipe.base.Struct`
-       Result struct with components:
+        Result struct with components:
 
-       - ``butler`` : the butler associated with ``dataRef``
-         (`lsst.daf.persistence.Butler`).
-       - ``camera`` : the camera associated with ``butler``
-         (`lsst.afw.cameraGeom.Camera`).
-       - ``dataId`` : the dataId associated with ``dataRef``
-         (`lsst.daf.persistence.DataId`).
-       - ``filterName`` : the name of the filter associated with ``dataRef``
-         (`str`).
-       - ``genericFilterName`` : a generic form for ``filterName`` (`str`).
-       - ``ccdKey`` : the ccd key associated with ``dataId`` (`str` or `None`).
-       - ``metadata`` : the metadata associated with ``butler`` and ``dataId``
-         (`lsst.daf.base.propertyContainer.PropertyList`).
-       - ``hscRun`` : string representing "HSCPIPE_VERSION" fits header if
-         the data associated with ``dataRef``'s ``dataset`` were processed with
-         the (now obsolete, but old reruns still exist) "HSC stack", None
-         otherwise (`str` or `None`).
-       - ``dataset`` : the dataset name ("src" if ``dataRef`` is visit level,
-         coaddName + coaddDataset if ``dataRef`` is a coadd (`str`)
-       - ``skyMap`` : the sky map associated with ``dataRef`` if it is a
-         coadd (`lsst.skymap.SkyMap` or `None`).
-       - ``wcs`` : the wcs of the coadd image associated with ``dataRef``
-         -- only needed as a workaround for some old coadd catalogs that were
-         persisted with all nan for ra dec (`lsst.afw.geom.SkyWcs` or `None`).
-       - ``tractInfo`` : the tract information associated with ``dataRef`` if
-         it is a coadd (`lsst.skymap.tractInfo.ExplicitTractInfo` or `None`).
+        - ``butler`` : the butler associated with ``dataRef``
+          (`lsst.daf.persistence.Butler`).
+        - ``camera`` : the camera associated with ``butler``
+          (`lsst.afw.cameraGeom.Camera`).
+        - ``dataId`` : the dataId associated with ``dataRef``
+          (`lsst.daf.persistence.DataId`).
+        - ``filterName`` : the name of the filter associated with ``dataRef``
+          (`str`).
+        - ``genericFilterName`` : a generic form for ``filterName`` (`str`).
+        - ``ccdKey`` : the ccd key associated with ``dataId`` (`str` or
+          `None`).
+        - ``metadata`` : the metadata associated with ``butler`` and ``dataId``
+          (`lsst.daf.base.propertyContainer.PropertyList`).
+        - ``hscRun`` : string representing "HSCPIPE_VERSION" fits header if
+          the data associated with ``dataRef``'s ``dataset`` were processed
+          with the (now obsolete, but old reruns still exist) "HSC stack",
+          `None` otherwise (`str` or `None`).
+        - ``dataset`` : the dataset name ("src" if ``dataRef`` is visit level,
+          coaddName + coaddDataset if ``dataRef`` is a coadd (`str`)
+        - ``skyMap`` : the sky map associated with ``dataRef`` if it is a
+          coadd (`lsst.skymap.SkyMap` or `None`).
+        - ``wcs`` : the wcs of the coadd image associated with ``dataRef``
+          -- only needed as a workaround for some old coadd catalogs that were
+          persisted with all nan for ra dec (`lsst.afw.geom.SkyWcs` or `None`).
+        - ``tractInfo`` : the tract information associated with ``dataRef`` if
+          it is a coadd (`lsst.skymap.tractInfo.ExplicitTractInfo` or `None`).
     """
     if coaddName and not coaddDataset or not coaddName and coaddDataset:
         raise RuntimeError("If one of coaddName or coaddDataset is specified, the other must be as well.")
@@ -1307,7 +1361,7 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
         skymap = skymap if skymap else butler.get("deepCoadd_skyMap")
         try:
             tractInfo = skymap[dataId["tract"]]
-        except:
+        except Exception:
             tractInfo = None
     return Struct(
         butler=butler,
@@ -1326,7 +1380,7 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
 
 
 def findCcdKey(dataId):
-    """Determine the convention for identifying a "ccd" for the current camera
+    """Determine the convention for identifying a "ccd" for the current camera.
 
     Parameters
     ----------
@@ -1335,12 +1389,12 @@ def findCcdKey(dataId):
     Raises
     ------
     `RuntimeError`
-       If "ccd" key could not be identified from the current hardwired list.
+        If "ccd" key could not be identified from the current hardwired list.
 
     Returns
     -------
     ccdKey : `str`
-       The string associated with the "ccd" key.
+        The string associated with the "ccd" key.
     """
     ccdKey = None
     ccdKeyList = ["ccd", "sensor", "camcol", "detector", "ccdnum"]
@@ -1400,23 +1454,24 @@ def fCubic(p, x):
 
 
 def orthogonalRegression(x, y, order, initialGuess=None):
-    """Perform an Orthogonal Distance Regression on the given data
+    """Perform an Orthogonal Distance Regression on the given data.
 
     Parameters
     ----------
     x, y : `array`
-       Arrays of x and y data to fit
+        Arrays of x and y data to fit.
     order : `int`, optional
-       Order of the polynomial to fit
+        Order of the polynomial to fit.
     initialGuess : `list` of `float`, optional
-       List of the polynomial coefficients (highest power first) of an initial guess to feed to
-       the ODR fit.  If no initialGuess is provided, a simple linear fit is performed and used
-       as the guess (`None` by default).
+        List of the polynomial coefficients (highest power first) of an initial
+        guess to feed to the ODR fit.  If no initialGuess is provided, a simple
+        linear fit is performed and used as the guess (`None` by default).
 
     Returns
     -------
     result : `list` of `float`
-       List of the fit coefficients (highest power first to mimic `numpy.polyfit` return).
+        List of the fit coefficients (highest power first to mimic
+        `numpy.polyfit` return).
     """
     if initialGuess is None:
         linReg = scipyStats.linregress(x, y)
@@ -1440,52 +1495,54 @@ def orthogonalRegression(x, y, order, initialGuess=None):
 
 
 def distanceSquaredToPoly(x1, y1, x2, poly):
-    """Calculate the square of the distance between point (x1, y1) and poly at x2
+    """Calculate the square of the distance between point (``x1``, ``y1``) and
+    ``poly`` at ``x2``.
 
     Parameters
     ----------
     x1, y1 : `float`
-       Point from which to calculate the square of the distance to the
-       polynomial ``poly``.
+        Point from which to calculate the square of the distance to the
+        polynomial ``poly``.
     x2 : `float`
-       Position on x axis from which to calculate the square of the distance
-       between (``x1``, ``y1``) and ``poly`` (the position of the tangent of
-       the polynomial curve closest to point (``x1``, ``y1``)).
+        Position on x axis from which to calculate the square of the distance
+        between (``x1``, ``y1``) and ``poly`` (the position of the tangent of
+        the polynomial curve closest to point (``x1``, ``y1``)).
     poly : `numpy.lib.polynomial.poly1d`
-       Numpy polynomial fit from which to calculate the square of the distance
-       to (``x1``, ``y1``) at ``x2``.
+        Numpy polynomial fit from which to calculate the square of the distance
+        to (``x1``, ``y1``) at ``x2``.
 
     Returns
     -------
     result : `float`
-       Square of the distance between (``x1``, ``y1``) and ``poly`` at ``x2``
+        Square of the distance between (``x1``, ``y1``) and ``poly`` at ``x2``.
     """
     return (x2 - x1)**2 + (poly(x2) - y1)**2
 
 
 def p1CoeffsFromP2x0y0(p2Coeffs, x0, y0):
-    """Compute Ivezic P1 coefficients using the P2 coeffs and origin (x0, y0)
+    """Compute Ivezic P1 coefficients using the P2 coeffs and origin (x0, y0).
 
     Reference: Ivezic et al. 2004 (2004AN....325..583I)
 
     theta = arctan(mP1), where mP1 is the slope of the equivalent straight
                          line (the P1 line) from the P2 coeffs in the (x, y)
                          coordinate system and x = c1 - c2, y = c2 - c3
-    P1 = cos(theta)*c1 + ((sin(theta) - cos(theta))*c2 - sin(theta)*c3 + deltaP1
+    P1 = cos(theta)*c1 + ((sin(theta)-cos(theta))*c2 - sin(theta)*c3 + deltaP1
     P1 = 0 at x0, y0 ==> deltaP1 = -cos(theta)*x0 - sin(theta)*y0
 
     Parameters
     ----------
     p2Coeffs : `list` of `float`
-       List of the four P2 coefficients from which, along with the origin point
-       (``x0``, ``y0``), to compute/derive the associated P1 coefficients.
+        List of the four P2 coefficients from which, along with the origin
+        point (``x0``, ``y0``), to compute/derive the associated P1
+        coefficients.
     x0, y0 : `float`
-       Coordinates at which to set P1 = 0 (i.e. the P1/P2 axis origin).
+        Coordinates at which to set P1 = 0 (i.e. the P1/P2 axis origin).
 
     Returns
     -------
     p1Coeffs: `list` of `float`
-       The four P1 coefficients.
+        The four P1 coefficients.
     """
     mP1 = p2Coeffs[0]/p2Coeffs[2]
     cosTheta = np.cos(np.arctan(mP1))
@@ -1497,7 +1554,7 @@ def p1CoeffsFromP2x0y0(p2Coeffs, x0, y0):
 
 
 def p2p1CoeffsFromLinearFit(m, b, x0, y0):
-    """Derive the Ivezic et al. 2004 P2 and P1 equations based on linear fit
+    """Derive the Ivezic et al. 2004 P2 and P1 equations based on linear fit.
 
     Where the linear fit is to the given region in color-color space.
     Reference: Ivezic et al. 2004 (2004AN....325..583I)
@@ -1508,25 +1565,25 @@ def p2p1CoeffsFromLinearFit(m, b, x0, y0):
 
     P1 = cos(theta)*x + sin(theta)*y + deltaP1, theta = arctan(m)
     P1 = cos(theta)*(c1 - c2) + sin(theta)*(c2 - c3) + deltaP1
-    P1 = cos(theta)*c1 + ((sin(theta) - cos(theta))*c2 - sin(theta)*c3 + deltaP1
+    P1 = cos(theta)*c1 + ((sin(theta)-cos(theta))*c2 - sin(theta)*c3 + deltaP1
     P1 = 0 at x0, y0 ==> deltaP1 = -cos(theta)*x0 - sin(theta)*y0
 
     Parameters
     ----------
     m : `float`
-       Slope of line to convert.
+        Slope of line to convert.
     b : `float`
-       Intercept of line to convert.
+        Intercept of line to convert.
     x0, y0 : `float`
-       Coordinates at which to set P1 = 0.
+        Coordinates at which to set P1 = 0.
 
     Returns
     -------
     result : `lsst.pipe.base.Struct`
-       Result struct with components:
+        Result struct with components:
 
-       - ``p2Coeffs`` : four P2 equation coefficents (`list` of `float`).
-       - ``p1Coeffs`` : four P1 equation coefficents (`list` of `float`).
+        - ``p2Coeffs`` : four P2 equation coefficents (`list` of `float`).
+        - ``p1Coeffs`` : four P1 equation coefficents (`list` of `float`).
     """
     # Compute Ivezic P2 coefficients using the linear fit slope and intercept
     scaleFact = np.sqrt(m**2 + 1.0)
@@ -1548,23 +1605,24 @@ def p2p1CoeffsFromLinearFit(m, b, x0, y0):
 
 
 def lineFromP2Coeffs(p2Coeffs):
-    """Compute P1 line in color-color space for given set P2 coefficients
+    """Compute P1 line in color-color space for given set P2 coefficients.
 
     Reference: Ivezic et al. 2004 (2004AN....325..583I)
 
     Parameters
     ----------
     p2Coeffs : `list` of `float`
-       List of the four P2 coefficients.
+        List of the four P2 coefficients.
 
     Returns
     -------
     result : `lsst.pipe.base.Struct`
-       Result struct with components:
+        Result struct with components:
 
-       - ``mP1`` : associated slope for P1 in color-color coordinates (`float`).
-       - ``bP1`` : associated intercept for P1 in color-color coordinates
-                   (`float`).
+        - ``mP1`` : associated slope for P1 in color-color coordinates
+                    (`float`).
+        - ``bP1`` : associated intercept for P1 in color-color coordinates
+                    (`float`).
     """
     mP1 = p2Coeffs[0]/p2Coeffs[2]
     bP1 = -p2Coeffs[3]*np.sqrt(mP1**2 + (mP1 + 1.0)**2 + 1.0)
@@ -1575,28 +1633,28 @@ def lineFromP2Coeffs(p2Coeffs):
 
 
 def linesFromP2P1Coeffs(p2Coeffs, p1Coeffs):
-    """Derive P1/P2 axes in color-color space based on the P2 and P1 coeffs
+    """Derive P1/P2 axes in color-color space based on the P2 and P1 coeffs.
 
     Reference: Ivezic et al. 2004 (2004AN....325..583I)
 
     Parameters
     ----------
     p2Coeffs : `list` of `float`
-       List of the four P2 coefficients.
+        List of the four P2 coefficients.
     p1Coeffs : `list` of `float`
-       List of the four P1 coefficients.
+        List of the four P1 coefficients.
 
     Returns
     -------
     result : `lsst.pipe.base.Struct`
-       Result struct with components:
+        Result struct with components:
 
-       - ``mP2``, ``mP1`` : associated slopes for P2 and P1 in color-color
-                            coordinates (`float`).
-       - ``bP2``, ``bP1`` : associated intercepts for P2 and P1 in color-color
-                            coordinates (`float`).
-       - ``x0``, ``y0`` : x and y coordinates of the P2/P1 axes origin in
-                          color-color coordinates (`float`).
+        - ``mP2``, ``mP1`` : associated slopes for P2 and P1 in color-color
+                             coordinates (`float`).
+        - ``bP2``, ``bP1`` : associated intercepts for P2 and P1 in color-color
+                             coordinates (`float`).
+        - ``x0``, ``y0`` : x and y coordinates of the P2/P1 axes origin in
+                           color-color coordinates (`float`).
     """
     p1Line = lineFromP2Coeffs(p2Coeffs)
     mP1 = p1Line.mP1
@@ -1623,27 +1681,29 @@ def linesFromP2P1Coeffs(p2Coeffs, p1Coeffs):
 
 
 def makeEqnStr(varName, coeffList, exponentList):
-    """Make a string-formatted equation
+    """Make a string-formatted equation.
 
     Parameters
     ----------
     varName : `str`
-       Name of the equation to be stringified.
+        Name of the equation to be stringified.
     coeffList : `list` of `float`
-       List of equation coefficients (matched to exponenets in ``exponentList`` list).
+        List of equation coefficients (matched to exponenets in
+        ``exponentList`` list).
     exponentList : `list` of `str`
-       List of equation exponents (matched to coefficients in ``coeffList`` list).
+        List of equation exponents (matched to coefficients in
+        ``coeffList`` list).
 
     Raises
     ------
     `RuntimeError`
-       If lengths of ``coeffList`` and ``exponentList`` are not equal.
+        If lengths of ``coeffList`` and ``exponentList`` are not equal.
 
     Returns
     -------
     eqnStr : `str`
-       The stringified equation of the form:
-       varName = coeffList[0]exponent[0] + ... + coeffList[n-1]exponent[n-1].
+        The stringified equation of the form:
+        varName = coeffList[0]exponent[0] + ... + coeffList[n-1]exponent[n-1].
     """
     if len(coeffList) != len(exponentList):
         raise RuntimeError("Lengths of coeffList ({0:d}) and exponentList ({1:d}) are not equal".
@@ -1662,23 +1722,25 @@ def makeEqnStr(varName, coeffList, exponentList):
 
 
 def catColors(c1, c2, magsCat, goodArray=None):
-    """Compute color for a set of filters given a catalog of magnitudes by filter
+    """Compute color for a set of filters given a catalog of magnitudes by
+    filter.
 
     Parameters
     ----------
     c1, c2 : `str`
-       String representation of the filters from which to compute the color.
+        String representation of the filters from which to compute the color.
     magsCat : `dict` of `numpy.ndarray`
-       Dict of arrays of magnitude values.  Dict keys are the string representation of the filters.
+        Dict of arrays of magnitude values.  Dict keys are the string
+        representation of the filters.
     goodArray : `numpy.ndarray`, optional
-       Boolean array with same length as the magsCat arrays whose values indicate whether the
-       source was deemed "good" for intended use.  If `None`, all entries are considered "good"
-       (`None` by default).
+        Boolean array with same length as the magsCat arrays whose values
+        indicate whether the source was deemed "good" for intended use.  If
+        `None`, all entries are considered "good" (`None` by default).
 
     Raises
     ------
     `RuntimeError`
-       If lengths of ``goodArray`` and ``magsCat`` arrays are not equal.
+        If lengths of ``goodArray`` and ``magsCat`` arrays are not equal.
 
     Returns
     -------
@@ -1695,35 +1757,35 @@ def catColors(c1, c2, magsCat, goodArray=None):
 
 
 def setAliasMaps(catalog, aliasDictList, prefix=""):
-    """Set an alias map for differing schema naming conventions
+    """Set an alias map for differing schema naming conventions.
 
     Parameters
     ----------
     catalog : `lsst.afw.table.SourceCatalog`
-       The source catalog to which the mapping will be added.
+        The source catalog to which the mapping will be added.
     aliasDictList : `dict` of `str` or `list` of `dict` of `str`
-       A `list` of `dict` or single `dict` representing the alias mappings to
-       be added to ``catalog``'s schema with the key representing the new
-       name to be mapped to the value which represents the old name.  Note
-       that the mapping will only be added if the old name exists in
-       ``catalog``'s schema.
+        A `list` of `dict` or single `dict` representing the alias mappings to
+        be added to ``catalog``'s schema with the key representing the new
+        name to be mapped to the value which represents the old name.  Note
+        that the mapping will only be added if the old name exists in
+        ``catalog``'s schema.
 
     prefix : `str`, optional
-       This `str` will be prepended to the alias names (used, e.g., in matched
-       catalogs for which "src_" and "ref_" prefixes have been added to all
-       schema names).  Both the old and new names have ``prefix`` associated
-       with them (default is an empty string).
+        This `str` will be prepended to the alias names (used, e.g., in matched
+        catalogs for which "src_" and "ref_" prefixes have been added to all
+        schema names).  Both the old and new names have ``prefix`` associated
+        with them (default is an empty string).
 
     Raises
     ------
     `RuntimeError`
-       If not all elements in ``aliasDictList`` are instances of type `dict` or
-       `lsst.pex.config.dictField.Dict`.
+        If not all elements in ``aliasDictList`` are instances of type `dict`
+        or `lsst.pex.config.dictField.Dict`.
 
     Returns
     -------
     catalog : `lsst.afw.table.SourceCatalog`
-       The source catalog with the alias mappings added to the schema.
+        The source catalog with the alias mappings added to the schema.
     """
     if isinstance(aliasDictList, dict):
         aliasDictList = [aliasDictList, ]
@@ -1738,7 +1800,7 @@ def setAliasMaps(catalog, aliasDictList, prefix=""):
 
 
 def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=None):
-    """Add column entries for a set of pre-computed values
+    """Add column entries for a set of pre-computed values.
 
     This is for the parquet tables to facilitate the interactive
     drilldown analyses.
@@ -1746,19 +1808,19 @@ def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=No
     Parameters
     ----------
     catalog : `lsst.afw.table.SourceCatalog`
-       The source catalog to which the columns will be added.
+        The source catalog to which the columns will be added.
     fluxToPlotList : `list`
-       List of flux field names to make mag(fluxName) - mag(PsfFlux) columns.
+        List of flux field names to make mag(fluxName) - mag(PsfFlux) columns.
     toMilli : `bool`, optional
-       Whether to use units of "milli" (e.g. mmag, mas).
+        Whether to use units of "milli" (e.g. mmag, mas).
     unforcedCat : `lsst.afw.table.SourceCatalog`, optional
-       If `catalog` is a coadd forced catalog, this is its associated unforced
-       catalog for direct comparison of forced vs. unforced parameters.
+        If `catalog` is a coadd forced catalog, this is its associated unforced
+        catalog for direct comparison of forced vs. unforced parameters.
 
     Returns
     -------
     catalog : `lsst.afw.table.SourceCatalog`
-       The source catalog with the columns of pre-computed values added.
+        The source catalog with the columns of pre-computed values added.
     """
     unitScale = 1000.0 if toMilli else 1.0
     fieldUnits = " (mmag)" if toMilli else " (mag)"
@@ -1780,7 +1842,6 @@ def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=No
             catalog = addIntFloatOrStrColumn(catalog, magDiffErr, fieldErrName, fieldErrDoc,
                                              fieldUnits=fieldUnits.strip(" ()"))
 
-
     for compareCol, psfCompareCol, compareStr in [["base_SdssShape", "base_SdssShape_psf", "Sdss"],
                                                   ["ext_shapeHSM_HsmSourceMoments",
                                                    "ext_shapeHSM_HsmPsfMoments", "Hsm"]]:
@@ -1801,7 +1862,7 @@ def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=No
 
             # Source Trace - PSF model Trace
             fieldUnits = " (%)"
-            fieldName =  "psfTrace" + compareStr + "Diff_percent"
+            fieldName = "psfTrace" + compareStr + "Diff_percent"
             fieldDoc = fieldName + " = srcTrace" + compareStr + " - psfModelTrace" + compareStr + fieldUnits
             parameterFunc = PsfTraceSizeDiff(compareCol, psfCompareCol)
             psfTraceSizeDiff = parameterFunc(catalog)
@@ -1820,7 +1881,6 @@ def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=No
             parameterFunc = E2Resids(compareCol, psfCompareCol, unitScale)
             e2Resids = parameterFunc(catalog)
             catalog = addIntFloatOrStrColumn(catalog, e2Resids, fieldName, fieldDoc)
-
 
     # HSM Regauss E1/E2 resids
     fieldUnits = " (milli)" if toMilli else ""
@@ -1858,7 +1918,7 @@ def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=No
 
 
 def addMetricMeasurement(job, metricName, metricValue, measExtrasDictList=None):
-    """Add a measurement to a lsst.verify.Job instance
+    """Add a measurement to a lsst.verify.Job instance.
 
     TODO: this functionality will likely be moved to MeasurementSet in
           lsst.verify per DM-12655.
@@ -1866,21 +1926,21 @@ def addMetricMeasurement(job, metricName, metricValue, measExtrasDictList=None):
     Parameters
     ----------
     job : `lsst.verify.Job`
-       The verify Job to add the measurement to.
+        The verify Job to add the measurement to.
     metricName : `str`
-       The name of the metric to be added.
+        The name of the metric to be added.
     metricValue : `float`, `int`, `bool`, `str`
-       The value of the metric to be added.
+        The value of the metric to be added.
     measExtrasDictList : `list` of `dict`, optional
-       A dict of key value pairs of any "extras" to be added to the
-       metric measurement.  All of the following keys must be provided for
-       each `dict` in the `list`: "name", "value", "label", "description".
-       The "label" is meant to be a `str` suitable for plot axis labelling.
+        A dict of key value pairs of any "extras" to be added to the
+        metric measurement.  All of the following keys must be provided for
+        each `dict` in the `list`: "name", "value", "label", "description".
+        The "label" is meant to be a `str` suitable for plot axis labelling.
 
     Returns
     -------
     job : `lsst.verify.Job`
-       The updated job with the new measurement added.
+        The updated job with the new measurement added.
     """
     meas = verify.Measurement(job.metrics[metricName], metricValue)
     if measExtrasDictList:
@@ -1892,23 +1952,23 @@ def addMetricMeasurement(job, metricName, metricValue, measExtrasDictList=None):
 
 
 def updateVerifyJob(job, metaDict=None, specsList=None):
-    """Update an lsst.verify.Job with metadata and specifications
+    """Update an lsst.verify.Job with metadata and specifications.
 
     Parameters
     ----------
     job : `lsst.verify.Job`
-       The verify Job to add the measurement to.
+        The verify Job to add the measurement to.
     metaDict : `dict`, optional
-       A dict of key value pairs of any metadata to be added to the
-       verify `job`.
+        A dict of key value pairs of any metadata to be added to the
+        verify `job`.
     specsList : `list` of `lsst.verify.Specification`, optional
-       A `list` of valid `lsst.verify.Specifications`s to be added
-       verify `job`.
+        A `list` of valid `lsst.verify.Specifications`s to be added
+        verify `job`.
 
     Returns
     -------
     job : `lsst.verify.Job`
-       The updated job with the new metadata and specifications added.
+        The updated job with the new metadata and specifications added.
     """
     if metaDict:
         for metaName, metaValue in metaDict.items():
@@ -1920,43 +1980,44 @@ def updateVerifyJob(job, metaDict=None, specsList=None):
 
 
 def computeMeanOfFrac(valueArray, tailStr="upper", fraction=0.1, floorFactor=1):
-    """Compute the rounded mean of the upper/lower fraction of the input array
+    """Compute the rounded mean of the upper/lower fraction of the input array.
 
     In other words, sort ``valueArray`` by value and compute the mean values of
     the highest[lowest] ``fraction`` of points for ``tailStr`` = upper[lower]
-    and round this mean to a number of significant digits given by ``floorFactor``.
+    and round this mean to a number of significant digits given by
+    ``floorFactor``.
     e.g.
-     ``floorFactor`` = 0.001, round to nearest thousandth (657.14727 -> 657.147)
-     ``floorFactor`` = 0.01,  round to nearest hundredth (657.14727 -> 657.15)
-     ``floorFactor`` = 0.1,   round to nearest tenth     (657.14727 -> 657.1)
-     ``floorFactor`` = 1,     round to nearest integer   (657.14727 -> 657.0)
-     ``floorFactor`` = 10,    round to nearest ten       (657.14727 -> 660.0)
-     ``floorFactor`` = 100,   round to nearest hundred   (657.14727 -> 700.0)
+    ``floorFactor`` = 0.001, round to nearest thousandth (657.14727 -> 657.147)
+    ``floorFactor`` = 0.01,  round to nearest hundredth (657.14727 -> 657.15)
+    ``floorFactor`` = 0.1,   round to nearest tenth     (657.14727 -> 657.1)
+    ``floorFactor`` = 1,     round to nearest integer   (657.14727 -> 657.0)
+    ``floorFactor`` = 10,    round to nearest ten       (657.14727 -> 660.0)
+    ``floorFactor`` = 100,   round to nearest hundred   (657.14727 -> 700.0)
 
     Parameters
     ----------
     valueArray : `numpy.ndarray`
-       The array of values from which to compute the rounded mean.
+        The array of values from which to compute the rounded mean.
     taiStr : `str`, optional
-       Whether to compute the mean of the upper or lower ``fraction`` of points
-       in ``valueArray`` ("upper" by default).
+        Whether to compute the mean of the upper or lower ``fraction`` of
+        points in ``valueArray`` ("upper" by default).
     fraction : `float`, optional
-       The fraction of the upper or lower tail of the sorted values of
-       ``valueArray`` to use in the calculation (0.1, i.e. 10% by default).
+        The fraction of the upper or lower tail of the sorted values of
+        ``valueArray`` to use in the calculation (0.1, i.e. 10% by default).
     floorFactor : `float`, optional
-       Factor of 10 representing the number of significant digits to round to.
-       See above for examples (1.0 by default).
+        Factor of 10 representing the number of significant digits to round to.
+        See above for examples (1.0 by default).
 
     Raises
     ------
     `RuntimeError`
-       If ``tailStr`` is not either \"upper\" or \"lower\".
+        If ``tailStr`` is not either \"upper\" or \"lower\".
 
     Returns
     -------
     meanOfFrac : `float`
-       The mean of the upper/lower ``fraction`` of the values in
-       ``valueArray``.
+        The mean of the upper/lower ``fraction`` of the values in
+        ``valueArray``.
     """
     valueArray = valueArray.array if hasattr(valueArray, "array") else valueArray
     pad = 0.49
@@ -1990,7 +2051,7 @@ def getSchema(catalog):
 
 
 def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, padRadiusFactor=1.05):
-    """Function to load and denormalize a catalog of packed matches
+    """Function to load and denormalize a catalog of packed matches.
 
     A match list is persisted and unpersisted as a catalog of IDs produced by
     afw.table.packMatches(), with match metadata (as returned by the astrometry

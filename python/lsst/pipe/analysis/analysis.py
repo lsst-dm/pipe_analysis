@@ -194,7 +194,8 @@ class Analysis(object):
         goodSn0 &= self.signalToNoise >= 2.0
         self.magMin = (computeMeanOfFrac(self.mag[goodSn0], tailStr="lower", fraction=0.005, floorFactor=1) -
                        1.5)
-        self.magMax = computeMeanOfFrac(self.mag[goodSn0], tailStr="upper", fraction=0.05, floorFactor=1) + 0.5
+        self.magMax = (computeMeanOfFrac(self.mag[goodSn0], tailStr="upper", fraction=0.05, floorFactor=1) +
+                       0.5)
 
         if labeller is not None:
             labels = labeller(catalog, compareCat) if compareCat is not None else labeller(catalog)
@@ -470,7 +471,7 @@ class Analysis(object):
                 labelStr = self.signalToNoiseStr if self.signalToNoiseStr else "stats"
                 dataPoints.append(axScatter.scatter(data.mag[stats[name].dataUsed],
                                                     data.quantity[stats[name].dataUsed], s=ptSize,
-                                                    marker="o",  facecolors="none", edgecolors=data.color,
+                                                    marker="o", facecolors="none", edgecolors=data.color,
                                                     label=labelStr, alpha=1, linewidth=0.5))
 
             if self.statsHigh is not None and (name == "star" or name == "all") and "foot" not in filename:
@@ -488,7 +489,8 @@ class Analysis(object):
                 if stats is not None:
                     labelStr = self.signalToNoiseStr if self.signalToNoiseStr else "stats"
                     axHisty.hist(data.quantity[stats[name].dataUsed], bins=yBins, facecolor="none",
-                                 edgecolor=data.color, linewidth=0.5, orientation="horizontal", label=labelStr)
+                                 edgecolor=data.color, linewidth=0.5, orientation="horizontal",
+                                 label=labelStr)
                     axHistx.hist(data.mag[stats[name].dataUsed], bins=xBins, facecolor="none",
                                  edgecolor=data.color, linewidth=0.5, label=labelStr)
                 if self.statsHigh is not None and (name == "star" or name == "all"):
@@ -577,12 +579,10 @@ class Analysis(object):
         numMin = 0 if density else 0.9
         numMax = 1
         alpha = 0.4
-        ic = 1
         for name, data in self.data.items():
             if not data.mag.any():
                 continue
             color = "tab:" + data.color
-            ic += 1
             good = np.isfinite(data.quantity)
             if magThreshold and stats is not None:
                 good &= data.mag < magThreshold
@@ -598,7 +598,7 @@ class Analysis(object):
                            label=name + "_cum", histtype="step", cumulative=cumulative)
             # yaxis limit for non-normalized histograms
             numMax = max(numMax, num.max()*1.1) if not density else numMax
-        if cumulative:
+        if cumulative and axes2:
             axes2.set_ylim(0, 1.05)
             axes2.tick_params(axis="y", which="both", direction="in")
             axes2.set_ylabel("Cumulative Fraction", rotation=270, labelpad=12, color=color, fontsize=9)
