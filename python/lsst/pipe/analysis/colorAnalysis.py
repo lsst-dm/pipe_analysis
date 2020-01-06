@@ -443,7 +443,8 @@ class ColorAnalysisTask(CmdLineTask):
                 return
 
         if self.config.doPlotPrincipalColors:
-            principalColCats = (principalColCatsCModel if "CModel" in self.fluxColumn else principalColCatsPsf)
+            principalColCats = (principalColCatsCModel if "CModel" in self.fluxColumn else
+                                principalColCatsPsf)
             self.plotStarPrincipalColors(principalColCats, byFilterForcedCats, filenamer,
                                          NumStarLabeller(3), repoInfo.dataId, camera=repoInfo.camera,
                                          tractInfo=repoInfo.tractInfo, patchList=patchList,
@@ -676,7 +677,8 @@ class ColorAnalysisTask(CmdLineTask):
         schema.addField(fluxColumn, type=np.float64, doc="Flux from filter " + self.fluxFilter)
         schema.addField(fluxColumn + "Err", type=np.float64, doc="Flux error for flux from filter " +
                         self.fluxFilter)
-        schema.addField("base_InputCount_value", type=np.int32, doc="Input visit count for " + self.fluxFilter)
+        schema.addField("base_InputCount_value", type=np.int32, doc="Input visit count for " +
+                        self.fluxFilter)
 
         # Copy basics (id, RA, Dec)
         new = afwTable.SourceCatalog(schema)

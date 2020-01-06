@@ -1,7 +1,3 @@
-#!/usr/bin/env python
-
-from __future__ import print_function
-
 import os
 import astropy.coordinates as coord
 import astropy.units as units
@@ -44,6 +40,7 @@ __all__ = ["CoaddAnalysisConfig", "CoaddAnalysisRunner", "CoaddAnalysisTask", "C
 
 NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
 
+
 class CoaddAnalysisConfig(Config):
     coaddName = Field(dtype=str, default="deep", doc="Name for coadd")
     matchRadiusRaDec = Field(dtype=float, default=0.5, doc="RaDec Matching radius (arcseconds)")
@@ -76,8 +73,10 @@ class CoaddAnalysisConfig(Config):
                              doc="Add a field containing 12 pix circular aperture flux to HSC table?")
     doPlotStarGalaxy = Field(dtype=bool, default=True, doc=("Plot star/galaxy? "
                                                             "(ignored if plotMatchesOnly is True)"))
-    doPlotOverlaps = Field(dtype=bool, default=True, doc="Plot overlaps? (ignored if plotMatchesOnly is True)")
-    plotMatchesOnly = Field(dtype=bool, default=False, doc="Only make plots related to reference cat matches?")
+    doPlotOverlaps = Field(dtype=bool, default=True, doc=("Plot overlaps? (ignored if plotMatchesOnly is "
+                                                          "True)"))
+    plotMatchesOnly = Field(dtype=bool, default=False, doc=("Only make plots related to reference cat "
+                                                            "matches?"))
     doPlotMatches = Field(dtype=bool, default=True, doc="Plot matches?")
     doPlotCompareUnforced = Field(dtype=bool, default=True, doc=("Plot difference between forced and unforced"
                                                                  "? (ignored if plotMatchesOnly is True)"))
@@ -99,7 +98,7 @@ class CoaddAnalysisConfig(Config):
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(fluxColumn)")
     # We want the following to come from the *_meas catalogs as they reflect
     # what happened in SFP calibration.
-    columnsToCopyFromMeas = ListField(dtype=str, default=["calib_",],
+    columnsToCopyFromMeas = ListField(dtype=str, default=["calib_", ],
                                       doc="List of string \"prefixes\" to identify the columns to copy.  "
                                       "All columns with names that start with one of these strings will be "
                                       "copied from the *_meas catalogs into the *_forced_src catalogs "
@@ -151,7 +150,9 @@ class CoaddAnalysisConfig(Config):
              "deepCoadd_obj parquet table."))
 
     def saveToStream(self, outfile, root="root"):
-        """Required for loading colorterms from a Config outside the 'lsst' namespace"""
+        """Required for loading colorterms from a Config outside the 'lsst'
+        namespace.
+        """
         print("import lsst.meas.photocal.colorterms", file=outfile)
         return Config.saveToStream(self, outfile, root)
 
@@ -244,10 +245,11 @@ class CoaddAnalysisTask(CmdLineTask):
     def runDataRef(self, patchRefList, subdir="", cosmos=None):
         haveForced = False  # do forced datasets exits (may not for single band datasets)
         dataset = "Coadd_obj" if self.config.doReadParquetTables else "Coadd_forced_src"
-        # Explicit input file was checked in CoaddAnalysisRunner, so a check on datasetExists
-        # is sufficient here (modulo the case where a forced dataset exists higher up the parent
-        # tree than the specified input, but does not exist in the input directory as the former
-        # will be found)
+        # Explicit input file was checked in CoaddAnalysisRunner, so a check
+        # on datasetExists is sufficient here (modulo the case where a forced
+        # dataset exists higher up the parent tree than the specified input,
+        # but does not exist in the input directory as the former will be
+        # found).
         if patchRefList[0].datasetExists(self.config.coaddName + dataset):
             haveForced = True
         forcedStr = "forced" if haveForced else "unforced"
@@ -263,7 +265,8 @@ class CoaddAnalysisTask(CmdLineTask):
         repoInfo = getRepoInfo(patchRefList[0], coaddName=self.config.coaddName, coaddDataset=dataset)
         subdir = "patch-" + str(patchList[0]) if len(patchList) == 1 else subdir
         filenamer = Filenamer(repoInfo.butler, self.outputDataset, repoInfo.dataId, subdir=subdir)
-        # Find a visit/ccd input so that you can check for meas_mosaic input (i.e. to set uberCalLabel)
+        # Find a visit/ccd input so that you can check for meas_mosaic input
+        # (i.e. to set uberCalLabel).
         self.uberCalLabel = determineExternalCalLabel(repoInfo, patchList[0], coaddName=self.config.coaddName)
         self.log.info(f"External calibration(s) used: {self.uberCalLabel}")
 
@@ -280,11 +283,11 @@ class CoaddAnalysisTask(CmdLineTask):
                           patchList=patchList, hscRun=repoInfo.hscRun, zpLabel=self.zpLabel,
                           uberCalLabel=self.uberCalLabel)
 
-        if any (doPlot for doPlot in [self.config.doPlotMags, self.config.doPlotStarGalaxy,
-                                      self.config.doPlotOverlaps, self.config.doPlotCompareUnforced,
-                                      self.config.doPlotSkyObjects, self.config.doPlotSkyObjectsSky,
-                                      self.config.doPlotFootprintArea, cosmos, self.config.externalCatalogs,
-                                      self.config.doWriteParquetTables]):
+        if any(doPlot for doPlot in [self.config.doPlotMags, self.config.doPlotStarGalaxy,
+                                     self.config.doPlotOverlaps, self.config.doPlotCompareUnforced,
+                                     self.config.doPlotSkyObjects, self.config.doPlotSkyObjectsSky,
+                                     self.config.doPlotFootprintArea, cosmos, self.config.externalCatalogs,
+                                     self.config.doWriteParquetTables]):
             if self.config.doReadParquetTables:
                 if haveForced:
                     forced = self.readParquetTables(patchRefList, self.config.coaddName + "Coadd_obj",
@@ -355,7 +358,8 @@ class CoaddAnalysisTask(CmdLineTask):
                         else:
                             self.log.info("No of unforced overlap objects matched. Overlap plots skipped.")
 
-            # Set boolean array indicating sources deemed unsuitable for qa analyses
+            # Set boolean array indicating sources deemed unsuitable for qa
+            # analyses.
             badUnforced = makeBadArray(unforced, onlyReadStars=self.config.onlyReadStars)
             if haveForced:
                 badForced = makeBadArray(forced, onlyReadStars=self.config.onlyReadStars)
@@ -453,9 +457,9 @@ class CoaddAnalysisTask(CmdLineTask):
                               forcedStr=forcedStr.replace("forced", "unforced"), postFix="_unforced",
                               **plotKwargs)
                 if haveForced:
-                    plotKwargs.update(dict(highlightList=highlightList +
-                                           [("merge_measurement_" + repoInfo.genericFilterName, 0,
-                                             "yellow")]))
+                    plotKwargs.update(dict(highlightList=highlightList
+                                           + [("merge_measurement_" + repoInfo.genericFilterName, 0,
+                                               "yellow")]))
                     self.plotMags(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr, postFix="_forced",
                                   **plotKwargs)
                     plotKwargs.update(dict(highlightList=highlightList))
@@ -523,7 +527,8 @@ class CoaddAnalysisTask(CmdLineTask):
 
         Parameters
         ----------
-        patchRefList : `list` of `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+        patchRefList : `list` of
+                       `lsst.daf.persistence.butlerSubset.ButlerDataRef`
             A list of butler data references whose catalogs of datasetType are
             to be read in.
         datasetType : `str`
@@ -559,8 +564,8 @@ class CoaddAnalysisTask(CmdLineTask):
                     cat = parquetTable.toDataFrame(columns={"dataset": dataset,
                                                             "filter": patchRef.dataId["filter"]})
                     colsToLoadList = [col for col in cat.columns if
-                                      (col.startswith(tuple(self.config.baseColStrList)) and
-                                       not any(s in col for s in self.config.notInColStrList))]
+                                      (col.startswith(tuple(self.config.baseColStrList))
+                                       and not any(s in col for s in self.config.notInColStrList))]
                     cat = cat[colsToLoadList]
                 else:
                     cat = parquetTable.toDataFrame(columns={"dataset": dataset,
@@ -654,38 +659,43 @@ class CoaddAnalysisTask(CmdLineTask):
         return forced, unforced
 
     def readCatalogs(self, patchRefList, dataset, readFootprintsAs=None):
-        """Read in and concatenate catalogs of type dataset in lists of data references
+        """Read in and concatenate catalogs of type ``dataset`` in lists of
+        data references.
 
-        If self.config.doWriteParquetTables is True, before appending each catalog to a single
-        list, an extra column indicating the patch is added to the catalog.  This is useful for
-        the subsequent interactive QA analysis.
+        If self.config.doWriteParquetTables is True, before appending each
+        catalog to a single list, an extra column indicating the patch is
+        added to the catalog.  This is useful for the subsequent interactive
+        QA analysis.
 
         Parameters
         ----------
-        patchRefList : `list` of `lsst.daf.persistence.butlerSubset.ButlerDataRef`
-           A list of butler data references whose catalogs of dataset type are to be read in
+        patchRefList : `list` of
+                       `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+            A list of butler data references whose catalogs of dataset type are
+            to be read in.
         dataset : `str`
-           Name of the catalog dataset to be read in
+            Name of the catalog dataset to be read in.
         readFootprintsAs : `None` or `str`, optional
-           A string dictating if and what type of Footprint to read in along
-           with the catalog:
-           `None` (the default): do not read in Footprints.
-           "light": read in regular Footprints (include SpanSet and list of
-                    peaks per Footprint).
-           "heavy": read in HeavyFootprints (include regular Footprint plus
-                    flux values per Footprint).
+            A string dictating if and what type of Footprint to read in along
+            with the catalog:
+            `None` (the default): do not read in Footprints.
+            "light": read in regular Footprints (include SpanSet and list of
+                     peaks per Footprint).
+            "heavy": read in HeavyFootprints (include regular Footprint plus
+                     flux values per Footprint).
 
         Raises
         ------
         `TaskError`
-           If no data is read in for the dataRefList
+            If no data is read in for ``patchRefList``.
         `RuntimeError`
-           If entry for ``readFootprintsAs`` is not recognized (i.e. not one
-           of `None`, \"light\", or \"heavy\".
+            If entry for ``readFootprintsAs`` is not recognized (i.e. not one
+            of `None`, \"light\", or \"heavy\".
 
         Returns
         -------
-        `list` of concatenated `lsst.afw.table.source.source.SourceCatalog`s
+        concatenatedCat : `lsst.afw.table.SourceCatalog`
+            The concatenated catalog.
         """
         catList = []
         for patchRef in patchRefList:
@@ -705,7 +715,8 @@ class CoaddAnalysisTask(CmdLineTask):
                 catList.append(cat)
         if not catList:
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
-        return concatenateCatalogs(catList)
+        concatenatedCat = concatenateCatalogs(catList)
+        return concatenatedCat
 
     def readSrcMatches(self, dataRefList, dataset, hscRun=None, wcs=None, aliasDictList=None):
         matchList = []
@@ -729,8 +740,8 @@ class CoaddAnalysisTask(CmdLineTask):
                     catalog = addAliasColumns(catalog, aliasDictList)
                 schema = getSchema(catalog)
                 needToAddColumns = any(ss not in schema for ss in
-                                       list(self.config.columnsToCopyFromMeas) +
-                                       list(self.config.columnsToCopyFromRef))
+                                       list(self.config.columnsToCopyFromMeas)
+                                       + list(self.config.columnsToCopyFromRef))
                 if dataset != self.config.coaddName + "Coadd_meas" and needToAddColumns:
                     # Copy over some fields from _ref and _meas catalogs to
                     # _forced_src catalog.
@@ -760,7 +771,8 @@ class CoaddAnalysisTask(CmdLineTask):
                                       and not (hscRun and col == "slot_Centroid_flag")]
                     catalog = addColumnsToSchema(unforced, catalog, measColsToCopy)
 
-                # Compute Focal Plane coordinates for each source if not already there
+                # Compute Focal Plane coordinates for each source if not
+                # already there.
                 if self.config.analysisMatches.doPlotFP:
                     if "base_FPPosition_x" not in schema and "focalplane_x" not in schema:
                         coaddType = dataset[:dataset.find("_")]
@@ -777,7 +789,8 @@ class CoaddAnalysisTask(CmdLineTask):
             if self.config.doBackoutApCorr:
                 catalog = backoutApCorr(catalog)
 
-            # Set boolean array indicating sources deemed unsuitable for qa analyses
+            # Set boolean array indicating sources deemed unsuitable for qa
+            # analyses.
             transCentFlag = "base_TransformedCentroid_flag"
             badFlagList = [transCentFlag, ] if transCentFlag in schema else ["slot_Centroid_flag", ]
             bad = makeBadArray(catalog, flagList=badFlagList, onlyReadStars=self.config.onlyReadStars)
@@ -800,7 +813,8 @@ class CoaddAnalysisTask(CmdLineTask):
                 continue
             refObjLoader = self.config.refObjLoader.apply(butler=butler)
             matches = loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader)
-            # LSST reads in reference catalogs with flux in "nanojanskys", so must convert to AB
+            # LSST reads in reference catalogs with flux in "nanojanskys", so
+            # must convert to AB.
             matches = matchNanojanskyToAB(matches)
 
             if matches.empty:
@@ -814,7 +828,8 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def calibrateCatalogs(self, catalog, wcs=None):
         self.zpLabel = "common (" + str(self.config.analysis.coaddZp) + ")"
-        # My persisted catalogs in lauren/LSST/DM-6816new all have nan for ra dec (see DM-9556)
+        # My persisted catalogs in lauren/LSST/DM-6816new all have nan for ra
+        # dec (see DM-9556).
         if np.all(np.isnan(catalog["coord_ra"])):
             if wcs is None:
                 self.log.warn("Bad ra, dec entries but can't update because wcs is None")
@@ -847,8 +862,8 @@ class CoaddAnalysisTask(CmdLineTask):
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                              zpLabel=zpLabel, forcedStr=forcedStr, uberCalLabel=uberCalLabel,
                                              highlightList=highlightList)
-                # Also make comparison plots for calib_psf_used only objects for
-                # the circular aperture plots.
+                # Also make comparison plots for calib_psf_used only objects
+                # for the circular aperture plots.
                 if "CircularApertureFlux_12_0" in col:
                     shortName = "mag_" + col + postFix + "_calib_psf_used"
                     self.log.info("shortName = {:s}".format(shortName))
@@ -889,8 +904,9 @@ class CoaddAnalysisTask(CmdLineTask):
                     if not any(col + "_flag" in highlight for highlight in calibHighlightList0):
                         calibHighlightList0 += [(col + "_flag", 0, "yellow"), ]
                 compareCol = "base_SdssShape"
-                # Set limits dynamically...can be very different visit-to-visit due to seeing differences
-                # SDSS and HSM should be similar, so limits based on one should be valid for the other and
+                # Set limits dynamically...can be very different visit-to-visit
+                # due to seeing differences.  SDSS and HSM should be similar,
+                # so limits based on one should be valid for the other and
                 # having the same scale eases comparisons between the two.
                 traceSizeFunc = TraceSize(compareCol)
 
@@ -909,9 +925,10 @@ class CoaddAnalysisTask(CmdLineTask):
                     if not any(compareCol + "_flag" in highlight for highlight in calibHighlightList):
                         calibHighlightList += [(compareCol + "_flag", 0, "greenyellow"), ]
                 plotAllKwargs.update(highlightList=calibHighlightList)
-                self.AnalysisClass(psfUsed, TraceSize(compareCol),
-                                   ("          SdssShape Trace (calib_psf_used): "
-                                    "$\sqrt{0.5*(I_{xx}+I_{yy})}$ (pixels)"), shortName, self.config.analysis,
+                self.AnalysisClass(psfUsed, sdssTrace,
+                                   (r"          SdssShape Trace (calib_psf_used): "
+                                    r"$\sqrt{0.5*(I_{xx}+I_{yy})}$ (pixels)"),
+                                   shortName, self.config.analysis,
                                    goodKeys=["calib_psf_used"], qMin=qMin, qMax=qMax,
                                    labeller=StarGalaxyLabeller(),
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
@@ -925,8 +942,8 @@ class CoaddAnalysisTask(CmdLineTask):
                             calibHighlightList += [(compareCol + "_flag", 0, "greenyellow"), ]
                     plotAllKwargs.update(highlightList=calibHighlightList)
                     self.AnalysisClass(psfUsed, TraceSize(compareCol),
-                                       ("          HSM Trace (calib_psf_used): $\sqrt{0.5*(I_{xx}+I_{yy})}$"
-                                        " (pixels)"), shortName, self.config.analysis,
+                                       (r"          HSM Trace (calib_psf_used): $\sqrt{0.5*(I_{xx}+I_{yy})}$"
+                                        r" (pixels)"), shortName, self.config.analysis,
                                        goodKeys=["calib_psf_used"], qMin=qMin, qMax=qMax,
                                        labeller=StarGalaxyLabeller(),
                                        ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
@@ -939,8 +956,8 @@ class CoaddAnalysisTask(CmdLineTask):
                 sdssTrace = traceSizeFunc(starsOnly)
                 self.log.info("shortName = {:s}".format(shortName))
                 plotAllKwargs.update(highlightList=highlightList)
-                self.AnalysisClass(starsOnly, TraceSize(compareCol),
-                                   "  SdssShape Trace: $\sqrt{0.5*(I_{xx}+I_{yy})}$ (pixels)", shortName,
+                self.AnalysisClass(starsOnly, sdssTrace,
+                                   r"  SdssShape Trace: $\sqrt{0.5*(I_{xx}+I_{yy})}$ (pixels)", shortName,
                                    self.config.analysis, qMin=qMin, qMax=qMax, labeller=StarGalaxyLabeller(),
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
                 if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
@@ -948,7 +965,7 @@ class CoaddAnalysisTask(CmdLineTask):
                     compareCol = "ext_shapeHSM_HsmSourceMoments"
                     self.log.info("shortName = {:s}".format(shortName))
                     self.AnalysisClass(starsOnly, TraceSize(compareCol),
-                                       "HSM Trace: $\sqrt{0.5*(I_{xx}+I_{yy})}$ (pixels)", shortName,
+                                       r"HSM Trace: $\sqrt{0.5*(I_{xx}+I_{yy})}$ (pixels)", shortName,
                                        self.config.analysis, qMin=qMin, qMax=qMax,
                                        labeller=StarGalaxyLabeller(),
                                        ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
@@ -1125,7 +1142,7 @@ class CoaddAnalysisTask(CmdLineTask):
         goodSn = psfSn > highSn
         psfFluxSnGtHigh = psfFlux[goodSn]
         goodFlux = psfFlux > lowFlux
-        psfSnFluxGtLow= psfSn[goodFlux]
+        psfSnFluxGtLow = psfSn[goodFlux]
         goodFlux = psfFlux > highFlux
         psfSnFluxGtHigh = psfSn[goodFlux]
         psfUsedCat = catalog[catalog["calib_psf_used"]]
@@ -1135,8 +1152,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
         self.AnalysisClass(catalog, psfFlux, "%s" % shortName, shortName,
                            self.config.analysis, qMin=0,
-                           qMax = int(min(99999, max(4.0*np.nanmedian(psfFlux), 0.25*np.nanmax(psfFlux)))),
-                           labeller=AllLabeller(),
+                           qMax=int(min(99999, max(4.0*np.nanmedian(psfFlux), 0.25*np.nanmax(psfFlux)))),
                            ).plotHistogram(filenamer, numBins="sqrt", stats=stats, camera=camera,
                                            ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
                                            hscRun=hscRun, zpLabel=zpLabel,
@@ -1150,7 +1166,7 @@ class CoaddAnalysisTask(CmdLineTask):
         filenamer = filenamer.replace("Flux", "FluxSn")
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(catalog, psfSn, "%s" % "S/N = " + shortName, shortName,
-                           self.config.analysis, qMin=0, qMax = 4*highSn, labeller=AllLabeller(),
+                           self.config.analysis, qMin=0, qMax=4*highSn, labeller=AllLabeller(),
                            ).plotHistogram(filenamer, numBins="sqrt", stats=stats, camera=camera,
                                            ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
                                            hscRun=hscRun, zpLabel=zpLabel,
@@ -1167,9 +1183,8 @@ class CoaddAnalysisTask(CmdLineTask):
         filenamer = filenamer.replace("hist", "sky-all")
 
         self.AnalysisClass(catalog, psfSn, "%s" % "S/N = " + shortName, shortName, self.config.analysis,
-                           qMin=0, qMax = 1.25*highSn, labeller=AllLabeller(),
+                           qMin=0, qMax=1.25*highSn, labeller=AllLabeller(),
                            ).plotSkyPosition(filenamer, dataName="all", **skyplotKwargs)
-
 
     def plotStarGal(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                     patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
@@ -1227,7 +1242,8 @@ class CoaddAnalysisTask(CmdLineTask):
                                              highlightList=highlightList, uberCalLabel=uberCalLabel)
 
     def isBad(self, source):
-        """Return True if any of config.badFlags are set for this source."""
+        """Return True if any of config.badFlags are set for this source.
+        """
         for flag in self.config.analysis.flags:
             if source.get(flag):
                 return True
@@ -1314,8 +1330,8 @@ class CoaddAnalysisTask(CmdLineTask):
             ct = self.config.colorterms.getColorterm(filterName, self.config.refObjLoader.ref_dataset_name)
         else:
             # Pass in a null colorterm.
-            # Obtain the filter name from the reference loader filter map, if present, otherwise set
-            # to the canonical filter name.
+            # Obtain the filter name from the reference loader filter map, if
+            # present, otherwise set to the canonical filter name.
             refFilterName = (self.config.refObjLoader.filterMap[filterName] if
                              filterName in self.config.refObjLoader.filterMap.keys() else
                              afwImage.Filter(afwImage.Filter(filterName).getId()).getName())
@@ -1392,8 +1408,8 @@ class CoaddAnalysisTask(CmdLineTask):
                                                        declination1="src_coord_dec",
                                                        declination2="ref_coord_dec",
                                                        unitScale=self.unitScale),
-                               "      $\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s) (calib_astrom_used)" % unitStr,
-                               shortName, self.config.analysisMatches, prefix="src_",
+                               r"      $\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s) (calib_astrom_used)" %
+                               unitStr, shortName, self.config.analysisMatches, prefix="src_",
                                goodKeys=["calib_astrometry_used"], qMin=-0.2*qMatchScale,
                                qMax=0.2*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
                                unitScale=self.unitScale,
@@ -1403,7 +1419,7 @@ class CoaddAnalysisTask(CmdLineTask):
         self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra",
                                                    declination1="src_coord_dec", declination2="ref_coord_dec",
                                                    unitScale=self.unitScale),
-                           "$\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr, shortName,
+                           r"$\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr, shortName,
                            self.config.analysisMatches, prefix="src_", qMin=-0.2*qMatchScale,
                            qMax=0.2*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
                            unitScale=self.unitScale,
@@ -1415,7 +1431,7 @@ class CoaddAnalysisTask(CmdLineTask):
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(matches,
                                AstrometryDiff("src_coord_ra", "ref_coord_ra", unitScale=self.unitScale),
-                               "$\Delta$RA (%s) (calib_astrom_used)" % unitStr, shortName,
+                               r"$\Delta$RA (%s) (calib_astrom_used)" % unitStr, shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
                                qMin=-0.25*qMatchScale, qMax=0.25*qMatchScale,
                                labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale,
@@ -1423,7 +1439,7 @@ class CoaddAnalysisTask(CmdLineTask):
         shortName = description + "_ra"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra", unitScale=self.unitScale),
-                           "$\Delta$RA (%s)" % unitStr, shortName, self.config.analysisMatches,
+                           r"$\Delta$RA (%s)" % unitStr, shortName, self.config.analysisMatches,
                            prefix="src_", qMin=-0.25*qMatchScale, qMax=0.25*qMatchScale,
                            labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale,
                            ).plotAll(dataId, filenamer, self.log,
@@ -1434,7 +1450,7 @@ class CoaddAnalysisTask(CmdLineTask):
             self.log.info("shortName = {:s}".format(shortName))
             self.AnalysisClass(matches,
                                AstrometryDiff("src_coord_dec", "ref_coord_dec", unitScale=self.unitScale),
-                               "$\delta_{Dec}$ (%s) (calib_astrom_used)" % unitStr, shortName,
+                               r"$\delta_{Dec}$ (%s) (calib_astrom_used)" % unitStr, shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
                                qMin=-0.25*qMatchScale, qMax=0.25*qMatchScale,
                                labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale,
@@ -1443,7 +1459,7 @@ class CoaddAnalysisTask(CmdLineTask):
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches,
                            AstrometryDiff("src_coord_dec", "ref_coord_dec", unitScale=self.unitScale),
-                           "$\delta_{Dec}$ (%s)" % unitStr, shortName, self.config.analysisMatches,
+                           r"$\delta_{Dec}$ (%s)" % unitStr, shortName, self.config.analysisMatches,
                            prefix="src_", qMin=-0.3*qMatchScale, qMax=0.3*qMatchScale,
                            labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale,
                            ).plotAll(dataId, filenamer, self.log,
@@ -1486,7 +1502,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def plotSkyObjects(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                        tractInfo=None, patchList=None, hscRun=None, zpLabel=None,
-                       forcedStr=None, postFix="", flagsCat=None):
+                       forcedStr=None, postFix=""):
         stats = None
         shortName = "skyObjects"
         self.log.info("shortName = {:s}".format(shortName))
@@ -1628,7 +1644,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
         repoInfo1 = getRepoInfo(patchRefList1[0], coaddName=self.config.coaddName, coaddDataset=dataset)
         repoInfo2 = getRepoInfo(patchRefList2[0], coaddName=self.config.coaddName, coaddDataset=dataset)
-        # Find a visit/ccd input so that you can check for meas_mosaic input (i.e. to set uberCalLabel)
+        # Find a visit/ccd input so that you can check for meas_mosaic input
+        # (i.e. to set uberCalLabel).
         self.uberCalLabel1 = determineExternalCalLabel(repoInfo1, patchList1[0],
                                                        coaddName=self.config.coaddName)
         self.uberCalLabel2 = determineExternalCalLabel(repoInfo2, patchList1[0],
@@ -1653,7 +1670,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         if haveForced:
             forced1Schema = getSchema(forced1)
             forced2Schema = getSchema(forced2)
-            # copy over some fields from _ref and _meas catalogs to _forced_src catalog
+            # Copy over some fields from _ref and _meas catalogs to _forced_src
+            # catalog.
             refCat1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_ref")
             refCat1Schema = getSchema(refCat1)
             refColList1 = []
@@ -1691,7 +1709,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             forced1 = addColumnsToSchema(unforced1, forced1, measColsToCopy1)
             forced2 = addColumnsToSchema(unforced2, forced2, measColsToCopy2)
 
-        # Set an alias map for differing schema naming conventions of different stacks (if any)
+        # Set an alias map for differing schema naming conventions of different
+        # stacks (if any).
         repoList = [repoInfo1.hscRun, repoInfo2.hscRun]
         coaddList = [unforced1, unforced2]
         if haveForced:
@@ -1705,7 +1724,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             if aliasDictList:
                 catalog = setAliasMaps(catalog, aliasDictList)
 
-        # Set boolean array indicating sources deemed unsuitable for qa analyses
+        # Set boolean array indicating sources deemed unsuitable for qa
+        # analyses.
         badUnforced1 = makeBadArray(unforced1, onlyReadStars=self.config.onlyReadStars)
         badUnforced2 = makeBadArray(unforced2, onlyReadStars=self.config.onlyReadStars)
         if haveForced:
@@ -1756,8 +1776,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             self.plotMags(forced, filenamer, repoInfo1.dataId, forcedStr=forcedStr, **plotKwargs1)
 
         if self.config.doPlotSizes:
-            if ("first_base_SdssShape_psf_xx" in forcedSchema and
-               "second_base_SdssShape_psf_xx" in forcedSchema):
+            if ("first_base_SdssShape_psf_xx" in forcedSchema
+               and "second_base_SdssShape_psf_xx" in forcedSchema):
                 self.plotSizes(forced, filenamer, repoInfo1.dataId, forcedStr=forcedStr, **plotKwargs1)
             else:
                 self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalogSchema")
@@ -1780,7 +1800,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
     def calibrateCatalogs(self, catalog, wcs=None):
         self.zpLabel = "common (" + str(self.config.analysis.coaddZp) + ")"
-        # For some reason my persisted catalogs in lauren/LSST/DM-6816new all have nan for ra dec
+        # For some reason my persisted catalogs in lauren/LSST/DM-6816new all
+        # have nan for ra dec.
         if np.all(np.isnan(catalog["coord_ra"])):
             if wcs is None:
                 self.log.warn("Bad ra, dec entries but can't update because wcs is None")
@@ -1852,7 +1873,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         self.log.info("shortName = {:s}".format(shortName))
         Analysis(catalog, AstrometryDiff("first_coord_ra", "second_coord_ra", declination1="first_coord_dec",
                                          declination2="second_coord_dec", unitScale=self.unitScale),
-                 "   Run Comparison: $\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr, shortName,
+                 r"   Run Comparison: $\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr, shortName,
                  self.config.analysisMatches, prefix="first_", qMin=-0.2*matchRadius, qMax=0.2*matchRadius,
                  labeller=OverlapsStarGalaxyLabeller(), unitScale=self.unitScale,
                  ).plotAll(dataId, filenamer, self.log, **plotAllKwargs)
@@ -1860,14 +1881,14 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         self.log.info("shortName = {:s}".format(shortName))
         Analysis(catalog, AstrometryDiff("first_coord_ra", "second_coord_ra", declination1=None,
                                          declination2=None, unitScale=self.unitScale),
-                 "Run Comparison: $\Delta$RA (%s)" % unitStr, shortName, self.config.analysisMatches,
+                 r"Run Comparison: $\Delta$RA (%s)" % unitStr, shortName, self.config.analysisMatches,
                  prefix="first_", qMin=-0.25*matchRadius, qMax=0.25*matchRadius,
                  labeller=OverlapsStarGalaxyLabeller(), unitScale=self.unitScale,
                  ).plotAll(dataId, filenamer, self.log, **plotAllKwargs)
         shortName = "diff_dec"
         self.log.info("shortName = {:s}".format(shortName))
         Analysis(catalog, AstrometryDiff("first_coord_dec", "second_coord_dec", unitScale=self.unitScale),
-                 "$\delta_{Dec}$ (%s)" % unitStr, shortName, self.config.analysisMatches, prefix="first_",
+                 r"$\delta_{Dec}$ (%s)" % unitStr, shortName, self.config.analysisMatches, prefix="first_",
                  qMin=-0.3*matchRadius, qMax=0.3*matchRadius, labeller=OverlapsStarGalaxyLabeller(),
                  unitScale=self.unitScale,
                  ).plotAll(dataId, filenamer, self.log, **plotAllKwargs)
@@ -1907,12 +1928,13 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                              uberCalLabel=uberCalLabel)
         for col in ["base_PsfFlux"]:
             if ("first_" + col + "_instFlux" in schema and "second_" + col + "_instFlux" in schema):
-                # Make comparison plots for all objects and calib_psf_used only objects
+                # Make comparison plots for all objects and calib_psf_used
+                # only objects.
                 for goodFlags in [[], ["calib_psf_used"]]:
                     subCatString = " (calib_psf_used)" if "calib_psf_used" in goodFlags else ""
                     shortNameBase = "trace"
-                    shortName = (shortNameBase + "_calib_psf_used" if "calib_psf_used" in goodFlags else
-                                 shortNameBase)
+                    shortName = (shortNameBase + "_calib_psf_used" if "calib_psf_used" in goodFlags
+                                 else shortNameBase)
                     compareCol = "base_SdssShape"
                     self.log.info("shortName = {:s}".format(shortName))
                     Analysis(catalog, TraceSizeCompare(compareCol),
@@ -1922,8 +1944,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                              ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
 
                     shortNameBase = "psfTrace"
-                    shortName = (shortNameBase + "_calib_psf_used" if "calib_psf_used" in goodFlags else
-                                 shortNameBase)
+                    shortName = (shortNameBase + "_calib_psf_used" if "calib_psf_used" in goodFlags
+                                 else shortNameBase)
                     self.log.info("shortName = {:s}".format(shortName))
                     Analysis(catalog, TraceSizeCompare(compareCol + "_psf"),
                              "       SdssShape PSF Trace Radius Diff (%)" + subCatString, shortName,
@@ -1933,8 +1955,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
                     if "first_ext_shapeHSM_HsmSourceMoments_xx" in schema:
                         shortNameBase = "hsmTrace"
-                        shortName = (shortNameBase + "_calib_psf_used" if "calib_psf_used" in goodFlags else
-                                     shortNameBase)
+                        shortName = (shortNameBase + "_calib_psf_used" if "calib_psf_used" in goodFlags
+                                     else shortNameBase)
                         compareCol = "ext_shapeHSM_HsmSourceMoments"
                         self.log.info("shortName = {:s}".format(shortName))
                         Analysis(catalog, TraceSizeCompare(compareCol),
@@ -1943,8 +1965,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                  qMin=-0.5, qMax=1.5, labeller=OverlapsStarGalaxyLabeller(),
                                  ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
                         shortNameBase = "hsmPsfTrace"
-                        shortName = (shortNameBase + "_calib_psf_used" if "calib_psf_used" in goodFlags else
-                                     shortNameBase)
+                        shortName = (shortNameBase + "_calib_psf_used" if "calib_psf_used" in goodFlags
+                                     else shortNameBase)
                     if "first_ext_shapeHSM_PsfMoments_xx" in schema:
                         compareCol = "ext_shapeHSM_HsmPsfMoments"
                         self.log.info("shortName = {:s}".format(shortName))
@@ -1963,7 +1985,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
                 shortName = "sdssYy"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, PercentDiff(compareCol +"_yy"), "SdssShape yy Moment Diff (%)", shortName,
+                Analysis(catalog, PercentDiff(compareCol + "_yy"), "SdssShape yy Moment Diff (%)", shortName,
                          self.config.analysis, prefix="first_", qMin=-0.5, qMax=1.5,
                          labeller=OverlapsStarGalaxyLabeller(),
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
@@ -2018,10 +2040,11 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             if "first_" + col + "_apCorr" in schema and "second_" + col + "_apCorr" in schema:
                 shortName = "diff_" + col + "_apCorr"
                 self.log.info("shortName = {:s}".format(shortName))
-                # apCorrs in coadds can be all nan if they weren't run in sfm, so add a check for valid data
-                # but here so we don't encounter the fatal error in Analysis
-                if (len(np.where(np.isfinite(catalog["first_" + col + "_apCorr"]))[0]) > 0 and
-                   len(np.where(np.isfinite(catalog["second_" + col + "_apCorr"]))[0]) > 0):
+                # apCorrs in coadds can be all nan if they weren't run in sfm,
+                # so add a check for valid data but here so we don't encounter
+                # the fatal error in Analysis.
+                if (len(np.where(np.isfinite(catalog["first_" + col + "_apCorr"]))[0]) > 0
+                   and len(np.where(np.isfinite(catalog["second_" + col + "_apCorr"]))[0]) > 0):
                     Analysis(catalog, MagDiffCompare(col + "_apCorr", unitScale=self.unitScale),
                              "  Run Comparison: %s apCorr diff (%s)" % (fluxToPlotString(col), unitStr),
                              shortName, self.config.analysis, prefix="first_", qMin=-0.025, qMax=0.025,
@@ -2030,8 +2053,8 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                        camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                        patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                        matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=None,
-                                       forcedStr=forcedStr, highlightList=highlightList +
-                                       [(col + "_flag_apCorr", 0, "lime"), ], uberCalLabel=uberCalLabel)
+                                       forcedStr=forcedStr, highlightList=highlightList
+                                       + [(col + "_flag_apCorr", 0, "lime"), ], uberCalLabel=uberCalLabel)
                 else:
                     self.log.warn("No valid data points for shortName = {:s}.  Skipping...".format(shortName))
 

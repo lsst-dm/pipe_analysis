@@ -14,7 +14,7 @@ import lsst.geom as geom
 from lsst.display.matplotlib.matplotlib import AsinhNormalize
 from lsst.pex.config import Config, Field, ListField, DictField
 
-from .utils import (Data, Stats, E1Resids, E2Resids, checkIdLists, fluxToPlotString, computeMeanOfFrac,
+from .utils import (Data, Stats, E1Resids, E2Resids, fluxToPlotString, computeMeanOfFrac,
                     calcQuartileClippedStats, getSchema)
 from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotText, plotCameraOutline,
                         plotTractOutline, plotPatchOutline, plotCcdOutline, labelCamera, getQuiver,
@@ -140,12 +140,12 @@ class Analysis(object):
         # Skip flag culling on the macth and overlap catalogs: we want to look
         # at any/all matches found (objects with any notable flags set will be
         # highlighted in the plot), and the latter are already culled.  Also,
-        # if sub-selecting a calib_*_used sample, we want to look at all objects
-        # used in the visit-level calibrations, so do not cull on the standard
-        # self.config.flags.  Rather, only cull on flags explicitly set in the
-        # flags variable for calib_*_used subsamples.
+        # if sub-selecting a calib_*_used sample, we want to look at all
+        # objects used in the visit-level calibrations, so do not cull on the
+        # standard self.config.flags.  Rather, only cull on flags explicitly
+        # set in the flags variable for calib_*_used subsamples.
         if ("matches" not in self.shortName and "overlap" not in self.shortName and "quiver" not in
-            self.shortName and "inputCounts" not in self.shortName and "skyObjects" not in self.shortName):
+           self.shortName and "inputCounts" not in self.shortName and "skyObjects" not in self.shortName):
             flagsList = flags.copy()
             flagsList = flagsList + list(self.config.flags) if self.calibUsedOnly == 0 else flagsList
             for flagName in set(flagsList):
@@ -168,7 +168,7 @@ class Analysis(object):
             self.signalToNoiseThreshold = self.config.signalToNoiseThreshold
             self.signalToNoiseHighThreshold = self.config.signalToNoiseHighThreshold
         if (("galacticExtinction" in self.shortName and self.magThreshold > 90.0)
-            or any(ss in self.shortName for ss in ["skySources", "skyObjects"])):
+           or any(ss in self.shortName for ss in ["skySources", "skyObjects"])):
             self.signalToNoiseThreshold = 0.0
             self.signalToNoiseHighThreshold = 0.0
 
@@ -192,9 +192,10 @@ class Analysis(object):
                 self.magThreshold = computeMeanOfFrac(self.mag[goodSn], tailStr="upper", fraction=0.05,
                                                       floorFactor=0.1)
 
-        # Always compute stats for S/N > self.config.signalToNoiseHighThreshold.  If too few
-        # objects classified as stars exist with the configured value, decrease the S/N threshold
-        # by 10 until a sample with N > self.config.minHighSampleN is achieved.
+        # Always compute stats for S/N > config.signalToNoiseHighThreshold.
+        # If too few objects classified as stars exist with the configured
+        # value, decrease the S/N threshold by 10 until a sample with
+        # N > self.config.minHighSampleN is achieved.
         goodSnHigh = np.logical_and(goodSn0, self.signalToNoise >= self.signalToNoiseHighThreshold)
         if prefix + "base_ClassificationExtendedness_value" in schema:
             isStar = catalog[prefix + "base_ClassificationExtendedness_value"] < 0.5
@@ -204,8 +205,8 @@ class Analysis(object):
             isStar = np.ones(len(self.mag), dtype=bool)
             print("Warning: No star/gal flag found")
         goodSnHighStars = np.logical_and(goodSnHigh, isStar)
-        while(len(self.mag[goodSnHighStars]) < self.config.minHighSampleN and
-              self.signalToNoiseHighThreshold > 0.0):
+        while(len(self.mag[goodSnHighStars]) < self.config.minHighSampleN
+              and self.signalToNoiseHighThreshold > 0.0):
             self.signalToNoiseHighThreshold -= 10.0
             goodSnHigh = np.logical_and(goodSn0, self.signalToNoise >= self.signalToNoiseHighThreshold)
             goodSnHighStars = np.logical_and(goodSnHigh, isStar)
@@ -213,12 +214,14 @@ class Analysis(object):
                                                   floorFactor=0.1)
         self.signalToNoiseHighStr = r"[S/N$\geqslant${0:}]".format(int(self.signalToNoiseHighThreshold))
 
-        # Select a sample for setting plot limits: "good" based on flags, S/N is finite and >= 2.0
-        # Limits are the means of the bottom 1% and top 5% of this sample with a 0.5 mag buffer on either side
+        # Select a sample for setting plot limits: "good" based on flags, S/N
+        # is finite and >= 2.0.  Limits are the means of the bottom 1% and top
+        # 5% of this sample with a 0.5 mag buffer on either side.
         goodSn0 &= self.signalToNoise >= 2.0
-        self.magMin = (computeMeanOfFrac(self.mag[goodSn0], tailStr="lower", fraction=0.005, floorFactor=1) -
-                       1.5)
-        self.magMax = computeMeanOfFrac(self.mag[goodSn0], tailStr="upper", fraction=0.05, floorFactor=1) + 0.5
+        self.magMin = (computeMeanOfFrac(self.mag[goodSn0], tailStr="lower", fraction=0.005, floorFactor=1)
+                       - 1.5)
+        self.magMax = (computeMeanOfFrac(self.mag[goodSn0], tailStr="upper", fraction=0.05, floorFactor=1)
+                       + 0.5)
 
         if labeller is not None:
             labels = labeller(catalog, compareCat) if compareCat is not None else labeller(catalog)
@@ -236,8 +239,8 @@ class Analysis(object):
                 self.stats = self.statistics(magThreshold=self.magThreshold, forcedMean=forcedMean)
             self.statsHigh = self.statistics(signalToNoiseThreshold=self.signalToNoiseHighThreshold,
                                              forcedMean=forcedMean)
-            # Ensure plot limits always encompass at least mean +/- 6.0*stdev, at most mean +/- 20.0*stddev,
-            # and clipped stats range + 25%
+            # Ensure plot limits always encompass at least mean +/- 6.0*stdev,
+            # at most mean +/- 20.0*stddev, and clipped stats range + 25%.
             dataType = "all" if "all" in self.data else "star"
             if self.stats[dataType].num > 0:
                 if not any(ss in self.shortName for ss in ["footArea", "distance", "pStar", "resolution",
@@ -246,8 +249,8 @@ class Analysis(object):
                                         self.stats[dataType].median - 1.25*self.stats[dataType].clip),
                                     min(self.stats[dataType].mean - 20.0*self.stats[dataType].stdev,
                                         -0.005*self.unitScale))
-                    if (abs(self.stats[dataType].mean) < 0.0005*self.unitScale and
-                        abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
+                    if (abs(self.stats[dataType].mean) < 0.0005*self.unitScale
+                       and abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
                         minmax = 2.0*max(abs(min(self.quantity[self.good])),
                                          abs(max(self.quantity[self.good])))
                         self.qMin = -minmax if minmax > 0 else self.qMin
@@ -257,8 +260,8 @@ class Analysis(object):
                                         self.stats[dataType].median + 1.25*self.stats[dataType].clip),
                                     max(self.stats[dataType].mean + 20.0*self.stats[dataType].stdev,
                                         0.005*self.unitScale))
-                    if (abs(self.stats[dataType].mean) < 0.0005*self.unitScale and
-                        abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
+                    if (abs(self.stats[dataType].mean) < 0.0005*self.unitScale
+                       and abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
                         minmax = 2.0*max(abs(min(self.quantity[self.good])),
                                          abs(max(self.quantity[self.good])))
                         self.qMax = minmax if minmax > 0 else self.qMax
@@ -359,15 +362,16 @@ class Analysis(object):
         if self.data[dataType].quantity.any():
             if len(self.data[dataType].quantity[inLimits]) < max(1.0, 0.35*len(self.data[dataType].quantity)):
                 log.info("plotAgainstMagAndHist: No data within limits...decreasing/increasing qMin/qMax")
-            while (len(self.data[dataType].quantity[inLimits]) <
-                   max(1.0, 0.35*len(self.data[dataType].quantity))):
+            while (len(self.data[dataType].quantity[inLimits])
+                   < max(1.0, 0.35*len(self.data[dataType].quantity))):
                 self.qMin -= 0.1*np.abs(self.qMin)
                 self.qMax += 0.1*self.qMax
                 inLimits = self.data[dataType].quantity < self.qMax
                 inLimits &= self.data[dataType].quantity > self.qMin
 
-        # Make sure plot limit extends low enough to show well below the star/galaxy separation line.
-        # Add delta as opposed to directly changing self.qMin to not affect other plots
+        # Make sure plot limit extends low enough to show well below the
+        # star/galaxy separation line.  Add delta as opposed to directly
+        # changing self.qMin to not affect other plots.
         deltaMin = 0.0
         if "galaxy" in self.data and len(self.data["galaxy"].quantity) > 0 and "-mag_" in filename:
             if "GaussianFlux" in filename:
@@ -480,7 +484,8 @@ class Analysis(object):
                                         label="Running\nstats (all\nstars)"))
 
             if highlightList is not None:
-                # Make highlight as a background ring of larger size than the data point size
+                # Make highlight as a background ring of larger size than the
+                # data point size.
                 sizeFactor = 1.3
                 for flag, threshValue, color in highlightList:
                     if flag in schema:
@@ -511,7 +516,7 @@ class Analysis(object):
                 labelStr = self.signalToNoiseStr if self.signalToNoiseStr else "stats"
                 axScatter.scatter(data.mag[stats[name].dataUsed],
                                   data.quantity[stats[name].dataUsed], s=ptSize,
-                                  marker="o",  facecolors="none", edgecolors=data.color,
+                                  marker="o", facecolors="none", edgecolors=data.color,
                                   label=labelStr, alpha=1, linewidth=0.5)
 
             if self.statsHigh is not None and (name == "star" or name == "all") and "foot" not in filename:
@@ -529,7 +534,8 @@ class Analysis(object):
                 if stats is not None:
                     labelStr = self.signalToNoiseStr if self.signalToNoiseStr else "stats"
                     axHisty.hist(data.quantity[stats[name].dataUsed], bins=yBins, facecolor="none",
-                                 edgecolor=data.color, linewidth=0.5, orientation="horizontal", label=labelStr)
+                                 edgecolor=data.color, linewidth=0.5, orientation="horizontal",
+                                 label=labelStr)
                     axHistx.hist(data.mag[stats[name].dataUsed], bins=xBins, facecolor="none",
                                  edgecolor=data.color, linewidth=0.5, label=labelStr)
                 if self.statsHigh is not None and (name == "star" or name == "all"):
@@ -564,14 +570,14 @@ class Analysis(object):
         axScatter.legend(handles=dataPoints, loc=1, fontsize=legendFontSize, labelspacing=0.3)
         axHistx.legend(fontsize=7, loc=2, edgecolor="w", labelspacing=0.2)
         axHisty.legend(fontsize=7, labelspacing=0.2)
-        # Add an axis with units of FWHM = 2*sqrt(2*ln(2))*Trace for Trace plots
+        # Add axis with units of FWHM = 2*sqrt(2*ln(2))*Trace for Trace plots
         if "race" in self.shortName and "iff" not in self.shortName:
             axHisty2 = axHisty.twinx()  # instantiate a second axes that shares the same x-axis
             sigmaToFwhm = 2.0*np.sqrt(2.0*np.log(2.0))
             axHisty2.set_ylim(axScatterY1*sigmaToFwhm, axScatterY2*sigmaToFwhm)
             axHisty2.yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
             axHisty2.tick_params(axis="y", which="both", direction="in", labelsize=8)
-            axHisty2.set_ylabel("FWHM: $2\sqrt{2\,ln\,2}*$Trace (pixels)", rotation=270, labelpad=13,
+            axHisty2.set_ylabel(r"FWHM: $2\sqrt{2\,ln\,2}*$Trace (pixels)", rotation=270, labelpad=13,
                                 fontsize=fontSize)
 
         # Label total number of objects of each data type
@@ -625,12 +631,10 @@ class Analysis(object):
         numMin = 0 if density else 0.9
         numMax = 1
         alpha = 0.4
-        ic = 1
         for name, data in self.data.items():
             if not data.mag.any():
                 continue
             color = "tab:" + data.color
-            ic += 1
             good = np.isfinite(data.quantity)
             if magThreshold and stats is not None:
                 good &= data.mag < magThreshold
@@ -646,7 +650,7 @@ class Analysis(object):
                            label=name + "_cum", histtype="step", cumulative=cumulative)
             # yaxis limit for non-normalized histograms
             numMax = max(numMax, num.max()*1.1) if not density else numMax
-        if cumulative:
+        if cumulative and axes2:
             axes2.set_ylim(0, 1.05)
             axes2.tick_params(axis="y", which="both", direction="in")
             axes2.set_ylabel("Cumulative Fraction", rotation=270, labelpad=12, color=color, fontsize=9)
@@ -731,8 +735,8 @@ class Analysis(object):
         if dataName == "star" and "matches" in filename and magThreshold < 99.0:
             magThreshold += 1.0  # plot to fainter mags for matching against ref cat
         good = (self.mag < magThreshold if magThreshold > 0 else np.ones(len(self.mag), dtype=bool))
-        if ((dataName == "star" or "matches" in filename or "compare" in filename) and
-                "pStar" not in filename and "race" not in filename and "resolution" not in filename):
+        if ((dataName == "star" or "matches" in filename or "compare" in filename)
+           and "pStar" not in filename and "race" not in filename and "resolution" not in filename):
             vMin, vMax = 0.4*self.qMin, 0.4*self.qMax
             if "-mag_" in filename or any(ss in filename for ss in ["compareUnforced", "overlap", "matches"]):
                 vMin, vMax = 0.6*vMin, 0.6*vMax
@@ -764,8 +768,8 @@ class Analysis(object):
             vMin = 3.0*self.qMin
             if "GaussianFlux" in filename:
                 vMin, vMax = 5.0*self.qMin, 0.0
-        if (dataName == "galaxy" and ("CircularApertureFlux" in filename or "KronFlux" in filename) and
-                "compare" not in filename and "overlap" not in filename):
+        if (dataName == "galaxy" and ("CircularApertureFlux" in filename or "KronFlux" in filename)
+           and "compare" not in filename and "overlap" not in filename):
             vMin, vMax = 4.0*self.qMin, 1.0*self.qMax
 
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.35"))
@@ -803,12 +807,13 @@ class Analysis(object):
             stats0 = self.calculateStats(data.quantity, good[data.selection])
             selection = data.selection & good
             if highlightList is not None:
-                # Make highlight as a background ring of larger size than the data point size
+                # Make highlight as a background ring of larger size than the
+                # data point size.
                 i = -1
                 sizeFactor = 1.4
                 for flag, threshValue, color in highlightList:
                     if flag in schema:
-                        # Only a white "halo" really shows up here, so ignore color
+                        # Only a white "halo" really shows up, so ignore color
                         highlightSelection = (self.catalog[flag] > threshValue) & selection
                         if sum(highlightSelection) > 0:
                             i += 1
@@ -974,7 +979,8 @@ class Analysis(object):
         bad |= catalog["deblend_nChild"] > 0
         for flag in flags:
             bad |= catalog[flag]
-        # Cull the catalog down to calibration candidates (or stars if calibration flags not available)
+        # Cull the catalog down to calibration candidates (or stars if
+        # calibration flags not available)
         if "calib_psf_used" in schema:
             bad |= ~catalog["calib_psf_used"]
             catStr = "psf_used"
@@ -1088,7 +1094,9 @@ class Analysis(object):
                         forcedStr=None, uberCalLabel=None, cmap=plt.cm.viridis, alpha=0.5,
                         doPlotTractImage=True, doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000,
                         columnName="base_InputCount_value", fluxScale=1e12):
-        """Plot grayscale image of tract with base_InputCounts_value overplotted
+        """Plot visit input counts of tract.
+
+        Can optionally plot with a background that is a grayscale of the image.
 
         Parameters
         ----------
@@ -1117,8 +1125,8 @@ class Analysis(object):
            The matplotlib colormap to use.  It will be given transparency level
            set by ``alpha``.  Default is `None`.
         alpha : `float`, optional
-           The matplotlib blending value, between 0 (transparent) and 1 (opaque)
-           Default is 0.5.
+           The matplotlib blending value, between 0 (transparent) and 1
+           (opaque).  Default is 0.5.
         doPlotTractImage : `bool`, optional
            A boolean indicating whether to plot the tract image (grayscale and
            asinh stretched).  Default is `True`.
@@ -1173,7 +1181,8 @@ class Analysis(object):
                 srcEllip = afwGeom.ellipses.Axes(srcQuad)
                 diamA = srcEllip.getA()*2.0*sizeFactor
                 diamB = srcEllip.getB()*2.0*sizeFactor
-                # Truncate ellipse size to a maximum width or height of maxDiamPix
+                # Truncate ellipse size to a maximum width or height of
+                # maxDiamPix.
                 if diamA > maxDiamPix or diamB > maxDiamPix:
                     edgeColor = "blue"
                     if diamA >= diamB:
@@ -1329,6 +1338,7 @@ class Analysis(object):
         yOff = 1.065
         legendLoc = "upper left"
         alpha = 0.35
+        nBins, nBinsChi = None, None
         for i, fluxStr in enumerate(fluxStrList):
             yOff -= 0.1
             flux = skyObjCat[fluxStr]*fluxScale
@@ -1351,8 +1361,8 @@ class Analysis(object):
             countMax = count.max() if count.max() and count.max() > countMax else countMax
             if i == 0:
                 xLim = 5.0*clippedStats.stdDev
-                # Put labels on left if typically over subtracted (so the mean lines
-                # don't cover the text).
+                # Put labels on left if typically over subtracted (so the mean
+                # lines don't cover the text).
                 if clippedStats.mean > 0:
                     xOff -= 0.62
                     legendLoc = "upper right"
@@ -1368,7 +1378,6 @@ class Analysis(object):
             chiArr = skyFluxArr/skyFluxErrArr
             meanChi = chiArr[clippedStats.goodArray].mean()
             stdDevChi = chiArr[clippedStats.goodArray].std()
-            rmsChi = np.sqrt(np.mean(chiArr[clippedStats.goodArray]**2))
             meanChiStr = "mean = {0:5.2f}".format(meanChi)
             stdChiStr = "  std = {0:5.2f}".format(stdDevChi)
             numChiStr = "    N = {}".format(len(chiArr[clippedStats.goodArray]))
@@ -1442,7 +1451,7 @@ class Analysis(object):
             axTopRight.set_aspect("equal")
             plotCameraOutline(axTopRight, camera, ccdList, metricPerCcdDict=metricPerUnitDict,
                               metricStr=metricStr, fig=fig)
-        if self.config.doPlotTractOutline and tractInfo is not None and len(patchList) > 0:
+        if self.config.doPlotTractOutline and tractInfo is not None and patchList is not None:
             axTopRight = plt.axes(topRight)
             axTopRight.set_aspect("equal")
             plotTractOutline(axTopRight, tractInfo, patchList, metricPerPatchDict=metricPerUnitDict,
@@ -1544,8 +1553,8 @@ class Analysis(object):
            are not -- `None`.
         """
         thresholdList = [magThreshold, signalToNoiseThreshold]
-        if (all(threshold is not None for threshold in thresholdList) or
-            all(threshold is None for threshold in thresholdList)):
+        if (all(threshold is not None for threshold in thresholdList)
+           or all(threshold is None for threshold in thresholdList)):
             raise RuntimeError("Must specify one AND ONLY one of magThreshold and signalToNoiseThreshold. "
                                "They are currently set to {0:} and {1:}, respectively".
                                format(magThreshold, signalToNoiseThreshold))
@@ -1587,9 +1596,9 @@ class Analysis(object):
            the subset of ``quantity`` to be used in the statistics computation:
            "S/N" and "mag" indicate a threshold based on signal-to-noise or
            magnitude, respectively.  A flag name, e.g. "calib_psf_used",
-           indicates that the sample was culled based on the value of this flag.
-           Provided here simply for inclusion in the returned ``Stats`` object.
-           Default is an empty `str`.
+           indicates that the sample was culled based on the value of this
+           flag. Provided here simply for inclusion in the returned ``Stats``
+           object. Default is an empty `str`.
         thresholdValue : `float`, `int`, or `None`, optional
            The threshold value used in culling ``quantity`` to the subset to be
            included in the statistics computation.  Provided here simply for
@@ -1629,8 +1638,8 @@ class Analysis(object):
               - i.e. clip x if abs(x - ``mean``) > ``clip``
               - this parameter is controlled by the config parameter
                 ``analysis.config.clip`` which is in units of number of
-                standard deviations (defined here as 0.74*interQuartileDistance)
-                (`float`).
+                standard deviations, defined here as
+                0.74*interQuartileDistance (`float`).
            ``thresholdType``
               String provided in input variable ``thresholdType`` representing
               the type of threshold used for culling data (`str`).
@@ -1707,7 +1716,7 @@ class Analysis(object):
             The name and key of the dataset for consideration in the ``stats``
             object.
         stats : `dict` of `lsst.pipe.analysis.utils.Stats`
-            A dictionary containing the statistics information per ``dataName``.
+            A dictionary containing the statistics info per ``dataName``.
         log : `lsst.log.Log`
             Logger object for logging messages.
 
@@ -1717,10 +1726,10 @@ class Analysis(object):
            Returns `True` if data points were included in ``stats`` for
            ``dataName``, else `False`.
         """
-        if stats[dataName].num == 0 :
+        if stats[dataName].num == 0:
             log.warn("No good data points to plot for: {:} {:}.  Skipping {:} plot.".
                      format(self.shortName, dataName, styleStr))
-            answer =  False
+            answer = False
         else:
             answer = True
         return answer
