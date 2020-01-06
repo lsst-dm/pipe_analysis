@@ -240,7 +240,7 @@ class Analysis(object):
             # and clipped stats range + 25%
             dataType = "all" if "all" in self.data else "star"
             if self.stats[dataType].num > 0:
-                if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar", "resolution",
+                if not any(ss in self.shortName for ss in ["footArea", "distance", "pStar", "resolution",
                                                            "race", "psfInst", "psfCal"]):
                     self.qMin = max(min(self.qMin, self.stats[dataType].mean - 6.0*self.stats[dataType].stdev,
                                         self.stats[dataType].median - 1.25*self.stats[dataType].clip),
@@ -251,7 +251,7 @@ class Analysis(object):
                         minmax = 2.0*max(abs(min(self.quantity[self.good])),
                                          abs(max(self.quantity[self.good])))
                         self.qMin = -minmax if minmax > 0 else self.qMin
-                if not any(ss in self.shortName for ss in ["footNpix", "pStar", "resolution", "race",
+                if not any(ss in self.shortName for ss in ["footArea", "pStar", "resolution", "race",
                                                            "psfInst", "psfCal"]):
                     self.qMax = min(max(self.qMax, self.stats[dataType].mean + 6.0*self.stats[dataType].stdev,
                                         self.stats[dataType].median + 1.25*self.stats[dataType].clip),
