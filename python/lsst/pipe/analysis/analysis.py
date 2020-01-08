@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import NullFormatter, AutoMinorLocator, FormatStrFormatter
 import numpy as np
 np.seterr(all="ignore")  # noqa E402
+import re
 
 import lsst.afw.geom as afwGeom
 import lsst.geom as geom
@@ -839,7 +840,7 @@ class Analysis(object):
         mappable._A = []        # fake up the array of the scalar mappable. Urgh...
         cb = plt.colorbar(mappable)
         colorbarLabel = self.quantityName + " " + filterLabelStr
-        fontSize = min(10, max(6, 10 - int(np.log(max(1, len(colorbarLabel) - 55)))))
+        fontSize = min(10, max(6, 10 - int(np.log(max(1, len(colorbarLabel) - 50)))))
         cb.ax.tick_params(labelsize=max(6, fontSize - 1))
         cb.set_label(colorbarLabel, fontsize=fontSize, rotation=270, labelpad=15)
         if hscRun is not None:
@@ -1082,7 +1083,8 @@ class Analysis(object):
 
     def plotInputCounts(self, catalog, filename, log, dataId, butler, tractInfo, patchList=None, camera=None,
                         forcedStr=None, uberCalLabel=None, cmap=plt.cm.viridis, alpha=0.5,
-                        doPlotTractImage=True, doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000):
+                        doPlotTractImage=True, doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000,
+                        columnName="base_InputCount_value", fluxScale=1e12):
         """Plot grayscale image of tract with base_InputCounts_value overplotted
 
         Parameters
@@ -1104,8 +1106,8 @@ class Analysis(object):
         patchList : `list` of `str`, optional
            List of patch IDs with data to be plotted.
         camera : `lsst.afw.cameraGeom.Camera`, optional
-           The base name of the coadd (e.g. deep or goodSeeing).
-           Default is `None`.
+           The camera associated with the dataset (used to label the plot with
+           the camera's name).
         forcedStr : `str`, optional
            String to label the catalog type (forced vs. unforced) on the plot.
         cmap : `matplotlib.colors.ListedColormap`, optional
@@ -1153,34 +1155,64 @@ class Analysis(object):
         diamBs = []
         thetas = []
         edgeColors = []  # to outline any ellipses truncated at maxDiamPix
-
-        for src in catalog:
-            edgeColor = "None"
-            srcQuad = afwGeom.Quadrupole(src[shapeStr + "_xx"], src[shapeStr + "_yy"], src[shapeStr + "_xy"])
-            srcEllip = afwGeom.ellipses.Axes(srcQuad)
-            diamA = srcEllip.getA()*2.0*sizeFactor
-            diamB = srcEllip.getB()*2.0*sizeFactor
-            # Truncate ellipse size to a maximum width or height of maxDiamPix
-            if diamA > maxDiamPix or diamB > maxDiamPix:
-                edgeColor = "blue"
-                if diamA >= diamB:
-                    diamB = diamB*(maxDiamPix/diamA)
-                    diamA = maxDiamPix
-                else:
-                    diamA = diamA*(maxDiamPix/diamB)
-                    diamB = maxDiamPix
-            diamAs.append(diamA)
-            diamBs.append(diamB)
-            thetas.append(np.degrees(srcEllip.getTheta()))
-            edgeColors.append(edgeColor)
+        if "CircularApertureFlux" in columnName:
+            m = re.search(r'CircularApertureFlux_(\d+)_(\d+)_', columnName)
+            apertureRadius = float(m.groups()[0]) + float(m.groups()[1])/10.0
+            diamAs = [min(sizeFactor*2.0*apertureRadius, maxDiamPix)]*len(catalog)
+            diamBs = diamAs
+            thetas = [0.0]*len(catalog)
+            edgeColors = ["None"]*len(catalog)
+        else:
+            for src in catalog:
+                edgeColor = "None"
+                srcQuad = afwGeom.Quadrupole(src[shapeStr + "_xx"], src[shapeStr + "_yy"],
+                                             src[shapeStr + "_xy"])
+                srcEllip = afwGeom.ellipses.Axes(srcQuad)
+                diamA = srcEllip.getA()*2.0*sizeFactor
+                diamB = srcEllip.getB()*2.0*sizeFactor
+                # Truncate ellipse size to a maximum width or height of maxDiamPix
+                if diamA > maxDiamPix or diamB > maxDiamPix:
+                    edgeColor = "blue"
+                    if diamA >= diamB:
+                        diamB = diamB*(maxDiamPix/diamA)
+                        diamA = maxDiamPix
+                    else:
+                        diamA = diamA*(maxDiamPix/diamB)
+                        diamB = maxDiamPix
+                diamAs.append(diamA)
+                diamBs.append(diamB)
+                thetas.append(np.degrees(srcEllip.getTheta()))
+                edgeColors.append(edgeColor)
 
         xyOffsets = np.stack((catalog[centStr + "_x"], catalog[centStr + "_y"]), axis=-1)
-        inputCounts = catalog["base_InputCount_value"]
-        bounds = np.arange(inputCounts.max())
-        bounds += 1
+        inputCounts = catalog[columnName]
+        if "instFlux" in columnName:
+            inputCounts *= fluxScale
+            finiteFlux = np.isfinite(inputCounts)
+            clippedStats = calcQuartileClippedStats(inputCounts[finiteFlux], nSigmaToClip=5.0)
+            boundMin = clippedStats.mean - 7.0*clippedStats.stdDev
+            boundMax = clippedStats.mean + 7.0*clippedStats.stdDev
+            boundStep = np.around((boundMax - boundMin)/20, 3)
+            cbarExtend = "both"
+        else:
+            boundMin = 1
+            boundMax = int(np.nanmax(inputCounts)) + 1
+            boundStep = 1
+            cbarExtend = "min"
+        bounds = np.arange(boundMin, boundMax, boundStep)
         alphaCmap = makeAlphaCmap(cmap=cmap, alpha=alpha)
         norm = matplotlib.colors.BoundaryNorm(bounds, alphaCmap.N)
-        alphaCmap.set_under("r")
+        if cbarExtend == "min":
+            alphaCmap.set_under("r")
+        elif cbarExtend == "max":
+            alphaCmap.set_over("r")
+        elif cbarExtend == "both":
+            alphaCmap.set_under("r")
+            alphaCmap.set_over("r")
+        else:
+            log.warn("Unknown extend string for matplotlib colorbar: {:}.  Setting to \"neither\"".
+                     format(cbarExtend))
+            cbarExtend = "neither"
 
         ellipsePatchList = [matplotlib.patches.Ellipse(xy=xy, width=diamA, height=diamB, angle=theta)
                             for xy, diamA, diamB, theta in zip(xyOffsets, diamAs, diamBs, thetas)]
@@ -1189,8 +1221,11 @@ class Analysis(object):
 
         ec.set_array(inputCounts)
         axes.add_collection(ec)
-        cbar = plt.colorbar(ec, extend="min", fraction=0.04)
-        cbar.set_label("InputCount: ellipse size * {:} [maxDiam = {:}] (pixels)".
+        cbar = plt.colorbar(ec, extend=cbarExtend, fraction=0.04)
+        columnStr = fluxToPlotString(columnName)
+        fluxScaleStr = "{:.0e}".format(fluxScale)
+        columnStr = columnStr + "*" + fluxScaleStr if "instFlux" in columnName else columnStr
+        cbar.set_label(columnStr + ": ellipse size * {:} [maxDiam = {:}] (pixels)".
                        format(sizeFactor, maxDiamPix), fontsize=7)
         cbar.ax.tick_params(direction="in", labelsize=7)
 
