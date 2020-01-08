@@ -9,7 +9,7 @@ import lsst.afw.table as afwTable
 import lsst.geom as geom
 from lsst.pipe.base import Struct
 
-from .utils import checkHscStack, findCcdKey
+from .utils import checkHscStack, findCcdKey, calcQuartileClippedStats
 
 try:
     from lsst.meas.mosaic.updateExposure import applyMosaicResultsExposure
@@ -337,7 +337,37 @@ def filterStrFromFilename(filename):
     return filterStr
 
 
-def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
+def plotCameraOutline(axes, camera, ccdList, color="k", fontSize=6, metricPerCcdDict=None,
+                      metricStr="", fig=None, metricSigmaRange=4.0):
+    """Plot the outline of the camera ccds highlighting those with data.
+
+    Parameters
+    ----------
+    axes : `matplotlib.axes._axes.Axes`
+        Particular matplotlib axes on which to plot the tract outline.
+    camera : `lsst.afw.cameraGeom.Camera`, optional
+       The camera associated with the dataset (used to label the plot with
+       the camera's name).
+    ccdList : `list` of `int`, optional
+       List of ccd IDs with data to be plotted.
+    fontSize : `int`, optional
+       Font size for plot labels.
+    metricPerCcdDict : `dict` of `float`, optional
+       Dictionary of per patch metric averages; {ccdId: metricValue}.  If
+       provided, these values will be used to color-code the camera outline
+       plot.
+    metricStr : `str`, optional
+       String representing the computed metric values provided in
+       ``metricPerCcdDict``.  Default is "".
+    fig : `matplotlib.figure.Figure`, optional
+       The figure on which to add the per-ccd metric info (required to add
+       the colorbar).
+    metricSigmaRange : `float`, optional
+       Number of sigma to make the +/- range for the metric colorbar.
+    """
+    if metricPerCcdDict:
+        if fig is None:
+            raise RuntimeError("Must supply the matplotlib fig if color-coding by metric-per-ccd")
     axes.tick_params(which="both", direction="in", labelleft=False, labelbottom=False)
     axes.locator_params(nbins=6)
     axes.ticklabel_format(useOffset=False)
@@ -354,6 +384,16 @@ def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
         if ccd.getOrientation().getNQuarter() != 0:
             hasRotatedCcds = True
             break
+    if metricPerCcdDict:  # color-code the ccds by the per-ccd metric measurement
+        cmap=plt.cm.viridis
+        metricPerCcdArray = np.fromiter(metricPerCcdDict.values(), dtype="float32")
+        finiteMetrics = np.isfinite(metricPerCcdArray)
+        clippedStats = calcQuartileClippedStats(metricPerCcdArray[finiteMetrics], nSigmaToClip=5.0)
+        vMin = clippedStats.mean - metricSigmaRange*clippedStats.stdDev
+        vMax = clippedStats.mean + metricSigmaRange*clippedStats.stdDev
+        vMax = max(abs(vMin), vMax) if vMax > 0 else vMax  # Make range symmetric about 0 if it crosses 0
+        vMin = -vMax if vMax > 0 else vMin
+        cmapBins = np.linspace(vMin, vMax, cmap.N - 1)
     for ic, ccd in enumerate(camera):
         ccdCorners = ccd.getCorners(cameraGeom.FOCAL_PLANE)
         if ccd.getType() == cameraGeom.DetectorType.SCIENCE:
@@ -361,20 +401,25 @@ def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
                                                   facecolor="none", edgecolor="k", ls="solid", lw=0.5,
                                                   alpha=0.5))
         if ccd.getId() in intCcdList:
-            if hasRotatedCcds:
-                nQuarter = ccd.getOrientation().getNQuarter()
-                fillColor = colors[nQuarter%len(colors)]
-            elif ccd.getName()[0] == "R":
-                try:
-                    fillColor = colors[(int(ccd.getName()[1]) + int(ccd.getName()[2]))%len(colors)]
-                except:
+            if metricPerCcdDict is None:
+                if hasRotatedCcds:
+                    nQuarter = ccd.getOrientation().getNQuarter()
+                    fillColor = colors[nQuarter%len(colors)]
+                elif ccd.getName()[0] == "R":
+                    try:
+                        fillColor = colors[(int(ccd.getName()[1]) + int(ccd.getName()[2]))%len(colors)]
+                    except:
+                        fillColor = colors[ic%len(colors)]
+                else:
                     fillColor = colors[ic%len(colors)]
             else:
-                fillColor = colors[ic%len(colors)]
+                cmapBinIndex = np.digitize(metricPerCcdDict[str(ccd.getId())], cmapBins)
+                fillColor = cmap.colors[cmapBinIndex]
             ccdCorners = ccd.getCorners(cameraGeom.FOCAL_PLANE)
             plt.gca().add_patch(patches.Rectangle(ccdCorners[0], *list(ccdCorners[2] - ccdCorners[0]),
                                                   fill=True, facecolor=fillColor, edgecolor="k",
                                                   ls="solid", lw=1.0, alpha=0.7))
+
     axes.set_xlim(-camLimits, camLimits)
     axes.set_ylim(-camLimits, camLimits)
     if camera.getName() == "HSC":
@@ -386,27 +431,57 @@ def plotCameraOutline(plt, axes, camera, ccdList, color="k", fontSize=6):
     else:
         axes.text(0.0, 1.04*camRadius, "%s" % camera.getName(), ha="center", fontsize=fontSize,
                   color=color)
+    if metricPerCcdDict:
+        mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vMin, vmax=vMax))
+        mappable._A = []        # fake up the array of the scalar mappable. Urgh...
+        axesBbox = axes.get_position()
+        caxDim = [axesBbox.xmin, 0.95*axesBbox.ymin, axesBbox.width, 0.07*axesBbox.height]
+        cax = fig.add_axes(caxDim)
+        cax.tick_params(labelsize=fontSize - 1)
+        cbar = fig.colorbar(mappable, cax=cax, orientation="horizontal")
+        cbar.set_label(label=metricStr, size=fontSize)
 
 
-def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1.5):
-    """Plot the the outline of the tract and patches highlighting those with data
+def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1.5, metricPerPatchDict=None,
+                     metricStr="", fig=None, metricSigmaRange=7.0):
+    """Plot the outline of the tract and patches highlighting those with data.
 
-    As some skyMap settings can define tracts with a large number of patches, this can
-    become very crowded.  So, if only a subset of patches are included, find the outer
-    boudary of all patches in patchList and only plot to maxDegBeyondPatch degrees
-    beyond those boundaries (in all four directions).
+    As some skyMap settings can define tracts with a large number of patches,
+    this can become very crowded.  So, if only a subset of patches are included,
+    find the outer boudary of all patches in ``patchList`` and only plot to
+    ``maxDegBeyondPatch`` degrees beyond those boundaries (in all four
+    directions).
 
     Parameters
     ----------
+    axes : `matplotlib.axes._axes.Axes`
+        Particular matplotlib axes on which to plot the tract outline.
     tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
        Tract information object for extracting tract RA and DEC limits.
     patchList : `list` of `str`
-       List of patch IDs with data to be plotted.  These will be color shaded in the outline plot.
-    fontSize : `int`
+       List of patch IDs with data to be plotted.  These will be color shaded
+       in the outline plot.
+    fontSize : `int`, optional
        Font size for plot labels.
-    maxDegBeyondPatch : `float`
-       Maximum number of degrees to plot beyond the border defined by all patches with data to be plotted.
+    maxDegBeyondPatch : `float`, optional
+       Maximum number of degrees to plot beyond the border defined by all
+       patches with data to be plotted.
+    metricPerPatchDict : `dict` of `float`, optional
+       Dictionary of per patch metric averages; {patchId: metricValue}.  If
+       provided, these values will be used to color-code the tract outline
+       plot.
+    metricStr : `str`, optional
+       String representing the computed metric values provided in
+       ``metricPerPatchDict``.
+    fig : `matplotlib.figure.Figure`, optional
+       The figure on which to add the per-patch metric info (required to add
+       the colorbar).
+    metricSigmaRange : `float`, optional
+       Number of sigma to make the +/- range for the metric colorbar.
     """
+    if metricPerPatchDict:
+        if fig is None:
+            raise RuntimeError("Must supply the matplotlib fig if color-coding by metric-per-patch")
     buff = 0.02
     axes.tick_params(which="both", direction="in", labelsize=fontSize)
     axes.locator_params(nbins=6)
@@ -426,11 +501,31 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
     colors = prop_cycle.by_key()['color']
     colors.pop(colors.index('#7f7f7f'))  # get rid of the gray one as that's our no-data colour
     colors.append("gold")
+    if metricPerPatchDict:  # color-code the ccds by the per-patch metric measurement
+        cmap = plt.cm.viridis
+        metricPerPatchArray = np.fromiter(metricPerPatchDict.values(), dtype="float32")
+        finiteMetrics = np.isfinite(metricPerPatchArray)
+        clippedStats = calcQuartileClippedStats(metricPerPatchArray[finiteMetrics], nSigmaToClip=5.0)
+        vMin = clippedStats.mean - metricSigmaRange*clippedStats.stdDev
+        vMax = clippedStats.mean + metricSigmaRange*clippedStats.stdDev
+        vMax = max(abs(vMin), vMax) if vMax > 0 else vMax  # Make range symmetric about 0 if it crosses 0
+        vMin = -vMax if vMax > 0 else vMin
+        cmapBins = np.linspace(vMin, vMax, cmap.N - 1)
+
     for ip, patch in enumerate(tractInfo):
         patchIndexStr = str(patch.getIndex()[0]) + "," + str(patch.getIndex()[1])
         color = "k"
         alpha = 0.05
-        (color, alpha) = (colors[ip%len(colors)], 0.5) if patchIndexStr in patchList else (color, alpha)
+        if patchIndexStr in patchList:
+            if metricPerPatchDict is None:
+                (color, alpha) = (colors[ip%len(colors)], 0.5)
+            else:
+                if np.isfinite(metricPerPatchDict[patchIndexStr]):
+                    alpha = 1.0
+                    cmapBinIndex = np.digitize(metricPerPatchDict[patchIndexStr], cmapBins)
+                    color = cmap.colors[cmapBinIndex]
+                else:
+                    color, alpha = "red", 0.9
         ra, dec = bboxToXyCoordLists(patch.getOuterBBox(), wcs=tractInfo.getWcs())
         deltaRa = abs(max(ra) - min(ra))
         deltaDec = abs(max(dec) - min(dec))
@@ -448,11 +543,20 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
                           fontsize=fontSize - 1, horizontalalignment="center", verticalalignment="center")
     axes.text(percent((xMin, xMax), 1.065), percent((yMin, yMax), -0.08), "RA",
               fontsize=fontSize, horizontalalignment="center", verticalalignment="center", color="green")
-    axes.text(percent((xMin, xMax), 1.15), percent((yMin, yMax), -0.02), "Dec",
+    axes.text(percent((xMin, xMax), 1.14), percent((yMin, yMax), -0.02), "Dec",
               fontsize=fontSize, horizontalalignment="center", verticalalignment="center",
               rotation="vertical", color="green")
     axes.set_xlim(xlim)
     axes.set_ylim(ylim)
+    if metricPerPatchDict:
+        mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vMin, vmax=vMax))
+        mappable._A = []        # fake up the array of the scalar mappable. Urgh...
+        axesBbox = axes.get_position()
+        caxDim = [axesBbox.xmin, 0.93*axesBbox.ymin, axesBbox.width, 0.07*axesBbox.height]
+        cax = fig.add_axes(caxDim)
+        cax.tick_params(labelsize=fontSize)
+        cbar = fig.colorbar(mappable, cax=cax, orientation="horizontal")
+        cbar.set_label(label=metricStr, size=fontSize + 1)
 
 
 def plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=None, zpLabel=None, fontSize=8):

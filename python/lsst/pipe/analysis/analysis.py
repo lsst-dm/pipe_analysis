@@ -129,6 +129,8 @@ class Analysis(object):
 
         self.good = (np.isfinite(self.quantity) & np.isfinite(self.mag) if self.quantity is not None
                      else np.isfinite(self.mag))
+        if any(ss in self.shortName for ss in ["skySources", "skyObjects"]) and self.quantity is not None:
+            self.good = np.isfinite(self.quantity)
         if errFunc is not None:
             self.good &= np.isfinite(self.quantityError)
 
@@ -140,7 +142,7 @@ class Analysis(object):
         # self.config.flags.  Rather, only cull on flags explicitly set in the
         # flags variable for calib_*_used subsamples.
         if ("matches" not in self.shortName and "overlap" not in self.shortName and "quiver" not in
-            self.shortName and "inputCounts" not in self.shortName):
+            self.shortName and "inputCounts" not in self.shortName and "skyObjects" not in self.shortName):
             flagsList = flags.copy()
             flagsList = flagsList + list(self.config.flags) if self.calibUsedOnly == 0 else flagsList
             for flagName in set(flagsList):
@@ -162,22 +164,30 @@ class Analysis(object):
         else:
             self.signalToNoiseThreshold = self.config.signalToNoiseThreshold
             self.signalToNoiseHighThreshold = self.config.signalToNoiseHighThreshold
-        if "galacticExtinction" in self.shortName and self.magThreshold > 90.0:
+        if (("galacticExtinction" in self.shortName and self.magThreshold > 90.0)
+            or any(ss in self.shortName for ss in ["skySources", "skyObjects"])):
             self.signalToNoiseThreshold = 0.0
             self.signalToNoiseHighThreshold = 0.0
+
+        if any(ss in self.shortName for ss in ["skySources", "skyObjects"]) and self.quantity is not None:
+            self.good = np.isfinite(self.quantity)
+            # We don't want to cull on S/N for the sky sources and they can be
+            # negative, so set threshold to a very large negative number.
+            self.signalToNoiseThreshold = -1e30
 
         self.signalToNoise = catalog[prefix + self.fluxColumn]/catalog[prefix + self.fluxColumn + "Err"]
         self.signalToNoiseStr = None
         goodSn0 = np.isfinite(self.signalToNoise)
         if self.good is not None:
             goodSn0 = np.logical_and(self.good, goodSn0)
-        if self.config.useSignalToNoiseThreshold:
-            self.signalToNoiseStr = r"[S/N$\geqslant${0:}]".format(int(self.signalToNoiseThreshold))
-            goodSn = np.logical_and(goodSn0, self.signalToNoise >= self.signalToNoiseThreshold)
-            # Set self.magThreshold to represent approximately that which corresponds to the S/N threshold
-            # Computed as the mean magnitude of the lower 5% of the S/N > signalToNoiseThreshold subsample
-            self.magThreshold = computeMeanOfFrac(self.mag[goodSn], tailStr="upper", fraction=0.05,
-                                                  floorFactor=0.1)
+            if self.config.useSignalToNoiseThreshold:
+                self.signalToNoiseStr = r"[S/N$\geqslant${0:}]".format(int(self.signalToNoiseThreshold))
+                goodSn = np.logical_and(goodSn0, self.signalToNoise >= self.signalToNoiseThreshold)
+                # Set self.magThreshold to represent approximately that which
+                # corresponds to the S/N threshold.  Computed as the mean mag
+                # of the lower 5% of the S/N > signalToNoiseThreshold subsample
+                self.magThreshold = computeMeanOfFrac(self.mag[goodSn], tailStr="upper", fraction=0.05,
+                                                      floorFactor=0.1)
 
         # Always compute stats for S/N > self.config.signalToNoiseHighThreshold.  If too few
         # objects classified as stars exist with the configured value, decrease the S/N threshold
@@ -336,7 +346,7 @@ class Analysis(object):
         if camera is not None and ccdList is not None:
             axTopRight = plt.axes(topRight)
             axTopRight.set_aspect("equal")
-            plotCameraOutline(plt, axTopRight, camera, ccdList)
+            plotCameraOutline(axTopRight, camera, ccdList)
 
         if self.config.doPlotTractOutline and tractInfo is not None and patchList:
             axTopRight = plt.axes(topRight)
@@ -685,7 +695,7 @@ class Analysis(object):
         if camera is not None and ccdList is not None:
             axTopMiddle = plt.axes([0.42, 0.68, 0.2, 0.2])
             axTopMiddle.set_aspect("equal")
-            plotCameraOutline(plt, axTopMiddle, camera, ccdList)
+            plotCameraOutline(axTopMiddle, camera, ccdList)
         if self.config.doPlotTractOutline and tractInfo is not None and patchList:
             axTopMiddle = plt.axes([0.42, 0.68, 0.2, 0.2])
             axTopMiddle.set_aspect("equal")
@@ -1225,6 +1235,187 @@ class Analysis(object):
 
         fig.savefig(filename, dpi=1200)  # Needs to be fairly hi-res to see enough detail
         plt.close(fig)
+
+    def plotSkyObjects(self, skyObjCat, filename, log, dataId, camera=None, ccdList=None, tractInfo=None,
+                       patchList=None, zpLabel=None, forcedStr=None):
+        """Plot histograms of sky object/source measurements.
+
+        Also plots the focal plane or tract outline to indicate which sub-units
+        (i.e. ccd or patch) contributed data (i.e. for which a source catalog
+        existed) and are color-coded by the measured metric per sub-unit, where
+        here this metric is the mean flux measured in the the sky sources
+        in a circular aperture of 9 pixels.
+
+        Parameters
+        ----------
+        skyObjCat : `lsst.afw.table.SourceCatalog`
+            The sky objects source catalog.
+        filename : `str`
+            Full path and name of the file to which the plot will be written.
+        log : `lsst.log.Log`
+            Logger object for logging messages.
+        dataId : `lsst.daf.persistence.DataId`
+            An instance of `lsst.daf.persistence.DataId` from which to extract
+            the filter name.
+        zpLabel : `str`, optional
+            A label indicating the external calibration applied (currently
+            either jointcal, fgcm, fgcm_tract, or meas_mosaic, but the latter
+            is effectively retired).
+        forcedStr : `str`, optional
+            String to label the catalog type (forced vs. unforced) on the plot.
+        ccdList : `list` of `int`, optional
+            List of ccd IDs with data to be plotted.
+        tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`, optional
+           Tract information object.
+        patchList : `list` of `str`, optional
+           List of patch IDs with data to be plotted.
+        """
+        fig, axes = plt.subplots(nrows=1, ncols=2, sharex=False, sharey=False)
+        fig.subplots_adjust(wspace=0.17, bottom=0.18, left=0.08, right=0.76, top=0.9)
+        topRight = [0.80, 0.68, 0.2, 0.2]
+        axes[0].tick_params(axis="x", which="both", direction="in", labelsize=7)
+        axes[1].tick_params(axis="x", which="both", direction="in", labelsize=7)
+        axes[0].tick_params(axis="y", which="both", direction="in", labelsize=6)
+        axes[1].tick_params(axis="y", which="both", direction="in", labelsize=6)
+        axes[0].yaxis.set_major_formatter(FormatStrFormatter('%.3f'))
+        axes[1].yaxis.set_major_formatter(FormatStrFormatter('%.3f'))
+        prop_cycle = plt.rcParams["axes.prop_cycle"]
+        colors = prop_cycle.by_key()["color"]
+        filterStr = dataId["filter"]
+        fluxStrList = ["base_PsfFlux_instFlux", "base_CircularApertureFlux_9_0_instFlux",
+                       "base_CircularApertureFlux_12_0_instFlux", "base_CircularApertureFlux_25_0_instFlux"]
+        fluxScale = 1e12
+        countMax = 0
+        countChiMax = 0
+        xOff = 0.96
+        yOff = 1.065
+        legendLoc = "upper left"
+        alpha = 0.35
+        for i, fluxStr in enumerate(fluxStrList):
+            yOff -= 0.1
+            flux = skyObjCat[fluxStr]*fluxScale
+            fluxErr = skyObjCat[fluxStr + "Err"]*fluxScale
+            finiteFlux = np.isfinite(flux)
+            skyFluxArr = flux[finiteFlux]
+            skyFluxErrArr = fluxErr[finiteFlux]
+            clippedStats = calcQuartileClippedStats(skyFluxArr, nSigmaToClip=5.0)
+            meanStr = "mean = {0:5.2f}".format(clippedStats.mean)
+            stdStr = "  std = {0:5.2f}".format(clippedStats.stdDev)
+            numStr = "    N = {}".format(sum(clippedStats.goodArray))
+            nBins = "auto" if i == 0 else nBins
+            count, binsFlux, ignored = axes[0].hist(skyFluxArr[clippedStats.goodArray], bins=nBins,
+                                                    label=fluxToPlotString(fluxStr),
+                                                    range=(-10.0*clippedStats.stdDev,
+                                                           10.0*clippedStats.stdDev),
+                                                    density=True, color=colors[i], edgecolor=colors[i],
+                                                    alpha=alpha)
+            nBins = binsFlux if i == 0 else nBins
+            countMax = count.max() if count.max() and count.max() > countMax else countMax
+            if i == 0:
+                xLim = 5.0*clippedStats.stdDev
+                # Put labels on left if typically over subtracted (so the mean lines
+                # don't cover the text).
+                if clippedStats.mean > 0:
+                    xOff -= 0.62
+                    legendLoc = "upper right"
+            axes[0].plot(binsFlux, (1/(clippedStats.stdDev*np.sqrt(2*np.pi))
+                                    *np.exp(-(binsFlux - clippedStats.mean)**2/(2*clippedStats.stdDev**2))),
+                         color=colors[i])
+            axes[0].axvline(x=clippedStats.mean, color=colors[i], linestyle=":")
+            kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=6, color=colors[i])
+            axes[0].annotate(meanStr, xy=(xOff, yOff), **kwargs)
+            axes[0].annotate(stdStr, xy=(xOff, yOff - 0.035), **kwargs)
+            axes[0].annotate(numStr, xy=(xOff, yOff - 0.07), **kwargs)
+
+            chiArr = skyFluxArr/skyFluxErrArr
+            meanChi = chiArr[clippedStats.goodArray].mean()
+            stdDevChi = chiArr[clippedStats.goodArray].std()
+            rmsChi = np.sqrt(np.mean(chiArr[clippedStats.goodArray]**2))
+            meanChiStr = "mean = {0:5.2f}".format(meanChi)
+            stdChiStr = "  std = {0:5.2f}".format(stdDevChi)
+            numChiStr = "    N = {}".format(len(chiArr[clippedStats.goodArray]))
+
+            nBinsChi = "auto" if i == 0 else nBinsChi
+            countChi, binsChi, ignoredChi = axes[1].hist(chiArr[clippedStats.goodArray], bins=nBinsChi,
+                                                         label=fluxToPlotString(fluxStr),
+                                                         range=(-10.0*stdDevChi, 10.0*stdDevChi),
+                                                         density=True, color=colors[i], edgecolor=colors[i],
+                                                         alpha=alpha)
+            nBinsChi = binsChi if i == 0 else nBinsChi
+            countChiMax = countChi.max() if countChi.max() and countChi.max() > countChiMax else countChiMax
+            if i == 0:
+                xLimChi = 5.0*stdDevChi
+            axes[1].plot(binsChi,
+                         1/(stdDevChi*np.sqrt(2*np.pi))*np.exp(-(binsChi - meanChi)**2/(2*stdDevChi**2)),
+                         color=colors[i])
+            axes[1].axvline(x=meanChi, color=colors[i], linestyle=":")
+            axes[1].annotate(meanChiStr, xy=(xOff, yOff), **kwargs)
+            axes[1].annotate(stdChiStr, xy=(xOff, yOff - 0.035), **kwargs)
+            axes[1].annotate(numChiStr, xy=(xOff, yOff - 0.07), **kwargs)
+
+        yLim = max(0.0015, np.round(1.25*countMax, 3))
+        yChiLim = np.round(1.25*countChiMax, 2)
+
+        axes[0].set_xlabel("%s %.0e [%s]" % ("flux *", fluxScale, filterStr), fontSize=8)
+        axes[0].set_ylabel("Normalized Counts", fontSize=8)
+        axes[0].set_xlim(-xLim, xLim)
+        axes[0].set_ylim(bottom=0.0, top=yLim)
+        axes[0].axvline(x=0.0, color="black", linestyle="--")
+
+        axes[1].set_xlabel("chi = %s [%s]" % ("flux/fluxErr", filterStr), fontSize=8)
+        axes[1].set_xlim(-xLimChi, xLimChi)
+        axes[1].set_ylim(bottom=0.0, top=yChiLim)
+        axes[1].axvline(x=0.0, color="black", linestyle="--")
+        axes[1].legend(loc=legendLoc, fontsize=6)
+
+        if camera is not None:
+            labelCamera(camera, plt, axes[0], 0.5, 1.04)
+        labelVisit(filename, plt, axes[1], 0.5, 1.04)
+        if forcedStr is not None:
+            plotText(forcedStr, plt, axes[0], 0.99, -0.15, prefix="cat: ", fontSize=8, color="green")
+
+        # Set color-coding for camera/tract outline to be based on mean metric
+        # per unit (ccd/patch).
+        metricFluxStr = "base_CircularApertureFlux_9_0_instFlux"
+        metricStr = "mean(" + fluxToPlotString(metricFluxStr) + ")"
+        metricPerUnitDict = {}
+        unitList = None
+        if ccdList is not None:
+            unitList = ccdList
+            unitStr = "ccdId"
+        elif patchList is not None:
+            unitList = patchList
+            unitStr = "patchId"
+        for iUnit in unitList:
+            if unitStr == "patchId":  # can't read String fields via afwTableSourceCatalog
+                good = skyObjCat.asAstropy()[unitStr] == iUnit
+            else:
+                good = skyObjCat[unitStr] == iUnit
+            perUnitSkyObjCat = skyObjCat[good].copy(deep=True)
+            if len(perUnitSkyObjCat) > 0:
+                perUnitSkyFlux = perUnitSkyObjCat[metricFluxStr]*fluxScale
+                finiteFlux = np.isfinite(perUnitSkyFlux)
+                perUnitSkyFluxArr = perUnitSkyFlux[finiteFlux]
+                perUnitClippedStats = calcQuartileClippedStats(perUnitSkyFluxArr, nSigmaToClip=5.0)
+                metricPerUnitDict[str(iUnit)] = perUnitClippedStats.mean
+            else:
+                metricPerUnitDict[str(iUnit)] = np.nan
+                log.info("No good sky objects for %s %s" % (unitStr, iUnit))
+
+        if camera is not None and ccdList is not None:
+            axTopRight = plt.axes(topRight)
+            axTopRight.set_aspect("equal")
+            plotCameraOutline(axTopRight, camera, ccdList, metricPerCcdDict=metricPerUnitDict,
+                              metricStr=metricStr, fig=fig)
+        if self.config.doPlotTractOutline and tractInfo is not None and len(patchList) > 0:
+            axTopRight = plt.axes(topRight)
+            axTopRight.set_aspect("equal")
+            plotTractOutline(axTopRight, tractInfo, patchList, metricPerPatchDict=metricPerUnitDict,
+                             metricStr=metricStr, fig=fig)
+
+        fig.savefig(filename, dpi=120)
+        plt.close(fig)
+        return
 
     def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
                 tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
