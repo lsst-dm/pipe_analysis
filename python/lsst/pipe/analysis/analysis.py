@@ -1071,7 +1071,8 @@ class Analysis(object):
 
     def plotInputCounts(self, catalog, filename, log, dataId, butler, tractInfo, patchList=None, camera=None,
                         forcedStr=None, uberCalLabel=None, cmap=plt.cm.viridis, alpha=0.5,
-                        doPlotTractImage=True, doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000):
+                        doPlotTractImage=True, doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000,
+                        columnName="base_InputCount_value"):
         """Plot grayscale image of tract with base_InputCounts_value overplotted
 
         Parameters
@@ -1164,8 +1165,10 @@ class Analysis(object):
             edgeColors.append(edgeColor)
 
         xyOffsets = np.stack((catalog[centStr + "_x"], catalog[centStr + "_y"]), axis=-1)
-        inputCounts = catalog["base_InputCount_value"]
-        bounds = np.arange(inputCounts.max())
+        inputCounts = catalog[columnName]
+        if "instFlux" in columnName:
+            inputCounts = -2.5*np.log10(inputCounts)
+            bounds = np.arange(int(np.nanmax(inputCounts)))
         bounds += 1
         alphaCmap = makeAlphaCmap(cmap=cmap, alpha=alpha)
         norm = matplotlib.colors.BoundaryNorm(bounds, alphaCmap.N)
@@ -1179,7 +1182,8 @@ class Analysis(object):
         ec.set_array(inputCounts)
         axes.add_collection(ec)
         cbar = plt.colorbar(ec, extend="min", fraction=0.04)
-        cbar.set_label("InputCount: ellipse size * {:} [maxDiam = {:}] (pixels)".
+        columnStr = fluxToPlotString(columnName)
+        cbar.set_label(columnStr + ": ellipse size * {:} [maxDiam = {:}] (pixels)".
                        format(sizeFactor, maxDiamPix), fontsize=7)
         cbar.ax.tick_params(direction="in", labelsize=7)
 

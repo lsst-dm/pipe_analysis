@@ -88,6 +88,7 @@ class CoaddAnalysisConfig(Config):
                                                                "(ignored if plotMatchesOnly is True)"))
     doPlotInputCounts = Field(dtype=bool, default=True, doc=("Make input counts plot? "
                                                              "(ignored if plotMatchesOnly is True)"))
+    doPlotSkyObjects = Field(dtype=bool, default=True, doc="Make sky object plots?")
     onlyReadStars = Field(dtype=bool, default=False, doc="Only read stars (to save memory)?")
     toMilli = Field(dtype=bool, default=True, doc="Print stats in milli units (i.e. mas, mmag)?")
     srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
@@ -251,7 +252,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
         if any (doPlot for doPlot in [self.config.doPlotMags, self.config.doPlotStarGalaxy,
                                       self.config.doPlotOverlaps, self.config.doPlotCompareUnforced,
-                                      cosmos, self.config.externalCatalogs,
+                                      self.config.doPlotSkyObjects, cosmos, self.config.externalCatalogs,
                                       self.config.doWriteParquetTables]):
             if haveForced:
                 forced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_forced_src")
@@ -289,6 +290,11 @@ class CoaddAnalysisTask(CmdLineTask):
                 unforced = addFootprintNPix(unforced, fromCat=unforced)
                 if haveForced:
                     forced = addFootprintNPix(forced, fromCat=unforced)
+
+            if self.config.doPlotSkyObjects:
+                # Make sub-catalog of sky objects before flag culling as many of these will have flags set
+                # due to measurement difficulties in regions that are really blank sky
+                skyObjCat = unforced[unforced["merge_peak_sky"]].copy(deep=True)
 
             # Must do the overlaps before purging the catalogs of non-primary sources
             if self.config.doPlotOverlaps and not self.config.writeParquetOnly:
@@ -369,6 +375,19 @@ class CoaddAnalysisTask(CmdLineTask):
                                         filenamer(repoInfo.dataId, description="base_PsfFlux_cal",
                                                   style="hist"),
                                         repoInfo.dataId, forcedStr="unforced " + self.catLabel, **plotKwargs)
+            if self.config.doPlotSkyObjects:
+                self.plotSkyObjects(skyObjCat, filenamer(repoInfo.dataId, description="skyObjects",
+                                                         style="hist"),
+                                    repoInfo.dataId, forcedStr="unforced", camera=repoInfo.camera,
+                                    tractInfo=repoInfo.tractInfo, patchList=patchList)
+                self.plotSkyObjectsSky(skyObjCat, filenamer(repoInfo.dataId, description="skyObjects",
+                                                            style="tract"),
+                                       dataId=repoInfo.dataId, butler=repoInfo.butler,
+                                       tractInfo=repoInfo.tractInfo, patchList=patchList,
+                                       camera=repoInfo.camera,
+                                       forcedStr="unforced", alpha=0.5, doPlotTractImage=True,
+                                       doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000)
+
             if self.config.doPlotFootprintNpix:
                 self.plotFootprintHist(forced,
                                        filenamer(repoInfo.dataId, description="footNpix", style="hist"),
@@ -1246,6 +1265,32 @@ class CoaddAnalysisTask(CmdLineTask):
                                         butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                         patchList=patchList, hscRun=hscRun, zpLabel=zpLabel,
                                         forcedStr=forcedStr, uberCalLabel=uberCalLabel, scale=scale)
+
+    def plotSkyObjects(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
+                       tractInfo=None, patchList=None, hscRun=None, zpLabel=None,
+                       forcedStr=None, postFix="", flagsCat=None):
+        shortName = "skyObjects"
+        self.log.info("shortName = {:s}".format(shortName))
+        self.AnalysisClass(catalog, None, "%s" % shortName, shortName,
+                           self.config.analysis, labeller=None,
+                           ).plotSkyObjects(catalog, filenamer, self.log, dataId, butler=butler,
+                                            camera=camera, ccdList=ccdList, tractInfo=tractInfo,
+                                            patchList=patchList, zpLabel=zpLabel, forcedStr=forcedStr)
+
+    def plotSkyObjectsSky(self, catalog, filenamer, dataId, butler, tractInfo, patchList=None, camera=None,
+                          hscRun=None, forcedStr=None, alpha=0.8, doPlotTractImage=True,
+                          doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000,
+                          columnName="base_PsfFlux_instFlux"):
+        shortName = "skyObjectsSky"
+        self.log.info("shortName = {:s}".format(shortName))
+        self.AnalysisClass(catalog, None, "%s" % shortName, shortName,
+                           self.config.analysis, labeller=None,
+                           ).plotInputCounts(catalog, filenamer, self.log, dataId, butler, tractInfo,
+                                             patchList=patchList, camera=camera, forcedStr=forcedStr,
+                                             alpha=alpha, doPlotTractImage=doPlotTractImage,
+                                             doPlotPatchOutline=doPlotPatchOutline,
+                                             sizeFactor=sizeFactor, maxDiamPix=maxDiamPix,
+                                             columnName=columnName)
 
     def plotInputCounts(self, catalog, filenamer, dataId, butler, tractInfo, patchList=None, camera=None,
                         hscRun=None, zpLabel=None, forcedStr=None, uberCalLabel=None, alpha=0.5,
