@@ -224,6 +224,12 @@ class ColorAnalysisConfig(Config):
                                                            "and setting star/galaxy classification"))
     srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
                              doc="Mapping between different stack (e.g. HSC vs. LSST) schema names")
+    columnsToCopyFromRef = ListField(dtype=str,
+                                     default=["detect_", "merge_peak_", "merge_measurement_", ],
+                                     doc="List of \"startswith\" strings of column names to copy from "
+                                     "*_ref to *_forced_src catalog.  All columns that start with one "
+                                     "of these strings will be copied from the *_ref into the "
+                                     "*_forced_src catalog.")
     extinctionCoeffs = DictField(keytype=str, itemtype=float, default=None, optional=True,
                                  doc="Dictionary of extinction coefficients for conversion from E(B-V) "
                                  "to extinction, A_filter")
@@ -495,11 +501,14 @@ class ColorAnalysisTask(CmdLineTask):
         for patchRef in patchRefList:
             if patchRef.datasetExists(dataset):
                 cat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
-                if dataset != "deepCoadd_meas":
-                    unforcedCat = patchRef.get("deepCoadd_meas", immediate=True,
-                                               flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
-                    cat = addColumnsToSchema(unforcedCat, cat, ["detect_isPatchInner", "detect_isTractInner",
-                                                                "merge_peak_sky"])
+                if dataset != self.config.coaddName + "Coadd_meas":
+                    refCat = patchRef.get(self.config.coaddName + "Coadd_ref", immediate=True,
+                                          flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+                    refColList = [s for s in refCat.schema.getNames() if
+                                  s.startswith(tuple(self.config.columnsToCopyFromRef))]
+                    cat = addColumnsToSchema(refCat, cat,
+                                             [col for col in refColList if col not in cat.schema and
+                                              col in refCat.schema])
                 if self.config.doWriteParquetTables:
                     cat = addIntFloatOrStrColumn(cat, patchRef.dataId["patch"], "patchId",
                                                  "Patch on which source was detected")

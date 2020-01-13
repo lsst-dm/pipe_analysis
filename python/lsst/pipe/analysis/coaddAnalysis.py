@@ -95,13 +95,19 @@ class CoaddAnalysisConfig(Config):
     fluxToPlotList = ListField(dtype=str, default=["base_GaussianFlux", "base_CircularApertureFlux_12_0",
                                                    "ext_photometryKron_KronFlux", "modelfit_CModel"],
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(fluxColumn)")
-    columnsToCopy = ListField(dtype=str,
-                              default=["calib_psf_used", "calib_psf_candidate", "calib_psf_reserved",
-                                       "calib_astrometry_used", "calib_photometry_used",
-                                       "calib_photometry_reserved", "detect_isPatchInner",
-                                       "detect_isTractInner", "merge_peak_sky", "calib_psfUsed",
-                                       "calib_psfCandidate", ],
-                              doc="List of columns to copy from one source catalog to another.")
+    # We want the following to come from the *_meas catalogs as they reflect
+    # what happened in SFP calibration.
+    columnsToCopyFromMeas = ListField(dtype=str, default=["calib_",],
+                                      doc="List of string \"prefixes\" to identify the columns to copy.  "
+                                      "All columns with names that start with one of these strings will be "
+                                      "copied from the *_meas catalogs into the *_forced_src catalogs.")
+    # We want the following to come from the *_ref catalogs as they reflect
+    # the forced measurement states.
+    columnsToCopyFromRef = ListField(dtype=str,
+                                     default=["detect_", "merge_peak_", "merge_measurement_", ],
+                                     doc="List of string \"prefixes\" to identify the columns to copy.  "
+                                     "All columns with names that start with one of these strings will be "
+                                     "copied from the *_ref catalogs into the *_forced_src catalogs.")
     flagsToAlias = DictField(keytype=str, itemtype=str,
                              default={"calib_psf_used": "calib_psfUsed",
                                       "calib_psf_candidate": "calib_psfCandidate",
@@ -251,22 +257,23 @@ class CoaddAnalysisTask(CmdLineTask):
             unforced = self.calibrateCatalogs(unforced, wcs=repoInfo.wcs)
             plotKwargs.update(dict(zpLabel=self.zpLabel))
             if haveForced:
-                # copy over some fields from unforced to forced catalog
-                forced = addColumnsToSchema(unforced, forced,
-                                            [col for col in list(self.config.columnsToCopy) +
-                                             list(self.config.analysis.flags) if
-                                             col not in forced.schema and col in unforced.schema and
-                                             not (repoInfo.hscRun and col == "slot_Centroid_flag")])
-                # Add the reference band flags for forced photometry to forced catalog
-                refBandCat = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_ref")
-                if len(forced) != len(refBandCat):
+                # copy over some fields from _ref and _meas catalogs to _forced_src catalog
+                refCat = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_ref")
+                if len(forced) != len(refCat):
                     raise RuntimeError(("Lengths of forced (N = {0:d}) and ref (N = {0:d}) cats don't match").
-                                       format(len(forced), len(refBandCat)))
-                refBandList = list(s.field.getName() for s in refBandCat.schema if "merge_measurement_"
-                                   in s.field.getName())
-                forced = addColumnsToSchema(refBandCat, forced,
-                                            [col for col in refBandList if col not in forced.schema and
-                                             col in refBandCat.schema])
+                                       format(len(forced), len(refCat)))
+                refColList = [s for s in refCat.schema.getNames() if
+                              s.startswith(tuple(self.config.columnsToCopyFromRef))]
+                refColsToCopy = [col for col in refColList if col not in forced.schema and
+                                 col in refCat.schema and not
+                                 (repoInfo.hscRun and col == "slot_Centroid_flag")]
+                forced = addColumnsToSchema(refCat, forced, refColsToCopy)
+                measColList = [s for s in unforced.schema.getNames() if
+                               s.startswith(tuple(self.config.columnsToCopyFromMeas))]
+                measColsToCopy = [col for col in measColList if col not in forced.schema and
+                                  col in unforced.schema and not
+                                  (repoInfo.hscRun and col == "slot_Centroid_flag")]
+                forced = addColumnsToSchema(unforced, forced, measColsToCopy)
 
             # Set some aliases for differing schema naming conventions
             coaddList = [unforced, ]
@@ -308,11 +315,18 @@ class CoaddAnalysisTask(CmdLineTask):
                                       format(len(unforcedOverlaps)))
 
             # Set boolean array indicating sources deemed unsuitable for qa analyses
-            bad = makeBadArray(unforced, flagList=self.config.analysis.flags,
-                               onlyReadStars=self.config.onlyReadStars)
+            badUnforced = makeBadArray(unforced, flagList=self.config.analysis.flags,
+                                       onlyReadStars=self.config.onlyReadStars)
             if haveForced:
-                bad |= makeBadArray(forced, flagList=self.config.analysis.flags,
-                                    onlyReadStars=self.config.onlyReadStars)
+                badForced = makeBadArray(forced, flagList=self.config.analysis.flags,
+                                         onlyReadStars=self.config.onlyReadStars)
+                badCombined = (badUnforced | badForced)
+                unforcedMatched = unforced[~badCombined].copy(deep=True)
+                forcedMatched = forced[~badCombined].copy(deep=True)
+
+                if self.config.doPlotCompareUnforced:
+                    self.plotCompareUnforced(forcedMatched, unforcedMatched, filenamer, repoInfo.dataId,
+                                             **plotKwargs)
 
             # Create and write parquet tables
             if self.config.doWriteParquetTables:
@@ -322,21 +336,21 @@ class CoaddAnalysisTask(CmdLineTask):
                                                    toMilli=self.config.toMilli, unforcedCat=unforced)
                     dataRef_forced = repoInfo.butler.dataRef('analysisCoaddTable_forced',
                                                              dataId=repoInfo.dataId)
-                    writeParquet(dataRef_forced, forced, badArray=bad)
+                    writeParquet(dataRef_forced, forced, badArray=badForced)
                 dataRef_unforced = repoInfo.butler.dataRef('analysisCoaddTable_unforced',
                                                            dataId=repoInfo.dataId)
                 # Add pre-computed columns for parquet tables
                 unforced = addPreComputedColumns(unforced, fluxToPlotList=self.config.fluxToPlotList,
                                                  toMilli=self.config.toMilli)
-                writeParquet(dataRef_unforced, unforced, badArray=bad)
+                writeParquet(dataRef_unforced, unforced, badArray=badUnforced)
                 if self.config.writeParquetOnly:
                     self.log.info("Exiting after writing Parquet tables.  No plots generated.")
                     return
 
             # Purge the catalogs of flagged sources
-            unforced = unforced[~bad].copy(deep=True)
+            unforced = unforced[~badUnforced].copy(deep=True)
             if haveForced:
-                forced = forced[~bad].copy(deep=True)
+                forced = forced[~badForced].copy(deep=True)
             else:
                 forced = unforced
             self.catLabel = "nChild = 0"
@@ -401,8 +415,6 @@ class CoaddAnalysisTask(CmdLineTask):
                                       "not in forced.schema")
             if cosmos:
                 self.plotCosmos(forced, filenamer, cosmos, repoInfo.dataId)
-            if self.config.doPlotCompareUnforced and haveForced:
-                self.plotCompareUnforced(forced, unforced, filenamer, repoInfo.dataId, **plotKwargs)
 
         if self.config.doPlotMatches:
             if haveForced:
@@ -477,16 +489,30 @@ class CoaddAnalysisTask(CmdLineTask):
             # Set some aliases for differing schema naming conventions
             if aliasDictList:
                 catalog = setAliasMaps(catalog, aliasDictList)
-            if dataset != "deepCoadd_meas" and any(ss not in catalog.schema
-                                                   for ss in self.config.columnsToCopy):
-                unforced = dataRef.get("deepCoadd_meas", immediate=True,
+            needToAddColumns = any(ss not in catalog.schema for ss in
+                                   list(self.config.columnsToCopyFromMeas) +
+                                   list(self.config.columnsToCopyFromRef))
+            if dataset != self.config.coaddName + "Coadd_meas" and needToAddColumns:
+                # copy over some fields from _ref and _meas catalogs to _forced_src catalog
+                refCat = dataRef.get(self.config.coaddName + "Coadd_ref", immediate=True,
+                                     flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+                unforced = dataRef.get(self.config.coaddName + "Coadd_meas", immediate=True,
                                        flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-                # copy over some fields from unforced to forced catalog
-                catalog = addColumnsToSchema(unforced, catalog,
-                                             [col for col in list(self.config.columnsToCopy) +
-                                              list(self.config.analysis.flags) if
-                                              col not in catalog.schema and col in unforced.schema and
-                                              not (hscRun and col == "slot_Centroid_flag")])
+                if len(catalog) != len(refCat):
+                    raise RuntimeError(("Lengths of forced (N = {0:d}) and ref (N = {0:d}) cats don't match").
+                                       format(len(catalog), len(refCat)))
+                refColList = [s for s in refCat.schema.getNames() if
+                              s.startswith(tuple(self.config.columnsToCopyFromRef))]
+                refColsToCopy = [col for col in refColList if col not in catalog.schema and
+                                 col in refCat.schema and not
+                                 (hscRun and col == "slot_Centroid_flag")]
+                catalog = addColumnsToSchema(refCat, catalog, refColsToCopy)
+                measColList = [s for s in unforced.schema.getNames() if
+                               s.startswith(tuple(self.config.columnsToCopyFromMeas))]
+                measColsToCopy = [col for col in measColList if col not in catalog.schema and
+                                  col in unforced.schema and not
+                                  (hscRun and col == "slot_Centroid_flag")]
+                catalog = addColumnsToSchema(unforced, catalog, measColsToCopy)
                 if aliasDictList:
                     catalog = setAliasMaps(catalog, aliasDictList)
 
@@ -1294,17 +1320,33 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         forcedStr = "forced" if haveForced else "unforced"
 
         if haveForced:
-            # copy over some fields from unforced to forced catalog
-            forced1 = addColumnsToSchema(unforced1, forced1,
-                                         [col for col in list(self.config.columnsToCopy) +
-                                          list(self.config.analysis.flags) if
-                                          col not in forced1.schema and col in unforced1.schema and
-                                          not (repoInfo1.hscRun and col == "slot_Centroid_flag")])
-            forced2 = addColumnsToSchema(unforced2, forced2,
-                                         [col for col in list(self.config.columnsToCopy) +
-                                          list(self.config.analysis.flags) if
-                                          col not in forced2.schema and col in unforced2.schema and
-                                          not (repoInfo2.hscRun and col == "slot_Centroid_flag")])
+            # copy over some fields from _ref and _meas catalogs to _forced_src catalog
+            refCat1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_ref")
+            refColList1 = [s for s in refCat1.schema.getNames() if
+                           s.startswith(tuple(self.config.columnsToCopyFromRef))]
+            refCat2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_ref")
+            refColList2 = [s for s in refCat2.schema.getNames() if
+                           s.startswith(tuple(self.config.columnsToCopyFromRef))]
+            refColsToCopy1 = [col for col in refColList1 if col not in forced1.schema
+                              and col in refCat1.schema
+                              and not (repoInfo1.hscRun and col == "slot_Centroid_flag")]
+            refColsToCopy2 = [col for col in refColList2 if col not in forced2.schema
+                              and col in refCat2.schema
+                              and not (repoInfo2.hscRun and col == "slot_Centroid_flag")]
+            forced1 = addColumnsToSchema(refCat1, forced1, refColsToCopy1)
+            forced2 = addColumnsToSchema(refCat2, forced2, refColsToCopy2)
+            measColList1 = [s for s in unforced1.schema.getNames() if
+                            s.startswith(tuple(self.config.columnsToCopyFromMeas))]
+            measColList2 = [s for s in unforced2.schema.getNames() if
+                            s.startswith(tuple(self.config.columnsToCopyFromMeas))]
+            measColsToCopy1 = [col for col in measColList1 if col not in forced1.schema and
+                               col in unforced1.schema and not
+                               (repoInfo1.hscRun and col == "slot_Centroid_flag")]
+            measColsToCopy2 = [col for col in measColList2 if col not in forced2.schema and
+                               col in unforced2.schema and not
+                               (repoInfo2.hscRun and col == "slot_Centroid_flag")]
+            forced1 = addColumnsToSchema(unforced1, forced1, measColsToCopy1)
+            forced2 = addColumnsToSchema(unforced2, forced2, measColsToCopy2)
 
         # Set an alias map for differing schema naming conventions of different stacks (if any)
         repoList = [repoInfo1.hscRun, repoInfo2.hscRun]
@@ -1321,22 +1363,22 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                 catalog = setAliasMaps(catalog, aliasDictList)
 
         # Set boolean array indicating sources deemed unsuitable for qa analyses
-        bad1 = makeBadArray(unforced1, flagList=self.config.analysis.flags,
-                            onlyReadStars=self.config.onlyReadStars)
-        bad2 = makeBadArray(unforced2, flagList=self.config.analysis.flags,
-                            onlyReadStars=self.config.onlyReadStars)
+        badUnforced1 = makeBadArray(unforced1, flagList=self.config.analysis.flags,
+                                    onlyReadStars=self.config.onlyReadStars)
+        badUnforced2 = makeBadArray(unforced2, flagList=self.config.analysis.flags,
+                                    onlyReadStars=self.config.onlyReadStars)
         if haveForced:
-            bad1 |= makeBadArray(forced1, flagList=self.config.analysis.flags,
-                                 onlyReadStars=self.config.onlyReadStars)
-            bad2 |= makeBadArray(forced2, flagList=self.config.analysis.flags,
-                                 onlyReadStars=self.config.onlyReadStars)
+            badForced1 = makeBadArray(forced1, flagList=self.config.analysis.flags,
+                                      onlyReadStars=self.config.onlyReadStars)
+            badForced2 = makeBadArray(forced2, flagList=self.config.analysis.flags,
+                                      onlyReadStars=self.config.onlyReadStars)
 
         # Purge the catalogs of flagged sources
-        unforced1 = unforced1[~bad1].copy(deep=True)
-        unforced2 = unforced2[~bad2].copy(deep=True)
+        unforced1 = unforced1[~badUnforced1].copy(deep=True)
+        unforced2 = unforced2[~badUnforced2].copy(deep=True)
         if haveForced:
-            forced1 = forced1[~bad1].copy(deep=True)
-            forced2 = forced2[~bad2].copy(deep=True)
+            forced1 = forced1[~badForced1].copy(deep=True)
+            forced2 = forced2[~badForced2].copy(deep=True)
         else:
             forced1 = unforced1
             forced2 = unforced2
