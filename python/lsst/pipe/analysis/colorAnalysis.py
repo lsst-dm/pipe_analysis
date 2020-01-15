@@ -212,9 +212,9 @@ class GalaxyColor(object):
 class ColorAnalysisConfig(Config):
     coaddName = Field(dtype=str, default="deep", doc="Name for coadd")
     flags = ListField(dtype=str, doc="Flags of objects to ignore",
-                      default=["slot_Centroid_flag", "slot_Shape_flag",
-                               "base_PsfFlux_flag", "modelfit_CModel_flag",
-                               "base_PixelFlags_flag_saturated", "base_ClassificationExtendedness_flag"])
+                      default=["slot_Centroid_flag", "slot_Shape_flag", "base_PsfFlux_flag",
+                               "modelfit_CModel_flag", "base_PixelFlags_flag_saturatedCenter",
+                               "base_ClassificationExtendedness_flag"])
     analysis = ConfigField(dtype=AnalysisConfig, doc="Analysis plotting options")
     transforms = ConfigDictField(keytype=str, itemtype=ColorTransform, default={},
                                  doc="Color transformations to analyse")
@@ -632,7 +632,7 @@ class ColorAnalysisTask(CmdLineTask):
                           format(tractInfo.getId(), str(tractInfo.getCtrCoord())))
         return catalog
 
-    def transformCatalogs(self, catalogs, transforms, fluxColumn, flagsCats=None, hscRun=None):
+    def transformCatalogs(self, catalogs, transforms, fluxColumn, hscRun=None):
         """
         Transform catalog entries according to the color transform given
 
@@ -642,18 +642,10 @@ class ColorAnalysisTask(CmdLineTask):
            One dict entry per filter
         transforms : `dict` of `lsst.pipe.analysis.colorAnalysis.ColorTransform`s
            One dict entry per filter-dependent transform definition
-        flagsCats : `dict` of `lsst.afw.table.source.source.SourceCatalog`s
-           One dict entry per filter.  Source lists must be identical to those in catalogs.
-           This is to provide a way to use a different catalog containing the flags of interest
-           for source filtering (e.g. forced catalogs do not have all the flags defined in unforced
-           catalogs, but the source lists are identical)
         hscRun : `str` or `NoneType`
            A string representing "HSCPIPE_VERSION" fits header if the data were processed with
            the (now obsolete, but old reruns still exist) "HSC stack", None otherwise
         """
-        if flagsCats is None:
-            flagsCats = catalogs
-
         template = list(catalogs.values())[0]
         num = len(template)
         assert all(len(cat) == num for cat in catalogs.values())
@@ -1480,7 +1472,7 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     cbKeep = plt.colorbar(mappableKeep, cax=caxKeep)
     cbKeep.ax.tick_params(labelsize=6, length=1)
     labelPadShift = len(str(zKeep.max()//10)) if zKeep.max()//10 > 0 else 0
-    cbKeep.set_label("Number Density", rotation=270, labelpad=-15 - labelPadShift, fontsize=7)
+    cbKeep.set_label("Number Density", rotation=270, labelpad=-12 - labelPadShift, fontsize=7)
 
     if xFitRange:
         # Shade region outside xFitRange

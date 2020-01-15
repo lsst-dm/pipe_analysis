@@ -81,7 +81,7 @@ class Analysis(object):
     """Centralised base for plotting"""
 
     def __init__(self, catalog, func, quantityName, shortName, config, qMin=-0.2, qMax=0.2,
-                 prefix="", flags=[], goodKeys=[], errFunc=None, labeller=AllLabeller(), flagsCat=None,
+                 prefix="", flags=[], goodKeys=[], errFunc=None, labeller=AllLabeller(),
                  magThreshold=None, forcedMean=None, unitScale=1.0, compareCat=None):
         self.catalog = catalog
         self.func = func
@@ -121,19 +121,15 @@ class Analysis(object):
         self.good = np.isfinite(self.quantity) & np.isfinite(self.mag) if self.quantity is not None else None
         if errFunc is not None:
             self.good &= np.isfinite(self.quantityError)
-        if flagsCat is None:
-            flagsCat = catalog
-        if not checkIdLists(catalog, flagsCat, prefix=prefix):
-            raise RuntimeError(
-                "Catalog being used for flags does not have the same object list as the data catalog")
+
         # Don't have flags in match and overlap catalogs (already removed in the latter)
         if ("matches" not in self.shortName and "overlap" not in self.shortName and
                 "quiver" not in self.shortName and "inputCounts" not in self.shortName):
             for ff in set(list(self.config.flags) + flags):
-                if prefix + ff in flagsCat.schema:
-                    self.good &= ~flagsCat[prefix + ff]
+                if prefix + ff in catalog.schema:
+                    self.good &= ~catalog[prefix + ff]
         for kk in goodKeys:
-            self.good &= flagsCat[prefix + kk]
+            self.good &= catalog[prefix + kk]
 
         # If the input catalog is a coadd, scale the S/N threshold by roughly
         # the sqrt of the number of input visits (actually the mean of the

@@ -347,8 +347,6 @@ class CoaddAnalysisTask(CmdLineTask):
             else:
                 self.log.info("\nNumber of sources in catalog: unforced = {0:d}".format(len(unforced)))
 
-            flagsCat = unforced
-
             if self.config.doPlotPsfFluxSnHists:
                 self.plotPsfFluxSnHists(unforced,
                                         filenamer(repoInfo.dataId, description="base_PsfFlux_cal",
@@ -357,9 +355,8 @@ class CoaddAnalysisTask(CmdLineTask):
             if self.config.doPlotFootprintNpix:
                 self.plotFootprintHist(forced,
                                        filenamer(repoInfo.dataId, description="footNpix", style="hist"),
-                                       repoInfo.dataId, flagsCat=flagsCat, **plotKwargs)
-                self.plotFootprint(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr, flagsCat=flagsCat,
-                                   **plotKwargs)
+                                       repoInfo.dataId, **plotKwargs)
+                self.plotFootprint(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr, **plotKwargs)
 
             if self.config.doPlotQuiver:
                 self.plotQuiver(unforced,
@@ -376,10 +373,9 @@ class CoaddAnalysisTask(CmdLineTask):
 
             if self.config.doPlotMags:
                 self.plotMags(unforced, filenamer, repoInfo.dataId, forcedStr="unforced " + self.catLabel,
-                              postFix="_unforced", flagsCat=flagsCat, **plotKwargs)
+                              postFix="_unforced", **plotKwargs)
                 if haveForced:
                     self.plotMags(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr, postFix="_forced",
-                                  flagsCat=flagsCat,
                                   highlightList=[("merge_measurement_" + repoInfo.genericFilterName, 0,
                                                   "yellow"), ], **plotKwargs)
             if self.config.doPlotStarGalaxy:
@@ -583,7 +579,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                  patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None,
-                 forcedStr=None, fluxToPlotList=None, postFix="", flagsCat=None, highlightList=None,
+                 forcedStr=None, fluxToPlotList=None, postFix="", highlightList=None,
                  uberCalLabel=None):
         if not fluxToPlotList:
             fluxToPlotList = self.config.fluxToPlotList
@@ -600,7 +596,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                    "Mag(%s) - PSFMag (%s)" % (fluxToPlotString(col), unitStr),
                                    shortName, self.config.analysis,
                                    flags=[col + "_flag"], labeller=StarGalaxyLabeller(),
-                                   flagsCat=flagsCat, unitScale=self.unitScale,
+                                   unitScale=self.unitScale,
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
@@ -609,7 +605,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                   patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None, postFix="",
-                  flagsCat=None, uberCalLabel=None):
+                  uberCalLabel=None):
         enforcer = None
         unitStr = " (milli)" if self.config.toMilli else ""
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
@@ -638,7 +634,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                     "$\sqrt{0.5*(I_{xx}+I_{yy})}$ (pixels)"),
                                    shortName, self.config.analysis, flags=[col + "_flag"],
                                    goodKeys=["calib_psf_used"], qMin=qMin, qMax=qMax,
-                                   labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                                   labeller=StarGalaxyLabeller(),
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
                 if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
                     shortName = "hsmTrace" + postFix + "_calib_psf_used"
@@ -648,7 +644,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                        ("          HSM Trace (calib_psf_used): $\sqrt{0.5*(I_{xx}+I_{yy})}$"
                                         " (pixels)"), shortName, self.config.analysis, flags=[col + "_flag"],
                                        goodKeys=["calib_psf_used"], qMin=qMin, qMax=qMax,
-                                       labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                                       labeller=StarGalaxyLabeller(),
                                        ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
                                                  **plotAllKwargs)
 
@@ -660,7 +656,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 self.AnalysisClass(starsOnly, sdssTrace,
                                    "  SdssShape Trace: $\sqrt{0.5*(I_{xx}+I_{yy})}$ (pixels)", shortName,
                                    self.config.analysis, flags=[col + "_flag"], qMin=qMin, qMax=qMax,
-                                   labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                                   labeller=StarGalaxyLabeller(),
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
                 if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
                     shortName = "hsmTrace" + postFix
@@ -669,7 +665,7 @@ class CoaddAnalysisTask(CmdLineTask):
                     self.AnalysisClass(starsOnly, TraceSize(compareCol),
                                        "HSM Trace: $\sqrt{0.5*(I_{xx}+I_{yy})}$ (pixels)", shortName,
                                        self.config.analysis, flags=[col + "_flag"], qMin=qMin, qMax=qMax,
-                                       labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                                       labeller=StarGalaxyLabeller(),
                                        ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
                                                  **plotAllKwargs)
 
@@ -682,7 +678,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                    "    SdssShape Trace % diff (psf_used - PSFmodel)", shortName,
                                    self.config.analysis, flags=[col + "_flag"],
                                    goodKeys=["calib_psf_used"], qMin=-3.0, qMax=3.0,
-                                   labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                                   labeller=StarGalaxyLabeller(),
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
 
                 shortName = "e1Resids" + postFix
@@ -690,7 +686,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 self.AnalysisClass(catalog, E1Resids(compareCol, psfCompareCol, unitScale=self.unitScale),
                                    "        SdssShape e1 resids (psf_used - PSFmodel)%s" % unitStr, shortName,
                                    self.config.analysis, flags=[col + "_flag"], goodKeys=["calib_psf_used"],
-                                   qMin=-0.05, qMax=0.05, labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                                   qMin=-0.05, qMax=0.05, labeller=StarGalaxyLabeller(),
                                    unitScale=self.unitScale,
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
 
@@ -699,7 +695,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 self.AnalysisClass(catalog, E2Resids(compareCol, psfCompareCol, unitScale=self.unitScale),
                                    "       SdssShape e2 resids (psf_used - PSFmodel)%s" % unitStr, shortName,
                                    self.config.analysis, flags=[col + "_flag"], goodKeys=["calib_psf_used"],
-                                   qMin=-0.05, qMax=0.05, labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                                   qMin=-0.05, qMax=0.05, labeller=StarGalaxyLabeller(),
                                    unitScale=self.unitScale,
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
 
@@ -712,7 +708,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                        "HSM Trace % diff (psf_used - PSFmodel)", shortName,
                                        self.config.analysis, flags=[col + "_flag"],
                                        goodKeys=["calib_psf_used"], qMin=-3.0, qMax=3.0,
-                                       labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                                       labeller=StarGalaxyLabeller(),
                                        ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
                                                  **plotAllKwargs)
                     shortName = "e1ResidsHsm" + postFix
@@ -721,8 +717,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                        "   HSM e1 resids (psf_used - PSFmodel)%s" % unitStr, shortName,
                                        self.config.analysis, flags=[col + "_flag"],
                                        goodKeys=["calib_psf_used"], qMin=-0.05, qMax=0.05,
-                                       labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
-                                       unitScale=self.unitScale,
+                                       labeller=StarGalaxyLabeller(), unitScale=self.unitScale,
                                        ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
                                                  **plotAllKwargs)
                     shortName = "e2ResidsHsm" + postFix
@@ -731,8 +726,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                        "   HSM e2 resids (psf_used - PSFmodel)%s" % unitStr, shortName,
                                        self.config.analysis, flags=[col + "_flag"],
                                        goodKeys=["calib_psf_used"], qMin=-0.05, qMax=0.05,
-                                       labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
-                                       unitScale=self.unitScale,
+                                       labeller=StarGalaxyLabeller(), unitScale=self.unitScale,
                                        ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
                                                  **plotAllKwargs)
 
@@ -743,8 +737,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                        shortName, self.config.analysis,
                                        flags=[col + "_flag", "ext_shapeHSM_HsmShapeRegauss_flag"],
                                        goodKeys=["calib_psf_used"], qMin=-0.05, qMax=0.05,
-                                       labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
-                                       unitScale=self.unitScale,
+                                       labeller=StarGalaxyLabeller(), unitScale=self.unitScale,
                                        ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
                                                  **plotAllKwargs)
 
@@ -755,28 +748,27 @@ class CoaddAnalysisTask(CmdLineTask):
                                        shortName, self.config.analysis,
                                        flags=[col + "_flag", "ext_shapeHSM_HsmShapeRegauss_flag"],
                                        goodKeys=["calib_psf_used"], qMin=-0.05, qMax=0.05,
-                                       labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
-                                       unitScale=self.unitScale,
+                                       labeller=StarGalaxyLabeller(), unitScale=self.unitScale,
                                        ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
                                                  **plotAllKwargs)
 
     def plotCentroidXY(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                        tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                       forcedStr=None, flagsCat=None, uberCalLabel=None):
+                       forcedStr=None, uberCalLabel=None):
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in ["base_SdssCentroid_x", "base_SdssCentroid_y"]:
             if col in catalog.schema:
                 shortName = col
                 self.log.info("shortName = {:s}".format(shortName))
                 self.AnalysisClass(catalog, catalog[col], "(%s)" % col, shortName, self.config.analysis,
-                                   labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                                   labeller=StarGalaxyLabeller(),
                                    ).plotFP(dataId, filenamer, self.log, enforcer=enforcer, camera=camera,
                                             ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
                                             zpLabel=zpLabel, forcedStr=forcedStr)
 
     def plotFootprint(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                       tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                      forcedStr=None, postFix="", flagsCat=None, plotRunStats=False, highlightList=None,
+                      forcedStr=None, postFix="", plotRunStats=False, highlightList=None,
                       uberCalLabel=None):
         enforcer = None
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
@@ -788,7 +780,7 @@ class CoaddAnalysisTask(CmdLineTask):
             self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
                                self.config.analysis, flags=["base_Footprint_nPix_flag"],
                                goodKeys=["calib_psf_used"], qMin=-100, qMax=2000,
-                               labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                               labeller=StarGalaxyLabeller(),
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
                                          plotRunStats=plotRunStats, highlightList=highlightList,
                                          **plotAllKwargs)
@@ -796,19 +788,19 @@ class CoaddAnalysisTask(CmdLineTask):
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
                            self.config.analysis, flags=["base_Footprint_nPix_flag"],
-                           qMin=0, qMax=3000, labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                           qMin=0, qMax=3000, labeller=StarGalaxyLabeller(),
                            ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
                                      plotRunStats=plotRunStats, **plotAllKwargs)
 
     def plotFootprintHist(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                           tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                          postFix="", flagsCat=None, uberCalLabel=None):
+                          postFix="", uberCalLabel=None):
         stats = None
         shortName = "footNpix"
         self.log.info("shortName = {:s}".format(shortName + "Hist"))
         self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
                            self.config.analysis, flags=["base_Footprint_nPix_flag"], qMin=0, qMax=3000,
-                           labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                           labeller=StarGalaxyLabeller(),
                            ).plotHistogram(filenamer, stats=stats, camera=camera, ccdList=ccdList,
                                            tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
                                            matchRadius=matchRadius, zpLabel=zpLabel,
@@ -816,8 +808,8 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def plotPsfFluxSnHists(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                            tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                           forcedStr=None, uberCalLabel=None, postFix="", flagsCat=None, logPlot=True,
-                           density=True, cumulative=-1):
+                           forcedStr=None, uberCalLabel=None, postFix="", logPlot=True, density=True,
+                           cumulative=-1):
         stats = None
         shortName = "psfInstFlux" if zpLabel == "raw" else "psfCalFlux"
         self.log.info("shortName = {:s}".format(shortName))
@@ -854,7 +846,7 @@ class CoaddAnalysisTask(CmdLineTask):
         self.AnalysisClass(catalog, psfFlux, "%s" % shortName, shortName,
                            self.config.analysis, flags=["base_PsfFlux_flag"], qMin=0,
                            qMax = int(min(99999, max(4.0*np.median(psfFlux), 0.25*np.max(psfFlux)))),
-                           labeller=AllLabeller(), flagsCat=flagsCat,
+                           labeller=AllLabeller(),
                            ).plotHistogram(filenamer, numBins="sqrt", stats=stats, camera=camera,
                                            ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
                                            hscRun=hscRun, zpLabel=zpLabel,
@@ -869,7 +861,7 @@ class CoaddAnalysisTask(CmdLineTask):
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(catalog, psfSn, "%s" % "S/N = " + shortName, shortName,
                            self.config.analysis, flags=["base_PsfFlux_flag"], qMin=0,
-                           qMax = 4*highSn, labeller=AllLabeller(), flagsCat=flagsCat,
+                           qMax = 4*highSn, labeller=AllLabeller(),
                            ).plotHistogram(filenamer, numBins="sqrt", stats=stats, camera=camera,
                                            ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
                                            hscRun=hscRun, zpLabel=zpLabel,
@@ -887,13 +879,13 @@ class CoaddAnalysisTask(CmdLineTask):
 
         self.AnalysisClass(catalog, psfSn, "%s" % "S/N = " + shortName, shortName,
                            self.config.analysis, flags=["base_PsfFlux_flag"], qMin=0,
-                           qMax = 1.25*highSn, labeller=AllLabeller(), flagsCat=flagsCat,
+                           qMax = 1.25*highSn, labeller=AllLabeller(),
                            ).plotSkyPosition(filenamer, dataName="all", **skyplotKwargs)
 
 
     def plotStarGal(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                     patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
-                    flagsCat=None, uberCalLabel=None):
+                    uberCalLabel=None):
         enforcer = None
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
@@ -902,13 +894,12 @@ class CoaddAnalysisTask(CmdLineTask):
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(catalog, deconvMomStarGal, "P(star) from deconvolved moments",
                            shortName, self.config.analysis, qMin=-0.1, qMax=1.39,
-                           labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                           labeller=StarGalaxyLabeller(),
                            ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
         shortName = "deconvMom"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(catalog, deconvMom, "Deconvolved moments", shortName,
                            self.config.analysis, qMin=-1.0, qMax=3.0, labeller=StarGalaxyLabeller(),
-                           flagsCat=flagsCat,
                            ).plotAll(dataId, filenamer, self.log,
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.2}}),
                                      **plotAllKwargs)
@@ -919,7 +910,7 @@ class CoaddAnalysisTask(CmdLineTask):
             self.AnalysisClass(catalog, catalog["ext_shapeHSM_HsmShapeRegauss_resolution"],
                                "Resolution Factor from HsmRegauss",
                                shortName, self.config.analysis, qMin=-0.1, qMax=1.15,
-                               labeller=StarGalaxyLabeller(), flagsCat=flagsCat,
+                               labeller=StarGalaxyLabeller(),
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
 
     def plotCompareUnforced(self, forced, unforced, filenamer, dataId, butler=None, camera=None, ccdList=None,
@@ -962,8 +953,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def plotOverlaps(self, overlaps, filenamer, dataId, butler=None, camera=None, ccdList=None,
                      tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
-                     zpLabel=None, forcedStr=None, postFix="", fluxToPlotList=None, flagsCat=None,
-                     uberCalLabel=None):
+                     zpLabel=None, forcedStr=None, postFix="", fluxToPlotList=None, uberCalLabel=None):
         if not fluxToPlotList:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
@@ -992,14 +982,14 @@ class CoaddAnalysisTask(CmdLineTask):
         self.AnalysisClass(overlaps,
                            lambda cat: cat["distance"]*(1.0*afwGeom.radians).asArcseconds()*self.unitScale,
                            "Distance (%s)" % unitStr, shortName, self.config.analysis, prefix="first_",
-                           qMin=-0.01, qMax=0.11, labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat,
-                           forcedMean=0.0, unitScale=self.unitScale,
+                           qMin=-0.01, qMax=0.11, labeller=OverlapsStarGalaxyLabeller(), forcedMean=0.0,
+                           unitScale=self.unitScale,
                            ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, doPrintMedian=True,
                                      **plotAllKwargs)
 
     def plotMatches(self, matches, filterName, filenamer, dataId, description="matches", butler=None,
                     camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None,
-                    matchRadiusUnitStr=None, zpLabel=None, forcedStr=None, flagsCat=None, uberCalLabel=None):
+                    matchRadiusUnitStr=None, zpLabel=None, forcedStr=None, uberCalLabel=None):
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.030*self.unitScale}}),
         fluxToPlotList = ["base_PsfFlux_instFlux", "base_CircularApertureFlux_12_0_instFlux"]
@@ -1030,7 +1020,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                    shortName,
                                    self.config.analysisMatches, prefix="src_", goodKeys=["calib_psf_used"],
                                    qMin=-0.15, qMax=0.1, labeller=MatchesStarGalaxyLabeller(),
-                                   flagsCat=flagsCat, unitScale=self.unitScale,
+                                   unitScale=self.unitScale,
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
             if "src_calib_photometry_used" in matches.schema:
                 shortName = description + "_" + fluxToPlotString(fluxName) + "_mag_calib_photometry_used"
@@ -1040,8 +1030,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                                                              unitStr),
                                    shortName, self.config.analysisMatches, prefix="src_",
                                    goodKeys=["calib_photometry_used"], qMin=-0.15, qMax=0.15,
-                                   labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
-                                   unitScale=self.unitScale,
+                                   labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale,
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
             shortName = description + "_" + fluxToPlotString(fluxName) + "_mag"
             self.log.info("shortName = {:s}".format(shortName))
@@ -1064,8 +1053,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                "Distance (%s) (calib_astrom_used)" % unitStr, shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
                                qMin=-0.01*qMatchScale, qMax=0.5*qMatchScale,
-                               labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
-                               unitScale=self.unitScale,
+                               labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale,
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, doPrintMedian=True,
                                          **plotAllKwargs)
         shortName = description + "_distance"
@@ -1074,8 +1062,7 @@ class CoaddAnalysisTask(CmdLineTask):
                            lambda cat: cat["distance"]*(1.0*afwGeom.radians).asArcseconds()*self.unitScale,
                            "Distance (%s)" % unitStr, shortName, self.config.analysisMatches, prefix="src_",
                            qMin=-0.05*qMatchScale, qMax=0.3*qMatchScale,
-                           labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat, forcedMean=0.0,
-                           unitScale=self.unitScale,
+                           labeller=MatchesStarGalaxyLabeller(), forcedMean=0.0, unitScale=self.unitScale,
                            ).plotAll(dataId, filenamer, self.log,
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
                                      doPrintMedian=True, **plotAllKwargs)
@@ -1090,7 +1077,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                shortName, self.config.analysisMatches, prefix="src_",
                                goodKeys=["calib_astrometry_used"], qMin=-0.2*qMatchScale,
                                qMax=0.2*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
-                               flagsCat=flagsCat, unitScale=self.unitScale,
+                               unitScale=self.unitScale,
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
         shortName = description + "_raCosDec"
         self.log.info("shortName = {:s}".format(shortName))
@@ -1100,7 +1087,7 @@ class CoaddAnalysisTask(CmdLineTask):
                            "$\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr, shortName,
                            self.config.analysisMatches, prefix="src_", qMin=-0.2*qMatchScale,
                            qMax=0.2*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
-                           flagsCat=flagsCat, unitScale=self.unitScale,
+                           unitScale=self.unitScale,
                            ).plotAll(dataId, filenamer, self.log,
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
                                      **plotAllKwargs)
@@ -1112,15 +1099,14 @@ class CoaddAnalysisTask(CmdLineTask):
                                "$\Delta$RA (%s) (calib_astrom_used)" % unitStr, shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
                                qMin=-0.25*qMatchScale, qMax=0.25*qMatchScale,
-                               labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
-                               unitScale=self.unitScale,
+                               labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale,
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
         shortName = description + "_ra"
         self.log.info("shortName = {:s}".format(shortName))
         self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra", unitScale=self.unitScale),
                            "$\Delta$RA (%s)" % unitStr, shortName, self.config.analysisMatches,
                            prefix="src_", qMin=-0.25*qMatchScale, qMax=0.25*qMatchScale,
-                           labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat, unitScale=self.unitScale,
+                           labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale,
                            ).plotAll(dataId, filenamer, self.log,
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
                                      **plotAllKwargs)
@@ -1132,8 +1118,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                "$\delta_{Dec}$ (%s) (calib_astrom_used)" % unitStr, shortName,
                                self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
                                qMin=-0.25*qMatchScale, qMax=0.25*qMatchScale,
-                               labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat,
-                               unitScale=self.unitScale,
+                               labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale,
                                ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
         shortName = description + "_dec"
         self.log.info("shortName = {:s}".format(shortName))
@@ -1141,7 +1126,7 @@ class CoaddAnalysisTask(CmdLineTask):
                            AstrometryDiff("src_coord_dec", "ref_coord_dec", unitScale=self.unitScale),
                            "$\delta_{Dec}$ (%s)" % unitStr, shortName, self.config.analysisMatches,
                            prefix="src_", qMin=-0.3*qMatchScale, qMax=0.3*qMatchScale,
-                           labeller=MatchesStarGalaxyLabeller(), flagsCat=flagsCat, unitScale=self.unitScale,
+                           labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale,
                            ).plotAll(dataId, filenamer, self.log,
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
                                      **plotAllKwargs)
@@ -1169,7 +1154,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def plotQuiver(self, catalog, filenamer, dataId=None, butler=None, camera=None, ccdList=None,
                    tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                   forcedStr=None, postFix="", flagsCat=None, uberCalLabel=None, scale=1):
+                   forcedStr=None, postFix="", uberCalLabel=None, scale=1):
         stats = None
         shortName = "quiver"
         self.log.info("shortName = {:s}".format(shortName))
@@ -1431,7 +1416,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
     def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                  patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None,
-                 forcedStr=None, fluxToPlotList=None, postFix="", flagsCat=None, highlightList=None,
+                 forcedStr=None, fluxToPlotList=None, postFix="", highlightList=None,
                  uberCalLabel=None):
         if not fluxToPlotList:
             fluxToPlotList = self.config.fluxToPlotList
@@ -1447,7 +1432,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                          shortName, self.config.analysis, prefix="first_", qMin=-0.05, qMax=0.05,
                          flags=[col + "_flag"], errFunc=MagDiffCompareErr(col + "_instFlux",
                                                                           unitScale=self.unitScale),
-                         labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat, unitScale=self.unitScale,
+                         labeller=OverlapsStarGalaxyLabeller(), unitScale=self.unitScale,
                          ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                    camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
                                    hscRun=hscRun, matchRadius=matchRadius,
@@ -1457,7 +1442,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
     def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                       tractInfo=None, patchList=None, hscRun=None, hscRun1=None, hscRun2=None,
                       matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None,
-                      flagsCat=None, highlightList=None, uberCalLabel=None):
+                      highlightList=None, uberCalLabel=None):
         unitStr = "milliPixels" if self.config.toMilli else "pixels"
         distEnforcer = None
         centroidStr1, centroidStr2 = "base_SdssCentroid", "base_SdssCentroid"
@@ -1493,8 +1478,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                          declination2="second_coord_dec", unitScale=self.unitScale),
                  "   Run Comparison: $\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr, shortName,
                  self.config.analysisMatches, prefix="first_", qMin=-0.2*matchRadius, qMax=0.2*matchRadius,
-                 labeller=OverlapsStarGalaxyLabeller(),
-                 flagsCat=flagsCat, unitScale=self.unitScale,
+                 labeller=OverlapsStarGalaxyLabeller(), unitScale=self.unitScale,
                  ).plotAll(dataId, filenamer, self.log, **plotAllKwargs)
         shortName = "diff_ra"
         self.log.info("shortName = {:s}".format(shortName))
@@ -1502,19 +1486,19 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                          declination2=None, unitScale=self.unitScale),
                  "Run Comparison: $\Delta$RA (%s)" % unitStr, shortName, self.config.analysisMatches,
                  prefix="first_", qMin=-0.25*matchRadius, qMax=0.25*matchRadius,
-                 labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat, unitScale=self.unitScale,
+                 labeller=OverlapsStarGalaxyLabeller(), unitScale=self.unitScale,
                  ).plotAll(dataId, filenamer, self.log, **plotAllKwargs)
         shortName = "diff_dec"
         self.log.info("shortName = {:s}".format(shortName))
         Analysis(catalog, AstrometryDiff("first_coord_dec", "second_coord_dec", unitScale=self.unitScale),
                  "$\delta_{Dec}$ (%s)" % unitStr, shortName, self.config.analysisMatches, prefix="first_",
                  qMin=-0.3*matchRadius, qMax=0.3*matchRadius, labeller=OverlapsStarGalaxyLabeller(),
-                 flagsCat=flagsCat, unitScale=self.unitScale,
+                 unitScale=self.unitScale,
                  ).plotAll(dataId, filenamer, self.log, **plotAllKwargs)
 
     def plotFootprint(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
                       tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
-                      zpLabel=None, forcedStr=None, postFix="", flagsCat=None, highlightList=None,
+                      zpLabel=None, forcedStr=None, postFix="", highlightList=None,
                       uberCalLabel=None):
         enforcer = None
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
@@ -1526,14 +1510,13 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         self.log.info("shortName = {:s}".format(shortName))
         Analysis(catalog, FootNpixDiffCompare(col), "  Run Comparison: Footprint nPix difference", shortName,
                  self.config.analysis, prefix="first_", qMin=-250, qMax=250, flags=[col + "_flag"],
-                 labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat,
+                 labeller=OverlapsStarGalaxyLabeller(),
                  ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
         shortName = "diff_footNpix_calib_psf_used"
         self.log.info("shortName = {:s}".format(shortName))
         Analysis(catalog, FootNpixDiffCompare(col), "     Run Comparison: Footprint nPix diff (psf_used)",
                  shortName, self.config.analysis, prefix="first_", goodKeys=["calib_psf_used"],
                  qMin=-150, qMax=150, flags=[col + "_flag"], labeller=OverlapsStarGalaxyLabeller(),
-                 flagsCat=flagsCat,
                  ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, highlightList=highlightList,
                            **plotAllKwargs)
 
@@ -1619,7 +1602,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
     def plotStarGal(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                     patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None,
-                    forcedStr=None, flagsCat=None, uberCalLabel=None):
+                    forcedStr=None, uberCalLabel=None):
         enforcer = None
         plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
@@ -1632,8 +1615,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             Analysis(catalog, PercentDiff(col),
                      "           Run Comparison: HsmRegauss Resolution (% diff)",
                      shortName, self.config.analysis, flags=[col + "_flag"], prefix="first_",
-                     qMin=-0.2, qMax=0.2,
-                     labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat,
+                     qMin=-0.2, qMax=0.2, labeller=OverlapsStarGalaxyLabeller(),
                      ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
         col = "ext_shapeHSM_HsmShapeRegauss_e1"
         if "first_" + col in catalog.schema:
@@ -1642,8 +1624,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             Analysis(catalog, PercentDiff(col),
                      "    Run Comparison: HsmRegauss e1 (% diff)",
                      shortName, self.config.analysis, flags=[col + "_flag"], prefix="first_",
-                     qMin=-0.2, qMax=0.2,
-                     labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat,
+                     qMin=-0.2, qMax=0.2, labeller=OverlapsStarGalaxyLabeller(),
                      ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
         col = "ext_shapeHSM_HsmShapeRegauss_e2"
         if "first_" + col in catalog.schema:
@@ -1652,8 +1633,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             Analysis(catalog, PercentDiff(col),
                      "    Run Comparison: HsmRegauss e2 (% diff)",
                      shortName, self.config.analysis, flags=[col + "_flag"], prefix="first_",
-                     qMin=-0.2, qMax=0.2,
-                     labeller=OverlapsStarGalaxyLabeller(), flagsCat=flagsCat,
+                     qMin=-0.2, qMax=0.2, labeller=OverlapsStarGalaxyLabeller(),
                      ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
 
     def plotApCorrs(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
