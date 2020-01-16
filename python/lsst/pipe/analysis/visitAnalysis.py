@@ -333,6 +333,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             aliasDictList = [self.config.flagsToAlias, ]
             if repoInfo.hscRun and self.config.srcSchemaMap is not None:
                 aliasDictList += [self.config.srcSchemaMap]
+            # Always highlight points with x-axis flag set (for cases where
+            # they do not get explicitly filtered out).
+            highlightList = [
+                (self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0, "turquoise"), ]
+
             if any(doPlot for doPlot in [self.config.doPlotFootprintNpix, self.config.doPlotQuiver,
                                          self.config.doPlotMags, self.config.doPlotSizes,
                                          self.config.doPlotCentroids, self.config.doPlotStarGalaxy,
@@ -419,13 +424,15 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                            filenamer(repoInfo.dataId, description="footNpix", style="hist"),
                                            repoInfo.dataId, **plotKwargs)
                     self.plotFootprint(catalog, filenamer, repoInfo.dataId, plotRunStats=False,
-                                       highlightList=[("parent", 0, "yellow"), ], **plotKwargs)
+                                       highlightList=highlightList + [("parent", 0, "yellow"), ],
+                                       **plotKwargs)
 
                 if self.config.doPlotQuiver:
                     self.plotQuiver(catalog,
                                     filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
                                     dataId=repoInfo.dataId, scale=2, **plotKwargs)
 
+                plotKwargs.update(dict(highlightList=highlightList))
                 # Create mag comparison plots using common ZP
                 if self.config.doPlotMags and not commonZpDone:
                     zpLabel = "common (%s)" % self.config.analysis.commonZp
@@ -457,18 +464,21 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if self.config.doPlotMatches:
                 matches = self.readSrcMatches(dataRefListTract, "src", repoInfo, aliasDictList=aliasDictList)
                 # Dict of all parameters common to plot* functions
+                matchHighlightList = [("src_" + self.config.analysis.fluxColumn.replace("_instFlux", "_flag"),
+                                       0, "turquoise"), ]
                 plotKwargs = dict(butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
-                                  hscRun=repoInfo.hscRun, zpLabel=self.zpLabel)
+                                  hscRun=repoInfo.hscRun, zpLabel=self.zpLabel,
+                                  highlightList=matchHighlightList)
                 self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId, **plotKwargs)
 
-            for cat in self.config.externalCatalogs:
-                if self.config.photoCatName not in cat:
-                    with andCatalog(cat):
-                        matches = self.matchCatalog(catalog, repoInfo.filterName,
-                                                    self.config.externalCatalogs[cat])
-                        self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
-                                         matchRadius=self.matchRadius,
-                                         matchRadiusUnitStr=self.matchRadiusUnitStr, **plotKwargs)
+                for cat in self.config.externalCatalogs:
+                    if self.config.photoCatName not in cat:
+                        with andCatalog(cat):
+                            matches = self.matchCatalog(catalog, repoInfo.filterName,
+                                                        self.config.externalCatalogs[cat])
+                            self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
+                                             matchRadius=self.matchRadius,
+                                             matchRadiusUnitStr=self.matchRadiusUnitStr, **plotKwargs)
 
     def readCatalogs(self, dataRefList, dataset, repoInfo, aliasDictList=None, fakeCat=None,
                      raFakesCol="raJ2000", decFakesCol="decJ2000"):
@@ -1095,9 +1105,13 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             tractInfo1 = repoInfo1.tractInfo if self.config.doApplyExternalPhotoCalib1 else None
             tractInfo2 = repoInfo2.tractInfo if self.config.doApplyExternalPhotoCalib2 else None
             tractInfo = tractInfo1 if (tractInfo1 or tractInfo2) else None
+            # Always highlight points with x-axis flag set (for cases where
+            # they do not get explicitly filtered out).
+            highlightList = [(self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0,
+                              "turquoise"), ]
             plotKwargs1 = dict(butler=repoInfo1.butler, camera=repoInfo1.camera, hscRun=hscRun,
                                matchRadius=self.matchRadius, matchRadiusUnitStr=self.matchRadiusUnitStr,
-                               zpLabel=self.zpLabel, tractInfo=tractInfo)
+                               zpLabel=self.zpLabel, tractInfo=tractInfo, highlightList=highlightList)
 
             if self.config.doPlotFootprintNpix:
                 self.plotFootprint(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,

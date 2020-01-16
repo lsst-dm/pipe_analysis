@@ -19,6 +19,11 @@ from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotTe
 __all__ = ["AnalysisConfig", "Analysis"]
 
 colorList = ["blue", "red", "green", "black", "yellow", "cyan", "magenta", ]
+# List of string replacement mappings to shorten text of labels
+strMappingList = [("merge_measurement", "ref"), ("src_", ""), ("base_", ""), ("Flux", ""), ("_flag", "Flag"),
+                  ("CircularAperture", "CircAp"), ("_12_0", "12"), ("modelfit_", ""), ("saturated", "sat"),
+                  ("ClassificationExtendedness", "ClassnExt"), ("PixelFlags", "Pix"), ("Center", "Cent"),
+                  ("_sat", "Sat"), ("slot_", "slot")]
 
 
 class AnalysisConfig(Config):
@@ -118,18 +123,27 @@ class Analysis(object):
             self.fluxColumn = "flux_psf_flux"
         self.mag = -2.5*np.log10(catalog[prefix + self.fluxColumn])
 
-        self.good = np.isfinite(self.quantity) & np.isfinite(self.mag) if self.quantity is not None else None
+        self.good = (np.isfinite(self.quantity) & np.isfinite(self.mag) if self.quantity is not None
+                     else np.isfinite(self.mag))
         if errFunc is not None:
             self.good &= np.isfinite(self.quantityError)
 
-        # Don't have flags in match and overlap catalogs (already removed in the latter)
-        if ("matches" not in self.shortName and "overlap" not in self.shortName and
-                "quiver" not in self.shortName and "inputCounts" not in self.shortName):
-            for ff in set(list(self.config.flags) + flags):
-                if prefix + ff in catalog.schema:
-                    self.good &= ~catalog[prefix + ff]
-        for kk in goodKeys:
-            self.good &= catalog[prefix + kk]
+        # Skip flag culling on the macth and overlap catalogs: we want to look
+        # at any/all matches found (objects with any notable flags set will be
+        # highlighted in the plot), and the latter are already culled.  Also,
+        # if sub-selecting a calib_*_used sample, we want to look at all objects
+        # used in the visit-level calibrations, so do not cull on the standard
+        # self.config.flags.  Rather, only cull on flags explicitly set in the
+        # flags variable for calib_*_used subsamples.
+        if ("matches" not in self.shortName and "overlap" not in self.shortName and "quiver" not in
+            self.shortName and "inputCounts" not in self.shortName):
+            flagsList = flags.copy()
+            flagsList = flagsList + list(self.config.flags) if self.calibUsedOnly == 0 else flagsList
+            for flagName in set(flagsList):
+                if prefix + flagName in catalog.schema:
+                    self.good &= ~catalog[prefix + flagName]
+        for flagName in goodKeys:
+            self.good &= catalog[prefix + flagName]
 
         # If the input catalog is a coadd, scale the S/N threshold by roughly
         # the sqrt of the number of input visits (actually the mean of the
@@ -397,6 +411,9 @@ class Analysis(object):
         royalBlue = "#4169E1"
         cornflowerBlue = "#6495ED"
 
+        # A call to axScatter.scatter() will have it's label included in the
+        # legend if its return is appended to dataPoints.  Use as sparingly
+        # as possible as long legend lists hide data.
         dataPoints = []
         runStats = []
         ptSize = None
@@ -441,36 +458,44 @@ class Analysis(object):
 
             if highlightList is not None:
                 # Make highlight as a background ring of larger size than the data point size
+                sizeFactor = 1.3
                 for flag, threshValue, color in highlightList:
-                    label = flag.replace("merge_measurement", "ref")
-                    highlightSelection = data.catalog[flag] > threshValue
-                    if name == "star" or name == "all":
-                        dataPoints.append(
-                            axScatter.scatter(data.mag[highlightSelection],
-                                              data.quantity[highlightSelection],
-                                              s=1.3*ptSize, marker="o", facecolors="none",
-                                              edgecolors=color, label=label))
-                    else:
-                        axScatter.scatter(data.mag[highlightSelection], data.quantity[highlightSelection],
-                                          s=1.3*ptSize, marker="o", facecolors="none", edgecolors=color)
-
-            # Plot data.  Appending in dataPoints for the sake of the legend
-            dataPoints.append(axScatter.scatter(data.mag, data.quantity, s=ptSize, marker="o",
-                                                facecolors=data.color, edgecolors="face",
-                                                label=name, alpha=alpha, linewidth=0.5))
+                    if flag in data.catalog.schema:
+                        highlightSelection = data.catalog[flag] > threshValue
+                        if sum(highlightSelection) > 0:
+                            label = flag
+                            for k, v in strMappingList:
+                                label = label.replace(k, v)
+                            if not any(label == lab.get_label() for lab in dataPoints):
+                                dataPoints.append(
+                                    axScatter.scatter(data.mag[highlightSelection],
+                                                      data.quantity[highlightSelection], s=sizeFactor*ptSize,
+                                                      marker="o", facecolors="none", edgecolors=color,
+                                                      linewidth=1.0/sizeFactor, label=label))
+                            else:
+                                axScatter.scatter(data.mag[highlightSelection],
+                                                  data.quantity[highlightSelection], s=sizeFactor*ptSize,
+                                                  marker="o", facecolors="none", edgecolors=color,
+                                                  linewidth=1.0/sizeFactor)
+                            sizeFactor *= 1.3
+            # Plot data.  Append the axScatter.scatter() calls to dataPoints if
+            # it's label is to be included in the legend.
+            axScatter.scatter(data.mag, data.quantity, s=ptSize, marker="o",
+                              facecolors=data.color, edgecolors="face",
+                              label=name, alpha=alpha, linewidth=0.5)
 
             if stats is not None and (name == "star" or name == "all") and "foot" not in filename:
                 labelStr = self.signalToNoiseStr if self.signalToNoiseStr else "stats"
-                dataPoints.append(axScatter.scatter(data.mag[stats[name].dataUsed],
-                                                    data.quantity[stats[name].dataUsed], s=ptSize,
-                                                    marker="o",  facecolors="none", edgecolors=data.color,
-                                                    label=labelStr, alpha=1, linewidth=0.5))
+                axScatter.scatter(data.mag[stats[name].dataUsed],
+                                  data.quantity[stats[name].dataUsed], s=ptSize,
+                                  marker="o",  facecolors="none", edgecolors=data.color,
+                                  label=labelStr, alpha=1, linewidth=0.5)
 
             if self.statsHigh is not None and (name == "star" or name == "all") and "foot" not in filename:
-                dataPoints.append(axScatter.scatter(data.mag[self.statsHigh[name].dataUsed],
-                                                    data.quantity[self.statsHigh[name].dataUsed], s=ptSize,
-                                                    marker="o", facecolors=data.color, edgecolors="face",
-                                                    label=self.signalToNoiseHighStr, alpha=1, linewidth=0.5))
+                axScatter.scatter(data.mag[self.statsHigh[name].dataUsed],
+                                  data.quantity[self.statsHigh[name].dataUsed], s=ptSize,
+                                  marker="o", facecolors=data.color, edgecolors="face",
+                                  label=self.signalToNoiseHighStr, alpha=1, linewidth=0.5)
 
             axHistx.hist(data.mag, bins=xBins, color=histColor, alpha=0.6, label=name)
             axHisty.hist(data.quantity, bins=yBins, color=histColor, alpha=0.6, orientation="horizontal",
@@ -512,9 +537,10 @@ class Analysis(object):
                                   matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
                                   unitScale=self.unitScale, doPrintMedian=doPrintMedian)
             dataPoints = dataPoints + runStats + [l1, l2]
-        axScatter.legend(handles=dataPoints, loc=1, fontsize=8)
-        axHistx.legend(fontsize=7, loc=2, edgecolor="w")
-        axHisty.legend(fontsize=7)
+        legendFontSize = 7 if len(dataPoints) < 4 else 6
+        axScatter.legend(handles=dataPoints, loc=1, fontsize=legendFontSize, labelspacing=0.3)
+        axHistx.legend(fontsize=7, loc=2, edgecolor="w", labelspacing=0.2)
+        axHisty.legend(fontsize=7, labelspacing=0.2)
         # Add an axis with units of FWHM = 2*sqrt(2*ln(2))*Trace for Trace plots
         if "race" in self.shortName and "iff" not in self.shortName:
             axHisty2 = axHisty.twinx()  # instantiate a second axes that shares the same x-axis
@@ -538,9 +564,9 @@ class Analysis(object):
         for name, data in self.data.items():
             if not (data.mag.any() and data.plot):
                 continue
-            yLoc -= 0.05
+            yLoc -= 0.045
             plt.text(xLoc, yLoc, "N$_{" + name[:4] + "}$ = " + str(len(data.mag)), ha="left", va="center",
-                     fontsize=8, transform=axScatter.transAxes, color=data.color)
+                     fontsize=7, transform=axScatter.transAxes, color=data.color)
 
         labelVisit(filename, plt, axScatter, 1.18, -0.11, color="green")
         if zpLabel is not None:
@@ -742,6 +768,7 @@ class Analysis(object):
             plotPatchOutline(axes, tractInfo, patchList)
 
         stats0 = None
+        lightShades = ["white", "lavenderblush", "floralwhite", "paleturquoise", ]
         for name, data in self.data.items():
             if name is not dataName:
                 continue
@@ -753,12 +780,22 @@ class Analysis(object):
             selection = data.selection & good
             if highlightList is not None:
                 # Make highlight as a background ring of larger size than the data point size
+                i = -1
+                sizeFactor = 1.4
                 for flag, threshValue, color in highlightList:
-                    label = flag.replace("merge_measurement", "ref")
-                    # Only a white "halo" really shows up here, so ignore color
-                    highlightSelection = (self.catalog[flag] > threshValue) & selection
-                    axes.scatter(ra[highlightSelection], dec[highlightSelection], s=1.4*ptSize,
-                                 marker="o", facecolors="none", edgecolors="white", label=label)
+                    if flag in data.catalog.schema:
+                        # Only a white "halo" really shows up here, so ignore color
+                        highlightSelection = (self.catalog[flag] > threshValue) & selection
+                        if sum(highlightSelection) > 0:
+                            i += 1
+                            label = flag
+                            for k, v in strMappingList:
+                                label = label.replace(k, v)
+                            axes.scatter(ra[highlightSelection], dec[highlightSelection],
+                                         s=sizeFactor*ptSize, marker="o", facecolors="none",
+                                         edgecolors=lightShades[i%len(lightShades)],
+                                         linewidth=1.0/sizeFactor, label=label)
+                            sizeFactor *= 1.4
 
             axes.scatter(ra[selection], dec[selection], s=ptSize, marker="o", lw=0, label=name,
                          c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax)
@@ -1214,8 +1251,8 @@ class Analysis(object):
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
                                  dataName=dataName, **skyPositionKwargs)
         if "galaxy" in self.data and (not any(ss in self.shortName for ss in
-                                              ["pStar", "race", "Xx", "Yy", "Resids", "psf_used",
-                                               "photometry_used", "gri", "riz", "izy", "z9y", "color_"])):
+                                              ["pStar", "race", "Xx", "Yy", "Resids", "gri", "riz", "izy",
+                                               "z9y", "color_"])):
             styleStr = "sky-gals"
             dataName = "galaxy"
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
