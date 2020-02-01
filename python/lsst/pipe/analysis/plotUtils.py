@@ -36,17 +36,23 @@ class AllLabeller(object):
 
 
 class StarGalaxyLabeller(object):
-    labels = {"star": 0, "galaxy": 1}
-    plot = ["star", "galaxy"]
+    # The "unknown" category is to accommodate failed star/gal classification
+    labels = {"star": 0, "galaxy": 1, "unknown": 9}
+    plot = ["star", "galaxy", "unknown"]
     _column = "base_ClassificationExtendedness_value"
 
     def __call__(self, catalog):
-        return np.where(catalog[self._column] < 0.5, 0, 1)
+        starGal = catalog[self._column]
+        starGal[np.isnan(starGal)] = 9
+        starGal[(starGal > 0.5) & (starGal < 1.5)] = 1
+        starGal[starGal <= 0.5] = 0
+        return starGal  # np.where(catalog[self._column] < 0.5, 0, 1)
 
 
 class OverlapsStarGalaxyLabeller(StarGalaxyLabeller):
-    labels = {"star": 0, "galaxy": 1, "split": 2}
-    plot = ["star", "galaxy", "split"]
+    # The "unknown" category is to accommodate failed star/gal classification
+    labels = {"star": 0, "galaxy": 1, "split": 2, "unknown": 9}
+    plot = ["star", "galaxy", "split", "unknown"]
 
     def __init__(self, first="first_", second="second_"):
         self._first = first
@@ -54,9 +60,15 @@ class OverlapsStarGalaxyLabeller(StarGalaxyLabeller):
 
     def __call__(self, catalog1, catalog2=None):
         catalog2 = catalog2 if catalog2 else catalog1
-        first = np.where(catalog1[self._first + self._column] < 0.5, 0, 1)
-        second = np.where(catalog2[self._second + self._column] < 0.5, 0, 1)
-        return np.where(first == second, first, 2)
+        starGal1 = catalog1[self._first + self._column]
+        starGal1[np.isnan(starGal1)] = 9
+        starGal1[(starGal1 > 0.5) & (starGal1 < 1.5)] = 1
+        starGal1[starGal1 <= 0.5] = 0
+        starGal2 = catalog2[self._second + self._column]
+        starGal2[np.isnan(starGal2)] = 9
+        starGal2[(starGal2 > 0.5) & (starGal2 < 1.5)] = 1
+        starGal2[starGal2 <= 0.5] = 0
+        return np.where(starGal1 == starGal2, starGal1, 2)
 
 
 class MatchesStarGalaxyLabeller(StarGalaxyLabeller):

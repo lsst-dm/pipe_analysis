@@ -18,7 +18,7 @@ from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotTe
 
 __all__ = ["AnalysisConfig", "Analysis"]
 
-colorList = ["blue", "red", "green", "black", "yellow", "cyan", "magenta", ]
+colorList = ["blue", "red", "green", "black", "yellow", "cyan", "magenta", "purple", "deeppink", "orange"]
 # List of string replacement mappings to shorten text of labels
 strMappingList = [("merge_measurement", "ref"), ("src_", ""), ("base_", ""), ("Flux", ""), ("_flag", "Flag"),
                   ("CircularAperture", "CircAp"), ("_12_0", "12"), ("modelfit_", ""), ("saturated", "sat"),
@@ -433,6 +433,8 @@ class Analysis(object):
             histColor = "red"
             if name == "split" or name == "notStar":
                 histColor = "green"
+            if name == "unknown":
+                histColor = "orange"
             if name == "star" or name == "all":
                 histColor = royalBlue
                 # shade the portion of the plot fainter that self.magThreshold
@@ -1262,6 +1264,13 @@ class Analysis(object):
                                                "z9y", "color_"])):
             styleStr = "sky-gals"
             dataName = "galaxy"
+            self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
+                                 dataName=dataName, **skyPositionKwargs)
+        if ("unknown" in self.data and stats["unknown"].num > 0
+            and (not any(ss in self.shortName for ss in ["pStar", "race", "Xx", "Yy", "Resids", "gri",
+                                                         "riz", "izy", "z9y", "color_"]))):
+            styleStr = "sky-unkn"
+            dataName = "unknown"
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
                                  dataName=dataName, **skyPositionKwargs)
         if "diff_" in self.shortName and stats["split"].num > 0:
