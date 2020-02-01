@@ -623,22 +623,42 @@ class CoaddAnalysisTask(CmdLineTask):
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in fluxToPlotList:
-            isForced = False if forcedStr is None else ("forced" in forcedStr)
-            if col + "_instFlux" in catalog.schema and not (isForced and "CircularAper" in col):
+            if col + "_instFlux" in catalog.schema:
                 shortName = "mag_" + col + postFix
                 self.log.info("shortName = {:s}".format(shortName))
-                self.AnalysisClass(catalog,
-                                   MagDiff(col + "_instFlux", "base_PsfFlux_instFlux",
-                                           unitScale=self.unitScale),
+                self.AnalysisClass(catalog, MagDiff(col + "_instFlux", "base_PsfFlux_instFlux",
+                                                    unitScale=self.unitScale),
                                    "Mag(%s) - PSFMag (%s)" % (fluxToPlotString(col), unitStr),
-                                   shortName, self.config.analysis,
-                                   flags=[col + "_flag"], labeller=StarGalaxyLabeller(),
+                                   shortName, self.config.analysis, labeller=StarGalaxyLabeller(),
                                    unitScale=self.unitScale,
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
                                              camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                                              patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
                                              zpLabel=zpLabel, forcedStr=forcedStr, uberCalLabel=uberCalLabel,
                                              highlightList=highlightList)
+                # Also make comparison plots for calib_psf_used only objects for
+                # the circular aperture plots.
+                if "CircularApertureFlux_12_0" in col:
+                    shortName = "mag_" + col + postFix + "_calib_psf_used"
+                    self.log.info("shortName = {:s}".format(shortName))
+                    calibHighlightList = highlightList.copy()
+                    flagColors = ["yellow", "greenyellow", "lime", "aquamarine", "orange",
+                                  "fuchsia", "gold", "lightseagreen"]
+                    for i, flagName in enumerate([col + "_flag", ] + list(self.config.analysis.flags)):
+                        if not any(flagName in highlight for highlight in calibHighlightList):
+                            calibHighlightList += [(flagName, 0, flagColors[i%len(flagColors)]), ]
+                    self.AnalysisClass(catalog, MagDiff(col + "_instFlux", "base_PsfFlux_instFlux",
+                                                        unitScale=self.unitScale),
+                                       ("%s - PSF (calib_psf_used) (%s)" % (fluxToPlotString(col), unitStr)),
+                                       shortName, self.config.analysis, goodKeys=["calib_psf_used"],
+                                       labeller=StarGalaxyLabeller(), unitScale=self.unitScale,
+                                       fluxColumn="base_CircularApertureFlux_12_0_instFlux",
+                                       ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
+                                                 butler=butler, camera=camera, ccdList=ccdList,
+                                                 tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
+                                                 matchRadius=matchRadius, zpLabel=zpLabel,
+                                                 forcedStr=forcedStr, uberCalLabel=uberCalLabel,
+                                                 highlightList=calibHighlightList)
 
     def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
                   patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None, postFix="",

@@ -87,7 +87,7 @@ class Analysis(object):
 
     def __init__(self, catalog, func, quantityName, shortName, config, qMin=-0.2, qMax=0.2,
                  prefix="", flags=[], goodKeys=[], errFunc=None, labeller=AllLabeller(),
-                 magThreshold=None, forcedMean=None, unitScale=1.0, compareCat=None):
+                 magThreshold=None, forcedMean=None, unitScale=1.0, compareCat=None, fluxColumn=None):
         self.catalog = catalog
         self.func = func
         self.quantityName = quantityName
@@ -117,10 +117,12 @@ class Analysis(object):
             self.quantity = None
 
         self.quantityError = errFunc(catalog) if errFunc is not None else None
-        if prefix + self.config.fluxColumn in catalog.schema:
-            self.fluxColumn = self.config.fluxColumn
-        else:
-            self.fluxColumn = "flux_psf_flux"
+        self.fluxColumn = fluxColumn
+        if not fluxColumn:
+            if prefix + self.config.fluxColumn in catalog.schema:
+                self.fluxColumn = self.config.fluxColumn
+            else:
+                self.fluxColumn = "flux_psf_flux"
         self.mag = -2.5*np.log10(catalog[prefix + self.fluxColumn])
 
         self.good = (np.isfinite(self.quantity) & np.isfinite(self.mag) if self.quantity is not None
@@ -439,13 +441,17 @@ class Analysis(object):
                 axScatter.axvspan(self.magThresholdHigh, axScatter.get_xlim()[1], facecolor="k",
                                   edgecolor="none", alpha=0.10)
                 # compute running stats (just for plotting)
-                if self.calibUsedOnly == 0 and plotRunStats:
+                if plotRunStats:
                     belowThresh = data.mag < magMax  # set lower if you want to truncate plotted running stats
                     numHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins))
-                    # Only plot running stats if there are a significant number of data points per bin.
-                    # Computed here as the mean number in the brightest 20% of the bins which we require
-                    # to be greater than 12.
-                    if numHist[0:max(1, int(0.2*len(xSyBins)))].mean() > 12:
+                    # Only plot running stats if there are a significant number
+                    # of data points per bin (as otherwise it looks too messy).
+                    # This is computed as the mean number in the brightest
+                    # 10-30% of the bins which we require to be greater than 12
+                    # (these magic numbers were selected based on trial and
+                    # error to be the best compromise between information and
+                    # messy clutter).
+                    if numHist[max(1, int(0.10*len(xSyBins))):max(2, int(0.3*len(xSyBins)))].mean() > 12:
                         syHist, dataHist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
                                                         weights=data.quantity[belowThresh])
                         syHist2, datahist = np.histogram(data.mag[belowThresh], bins=len(xSyBins),
@@ -454,7 +460,8 @@ class Analysis(object):
                         stdHist = np.sqrt(syHist2/numHist - meanHist*meanHist)
                         runStats.append(axScatter.errorbar((dataHist[1:] + dataHist[:-1])/2, meanHist,
                                         yerr=stdHist, fmt="o", mfc=cornflowerBlue, mec="k",
-                                        ms=2, ecolor="k", label="Running\nstats (all\nstars)"))
+                                        ms=2, ecolor="k", elinewidth=0.7,
+                                        label="Running\nstats (all\nstars)"))
 
             if highlightList is not None:
                 # Make highlight as a background ring of larger size than the data point size
