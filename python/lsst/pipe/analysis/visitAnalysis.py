@@ -10,7 +10,7 @@ np.seterr(all="ignore")  # noqa 402
 from collections import defaultdict
 
 from lsst.daf.persistence.butler import Butler
-from lsst.pex.config import Field
+from lsst.pex.config import Field, ChoiceField
 from lsst.pipe.base import ArgumentParser, TaskRunner, TaskError
 from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
@@ -166,11 +166,29 @@ class CcdAnalysis(Analysis):
 
 
 class VisitAnalysisConfig(CoaddAnalysisConfig):
-    doApplyUberCal = Field(dtype=bool, default=True, doc="Apply uberCal (jointcal/meas_mosaic) results " +
-                           "to input?  The instrumental flux corresponding to 0 magnitude, fluxMag0, " +
-                           "from SFM is applied if doApplyUberCal is False")
+    doApplyExternalPhotoCalib = Field(dtype=bool, default=True,
+                                      doc=("Whether to apply external photometric calibration (e.g. "
+                                           "fgcmcal/jointcal/meas_mosaic) via an `lsst.afw.image.PhotoCalib` "
+                                           "object?  If `True`, uses ``externalPhotoCalibName`` field to "
+                                           "determine which calibration to load.  If `False`, the "
+                                           "instrumental flux corresponding to 0th magnitude, fluxMag0, "
+                                           "from SFM is applied."))
+    externalPhotoCalibName = ChoiceField(dtype=str, default="jointcal",
+                                         allowed={"jointcal": "Use jointcal_photoCalib",
+                                                  "fgcm": "Use fgcm_photoCalib",
+                                                  "fgcm_tract": "Use fgcm_tract_photoCalib"},
+                                         doc=("Type of external `lsst.afw.image.PhotoCalib` if "
+                                              "``doApplyExternalPhotoCalib`` is `True`."))
+    doApplyExternalSkyWcs = Field(dtype=bool, default=True,
+                                  doc=("Whether to apply external astrometric calibration via an "
+                                       "`lsst.afw.geom.SkyWcs` object.  Uses ``externalSkyWcsName`` field "
+                                       "to determine which calibration to load."))
+    externalSkyWcsName = ChoiceField(dtype=str, default="jointcal",
+                                     allowed={"jointcal": "Use jointcal_wcs"},
+                                     doc=("Type of external `lsst.afw.geom.SkyWcs` if "
+                                          "``doApplyExternalSkyWcs`` is `True`."))
     useMeasMosaic = Field(dtype=bool, default=False, doc="Use meas_mosaic's applyMosaicResultsExposure " +
-                          "to apply meas_mosaic ubercal results to catalog (i.e. as opposed to using " +
+                          "to apply meas_mosaic calibration results to catalog (i.e. as opposed to using " +
                           "the photoCalib object)?")
 
     hasFakes = Field(dtype=bool, default=False, doc="Include the analysis of the added fake sources?")
@@ -255,22 +273,60 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if not dataRefListTract:
                 self.log.info("No data found for tract: {:d}".format(tractList[i]))
                 continue
-            repoInfo = getRepoInfo(dataRefListTract[0], doApplyUberCal=self.config.doApplyUberCal)
+            repoInfo = getRepoInfo(dataRefListTract[0],
+                                   doApplyExternalPhotoCalib=self.config.doApplyExternalPhotoCalib,
+                                   externalPhotoCalibName=self.config.externalPhotoCalibName,
+                                   doApplyExternalSkyWcs=self.config.doApplyExternalSkyWcs,
+                                   externalSkyWcsName=self.config.externalSkyWcsName)
             self.log.info("dataId: {!s:s}".format(repoInfo.dataId))
-            ccdListPerTract = getDataExistsRefList(dataRefListTract, repoInfo.dataset)
-            if not ccdListPerTract and self.config.doApplyUberCal:
-                # Check for wcs for compatibility with old dataset naming
-                ccdListPerTract = getDataExistsRefList(dataRefListTract, "wcs")
-                if ccdListPerTract:
-                    self.log.info("Old meas_mosaic dataset naming: wcs (new name is jointcal_wcs)")
-                    repoInfo.dataset = "wcs"
-            self.log.info("Exising data for tract {:d}: ccdListPerTract = {}".
-                          format(tractList[i], ccdListPerTract))
+            ccdListPerTract = getDataExistsRefList(dataRefListTract, repoInfo.catDataset)
             if not ccdListPerTract:
-                if self.config.doApplyUberCal:
-                    self.log.fatal("No data found for {:s} datset...are you sure you ran meas_mosaic? "
-                                   "If not, run with --config doApplyUberCal=False".format(repoInfo.dataset))
-                raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo.dataset))
+                raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo.catDataset))
+            if self.config.doApplyExternalPhotoCalib:
+                ccdPhotoCalibListPerTract = getDataExistsRefList(dataRefListTract, repoInfo.photoCalibDataset)
+                if not ccdPhotoCalibListPerTract:
+                    self.log.fatal(f"No data found for {repoInfo.photoCalibDataset} dataset...are you sure "
+                                   "you ran the external photometric calibration?  If not, run with "
+                                   "--config doApplyExternalPhotoCalib=False")
+            if self.config.doApplyExternalSkyWcs:
+                # Check for wcs for compatibility with old dataset naming
+                ccdSkyWcsListPerTract = getDataExistsRefList(dataRefListTract, repoInfo.skyWcsDataset)
+                if not ccdSkyWcsListPerTract:
+                    ccdSkyWcsListPerTract = getDataExistsRefList(dataRefListTract, "wcs")
+                    if ccdSkyWcsListPerTract:
+                        repoInfo.skyWcsDataset = "wcs"
+                        self.log.info("Old meas_mosaic dataset naming: wcs (new name is jointcal_wcs)")
+                    else:
+                        self.log.fatal(f"No data found for {repoInfo.skyWcsDataset} dataset...are you sure "
+                                       "you ran the external astrometric calibration?  If not, run with "
+                                       "--config doApplyExternalSkyWcs=False")
+            self.log.info(f"Existing {repoInfo.catDataset} data for tract {tractList[i]}: "
+                          f"ccdListPerTract = \n{ccdListPerTract}")
+            if self.config.doApplyExternalPhotoCalib:
+                self.log.info(f"Existing {repoInfo.photoCalibDataset} data for tract {tractList[i]}: "
+                              f"ccdPhotoCalibListPerTract = \n{ccdPhotoCalibListPerTract}")
+            if self.config.doApplyExternalSkyWcs:
+                self.log.info(f"Existing {repoInfo.skyWcsDataset} data for tract {tractList[i]}: "
+                              f"ccdSkyWcsListPerTract = \n{ccdSkyWcsListPerTract}")
+            if self.config.doApplyExternalPhotoCalib and not ccdPhotoCalibListPerTract:
+                raise RuntimeError(f"No {repoInfo.photoCalibDataset} datasets were found...are you sure "
+                                   "you ran the specified external photometric calibration?  If no "
+                                   "photometric external calibrations are to be applied, run with "
+                                   "--config doApplyExternalPhotoCalib=False")
+            if self.config.doApplyExternalSkyWcs and not ccdSkyWcsListPerTract:
+                raise RuntimeError(f"No {repoInfo.skyWcsDataset} datasets were found...are you sure "
+                                   "you ran the specified external astrometric calibration?  If no "
+                                   "astrometric external calibrations are to be applied, run with "
+                                   "--config doApplyExternalSkywcs=False")
+            if self.config.doApplyExternalPhotoCalib:
+                if set(ccdListPerTract) != set(ccdPhotoCalibListPerTract):
+                    self.log.warn(f"Did not find {repoInfo.photoCalibDataset} external calibrations for "
+                                  f"all dataIds that do have {repoInfo.catDataset} catalogs.")
+            if self.config.doApplyExternalPhotoCalib:
+                if set(ccdListPerTract) != set(ccdSkyWcsListPerTract):
+                    self.log.warn(f"Did not find {repoInfo.skyWcsDataset} external calibrations for "
+                                  f"all dataIds that do have {epoInfo.catDataset} catalogs.")
+
             subdir = "ccd-" + str(ccdListPerTract[0]) if len(ccdListPerTract) == 1 else subdir
             filenamer = Filenamer(repoInfo.butler, "plotVisit", repoInfo.dataId, subdir=subdir)
             # Create list of alias mappings for differing schema naming conventions (if any)
@@ -345,11 +401,6 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, plotInfoDict,
                                           areaDict, repoInfo)
 
-                try:
-                    self.zpLabel = self.zpLabel + " " + self.catLabel
-                except Exception:
-                    pass
-
                 # Dict of all parameters common to plot* functions
                 plotKwargs = dict(butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
                                   hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo)
@@ -378,18 +429,14 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 # Create mag comparison plots using common ZP
                 if self.config.doPlotMags and not commonZpDone:
                     zpLabel = "common (%s)" % self.config.analysis.commonZp
-                    try:
-                        zpLabel += " " + self.catLabel
-                    except Exception:
-                        pass
                     plotKwargs.update(dict(zpLabel=zpLabel))
                     self.plotMags(commonZpCat, filenamer, repoInfo.dataId,
                                   fluxToPlotList=["base_GaussianFlux", "base_CircularApertureFlux_12_0"],
                                   postFix="_commonZp", **plotKwargs)
                     commonZpDone = True
                 # Now calibrate the source catalg to either the instrumental flux corresponding
-                # to 0 magnitude, fluxMag0, from SFM or the uber-calibration solution (from
-                # jointcal or meas_mosaic) for remainder of plots.
+                # to 0th magnitude, fluxMag0, from SFM or the external-calibration solution
+                # (from jointcal, fgcm, or meas_mosaic) for remainder of plots.
                 plotKwargs.update(dict(zpLabel=self.zpLabel))
                 if self.config.doPlotMags:
                     self.plotMags(catalog, filenamer, repoInfo.dataId, **plotKwargs)
@@ -433,9 +480,18 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
         Also added to the catalog are columns with the focal plane coordinate (if not already
         present) and the number of pixels in the object's footprint.  Finally, the catalogs
-        are calibrated according to the self.config.doApplyUberCal config parameter:
-        - uber-calibration (jointcal or meas_mosaic) wcs and flux calibrations if True
-        - fluxMag0, the instrumental flux corresponding to 0 magnitude, from SFM if False
+        are calibrated according to the self.config.doApplyExternalPhotoCalib/SkyWcs config
+        parameters:
+
+        self.config.doApplyExternalPhotoCalib:
+        - external photometric flux calibration (fgcmcal, jointcal, or meas_mosaic)
+           if True
+        - fluxMag0, the instrumental flux corresponding to 0th magnitude, from SFM
+          if False
+
+        self.config.doApplyExternalSkyWcs:
+        - external astrometric calibration (jointcal or meas_mosaic) if True
+        - no change to SFM astrometric calibration if False
 
         Parameters
         ----------
@@ -544,20 +600,29 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             commonZpCat = catalog.copy(True)
             commonZpCat = calibrateSourceCatalog(commonZpCat, self.config.analysis.commonZp)
             commonZpCatList.append(commonZpCat)
-            if self.config.doApplyUberCal:
+            if self.config.doApplyExternalPhotoCalib:
                 if repoInfo.hscRun:
-                    if not dataRef.datasetExists("wcs_hsc") or not dataRef.datasetExists("fcr_hsc_md"):
+                    if not dataRef.datasetExists("fcr_hsc_md") or not dataRef.datasetExists("wcs_hsc"):
                         continue
                 else:
                     # Check for both jointcal_wcs and wcs for compatibility with old datasets
-                    if (not (dataRef.datasetExists("jointcal_wcs") or dataRef.datasetExists("wcs")) or not
-                       (dataRef.datasetExists("jointcal_photoCalib") or dataRef.datasetExists("fcr_md"))):
+                    if not (dataRef.datasetExists(repoInfo.photoCalibDataset)
+                            or dataRef.datasetExists("fcr_md")):
+                        continue
+            if self.config.doApplyExternalSkyWcs:
+                if repoInfo.hscRun:
+                    if not dataRef.datasetExists("fcr_hsc_md") or not dataRef.datasetExists("wcs_hsc"):
+                        continue
+                else:
+                    # Check for both jointcal_wcs and wcs for compatibility with old datasets
+                    if not (dataRef.datasetExists(repoInfo.skyWcsDataset)
+                            or dataRef.datasetExists("wcs")):
                         continue
             fluxMag0 = None
-            if not self.config.doApplyUberCal:
+            if not self.config.doApplyExternalPhotoCalib:
                 calexp = repoInfo.butler.get("calexp", dataRef.dataId) if not calexp else calexp
                 fluxMag0 = calexp.getPhotoCalib().getInstFluxAtZeroMagnitude()
-            catalog = self.calibrateCatalogs(dataRef, catalog, fluxMag0, repoInfo.dataset)
+            catalog = self.calibrateCatalogs(dataRef, catalog, fluxMag0, repoInfo)
             catList.append(catalog)
 
         if not catList:
@@ -574,14 +639,23 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
                 continue
-            if self.config.doApplyUberCal:
+            if self.config.doApplyExternalPhotoCalib:
                 if repoInfo.hscRun:
-                    if not dataRef.datasetExists("wcs_hsc") or not dataRef.datasetExists("fcr_hsc_md"):
+                    if not dataRef.datasetExists("fcr_hsc_md") or not dataRef.datasetExists("wcs_hsc"):
                         continue
                 else:
                     # Check for both jointcal_wcs and wcs for compatibility with old datasets
-                    if (not (dataRef.datasetExists("jointcal_wcs") or dataRef.datasetExists("wcs")) or not
-                       (dataRef.datasetExists("jointcal_photoCalib") or dataRef.datasetExists("fcr_md"))):
+                    if (not (dataRef.datasetExists(repoInfo.photoCalibDataset)
+                             or dataRef.datasetExists("fcr_md"))):
+                        continue
+            if self.config.doApplyExternalSkyWcs:
+                if repoInfo.hscRun:
+                    if not dataRef.datasetExists("fcr_hsc_md") or not dataRef.datasetExists("wcs_hsc"):
+                        continue
+                else:
+                    # Check for both jointcal_wcs and wcs for compatibility with old datasets
+                    if not (dataRef.datasetExists(repoInfo.skyWcsDataset)
+                            or dataRef.datasetExists("wcs")):
                         continue
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
@@ -590,10 +664,10 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if aliasDictList:
                 catalog = setAliasMaps(catalog, aliasDictList)
             fluxMag0 = None
-            if not self.config.doApplyUberCal:
+            if not self.config.doApplyExternalPhotoCalib:
                 calexp = repoInfo.butler.get("calexp", dataRef.dataId)
                 fluxMag0 = calexp.getPhotoCalib().getInstFluxAtZeroMagnitude()
-            catalog = self.calibrateCatalogs(dataRef, catalog, fluxMag0, repoInfo.dataset)
+            catalog = self.calibrateCatalogs(dataRef, catalog, fluxMag0, repoInfo)
             packedMatches = repoInfo.butler.get(dataset + "Match", dataRef.dataId)
             # The reference object loader grows the bbox by the config parameter pixelMargin.  This
             # is set to 50 by default but is not reflected by the radius parameter set in the
@@ -629,8 +703,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             matchMeta = repoInfo.butler.get(dataset, dataRef.dataId,
                                             flags=afwTable.SOURCE_IO_NO_FOOTPRINTS).getTable().getMetadata()
             catalog = matchesToCatalog(matches, matchMeta)
-            if self.config.doApplyUberCal:
-                # Update "distance" between reference and source matches based on uber-calibration positions
+            if self.config.doApplyExternalSkyWcs:
+                # Update "distance" between reference and source matches based
+                # on external-calibration positions.
                 angularDist = AngularDistance("ref_coord_ra", "src_coord_ra",
                                               "ref_coord_dec", "src_coord_dec")
                 catalog["distance"] = angularDist(catalog)
@@ -659,7 +734,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
         return concatenateCatalogs(catList)
 
-    def calibrateCatalogs(self, dataRef, catalog, fluxMag0, photoCalibDataset):
+    def calibrateCatalogs(self, dataRef, catalog, fluxMag0, repoInfo):
         """Determine and apply appropriate flux calibration to the catalog.
 
         Parameters
@@ -668,32 +743,36 @@ class VisitAnalysisTask(CoaddAnalysisTask):
            If applying meas_mosaic calibrations, a dataRef is needed for call to
            meas_mosaic's applyMosaicResultsCatalog() in in utils'
            calibrateSourceCatalogMosaic().  It is also needed to distinguish
-           between jointcal vs. meas_mosaic uberCal when calibrating through
-           a PhotoCalib object.
+           between jointcal vs. meas_mosaic when calibrating through
+           a `lsst.afw.image.PhotoCalib` object.
         catalog : `lsst.afw.table.source.source.SourceCatalog`
            The catalog to which the calibration is applied in place.
         fluxMag0 : `float`
            The instrumental flux corresponding to 0 magnitude from Single Frame
            Measurement for the catalog.
-        photoCalibDataset : `str`
-           Name of the dataSet to be used for the uber calibration (e.g.
-           "jointcal_photoCalib" or "fcr_md").
+        repoInfo : `lsst.pipe.base.Struct`
+           A struct containing relevant information about the repository under
+           study.  Elements used here include the dataset names for any external
+           calibrations to be applied.
         """
         self.zp = 0.0
         try:
             self.zpLabel = self.zpLabel
         except Exception:
             self.zpLabel = None
-        if self.config.doApplyUberCal:
-            if "jointcal" in photoCalibDataset and not self.config.useMeasMosaic:
+
+        if self.config.doApplyExternalPhotoCalib:
+            if not self.config.useMeasMosaic:
                 # i.e. the processing was post-photoCalib output generation
                 # AND you want the photoCalib flux object used for the
                 # calibration (as opposed to meas_mosaic's fcr object).
                 if not self.zpLabel:
-                    zpStr = "MMphotoCalib" if dataRef.datasetExists("fcr_md") else "JOINTCAL"
-                    self.log.info("Applying {:} photoCalib calibration to catalog".format(zpStr))
-                self.zpLabel = "MMphotoCalib" if dataRef.datasetExists("fcr_md") else "JOINTCAL"
-                calibrated = calibrateSourceCatalogPhotoCalib(dataRef, catalog, zp=self.zp)
+                    zpStr = ("MMphotoCalib" if dataRef.datasetExists("fcr_md")
+                             else self.config.externalPhotoCalibName.upper())
+                    self.log.info(f"Applying {zpStr} photoCalib calibration to catalog")
+                    self.zpLabel = zpStr
+                calibrated = calibrateSourceCatalogPhotoCalib(dataRef, catalog, repoInfo.photoCalibDataset,
+                                                              zp=self.zp)
             else:
                 # If here, the data were processed pre-photoCalib output
                 # generation, so must use old method OR old method was
@@ -701,9 +780,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 try:
                     import lsst.meas.mosaic  # noqa : F401
                 except ImportError:
-                    raise ValueError("Cannot apply uber calibrations because meas_mosaic "
-                                     "could not be imported."
-                                     "\nEither setup meas_mosaic or run with --config doApplyUberCal=False")
+                    raise ValueError("Cannot apply calibrations because meas_mosaic could not "
+                                     "be imported. \nEither setup meas_mosaic or run with "
+                                     "--config doApplyExternalPhotoCalib=False doApplyExternalSkyWcs=False")
                 if not self.zpLabel:
                     self.log.info("Applying meas_mosaic calibration to catalog")
                 self.zpLabel = "MEAS_MOSAIC"
@@ -716,19 +795,68 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             self.zpLabel = "FLUXMAG0"
             calibrated = calibrateSourceCatalog(catalog, self.zp)
 
+        if self.config.doApplyExternalSkyWcs:
+            wcs = dataRef.get(repoInfo.skyWcsDataset)
+            for record in catalog:
+                record.updateCoord(wcs)
+            if "wcs" not in self.zpLabel:
+                self.zpLabel += "\nwcs: " + self.config.externalSkyWcsName.upper()
+
         return calibrated
 
 
 class CompareVisitAnalysisConfig(VisitAnalysisConfig):
-    doApplyUberCal1 = Field(dtype=bool, default=True, doc="Apply uberCal (jointcal/meas_mosaic) results " +
-                            "to input1? FLUXMAG0 zeropoint from SFM is applied if doApplyUberCal is False")
+    doApplyExternalPhotoCalib1 = Field(dtype=bool, default=True,
+                                       doc=("Whether to apply external photometric calibration (e.g. "
+                                            "fgcmcal/jointcal/meas_mosaic) via an "
+                                            "`lsst.afw.image.PhotoCalib` object to input1.  If `True`, "
+                                            "uses ``externalPhotoCalibName1`` field to determine which "
+                                            "calibration to load.  If `False`, the instrumental flux "
+                                            "corresponding to 0th magnitude, fluxMag0, from SFM is "
+                                            "applied."))
+    externalPhotoCalibName1 = ChoiceField(dtype=str, default="jointcal",
+                                          allowed={"jointcal": "Use jointcal_photoCalib",
+                                                   "fgcm": "Use fgcm_photoCalib",
+                                                   "fgcm_tract": "Use fgcm_tract_photoCalib"},
+                                          doc=("Type of external `lsst.afw.image.PhotoCalib` to apply to "
+                                               "input1 if ``doApplyExternalPhotoCalib1`` is `True`."))
+    doApplyExternalSkyWcs1 = Field(dtype=bool, default=True,
+                                   doc=("Whether to apply external astrometric calibration via an "
+                                        "`lsst.afw.geom.SkyWcs` object to input1.  Uses "
+                                        "``externalSkyWcsName1`` field to determine which calibration "
+                                        "to load."))
+    externalSkyWcsName1 = ChoiceField(dtype=str, default="jointcal",
+                                      allowed={"jointcal": "Use jointcal_wcs"},
+                                      doc=("Type of external `lsst.afw.geom.SkyWcs` to apply to input1 if "
+                                           "``doApplyExternalSkyWcs1`` is ``True``."))
+    doApplyExternalPhotoCalib2 = Field(dtype=bool, default=True,
+                                       doc=("Whether to apply external photometric calibration (e.g. "
+                                            "fgcmcal/jointcal/meas_mosaic) via an "
+                                            "`lsst.afw.image.PhotoCalib` object to input2.  If `True`, "
+                                            "uses ``externalPhotoCalibName2`` field to determine which "
+                                            "calibration to load.  If `False`, the instrumental flux "
+                                            "corresponding to 0th magnitude, fluxMag0, from SFM is "
+                                            "applied."))
+    externalPhotoCalibName2 = ChoiceField(dtype=str, default="jointcal",
+                                          allowed={"jointcal": "Use jointcal_photoCalib",
+                                                   "fgcm": "Use fgcm_photoCalib",
+                                                   "fgcm_tract": "Use fgcm_tract_photoCalib"},
+                                          doc=("Type of external `lsst.afw.image.PhotoCalib` to apply to "
+                                               "input2 if ``doApplyExternalPhotoCalib2`` is `True`."))
+    doApplyExternalSkyWcs2 = Field(dtype=bool, default=True,
+                                   doc=("Whether to apply external astrometric calibration via an "
+                                        "`lsst.afw.geom.SkyWcs` object to input2.  Uses "
+                                        "``externalSkyWcsName2`` field to determine which calibration "
+                                        "to load."))
+    externalSkyWcsName2 = ChoiceField(dtype=str, default="jointcal",
+                                      allowed={"jointcal": "Use jointcal_wcs"},
+                                      doc=("Type of external `lsst.afw.geom.SkyWcs` to apply to input2 if "
+                                           "``doApplyExternalSkyWcs2`` is `True`."))
     useMeasMosaic1 = Field(dtype=bool, default=False, doc="Use meas_mosaic's applyMosaicResultsExposure " +
-                           "to apply meas_mosaic ubercal results to input1 (i.e. as opposed to using " +
+                           "to apply meas_mosaic calibration results to input1 (i.e. as opposed to using " +
                            "the photoCalib object)?")
-    doApplyUberCal2 = Field(dtype=bool, default=True, doc="Apply uberCal (jointcal/meas_mosaic) results " +
-                            "to input2? FLUXMAG0 zeropoint from SFM is applied if doApplyUberCal is False")
     useMeasMosaic2 = Field(dtype=bool, default=False, doc="Use meas_mosaic's applyMosaicResultsExposure " +
-                           "to apply meas_mosaic ubercal results to input2 (i.e. as opposed to using " +
+                           "to apply meas_mosaic calibration results to input2 (i.e. as opposed to using " +
                            "the photoCalib object)?")
 
     def setDefaults(self):
@@ -742,11 +870,20 @@ class CompareVisitAnalysisConfig(VisitAnalysisConfig):
 
     def validate(self):
         super(CoaddAnalysisConfig, self).validate()
-        if not self.doApplyUberCal and (self.doApplyUberCal1 and self.doApplyUberCal2):
-            raise ValueError("doApplyUberCal is set to False, but doApplyUberCal1 and doApplyUberCal2, "
-                             "the appropriate settings for the compareVisitAnalysis.py scirpt, are both "
-                             "True, so uber-calibrations would be applied.  Try running without setting "
-                             "doApplyUberCal (which is only appropriate for the visitAnalysis.py script).")
+        if not self.doApplyExternalPhotoCalib and (self.doApplyExternalPhotoCalib1
+                                                   and self.doApplyExternalPhotoCalib2):
+            raise ValueError("doApplyExternalPhotoCalib is set to False, but doApplyExternalPhotoCalib1 and "
+                             "doApplyExternalPhotoCalib2, the appropriate settings for the "
+                             "compareVisitAnalysis.py scirpt, are both True, so external calibrations would "
+                             "be applied.  Try running without setting doApplyExternalPhotoCalib (which is "
+                             "only appropriate for the visitAnalysis.py script).")
+        if (not self.doApplyExternalSkyWcs
+            and (self.doApplyExternalSkyWcs1 and self.doApplyExternalSkyWcs2)):
+            raise ValueError("doApplyExternalSkyWcs is set to False, but doApplyExternalSkyWcs1 and "
+                             "doApplyExternalSkyWcs2, the appropriate settings for the "
+                             "compareVisitAnalysis.py scirpt, are both True, so external calibrations would "
+                             "be applied.  Try running without setting doApplyExternalSkyWcs (which is "
+                             "only appropriate for the visitAnalysis.py script).")
         if not self.useMeasMosaic and (self.useMeasMosaic1 and self.useMeasMosaic2):
             raise ValueError("useMeasMosaic is set to False, but useMeasMosaic1 and useMeasMosaic2, "
                              "the appropriate settings for the compareVisitAnalysis.py scirpt, are both "
@@ -835,38 +972,78 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             # plotting functions (for labelling the camera and plotting ccd outlines) in addition to
             # determining if the data were processed with the HSC stack.  We assume all processing in a
             # given rerun is self-consistent, so only need one valid dataId per comparison rerun.
-            repoInfo1 = getRepoInfo(dataRefListTract1[0], doApplyUberCal=self.config.doApplyUberCal1)
-            repoInfo2 = getRepoInfo(dataRefListTract2[0], doApplyUberCal=self.config.doApplyUberCal2)
+            repoInfo1 = getRepoInfo(dataRefListTract1[0],
+                                    doApplyExternalPhotoCalib=self.config.doApplyExternalPhotoCalib1,
+                                    externalPhotoCalibName=self.config.externalPhotoCalibName1,
+                                    doApplyExternalSkyWcs=self.config.doApplyExternalSkyWcs1,
+                                    externalSkyWcsName=self.config.externalSkyWcsName1)
+            repoInfo2 = getRepoInfo(dataRefListTract2[0],
+                                    doApplyExternalPhotoCalib=self.config.doApplyExternalPhotoCalib2,
+                                    externalPhotoCalibName=self.config.externalPhotoCalibName2,
+                                    doApplyExternalSkyWcs=self.config.doApplyExternalSkyWcs2,
+                                    externalSkyWcsName=self.config.externalSkyWcsName2)
 
             fullCameraCcdList1 = getCcdNameRefList(dataRefListTract1)
 
-            ccdListPerTract1 = getDataExistsRefList(dataRefListTract1, repoInfo1.dataset)
-            ccdListPerTract2 = getDataExistsRefList(dataRefListTract2, repoInfo2.dataset)
+            ccdListPerTract1 = getDataExistsRefList(dataRefListTract1, repoInfo1.catDataset)
+            ccdListPerTract2 = getDataExistsRefList(dataRefListTract2, repoInfo2.catDataset)
             if not ccdListPerTract1:
-                ccdListPerTract1 = getDataExistsRefList(dataRefListTract1, "wcs")
-                if ccdListPerTract1:
-                    self.log.info("Old meas_mosaic dataset naming for rerun1: wcs (new name is jointcal_wcs)")
-                    repoInfo1.dataset = "wcs"
+                raise RuntimeError(f"No datasets found for datasetType = {repoInfo1.catDataset}")
             if not ccdListPerTract2:
-                ccdListPerTract2 = getDataExistsRefList(dataRefListTract2, "wcs")
-                if ccdListPerTract2:
-                    self.log.info("Old meas_mosaic dataset naming for rerun2: wcs (new name is jointcal_wcs)")
-                    repoInfo2.dataset = "wcs"
-            if not ccdListPerTract1:
-                if self.config.doApplyUberCal1 and "wcs" in repoInfo1.dataset:
-                    self.log.fatal("No data found for {:s} dataset...are you sure you ran meas_mosaic? If "
-                                   "not, run with --config doApplyUberCal1=False".format(repoInfo1.dataset))
-                raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo1.dataset))
-            if not ccdListPerTract2:
-                if self.config.doApplyUberCal2 and "wcs" in repoInfo2.dataset:
-                    self.log.fatal("No data found for {:s} dataset...are you sure you ran meas_mosaic? If "
-                                   "not, run with --config doApplyUberCal2=False".format(repoInfo2.dataset))
-                raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo2.dataset))
+                raise RuntimeError(f"No datasets found for datasetType = {repoInfo2.catDataset}")
+
+            if self.config.doApplyExternalPhotoCalib1:
+                ccdPhotoCalibListPerTract1 = getDataExistsRefList(dataRefListTract1,
+                                                                  repoInfo1.photoCalibDataset)
+                if not ccdPhotoCalibListPerTract1:
+                    self.log.fatal(f"No data found for {repoInfo1.photoCalibDataset} dataset...are you "
+                                   "sure you ran the external calibration?  If not, run with "
+                                   "--config doApplyExternalPhotoCalib1=False")
+            if self.config.doApplyExternalPhotoCalib2:
+                ccdPhotoCalibListPerTract2 = getDataExistsRefList(dataRefListTract2,
+                                                                  repoInfo2.photoCalibDataset)
+                if not ccdPhotoCalibListPerTract2:
+                    self.log.fatal(f"No data found for {repoInfo2.photoCalibDataset} dataset...are you "
+                                   "sure you ran the external calibration?  If not, run with "
+                                   "--config doApplyExternalPhotoCalib2=False")
+            if self.config.doApplyExternalSkyWcs1:
+                # Check for wcs for compatibility with old dataset naming
+                ccdSkyWcsListPerTract1 = getDataExistsRefList(dataRefListTract1, repoInfo1.skyWcsDataset)
+                if not ccdSkyWcsListPerTract1:
+                    ccdSkyWcsListPerTract1 = getDataExistsRefList(dataRefListTract1, "wcs")
+                    if ccdSkyWcsListPerTract1:
+                        repoInfo1.skyWcsDataset = "wcs"
+                        self.log.info("Old meas_mosaic dataset naming: wcs (new name is jointcal_wcs)")
+                    else:
+                        self.log.fatal(f"No data found for {repoInfo1.wcsSkyDataset} dataset...are you "
+                                       "sure you ran the external astrometric calibration?  If not, run "
+                                       "with --config doApplyExternalSkyWcs1=False")
+            if self.config.doApplyExternalSkyWcs2:
+                # Check for wcs for compatibility with old dataset naming
+                ccdSkyWcsListPerTract2 = getDataExistsRefList(dataRefListTract2, repoInfo2.skyWcsDataset)
+                if not ccdSkyWcsListPerTract2:
+                    ccdSkyWcsListPerTract2 = getDataExistsRefList(dataRefListTract2, "wcs")
+                    if ccdSkyWcsListPerTract2:
+                        repoInfo2.skyWcsDataset = "wcs"
+                        self.log.info("Old meas_mosaic dataset naming: wcs (new name is jointcal_wcs)")
+                    else:
+                        self.log.fatal(f"No data found for {repoInfo2.wcsSkyDataset} dataset...are you "
+                                       "sure you ran the external astrometric calibration?  If not, run "
+                                       "with --config doApplyExternalSkyWcs2=False")
+
             ccdIntersectList = list(set(ccdListPerTract1).intersection(set(ccdListPerTract2)))
-            self.log.info("tract: {:d} ".format(repoInfo1.dataId["tract"]))
-            self.log.info("ccdListPerTract1: {} ".format(ccdListPerTract1))
-            self.log.info("ccdListPerTract2: {} ".format(ccdListPerTract2))
-            self.log.info("ccdIntersectList: {}".format(ccdIntersectList))
+            self.log.info("tract: {:d}".format(repoInfo1.dataId["tract"]))
+            self.log.info(f"ccdListPerTract1: \n{ccdListPerTract1}")
+            self.log.info(f"ccdListPerTract2: \n{ccdListPerTract2}")
+            self.log.info(f"ccdIntersectList: \n{ccdIntersectList}")
+            if self.config.doApplyExternalPhotoCalib1:
+                self.log.info(f"ccdPhotoCalibListPerTract1: \n{ccdPhotoCalibListPerTract1}")
+            if self.config.doApplyExternalPhotoCalib2:
+                self.log.info(f"ccdPhotoCalibListPerTract2: \n{ccdPhotoCalibListPerTract2}")
+            if self.config.doApplyExternalSkyWcs1:
+                self.log.info(f"ccdSkyWcsListPerTract1: \n{ccdSkyWcsListPerTract1}")
+            if self.config.doApplyExternalSkyWcs2:
+                self.log.info(f"ccdSkyWcsListPerTract2: \n{ccdSkyWcsListPerTract2}")
 
             doReadFootprints = None
             if self.config.doPlotFootprintNpix:
@@ -910,18 +1087,13 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             self.log.info("Number of matches (maxDist = {0:.2f}{1:s}) = {2:d}".format(
                           self.matchRadius, self.matchRadiusUnitStr, len(catalog)))
 
-            try:
-                self.zpLabel = self.zpLabel + " " + self.catLabel
-            except Exception:
-                pass
-
             subdir = "ccd-" + str(ccdListPerTract1[0]) if len(ccdIntersectList) == 1 else subdir
             filenamer = Filenamer(repoInfo1.butler, "plotCompareVisit", repoInfo1.dataId, subdir=subdir)
             hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
 
             # Dict of all parameters common to plot* functions
-            tractInfo1 = repoInfo1.tractInfo if self.config.doApplyUberCal1 else None
-            tractInfo2 = repoInfo2.tractInfo if self.config.doApplyUberCal2 else None
+            tractInfo1 = repoInfo1.tractInfo if self.config.doApplyExternalPhotoCalib1 else None
+            tractInfo2 = repoInfo2.tractInfo if self.config.doApplyExternalPhotoCalib2 else None
             tractInfo = tractInfo1 if (tractInfo1 or tractInfo2) else None
             plotKwargs1 = dict(butler=repoInfo1.butler, camera=repoInfo1.camera, hscRun=hscRun,
                                matchRadius=self.matchRadius, matchRadiusUnitStr=self.matchRadiusUnitStr,
@@ -996,9 +1168,9 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         Returns
         -------
         `list` of 4 concatenated `lsst.afw.table.source.source.SourceCatalog`
-           The concatenated catalogs returned are (common ZP calibrated of dataRefList1,
-           sfm or uber calibrated of dataRefList1, common ZP calibrated of dataRefList2,
-           sfm or uber calibrated of dataRefList2)
+           The concatenated catalogs returned are (common ZP-calibrated of dataRefList1,
+           sfm or external-calibrated of dataRefList1, common ZP-calibrated of dataRefList2,
+           sfm or external-calibrated of dataRefList2)
 
         """
         catList1 = []
@@ -1007,11 +1179,14 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         commonZpCatList2 = []
         self.zpLabel1 = None
         self.zpLabel2 = None
-        for iCat, catList, commonZpCatList, dataRefList, repoInfo, doApplyUberCal, useMeasMosaic in [
-                [1, catList1, commonZpCatList1, dataRefList1, repoInfo1,
-                 self.config.doApplyUberCal1, self.config.useMeasMosaic1],
-                [2, catList2, commonZpCatList2, dataRefList2, repoInfo2,
-                 self.config.doApplyUberCal2, self.config.useMeasMosaic2]]:
+        for (iCat, catList, commonZpCatList, dataRefList, repoInfo, doApplyExternalPhotoCalib,
+             doApplyExternalSkyWcs, useMeasMosaic) in [
+                 [1, catList1, commonZpCatList1, dataRefList1, repoInfo1,
+                  self.config.doApplyExternalPhotoCalib1, self.config.doApplyExternalSkyWcs1,
+                  self.config.useMeasMosaic1],
+                 [2, catList2, commonZpCatList2, dataRefList2, repoInfo2,
+                  self.config.doApplyExternalPhotoCalib2, self.config.doApplyExternalSkyWcs2,
+                  self.config.useMeasMosaic2]]:
             for dataRef in dataRefList:
                 if not dataRef.datasetExists(dataset):
                     continue
@@ -1031,7 +1206,9 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                     srcCat = backoutApCorr(srcCat)
 
                 calexp = repoInfo.butler.get("calexp", dataRef.dataId)
-                fluxMag0 = calexp.getPhotoCalib().getInstFluxAtZeroMagnitude()
+                fluxMag0 = None
+                if not doApplyExternalPhotoCalib:
+                    fluxMag0 = calexp.getPhotoCalib().getInstFluxAtZeroMagnitude()
                 nQuarter = calexp.getDetector().getOrientation().getNQuarter()
                 # add footprint nPix column
                 if self.config.doPlotFootprintNpix:
@@ -1049,22 +1226,35 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 commonZpCat = srcCat.copy(True)
                 commonZpCat = calibrateSourceCatalog(commonZpCat, self.config.analysis.commonZp)
                 commonZpCatList.append(commonZpCat)
-                if self.config.doApplyUberCal:
+
+
+                if self.config.doApplyExternalPhotoCalib:
                     if repoInfo.hscRun:
-                        if not dataRef.datasetExists("wcs_hsc") or not dataRef.datasetExists("fcr_hsc_md"):
+                        if not dataRef.datasetExists("fcr_hsc_md") or not dataRef.datasetExists("wcs_hsc"):
                             continue
-                    # Check for both jointcal_wcs and wcs for compatibility with old datasets
-                    elif (not (dataRef.datasetExists("jointcal_wcs") or dataRef.datasetExists("wcs")) or not
-                          (dataRef.datasetExists("jointcal_photoCalib") or dataRef.datasetExists("fcr_md"))):
-                        continue
-                srcCat, zpLabel = self.calibrateCatalogs(dataRef, srcCat, fluxMag0, repoInfo.dataset,
-                                                         doApplyUberCal, useMeasMosaic)
+                    else:
+                        # Check for both jointcal_wcs and wcs for compatibility with old datasets
+                        if (not (dataRef.datasetExists(repoInfo.photoCalibDataset)
+                                 or dataRef.datasetExists("fcr_md"))):
+                            continue
+                if self.config.doApplyExternalSkyWcs:
+                    if repoInfo.hscRun:
+                        if not dataRef.datasetExists("fcr_hsc_md") or not dataRef.datasetExists("wcs_hsc"):
+                            continue
+                    else:
+                        # Check for both jointcal_wcs and wcs for compatibility with old datasets
+                        if not (dataRef.datasetExists(repoInfo.skyWcsDataset)
+                                or dataRef.datasetExists("wcs")):
+                            continue
+                srcCat, zpLabel = self.calibrateCatalogs(dataRef, srcCat, fluxMag0, repoInfo,
+                                                         doApplyExternalPhotoCalib, doApplyExternalSkyWcs,
+                                                         useMeasMosaic, iCat)
                 self.zpLabel1 = zpLabel if iCat == 1 and not self.zpLabel1 else self.zpLabel1
                 self.zpLabel2 = zpLabel if iCat == 2 and not self.zpLabel2 else self.zpLabel2
 
                 catList.append(srcCat)
 
-        self.zpLabel = self.zpLabel1 + "_1 " + self.zpLabel2 + "_2"
+        self.zpLabel = self.zpLabel1 + "\n zp: " + self.zpLabel2
         self.log.info("Applying {:} calibration to catalogs".format(self.zpLabel))
         if not catList1:
             raise TaskError("No catalogs read: %s" % ([dataRefList1[0].dataId for dataRef1 in dataRefList1]))
@@ -1074,7 +1264,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         return (concatenateCatalogs(commonZpCatList1), concatenateCatalogs(catList1),
                 concatenateCatalogs(commonZpCatList2), concatenateCatalogs(catList2))
 
-    def calibrateCatalogs(self, dataRef, catalog, fluxMag0, photoCalibDataset, doApplyUberCal, useMeasMosaic):
+    def calibrateCatalogs(self, dataRef, catalog, fluxMag0, repoInfo, doApplyExternalPhotoCalib,
+                          doApplyExternalSkyWcs, useMeasMosaic, iCat):
         """Determine and apply appropriate flux calibration to the catalog.
 
         Parameters
@@ -1087,34 +1278,46 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         fluxMag0 : `float`
            The instrumental flux corresponding to 0 magnitude from Single Frame
            Measurement for the catalog.
-        photoCalibDataset : `str`
-           Name of the dataSet to be used for the uber calibration (e.g.
-           "jointcal_photoCalib" or "fcr_md").
-        doApplyUberCal : `bool`
-           If True: Apply the flux and wcs uber calibrations from meas_mosaic to
-                    the caltalog.
-           If False: Apply the ``fluxMag0`` flux calibration from single frame
-                     processing to the catalog.
+        repoInfo : `lsst.pipe.base.Struct`
+           A struct containing relevant information about the repository under
+           study.  Elements used here include the dataset names for any external
+           calibrations to be applied.
+        doApplyExternalPhotoCalib : `bool`
+           If True: Apply the external photometric calibrations specified by
+                    ``repoInfo.photoCalibDataset`` to the caltalog.
+           If False: Apply the ``fluxMag0`` photometric calibration from single
+                     frame processing to the catalog.
+        doApplyExternalSkyWcs : `bool`
+           If True: Apply the external astrometric calibrations specified by
+                    ``repoInfo.skyWcsDataset`` the caltalog.
+           If False: Retain the WCS from single frame processing.
         useMeasMosaic : `bool`
-           Use meas_mosaic's applyMosaicResultsCatalog for the uber-calibration
-           (even if photoCalib object exists).  For testing implementations.
+           Use meas_mosaic's applyMosaicResultsCatalog for the external
+           calibration (even if photoCalib object exists).  For testing
+           implementations.
+        iCat : `int`
+           Integer representing whether this is comparison catalog number 1 or 2
 
         Returns
         -------
         calibrated : `lsst.afw.table.source.source.SourceCatalog`
            The calibrated source catalog.
         zpLabel : `str`
-           A label indicating the uberCalibration applied (currently either
-           jointcal or meas_mosaic).
+           A label indicating the external calibration applied (currently
+           either jointcal, fgcm, fgcm_tract, or meas_mosaic, but the latter
+           is effectively retired).
         """
         self.zp = 0.0
-        if doApplyUberCal:
-            if "jointcal" in photoCalibDataset and not useMeasMosaic:
+        if doApplyExternalPhotoCalib:
+            if not useMeasMosaic:
                 # i.e. the processing was post-photoCalib output generation
                 # AND you want the photoCalib flux object used for the
                 # calibration (as opposed to meas_mosaic's fcr object).
-                zpLabel = "MMphotoCalib" if dataRef.datasetExists("fcr_md") else "JOINTCAL"
-                calibrated = calibrateSourceCatalogPhotoCalib(dataRef, catalog, zp=self.zp)
+                zpLabel = ("MMphotoCalib" if dataRef.datasetExists("fcr_md")
+                           else repoInfo.photoCalibDataset.split("_")[0].upper())
+                zpLabel += "_" + str(iCat)
+                calibrated = calibrateSourceCatalogPhotoCalib(dataRef, catalog, repoInfo.photoCalibDataset,
+                                                              zp=self.zp)
             else:
                 # If here, the data were processed pre-photoCalib output
                 # generation, so must use old method OR old method was
@@ -1122,9 +1325,9 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 try:
                     import lsst.meas.mosaic  # noqa : F401
                 except ImportError:
-                    raise ValueError("Cannot apply uber calibrations because meas_mosaic "
-                                     "could not be imported."
-                                     "\nEither setup meas_mosaic or run with --config doApplyUberCal=False")
+                    raise ValueError("Cannot apply calibrations because meas_mosaic could not "
+                                     "be imported. \nEither setup meas_mosaic or run with "
+                                     "--config doApplyExternalPhotoCalib=False doApplyExternalSkyWcs=False")
                 zpLabel = "MEAS_MOSAIC"
                 calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
         else:
@@ -1132,5 +1335,11 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             self.zp = 2.5*np.log10(fluxMag0)
             zpLabel = "FLUXMAG0"
             calibrated = calibrateSourceCatalog(catalog, self.zp)
+
+        if doApplyExternalSkyWcs:
+            wcs = dataRef.get(repoInfo.skyWcsDataset)
+            afwTable.updateSourceCoords(wcs, catalog)
+            if "wcs" not in zpLabel:
+                zpLabel += " wcs: " + repoInfo.skyWcsDataset.split("_")[0].upper() + "_" + str(iCat)
 
         return calibrated, zpLabel
