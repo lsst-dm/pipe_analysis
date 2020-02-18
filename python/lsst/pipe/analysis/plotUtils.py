@@ -24,7 +24,7 @@ __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "M
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
            "plotCcdOutline", "rotatePixelCoords", "bboxToXyCoordLists", "getRaDecMinMaxPatchList",
            "percent", "setPtSize", "getQuiver", "makeAlphaCmap", "buildTractImage",
-           "determineUberCalLabel"]
+           "determineExternalCalLabel"]
 
 
 class AllLabeller(object):
@@ -754,14 +754,32 @@ def buildTractImage(butler, dataId, tractInfo, patchList=None, coaddName="deep")
     return image
 
 
-def determineUberCalLabel(repoInfo, patch, coaddName="deep"):
-    """Determine uber-calibration (meas_mosaic/jointcal) applied to make coadd.
+def determineExternalCalLabel(repoInfo, patch, coaddName="deep"):
+    """Determine external calibration applied to make coadd.
+
+    Make a string representing the external calibrations used in assembling the
+    coadd to serve as a label for the plots.  Note that this is really a "best
+    guess" based on the datasets that exist in the repo.  The prioritized
+    assigment is based on the assumption that a particular calibration type will
+    have been applied in coaddition if it does indeed exist in the repo (most
+    notably, it is assumed that any fgcm photoCalib would have been used for
+    photometric calibration even if the jointcal equivalent exists).
+
+    External photometric calibration:
+    fcr_md                dataset exists: label as MEAS_MOSAIC
+    fgcm_tract_photoCalib dataset exists: label as FGCMTRACT
+    fgcm_photoCalib       dataset exists: label as FGCM
+    jointcal_photoCalib   dataset exists: label as JOINTCAL
+
+    External astrometric calibration:
+    fcr_md                dataset exists: label as MEAS_MOSAIC
+    jointcal_wcs          dataset exists: label as JOINTCAL
 
     Parameters
     ----------
     repoInfo : `lsst.pipe.base.struct.Struct`
        A struct containing elements with repo information needed to create
-       appropriate dataIds to look for the uber-calibration datasets.
+       appropriate dataIds to look for the external calibration datasets.
     patch : `str`
        An existing patch to use in the coaddDataId.
     coaddName : `str`, optional
@@ -771,7 +789,7 @@ def determineUberCalLabel(repoInfo, patch, coaddName="deep"):
     Returns
     -------
     uberCalLabel : `str`
-       The label to be used for the uberCal used.
+       The label to be used for the external calibration used.
     """
     # Find a visit/ccd input so that you can check for meas_mosaic input (i.e. to set uberCalLabel)
     coaddDataId = {"tract": repoInfo.tractInfo.getId(), "patch": patch, "filter": repoInfo.filterName}
@@ -787,11 +805,21 @@ def determineUberCalLabel(repoInfo, patch, coaddName="deep"):
         repoInfo.butler.datasetExists("jointcal_photoCalib", dataId=visitDataId)
 
     if repoInfo.butler.datasetExists("fcr_md", dataId=visitDataId):
-        uberCalLabel = "MEAS_MOSAIC"
-    elif (not repoInfo.butler.datasetExists("fcr_md", dataId=visitDataId) and
-          repoInfo.butler.datasetExists("jointcal_photoCalib", dataId=visitDataId)):
-        uberCalLabel = "JOINTCAL"
-    else:
-        uberCalLabel = "None"
+        uberCalLabel = "externCal: MEAS_MOSAIC"
+    elif not repoInfo.butler.datasetExists("fcr_md", dataId=visitDataId):
+        uberCalLabel = "photoCal: "
+        if repoInfo.butler.datasetExists("fgcm_tract_photoCalib", dataId=visitDataId):
+            uberCalLabel += "FGCMTRACT"
+        elif repoInfo.butler.datasetExists("fgcm_photoCalib", dataId=visitDataId):
+            uberCalLabel += "FGCM"
+        elif repoInfo.butler.datasetExists("jointcal_photoCalib", dataId=visitDataId):
+            uberCalLabel += "JOINTCAL"
+        else:
+            uberCalLabel += "SFM"
+        uberCalLabel += "  wcs: "
+        if  repoInfo.butler.datasetExists("jointcal_wcs", dataId=visitDataId):
+            uberCalLabel += "JOINTCAL"
+        else:
+            uberCalLabel += "SFM"
 
     return uberCalLabel

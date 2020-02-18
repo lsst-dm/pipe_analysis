@@ -33,7 +33,7 @@ from .utils import (Filenamer, Enforcer, MagDiff, MagDiffMatches, MagDiffCompare
                     fluxToPlotString, andCatalog, writeParquet, getRepoInfo, setAliasMaps,
                     addPreComputedColumns, computeMeanOfFrac)
 from .plotUtils import (CosmosLabeller, AllLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
-                        MatchesStarGalaxyLabeller, determineUberCalLabel)
+                        MatchesStarGalaxyLabeller, determineExternalCalLabel)
 
 import lsst.afw.geom as afwGeom
 import lsst.afw.image as afwImage
@@ -227,8 +227,8 @@ class CoaddAnalysisTask(CmdLineTask):
         subdir = "patch-" + str(patchList[0]) if len(patchList) == 1 else subdir
         filenamer = Filenamer(repoInfo.butler, self.outputDataset, repoInfo.dataId, subdir=subdir)
         # Find a visit/ccd input so that you can check for meas_mosaic input (i.e. to set uberCalLabel)
-        self.uberCalLabel = determineUberCalLabel(repoInfo, patchList[0], coaddName=self.config.coaddName)
-        self.log.info("Uber-calibration used: {:}".format(self.uberCalLabel))
+        self.uberCalLabel = determineExternalCalLabel(repoInfo, patchList[0], coaddName=self.config.coaddName)
+        self.log.info(f"External calibration(s) used: {self.uberCalLabel}")
 
         # Set some aliases for differing schema naming conventions
         aliasDictList = [self.config.flagsToAlias, ]
@@ -1289,10 +1289,12 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         repoInfo1 = getRepoInfo(patchRefList1[0], coaddName=self.config.coaddName, coaddDataset=dataset)
         repoInfo2 = getRepoInfo(patchRefList2[0], coaddName=self.config.coaddName, coaddDataset=dataset)
         # Find a visit/ccd input so that you can check for meas_mosaic input (i.e. to set uberCalLabel)
-        self.uberCalLabel1 = determineUberCalLabel(repoInfo1, patchList1[0], coaddName=self.config.coaddName)
-        self.uberCalLabel2 = determineUberCalLabel(repoInfo2, patchList1[0], coaddName=self.config.coaddName)
-        self.uberCalLabel = self.uberCalLabel1 + "_1 " + self.uberCalLabel2 + "_2"
-        self.log.info("Uber-calibration(s) used: {:}".format(self.uberCalLabel))
+        self.uberCalLabel1 = determineExternalCalLabel(repoInfo1, patchList1[0],
+                                                       coaddName=self.config.coaddName)
+        self.uberCalLabel2 = determineExternalCalLabel(repoInfo2, patchList1[0],
+                                                       coaddName=self.config.coaddName)
+        self.uberCalLabel = self.uberCalLabel1 + "_1\n" + self.uberCalLabel2 + "_2"
+        self.log.info(f"External calibration(s) used: {self.uberCalLabel}")
 
         if haveForced:
             forced1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_forced_src")
