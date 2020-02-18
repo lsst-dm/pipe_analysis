@@ -72,7 +72,7 @@ def writeParquet(dataRef, table, badArray=None):
     """
 
     try:
-        from lsst.qa.explorer.parquetTable import ParquetTable
+        from lsst.pipe.tasks.parquetTable import ParquetTable
     except ImportError:
         import logging
         logging.warning('Parquet files will not be written (qa_explorer is not setup).')
