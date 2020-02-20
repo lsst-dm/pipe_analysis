@@ -548,10 +548,16 @@ class Analysis(object):
 
         labelVisit(filename, plt, axScatter, 1.18, -0.11, color="green")
         if zpLabel is not None:
+            # The following sets yOff to accommodate the longer labels for the
+            # compare scripts and/or for the presence of the extra uberCalLabel
+            # (for coadds).  Font size is adjusted with uberFontSize below.
+            yOff = 0.02 if uberCalLabel is not None else 0
+            yOff = -0.02 if "_2" in zpLabel else yOff
             prefix = "" if "GalExt" in zpLabel else "zp: "
-            plotText(zpLabel, plt, axScatter, 0.09, -0.1, prefix=prefix, fontSize=7, color="green")
+            plotText(zpLabel, plt, axScatter, 0.11, -0.1 + yOff, prefix=prefix, fontSize=7, color="green")
         if uberCalLabel:
-            plotText(uberCalLabel, plt, axScatter, 0.09, -0.14, prefix="uberCal: ", fontSize=7, color="green")
+            uberFontSize = 5 if "_2" in uberCalLabel else 7
+            plotText(uberCalLabel, plt, axScatter, 0.11, -0.13, fontSize=uberFontSize, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axScatter, 0.87, -0.11, prefix="cat: ", fontSize=7, color="green")
         if extraLabels is not None:
@@ -640,7 +646,7 @@ class Analysis(object):
             prefix = "" if "GalExt" in zpLabel else "zp: "
             plotText(zpLabel, plt, axes, 0.10, -0.10, prefix=prefix, fontSize=7, color="green")
         if uberCalLabel:
-            plotText(uberCalLabel, plt, axes, 0.10, -0.13, prefix="uberCal: ", fontSize=7, color="green")
+            plotText(uberCalLabel, plt, axes, 0.10, -0.13, fontSize=7, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.90, -0.10, prefix="cat: ", fontSize=7, color="green")
         if camera is not None and ccdList is not None:
@@ -789,9 +795,9 @@ class Analysis(object):
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
             prefix = "" if "GalExt" in zpLabel else "zp: "
-            plotText(zpLabel, plt, axes, 0.13, -0.07, prefix=prefix, color="green")
+            plotText(zpLabel, plt, axes, 0.14, -0.07, prefix=prefix, color="green")
         if uberCalLabel:
-            plotText(uberCalLabel, plt, axes, 0.13, -0.11, prefix="uberCal: ", fontSize=8, color="green")
+            plotText(uberCalLabel, plt, axes, 0.14, -0.11, fontSize=7, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
         strKwargs = dict(loc='upper left', fancybox=True, markerscale=1.2, scatterpoints=3, framealpha=0.35,
@@ -881,7 +887,7 @@ class Analysis(object):
             prefix = "" if "GalExt" in zpLabel else "zp: "
             plotText(zpLabel, plt, axes[0], 0.13, -0.09, prefix=prefix, color="green")
         if uberCalLabel:
-            plotText(uberCalLabel, plt, axes[0], 0.13, -0.14, prefix="uberCal: ", fontSize=8, color="green")
+            plotText(uberCalLabel, plt, axes[0], 0.13, -0.14, fontSize=8, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes[0], 0.85, -0.09, prefix="cat: ", color="green")
         fig.savefig(filename, dpi=120)
@@ -1009,13 +1015,13 @@ class Analysis(object):
             labelCamera(camera, plt, axes, 0.5, 1.09)
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if zpLabel is not None:
-            plotText(zpLabel, plt, axes, 0.13, -0.08, prefix="zp: ", color="green")
+            plotText(zpLabel, plt, axes, 0.14, -0.08, prefix="zp: ", color="green")
         if uberCalLabel:
-            plotText(uberCalLabel, plt, axes, 0.13, -0.12, prefix="uberCal: ", fontSize=8, color="green")
+            plotText(uberCalLabel, plt, axes, 0.14, -0.12, fontSize=7, color="green")
         plotText(shapeAlgorithm, plt, axes, 0.85, -0.08, prefix="Shape Alg: ", fontSize=8, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
-        axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=9)
+        axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.1), fancybox=True, shadow=True, fontsize=8)
 
         fig.savefig(filename, dpi=150)
         plt.close(fig)
@@ -1169,9 +1175,9 @@ class Analysis(object):
             labelCamera(camera, plt, axes, 0.5, 1.09)
         labelVisit(filename, plt, axes, 0.5, 1.04)
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes, 0.99, -0.11, prefix="cat: ", fontSize=8, color="green")
+            plotText(forcedStr, plt, axes, 0.96, -0.11, prefix="cat: ", fontSize=7, color="green")
         if uberCalLabel:
-            plotText(uberCalLabel, plt, axes, 0.01, -0.11, prefix="uberCal: ", fontSize=8, color="green")
+            plotText(uberCalLabel, plt, axes, 0.08, -0.11, fontSize=7, color="green")
 
         fig.savefig(filename, dpi=1200)  # Needs to be fairly hi-res to see enough detail
         plt.close(fig)

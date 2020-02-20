@@ -972,8 +972,12 @@ def calibrateSourceCatalogMosaic(dataRef, catalog, fluxKeys=None, errKeys=None, 
     return catalog
 
 
-def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
-    """Calibrate catalog with (e.g. jointcal/meas_mosaic) PhotoCalib results
+def calibrateSourceCatalogPhotoCalib(dataRef, catalog, photoCalibDataset, fluxKeys=None, zp=27.0):
+    """Calibrate catalog with PhotoCalib results.
+
+    The suite of external photometric calibrations in existence include:
+    fgcm, fgcm_tract, jointcal, and meas_mosaic (but the latter has been
+    effectively retired).
 
     Parameters
     ----------
@@ -981,6 +985,9 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
        The data reference for which the relevant datasets are to be retrieved.
     catalog : `lsst.afw.table.SourceCatalog`
        The source catalog to which the calibrations will be applied.
+    photoCalibDataset : `str`:
+       The name of the photoCalib dataset to be applied (e.g.
+       "jointcal_photoCalib" or "fgcm_tract_photoCalib").
     fluxKeys : `dict`, optional
        A `dict` of the flux keys to which the photometric calibration will
        be applied.  If not provided, the getFluxKeys function will be used
@@ -999,11 +1006,7 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, fluxKeys=None, zp=27.0):
     Adds magnitudes to the returned catalog these are in the columns called <flux column>_mag and have
     errors in the associated _magErr columns.
     """
-    wcs = dataRef.get("jointcal_wcs")
-    for record in catalog:
-        record.updateCoord(wcs)
-
-    photoCalib = dataRef.get("jointcal_photoCalib")
+    photoCalib = dataRef.get(photoCalibDataset)
     # Scale to AB and convert to constant zero point, as for the coadds
     factor = NANOJANSKYS_PER_AB_FLUX/10.0**(0.4*zp)
     if fluxKeys is None:
@@ -1172,7 +1175,9 @@ def andCatalog(version):
         eups.setup("astrometry_net_data", current, noRecursion=True)
 
 
-def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False):
+def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyExternalPhotoCalib=False,
+                externalPhotoCalibName="jointcal", doApplyExternalSkyWcs=False,
+                externalSkyWcsName="jointcal"):
     """Obtain the relevant repository information for the given dataRef
 
     Parameters
@@ -1249,7 +1254,7 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
     metaStr = coaddName + coaddDataset + "_md" if coaddName else "calexp_md"
     metadata = butler.get(metaStr, dataId)
     hscRun = checkHscStack(metadata)
-    dataset = "src"
+    catDataset = "src"
     skymap = butler.get(coaddName + "Coadd_skyMap") if coaddName else None
     wcs = None
     tractInfo = None
@@ -1257,10 +1262,14 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
         coaddImageName = "Coadd_calexp_hsc" if hscRun else "Coadd_calexp"  # To get the coadd's WCS
         coadd = butler.get(coaddName + coaddImageName, dataId)
         wcs = coadd.getWcs()
-        dataset = coaddName + coaddDataset
+        catDataset = coaddName + coaddDataset
         tractInfo = skymap[dataId["tract"]]
-    if doApplyUberCal:
-        dataset = "wcs_hsc" if hscRun else "jointcal_wcs"
+    photoCalibDataset = None
+    if doApplyExternalPhotoCalib:
+        photoCalibDataset = "fcr_hsc" if hscRun else externalPhotoCalibName + "_photoCalib"
+    skyWcsDataset = None
+    if doApplyExternalSkyWcs:
+        skyWcsDataset = "wcs_hsc" if hscRun else externalSkyWcsName + "_wcs"
         skymap = skymap if skymap else butler.get("deepCoadd_skyMap")
         try:
             tractInfo = skymap[dataId["tract"]]
@@ -1275,7 +1284,9 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyUberCal=False
         ccdKey=ccdKey,
         metadata=metadata,
         hscRun=hscRun,
-        dataset=dataset,
+        catDataset=catDataset,
+        photoCalibDataset=photoCalibDataset,
+        skyWcsDataset=skyWcsDataset,
         skymap=skymap,
         wcs=wcs,
         tractInfo=tractInfo,
