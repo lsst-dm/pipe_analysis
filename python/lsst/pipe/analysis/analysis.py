@@ -1230,6 +1230,7 @@ class Analysis(object):
                 extraLabels=None, uberCalLabel=None, doPrintMedian=False):
         """Make all plots"""
         stats = self.stats
+        magStr = "circAp" if "CircularAperture" in self.fluxColumn else "psf"
         # Dict of all parameters common to plot* functions
         plotKwargs = dict(stats=stats, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                           patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
@@ -1237,12 +1238,12 @@ class Analysis(object):
                           forcedStr=forcedStr, uberCalLabel=uberCalLabel, doPrintMedian=doPrintMedian)
         if "galacticExtinction" not in self.shortName:
             self.plotAgainstMagAndHist(log, filenamer(dataId, description=self.shortName,
-                                                      style="psfMagHist" + postFix),
+                                                      style=magStr + "MagHist" + postFix),
                                        plotRunStats=plotRunStats, highlightList=highlightList,
                                        filterStr=dataId["filter"], extraLabels=extraLabels, **plotKwargs)
 
         if self.config.doPlotOldMagsHist and "galacticExtinction" not in self.shortName:
-            self.plotAgainstMag(filenamer(dataId, description=self.shortName, style="psfMag" + postFix),
+            self.plotAgainstMag(filenamer(dataId, description=self.shortName, style=magStr + "Mag" + postFix),
                                 **plotKwargs)
             self.plotHistogram(filenamer(dataId, description=self.shortName, style="hist" + postFix),
                                **plotKwargs)
@@ -1251,30 +1252,30 @@ class Analysis(object):
         skyPositionKwargs.update(plotKwargs)
         if "all" in self.data:
             styleStr = "sky-all"
+            styleStr = magStr + "Sky-all" if magStr != "psf" else "sky-all"
             dataName = "all"
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
                                  dataName=dataName, **skyPositionKwargs)
         if "star" in self.data:
-            styleStr = "sky-stars"
+            styleStr = magStr + "Sky-stars" if magStr != "psf" else "sky-stars"
             dataName = "star"
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
                                  dataName=dataName, **skyPositionKwargs)
-        if "galaxy" in self.data and (not any(ss in self.shortName for ss in
-                                              ["pStar", "race", "Xx", "Yy", "Resids", "gri", "riz", "izy",
-                                               "z9y", "color_"])):
-            styleStr = "sky-gals"
+        skipSkyPlotList = ["pStar", "race", "Xx", "Yy", "Resids", "gri", "riz", "izy", "z9y", "color_"]
+        if ("galaxy" in self.data and stats["galaxy"].num > 0
+            and (not any(ss in self.shortName for ss in skipSkyPlotList))):
+            styleStr = magStr + "Sky-gals" if magStr != "psf" else "sky-gals"
             dataName = "galaxy"
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
                                  dataName=dataName, **skyPositionKwargs)
         if ("unknown" in self.data and stats["unknown"].num > 0
-            and (not any(ss in self.shortName for ss in ["pStar", "race", "Xx", "Yy", "Resids", "gri",
-                                                         "riz", "izy", "z9y", "color_"]))):
-            styleStr = "sky-unkn"
+            and (not any(ss in self.shortName for ss in skipSkyPlotList))):
+            styleStr = magStr + "Sky-unkn" if magStr != "psf" else "sky-unkn"
             dataName = "unknown"
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
                                  dataName=dataName, **skyPositionKwargs)
         if "diff_" in self.shortName and stats["split"].num > 0:
-            styleStr = "sky-split"
+            styleStr = magStr + "Sky-split" if magStr != "psf" else "sky-split"
             dataName = "split"
             self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
                                  dataName=dataName, **skyPositionKwargs)

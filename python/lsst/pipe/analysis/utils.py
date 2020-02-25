@@ -585,7 +585,7 @@ def joinCatalogs(catalog1, catalog2, prefix1="cat1_", prefix2="cat2_"):
     return catalog
 
 
-def getFluxKeys(schema):
+def getFluxKeys(schema, excludePrefixStr=None):
     """Retrieve the flux and flux error keys from a schema
 
     Both are returned as dicts indexed on the flux name (e.g. "base_PsfFlux_instFlux" or
@@ -598,7 +598,8 @@ def getFluxKeys(schema):
     # slot fields, as these would effectively duplicate whatever they point to.
     fluxKeys = dict((name, schemaItem.key) for name, schemaItem in list(fluxSchemaItems.items()) if
                     schemaItem.field.getTypeString() != "Flag" and
-                    not name.startswith("slot"))
+                    not name.startswith("slot") and not
+                    (excludePrefixStr is not None and name.startswith(excludePrefixStr)))
     errSchemaItems = schema.extract("*" + fluxTypeStr + "Err")
     errKeys = dict((name, schemaItem.key) for name, schemaItem in list(errSchemaItems.items()) if
                    name[:-len("Err")] in fluxKeys)
@@ -972,7 +973,8 @@ def calibrateSourceCatalogMosaic(dataRef, catalog, fluxKeys=None, errKeys=None, 
     return catalog
 
 
-def calibrateSourceCatalogPhotoCalib(dataRef, catalog, photoCalibDataset, fluxKeys=None, zp=27.0):
+def calibrateSourceCatalogPhotoCalib(dataRef, catalog, photoCalibDataset, fluxKeys=None, zp=27.0,
+                                     excludePrefixStr=None):
     """Calibrate catalog with PhotoCalib results.
 
     The suite of external photometric calibrations in existence include:
@@ -1012,7 +1014,7 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, photoCalibDataset, fluxKe
     # Scale to AB and convert to constant zero point, as for the coadds
     factor = NANOJANSKYS_PER_AB_FLUX/10.0**(0.4*zp)
     if fluxKeys is None:
-        fluxKeys, errKeys = getFluxKeys(catalog.schema)
+       fluxKeys, errKeys = getFluxKeys(catalog.schema, excludePrefixStr=excludePrefixStr)
 
     magColsToAdd = []
     for fluxName, fluxKey in list(fluxKeys.items()):
@@ -1063,13 +1065,13 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, photoCalibDataset, fluxKe
     return catalog
 
 
-def calibrateSourceCatalog(catalog, zp):
+def calibrateSourceCatalog(catalog, zp, excludePrefixStr=None):
     """Calibrate catalog in the case of no meas_mosaic results using FLUXMAG0 as zp
 
     Requires a SourceCatalog and zeropoint as input.
     """
     # Convert to constant zero point, as for the coadds
-    fluxKeys, errKeys = getFluxKeys(catalog.schema)
+    fluxKeys, errKeys = getFluxKeys(catalog.schema, excludePrefixStr=excludePrefixStr)
     factor = 10.0**(0.4*zp)
     for name, key in list(fluxKeys.items()) + list(errKeys.items()):
         catalog[key] /= factor

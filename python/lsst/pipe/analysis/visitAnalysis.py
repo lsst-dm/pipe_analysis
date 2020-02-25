@@ -481,8 +481,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                              matchRadius=self.matchRadius,
                                              matchRadiusUnitStr=self.matchRadiusUnitStr, **plotKwargs)
 
-    def readCatalogs(self, dataRefList, dataset, repoInfo, aliasDictList=None, fakeCat=None,
-                     raFakesCol="raJ2000", decFakesCol="decJ2000"):
+    def readCatalogs(self, dataRefList, dataset, repoInfo, aliasDictList=None, excludePrefixStr=None,
+                     fakeCat=None, raFakesCol="raJ2000", decFakesCol="decJ2000"):
         """Read in and concatenate catalogs of type dataset in lists of data references
 
         If self.config.doWriteParquetTables is True, before appending each catalog to a single
@@ -616,7 +616,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
             # Scale fluxes to common zeropoint to make basic comparison plots without calibrated ZP influence
             commonZpCat = catalog.copy(True)
-            commonZpCat = calibrateSourceCatalog(commonZpCat, self.config.analysis.commonZp)
+            commonZpCat = calibrateSourceCatalog(commonZpCat, self.config.analysis.commonZp,
+                                                 excludePrefixStr=excludePrefixStr)
             commonZpCatList.append(commonZpCat)
             if self.config.doApplyExternalPhotoCalib:
                 if repoInfo.hscRun:
@@ -640,7 +641,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if not self.config.doApplyExternalPhotoCalib:
                 photoCalib = repoInfo.butler.get("calexp_photoCalib", dataRef.dataId)
                 fluxMag0 = photoCalib.getInstFluxAtZeroMagnitude()
-            catalog = self.calibrateCatalogs(dataRef, catalog, fluxMag0, repoInfo)
+            catalog = self.calibrateCatalogs(dataRef, catalog, fluxMag0, repoInfo,
+                                             excludePrefixStr=excludePrefixStr)
             catList.append(catalog)
 
         if not catList:
@@ -751,7 +753,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
         return concatenateCatalogs(catList)
 
-    def calibrateCatalogs(self, dataRef, catalog, fluxMag0, repoInfo):
+    def calibrateCatalogs(self, dataRef, catalog, fluxMag0, repoInfo, excludePrefixStr=None):
         """Determine and apply appropriate flux calibration to the catalog.
 
         Parameters
@@ -1157,7 +1159,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 self.plotStarGal(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
                                  **plotKwargs1)
 
-    def readCatalogs(self, dataRefList1, dataRefList2, dataset, repoInfo1, repoInfo2,
+    def readCatalogs(self, dataRefList1, dataRefList2, dataset, repoInfo1, repoInfo2, excludePrefixStr=None,
                      doReadFootprints=None, aliasDictList=None):
         """Read in and concatenate catalogs of type dataset in lists of data references
 
@@ -1288,7 +1290,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 concatenateCatalogs(commonZpCatList2), concatenateCatalogs(catList2))
 
     def calibrateCatalogs(self, dataRef, catalog, fluxMag0, repoInfo, doApplyExternalPhotoCalib,
-                          doApplyExternalSkyWcs, useMeasMosaic, iCat):
+                          doApplyExternalSkyWcs, useMeasMosaic, iCat, excludePrefixStr=None):
         """Determine and apply appropriate flux calibration to the catalog.
 
         Parameters
