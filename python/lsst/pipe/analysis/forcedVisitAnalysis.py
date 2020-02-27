@@ -133,11 +133,26 @@ class ForcedVisitAnalysisTask(VisitAnalysisTask):
             if any(doPlot for doPlot in [self.config.doPlotFootprintNpix, self.config.doPlotQuiver,
                                          self.config.doPlotMags, self.config.doPlotSizes,
                                          self.config.doPlotCentroids, self.config.doPlotStarGalaxy,
-                                         self.config.doWriteParquetTables]):
+                                         self.config.doPlotSkyObjects, self.config.doWriteParquetTables]):
                 commonZpCat, catalog = self.readCatalogs(dataRefListTract, repoInfo.catDataset, repoInfo,
                                                          aliasDictList=aliasDictList,
                                                          excludePrefixStr=self.config.excludePrefixStr)
                 self.zpLabel = "forcedCcd"
+
+                # Make sub-catalog of sky sources before flag culling as many of
+                # these will have flags set due to measurement difficulties in
+                # regions that are really blank sky.  Caveat: we don't want any
+                # on the visit "edge", which could happen since these are from
+                # the coadd sky object placements, so omit those.
+                if self.config.doPlotSkyObjects:
+                    if "merge_peak_sky" in catalog.schema:
+                        skySrcCat = catalog[catalog["merge_peak_sky"] &
+                                            ~catalog["base_PixelFlags_flag_edge"]].copy(deep=True)
+                    else:
+                        skySrcCat = None
+                        self.log.warn("doPlotSkyObjects is True, but the \"merge_peak_sky\" "
+                                      "column does not exist in catalog.schema.  Skipping "
+                                      "skyObjects plot.")
 
                 # Set boolean arrays indicating sources deemed unsuitable for qa analyses
                 self.catLabel = "nChild = 0"
@@ -153,6 +168,9 @@ class ForcedVisitAnalysisTask(VisitAnalysisTask):
                 # Dict of all parameters common to plot* functions
                 plotKwargs = dict(butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
                                   hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo)
+                if self.config.doPlotSkyObjects and skySrcCat is not None:
+                    self.plotSkyObjects(skySrcCat, filenamer(repoInfo.dataId, description="skySources",
+                                                             style="hist"), repoInfo.dataId, **plotKwargs)
                 if self.config.doPlotPsfFluxSnHists:
                     self.plotPsfFluxSnHists(commonZpCat,
                                             filenamer(repoInfo.dataId, description="base_PsfFlux_raw",
