@@ -640,13 +640,14 @@ class CoaddAnalysisTask(CmdLineTask):
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
+        fluxStr = fluxToPlotString(self.config.analysis.fluxColumn)
         for col in fluxToPlotList:
-            if col + "_instFlux" in catalog.schema:
+            if col + "_instFlux" in catalog.schema and col + "_instFlux" != self.config.analysis.fluxColumn:
                 shortName = "mag_" + col + postFix
                 self.log.info("shortName = {:s}".format(shortName))
-                self.AnalysisClass(catalog, MagDiff(col + "_instFlux", "base_PsfFlux_instFlux",
+                self.AnalysisClass(catalog, MagDiff(col + "_instFlux", self.config.analysis.fluxColumn,
                                                     unitScale=self.unitScale),
-                                   "Mag(%s) - PSFMag (%s)" % (fluxToPlotString(col), unitStr),
+                                   "Mag(%s) - %sMag (%s)" % (fluxToPlotString(col), fluxStr, unitStr),
                                    shortName, self.config.analysis, labeller=StarGalaxyLabeller(),
                                    unitScale=self.unitScale,
                                    ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
@@ -656,7 +657,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                              highlightList=highlightList)
                 # Also make comparison plots for calib_psf_used only objects for
                 # the circular aperture plots.
-                if "CircularApertureFlux_12_0" in col:
+                if "CircularApertureFlux_12_0" in col or "Psf" in col:
                     shortName = "mag_" + col + postFix + "_calib_psf_used"
                     self.log.info("shortName = {:s}".format(shortName))
                     calibHighlightList = highlightList.copy()
@@ -665,9 +666,10 @@ class CoaddAnalysisTask(CmdLineTask):
                     for i, flagName in enumerate([col + "_flag", ] + list(self.config.analysis.flags)):
                         if not any(flagName in highlight for highlight in calibHighlightList):
                             calibHighlightList += [(flagName, 0, flagColors[i%len(flagColors)]), ]
-                    self.AnalysisClass(catalog, MagDiff(col + "_instFlux", "base_PsfFlux_instFlux",
+                    self.AnalysisClass(catalog, MagDiff(col + "_instFlux", self.config.analysis.fluxColumn,
                                                         unitScale=self.unitScale),
-                                       ("%s - PSF (calib_psf_used) (%s)" % (fluxToPlotString(col), unitStr)),
+                                       ("%s - %s (calib_psf_used) (%s)" % (fluxToPlotString(col),
+                                                                           fluxStr, unitStr)),
                                        shortName, self.config.analysis, goodKeys=["calib_psf_used"],
                                        labeller=StarGalaxyLabeller(), unitScale=self.unitScale,
                                        fluxColumn="base_CircularApertureFlux_12_0_instFlux",

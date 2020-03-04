@@ -534,7 +534,7 @@ class Analysis(object):
         axScatter.yaxis.set_minor_locator(AutoMinorLocator(2))
 
         yLabel = r"%s %s" % (self.quantityName, filterLabelStr)
-        fontSize = min(11, max(6, 11 - int(np.log(max(1, len(yLabel) - 45)))))
+        fontSize = min(11, max(5, 11 - int(np.log(max(1, len(yLabel) - 45)))))
 
         axScatter.set_xlabel("%s mag %s" % (fluxToPlotString(self.fluxColumn), filterLabelStr), fontSize=11)
         axScatter.set_ylabel(yLabel, fontsize=fontSize)
@@ -1267,6 +1267,9 @@ class Analysis(object):
             meanStr = "mean = {0:5.2f}".format(mean)
             stdStr = "  std = {0:5.2f}".format(stdDev)
             numStr = "    N = {}".format(len(skyFluxArr[good]))
+            if "visit" in dataId:
+                log.info("Statistics for %40s Sky objects: %d %s %7s%7s%7s" %
+                         (fluxStr, dataId["visit"], dataId["filter"], meanStr[6:], stdStr[7:], numStr[7:]))
             nBins = "auto" if i == 0 else nBins
             count, binsFlux, ignored = axes[0].hist(skyFluxArr[good], bins=nBins,
                                                     label=fluxToPlotString(fluxStr),

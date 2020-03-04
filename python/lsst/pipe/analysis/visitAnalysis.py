@@ -825,7 +825,15 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if not self.zpLabel:
                 self.log.info("Using 2.5*log10(fluxMag0) = {:.4f} from SFM for zeropoint".format(self.zp))
             self.zpLabel = "FLUXMAG0"
-            calibrated = calibrateSourceCatalog(catalog, self.zp)
+            calibrated = calibrateSourceCatalog(catalog, self.zp, excludePrefixStr=excludePrefixStr)
+
+        # The "ref" (i.e. coadd) fluxes in forcedPhotCcd cats had zp=27.
+        # Adjust to match zp of forced_src
+        if repoInfo.catDataset.startswith("forced_"):
+            factor = 10.0**(-0.4*self.config.analysis.coaddZp)
+            fluxKeys = calibrated.schema.extract("ref*instFlux*")
+            for fluxKey in fluxKeys:
+                calibrated[fluxKey] *= factor
 
         if self.config.doApplyExternalSkyWcs:
             wcs = dataRef.get(repoInfo.skyWcsDataset)
@@ -1372,11 +1380,19 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             # Scale fluxes to measured zeropoint
             self.zp = 2.5*np.log10(fluxMag0)
             zpLabel = "FLUXMAG0"
-            calibrated = calibrateSourceCatalog(catalog, self.zp)
+            calibrated = calibrateSourceCatalog(catalog, self.zp, excludePrefixStr=excludePrefixStr)
+
+        # The "ref" (i.e. coadd) fluxes in forcedPhotCcd cats had zp=27.
+        # Adjust to match zp of forced_src
+        if repoInfo.catDataset.startswith("forced_"):
+            factor = 10.0**(-0.4*self.config.analysis.coaddZp)
+            fluxKeys = calibrated.schema.extract("ref*instFlux*")
+            for fluxKey in fluxKeys:
+                calibrated[fluxKey] *= factor
 
         if doApplyExternalSkyWcs:
             wcs = dataRef.get(repoInfo.skyWcsDataset)
-            afwTable.updateSourceCoords(wcs, catalog)
+            afwTable.updateSourceCoords(wcs, calibrated)
             if "wcs" not in zpLabel:
                 zpLabel += " wcs: " + repoInfo.skyWcsDataset.split("_")[0].upper() + "_" + str(iCat)
 

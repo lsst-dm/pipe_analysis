@@ -1142,7 +1142,12 @@ def fluxToPlotString(fluxToPlot):
                   "base_CircularApertureFlux_9_0_instFlux": "CircApRad9pix",
                   "base_CircularApertureFlux_9_0": "CircApRad9pix",
                   "base_CircularApertureFlux_25_0_instFlux": "CircApRad25pix",
-                  "base_CircularApertureFlux_25_0": "CircApRad25pix"}
+                  "base_CircularApertureFlux_25_0": "CircApRad25pix",
+                  "ref_base_PsfFlux": "coaddPSF",
+                  "ref_base_PsfFlux_instFlux": "coaddPSF",
+                  "ref_base_CircularApertureFlux_12_0_instFlux": "coaddCircApRad12pix",
+                  "ref_base_CircularApertureFlux_12_0": "coaddCircApRad12pix"}
+
     if fluxToPlot in fluxStrMap:
         return fluxStrMap[fluxToPlot]
     else:
