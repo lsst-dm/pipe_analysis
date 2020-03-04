@@ -1003,8 +1003,10 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, photoCalibDataset, fluxKe
 
     Notes
     -----
-    Adds magnitudes to the returned catalog these are in the columns called <flux column>_mag and have
-    errors in the associated _magErr columns.
+    Adds columns with magnitudes and their associated errors for all flux
+    fields returned by the getFluxKeys() method to the returned catalog.
+    These columns are named <flux column>_mag and <flux column>_magErr,
+    respectively.
     """
     photoCalib = dataRef.get(photoCalibDataset)
     # Scale to AB and convert to constant zero point, as for the coadds
@@ -1050,22 +1052,15 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, photoCalibDataset, fluxKe
         if fluxErrKey:
             catalog[fluxErrKey] /= factor
 
-    mapper = afwTable.SchemaMapper(catalog.schema, True)
-    mapper.addMinimalSchema(catalog.schema, True)
-    mapper.editOutputSchema().disconnectAliases()
-    for (values, colName) in magColsToAdd:
-        mapper.editOutputSchema().addField(colName + "_mag", type=float,
-                                           doc="Magnitude calculated from " + colName, units="mag")
-        mapper.editOutputSchema().addField(colName + "_magErr", type=float,
-                                           doc="Magnitude error calculated from " + colName, units="mag")
-    catWithMags = afwTable.SimpleCatalog(mapper.getOutputSchema())
-    catWithMags.extend(catalog, mapper=mapper)
-    for (i, src) in enumerate(catWithMags):
-        for (values, colName) in magColsToAdd:
-            src[colName + "_mag"] = values[i, 0]
-            src[colName + "_magErr"] = values[i, 1]
+    for values, colName in magColsToAdd:
+        fieldName = colName + "_mag"
+        fieldDoc = "Magnitude calculated from " + colName
+        catalog = addIntFloatOrStrColumn(catalog, values[:, 0], fieldName, fieldDoc, fieldUnits="mag")
+        fieldName = colName + "_magErr"
+        fieldDoc = "Magnitude error calculated from " + colName
+        catalog = addIntFloatOrStrColumn(catalog, values[:, 1], fieldName, fieldDoc, fieldUnits="mag")
 
-    return catWithMags
+    return catalog
 
 
 def calibrateSourceCatalog(catalog, zp):
