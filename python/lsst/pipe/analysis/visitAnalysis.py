@@ -807,7 +807,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
         if self.config.doApplyExternalSkyWcs:
             wcs = dataRef.get(repoInfo.skyWcsDataset)
-            for record in catalog:
+            for record in calibrated:
                 record.updateCoord(wcs)
             if "wcs" not in self.zpLabel:
                 self.zpLabel += "\nwcs: " + self.config.externalSkyWcsName.upper()
