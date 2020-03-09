@@ -785,7 +785,7 @@ def addRotPoint(catalog, width, height, nQuarter, prefix=""):
     return newCatalog
 
 
-def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True, tractInnerOnly=False):
+def makeBadArray(catalog, flagList=None, onlyReadStars=False, patchInnerOnly=True, tractInnerOnly=False):
     """Create a boolean array indicating sources deemed unsuitable for qa analyses
 
     Sets value to True for unisolated objects (deblend_nChild > 0), "sky" objects (merge_peak_sky),
@@ -803,9 +803,9 @@ def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True,
     ----------
     catalog : `lsst.afw.table.SourceCatalog`
        The source catalog under consideration.
-    flagList : `list`
+    flagList : `list` or `None`, optional
        The list of flags for which, if any is set for a given source, set bad entry to `True` for
-       that source.
+       that source (`None` by default).
     onlyReadStars : `bool`, optional
        Boolean indicating if you want to select objects classified as stars only (based on
        base_ClassificationExtendedness_value > 0.5, `False` by default).
@@ -831,8 +831,9 @@ def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True,
     bad |= catalog["deblend_nChild"] > 0  # Exclude non-deblended (i.e. parents)
     if "merge_peak_sky" in catalog.schema:
         bad |= catalog["merge_peak_sky"]  # Exclude "sky" objects (currently only inserted in coadds)
-    for flag in flagList:
-        bad |= catalog[flag]
+    if flagList:
+        for flag in flagList:
+            bad |= catalog[flag]
     if onlyReadStars and "base_ClassificationExtendedness_value" in catalog.schema:
         bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
     return bad
