@@ -582,8 +582,7 @@ class CoaddAnalysisTask(CmdLineTask):
             # Compute Focal Plane coordinates for each source if not already there
             if self.config.analysisMatches.doPlotFP:
                 if "src_base_FPPosition_x" not in catalog.schema and "src_focalplane_x" not in catalog.schema:
-                    exp = butler.get("calexp", dataRef.dataId)
-                    det = exp.getDetector()
+                    det = butler.get("calexp_detector", dataRef.dataId)
                     catalog = addFpPoint(det, catalog, prefix="src_")
             # Optionally backout aperture corrections
             if self.config.doBackoutApCorr:
