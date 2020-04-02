@@ -1239,10 +1239,12 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyExternalPhoto
     isCoadd = True if "patch" in dataId else False
     try:
         filterName = dataId["filter"]
-    except Exception:
-        exp = butler.get("calexp", dataId) if not isCoadd else butler.get(coaddName + "Coadd_calexp", dataId)
-        filterName = exp.getFilter().getFilterProperty().getName()
-        dataId.update(dict(filter=filterName))
+    except KeyError:
+        if isCoadd:
+            filterName = butler.get(coaddName + "Coadd_calexp_filter", dataId)
+        else:
+            filterName = butler.get("calexp_filter", dataId)
+        dataId['filter'] = filterName
     genericFilterName = afwImage.Filter(afwImage.Filter(filterName).getId()).getName()
     ccdKey = None if isCoadd else findCcdKey(dataId)
     # Check metadata to see if stack used was HSC
