@@ -27,6 +27,7 @@ from .fakesAnalysis import (addDegreePositions, matchCatalogs, addNearestNeighbo
                             getPlotInfo, fakesAreaDepth, fakesMagnitudeCompare, fakesMagnitudeNearestNeighbor,
                             fakesMagnitudeBlendedness, fakesCompletenessPlot)
 
+import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 import lsst.geom as lsstGeom
 
@@ -532,7 +533,6 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         """
         catList = []
         commonZpCatList = []
-        calexp = None
         areaDict = {}
         self.haveFpCoords = True
         for dataRef in dataRefList:
@@ -550,22 +550,35 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
             # Compute Focal Plane coordinates for each source if not already there
             if self.config.hasFakes:
-                exp = repoInfo.butler.get("calexp", dataRef.dataId)
+                # Get just a single pixel of the exposure
+                # Exposure is needed for ExposureInfo including bounding
+                # polygon
+                pix = lsstgeom.Box2I(lsstGeom.Point2I(0, 0),
+                                     lsstGeom.Point2I(0, 0))
+                exp = butler.get("calexp_sub", dataId, bbox=pix)
                 wcs = exp.getWcs()
-                mask = exp.mask.array
-                maskBad = mask & 2**0
-                good = len(np.where((maskBad == 0))[0])
-                pixScale = exp.getWcs().getPixelScale().asArcseconds()
+
+                # Hacky but fast way of getting just the mask
+                # Actual mask is needed because BAD pixels are more than
+                # just the defects
+                fname = butler.get("calexp_filename", dataId)[0]
+                mask = afwImage.Mask(fname, hdu=2)
+
+                maskBad = mask.array & 2**mask.getMaskPlaneDict()['BAD']
+                good = np.count_nonzero(maskBad == 0)
+                pixScale = wcs.getPixelScale().asArcseconds()
                 area = pixScale**2 * good
                 areaDict[dataRef.dataId["ccd"]] = area
 
-                ccdWidth = exp.getWidth()
-                ccdHeight = exp.getHeight()
+                ccdWidth = mask.getWidth()
+                ccdHeight = mask.getHeight()
 
                 ccdCorners = wcs.pixelToSky([lsstGeom.Point2D(0, 0), lsstGeom.Point2D(ccdWidth, ccdHeight)])
                 areaDict["corners_" + str(dataRef.dataId["ccd"])] = ccdCorners
 
                 # Check which fake sources fall on the ccd
+                # TODO: this looks a bit iffy, as a fake could still be on the
+                # CCD but outside where sources were detected
                 minRa = np.min(catalog["coord_ra"])
                 maxRa = np.max(catalog["coord_ra"])
                 minDec = np.min(catalog["coord_dec"])
@@ -591,8 +604,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
             if self.config.doPlotCentroids or self.config.analysis.doPlotFP and self.haveFpCoords:
                 if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
-                    calexp = repoInfo.butler.get("calexp", dataRef.dataId)
-                    det = calexp.getDetector()
+                    det = repoInfo.butler.get("calexp_detector", dataRef.dataId)
                     catalog = addFpPoint(det, catalog)
                 xFp = catalog["base_FPPosition_x"]
                 if len(xFp[np.where(np.isfinite(xFp))]) <= 0:
@@ -630,8 +642,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                         continue
             fluxMag0 = None
             if not self.config.doApplyExternalPhotoCalib:
-                calexp = repoInfo.butler.get("calexp", dataRef.dataId) if not calexp else calexp
-                fluxMag0 = calexp.getPhotoCalib().getInstFluxAtZeroMagnitude()
+                photoCalib = repoInfo.butler.get("calexp_photoCalib", dataRef.dataId)
+                fluxMag0 = photoCalib.getInstFluxAtZeroMagnitude()
             catalog = self.calibrateCatalogs(dataRef, catalog, fluxMag0, repoInfo)
             catList.append(catalog)
 
@@ -675,8 +687,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 catalog = setAliasMaps(catalog, aliasDictList)
             fluxMag0 = None
             if not self.config.doApplyExternalPhotoCalib:
-                calexp = repoInfo.butler.get("calexp", dataRef.dataId)
-                fluxMag0 = calexp.getPhotoCalib().getInstFluxAtZeroMagnitude()
+                photoCalib = repoInfo.butler.get("calexp_photoCalib", dataRef.dataId)
+                fluxMag0 = photoCalib.getInstFluxAtZeroMagnitude()
             catalog = self.calibrateCatalogs(dataRef, catalog, fluxMag0, repoInfo)
             packedMatches = repoInfo.butler.get(dataset + "Match", dataRef.dataId)
             # The reference object loader grows the bbox by the config parameter pixelMargin.  This
@@ -723,8 +735,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             # Compute Focal Plane coordinates for each source if not already there
             if self.config.analysisMatches.doPlotFP:
                 if "src_base_FPPosition_x" not in catalog.schema and "src_focalplane_x" not in catalog.schema:
-                    exp = repoInfo.butler.get("calexp", dataRef.dataId)
-                    det = exp.getDetector()
+                    det = repoInfo.butler.get("calexp_detector", dataRef.dataId)
                     catalog = addFpPoint(det, catalog, prefix="src_")
             # Optionally backout aperture corrections
             if self.config.doBackoutApCorr:
@@ -1219,17 +1230,19 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 if self.config.doBackoutApCorr:
                     srcCat = backoutApCorr(srcCat)
 
-                calexp = repoInfo.butler.get("calexp", dataRef.dataId)
                 fluxMag0 = None
                 if not doApplyExternalPhotoCalib:
-                    fluxMag0 = calexp.getPhotoCalib().getInstFluxAtZeroMagnitude()
-                nQuarter = calexp.getDetector().getOrientation().getNQuarter()
+                    photoCalib = repoInfo.butler.get("calexp_photoCalib", dataRef.dataId)
+                    fluxMag0 = photoCalib.getInstFluxAtZeroMagnitude()
+                det = repoInfo.butler.get("calexp_detector", dataRef.dataId)
+                nQuarter = det.getOrientation().getNQuarter()
                 # add footprint nPix column
                 if self.config.doPlotFootprintNpix:
                     srcCat = addFootprintNPix(srcCat)
                 # Add rotated point in LSST cat if comparing with HSC cat to compare centroid pixel positions
                 if repoInfo.hscRun and not (repoInfo1.hscRun and repoInfo2.hscRun):
-                    srcCat = addRotPoint(srcCat, calexp.getWidth(), calexp.getHeight(), nQuarter)
+                    bbox = repoInfo.butler.get("calexp_bbox", dataRef.dataId)
+                    srcCat = addRotPoint(srcCat, bbox.getWidth(), bbox.getHeight(), nQuarter)
 
                 if repoInfo.hscRun and self.config.doAddAperFluxHsc:
                     self.log.info("HSC run: adding aperture flux to schema...")
