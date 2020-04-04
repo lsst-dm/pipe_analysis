@@ -1257,8 +1257,7 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyExternalPhoto
     tractInfo = None
     if isCoadd:
         coaddImageName = "Coadd_calexp_hsc" if hscRun else "Coadd_calexp"  # To get the coadd's WCS
-        coadd = butler.get(coaddName + coaddImageName, dataId)
-        wcs = coadd.getWcs()
+        wcs = butler.get(coaddName + coaddImageName + "_wcs", dataId)
         catDataset = coaddName + coaddDataset
         tractInfo = skymap[dataId["tract"]]
     photoCalibDataset = None
