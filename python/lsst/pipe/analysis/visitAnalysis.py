@@ -550,19 +550,15 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
             # Compute Focal Plane coordinates for each source if not already there
             if self.config.hasFakes:
-                # Get just a single pixel of the exposure
-                # Exposure is needed for ExposureInfo including bounding
-                # polygon
-                pix = lsstgeom.Box2I(lsstGeom.Point2I(0, 0),
-                                     lsstGeom.Point2I(0, 0))
-                exp = butler.get("calexp_sub", dataId, bbox=pix)
-                wcs = exp.getWcs()
+                # getUri is less safe but enables us to use an efficient
+                # ExposureFitsReader
+                fname = repoInfo.butler.getUri("calexp", dataId)
+                reader = afwImage.ExposureFitsReader(fname)
+                wcs = reader.readWcs()
 
-                # Hacky but fast way of getting just the mask
                 # Actual mask is needed because BAD pixels are more than
                 # just the defects
-                fname = butler.get("calexp_filename", dataId)[0]
-                mask = afwImage.Mask(fname, hdu=2)
+                mask = reader.readMask()
 
                 maskBad = mask.array & 2**mask.getMaskPlaneDict()['BAD']
                 good = np.count_nonzero(maskBad == 0)
@@ -591,7 +587,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 if "onCcd" not in fakeCat.columns:
                     fakeCat["onCcd"] = [np.nan]*len(fakeCat)
 
-                validCcdPolygon = exp.getInfo().getValidPolygon()
+                validCcdPolygon = reader.readExposureInfo().getValidPolygon()
                 onCcdList = []
                 for rowId in possOnCcd:
                     skyCoord = lsstGeom.SpherePoint(fakeCat[raFakesCol].values[rowId],

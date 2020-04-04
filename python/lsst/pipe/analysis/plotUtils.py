@@ -485,27 +485,30 @@ def plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=None, zpLabel=None, 
             ccd = ccd[-2] + "," + ccd[-1]
             ccdLabelStr = "R" + str(raft) + "S" + str(ccd)
         dataIdCopy[ccdKey] = ccd
-        calexp = butler.get("calexp", dataIdCopy)
-        dataRef = butler.dataRef("raw", dataId=dataIdCopy)
         # Check metadata to see if stack used was HSC
         metadata = butler.get("calexp_md", dataIdCopy)
         hscRun = checkHscStack(metadata)
         if zpLabel and (zpLabel == "MEAS_MOSAIC" or "MEAS_MOSAIC_1" in zpLabel):
+            # Unfortunate, but not easily avoided
+            calexp = butler.get("calexp", dataIdCopy)
+            dataRef = butler.dataRef("raw", dataId=dataIdCopy)
             applyMosaicResultsExposure(dataRef, calexp=calexp)
             wcs = calexp.getWcs()
         elif zpLabel and (zpLabel == "MMphotoCalib" or zpLabel == "JOINTCAL" or
                           "MMphotoCalib" in zpLabel or "JOINTCAL_1" in zpLabel):
-            wcs = dataRef.get("jointcal_wcs")
+            wcs = butler.get("jointcal_wcs", dataIdCopy)
         else:
-            wcs = calexp.getWcs()
-        w = calexp.getWidth()
-        h = calexp.getHeight()
+            wcs = butler.get("calexp_wcs", dataIdCopy)
+        bbox = butler.get("calexp_bbox", dataIdCopy)
+        w = bbox.getWidth()
+        h = bbox.getHeight()
         if zpLabel is not None:
             if hscRun and (zpLabel == "MEAS_MOSAIC" or "MEAS_MOSAIC_1" in zpLabel):
-                nQuarter = calexp.getDetector().getOrientation().getNQuarter()
+                det = butler.get("calexp_detector", dataIdCopy)
+                nQuarter = det.getOrientation().getNQuarter()
                 if nQuarter%2 != 0:
-                    w = calexp.getHeight()
-                    h = calexp.getWidth()
+                    w = bbox.getHeight()
+                    h = bbox.getWidth()
 
         ras = list()
         decs = list()
@@ -751,8 +754,7 @@ def buildTractImage(butler, dataId, tractInfo, patchList=None, coaddName="deep")
     for patch in patchList:
         expDataId = {"filter": dataId["filter"], "tract": tractInfo.getId(), "patch": patch}
         try:
-            exp = butler.get(coaddName + "Coadd_calexp", expDataId, immediate=True)
-            bbox = exp.getBBox()
+            bbox = butler.get(coaddName + "Coadd_calexp_bbox", expDataId)
             tractArray[bbox.getMinY():bbox.getMaxY() + 1,
                        bbox.getMinX():bbox.getMaxX() + 1] = exp.maskedImage.image.array
             nPatches += 1
@@ -805,8 +807,8 @@ def determineExternalCalLabel(repoInfo, patch, coaddName="deep"):
     """
     # Find a visit/ccd input so that you can check for meas_mosaic input (i.e. to set uberCalLabel)
     coaddDataId = {"tract": repoInfo.tractInfo.getId(), "patch": patch, "filter": repoInfo.filterName}
-    coadd = repoInfo.butler.get(coaddName + "Coadd_calexp", coaddDataId, immediate=True)
-    coaddInputs = coadd.getInfo().getCoaddInputs()
+    fname = repoInfo.butler.getUri(coaddName + "Coadd_calexp", coaddDataId)
+    coaddInputs = afwImage.ExposureFitsReader(fname).readExposureInfo().getCoaddInputs()
     try:
         visitDataId = {"visit": coaddInputs.ccds[0]["visit"], "ccd": coaddInputs.ccds[0]["ccd"],
                        "filter": repoInfo.filterName, "tract": repoInfo.tractInfo.getId()}
