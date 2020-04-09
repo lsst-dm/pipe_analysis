@@ -754,7 +754,8 @@ def buildTractImage(butler, dataId, tractInfo, patchList=None, coaddName="deep")
     for patch in patchList:
         expDataId = {"filter": dataId["filter"], "tract": tractInfo.getId(), "patch": patch}
         try:
-            bbox = butler.get(coaddName + "Coadd_calexp_bbox", expDataId)
+            exp = butler.get(coaddName + "Coadd_calexp", expDataId)
+            bbox = exp.getBBox()
             tractArray[bbox.getMinY():bbox.getMaxY() + 1,
                        bbox.getMinX():bbox.getMaxX() + 1] = exp.maskedImage.image.array
             nPatches += 1
