@@ -15,10 +15,9 @@ from lsst.daf.persistence.safeFileIo import safeMakeDir
 from lsst.pipe.base import Struct, TaskError
 
 import lsst.afw.cameraGeom as cameraGeom
-import lsst.afw.geom as afwGeom
-import lsst.geom as lsstGeom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
+import lsst.geom as geom
 import lsst.pex.config as pexConfig
 import lsst.verify as verify
 
@@ -230,7 +229,7 @@ class AstrometryDiff(object):
         second = catalog[self.second]
         cosDec1 = np.cos(catalog[self.declination1]) if self.declination1 is not None else 1.0
         cosDec2 = np.cos(catalog[self.declination2]) if self.declination2 is not None else 1.0
-        return (first*cosDec1 - second*cosDec2)*(1.0*afwGeom.radians).asArcseconds()*self.unitScale
+        return (first*cosDec1 - second*cosDec2)*(1.0*geom.radians).asArcseconds()*self.unitScale
 
 class AngularDistance(object):
     """Functor to calculate the Haversine angular distance between two points
@@ -519,7 +518,7 @@ def joinMatches(matches, first="first_", second="second_"):
         row = catalog.addNew()
         row.assign(mm.first, mapperList[0])
         row.assign(mm.second, mapperList[1])
-        row.set(distanceKey, mm.distance*afwGeom.radians)
+        row.set(distanceKey, mm.distance*geom.radians)
     # make sure aliases get persisted to match catalog
     for k, v in firstAliases.items():
         aliases.set(first + k, first + v)
@@ -700,11 +699,11 @@ def addFpPoint(det, catalog, prefix=""):
         row = newCatalog.addNew()
         row.assign(source, mapper)
         try:
-            center = lsstGeom.Point2D(source[xCentroidKey], source[yCentroidKey])
+            center = geom.Point2D(source[xCentroidKey], source[yCentroidKey])
             pixelsToFocalPlane = det.getTransform(cameraGeom.PIXELS, cameraGeom.FOCAL_PLANE)
             fpPoint = pixelsToFocalPlane.applyForward(center)
         except Exception:
-            fpPoint = lsstGeom.Point2D(np.nan, np.nan)
+            fpPoint = geom.Point2D(np.nan, np.nan)
             row.set(fpFlag, True)
         row.set(fpxKey, fpPoint[0])
         row.set(fpyKey, fpPoint[1])
@@ -776,7 +775,7 @@ def addRotPoint(catalog, width, height, nQuarter, prefix=""):
         try:
             rotPoint = rotatePixelCoord(source, width, height, nQuarter).getCentroid()
         except Exception:
-            rotPoint = lsstGeom.Point2D(np.nan, np.nan)
+            rotPoint = geom.Point2D(np.nan, np.nan)
             row.set(rotFlag, True)
         row.set(rotxKey, rotPoint[0])
         row.set(rotyKey, rotPoint[1])
