@@ -12,7 +12,8 @@ import lsst.geom as geom
 from lsst.display.matplotlib.matplotlib import AsinhNormalize
 from lsst.pex.config import Config, Field, ListField, DictField
 
-from .utils import Data, Stats, E1Resids, E2Resids, checkIdLists, fluxToPlotString, computeMeanOfFrac
+from .utils import (Data, Stats, E1Resids, E2Resids, checkIdLists, fluxToPlotString, computeMeanOfFrac,
+                    calcQuartileClippedStats)
 from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotText, plotCameraOutline,
                         plotTractOutline, plotPatchOutline, plotCcdOutline, labelCamera, getQuiver,
                         getRaDecMinMaxPatchList, bboxToXyCoordLists, makeAlphaCmap, buildTractImage)
@@ -1406,17 +1407,12 @@ class Analysis(object):
             return Stats(dataUsed=0, num=0, total=0, mean=np.nan, stdev=np.nan, forcedMean=np.nan,
                          median=np.nan, clip=np.nan, thresholdType=thresholdType,
                          thresholdValue=thresholdValue)
-        quartiles = np.percentile(quantity[selection], [25, 50, 75])
-        assert len(quartiles) == 3
-        median = quartiles[1]
-        clip = self.config.clip*0.74*(quartiles[2] - quartiles[0])
-        good = selection & np.logical_not(np.abs(quantity - median) > clip)
-        actualMean = quantity[good].mean()
-        mean = actualMean if forcedMean is None else forcedMean
-        stdev = np.sqrt(((quantity[good].astype(np.float64) - mean)**2).mean())
-        return Stats(dataUsed=good, num=good.sum(), total=total, mean=actualMean, stdev=stdev,
-                     forcedMean=forcedMean, median=median, clip=clip, thresholdType=thresholdType,
-                     thresholdValue=thresholdValue)
+        clippedStats = calcQuartileClippedStats(quantity[selection], nSigmaToClip=self.config.clip)
+        mean = clippedStats.mean if forcedMean is None else forcedMean
+        good = selection & np.logical_not(np.abs(quantity - clippedStats.median) > clippedStats.clipValue)
+        return Stats(dataUsed=good, num=good.sum(), total=total, mean=mean, stdev=clippedStats.stdDev,
+                     forcedMean=forcedMean, median=clippedStats.median, clip=clippedStats.clipValue,
+                     thresholdType=thresholdType, thresholdValue=thresholdValue)
 
     def calculateSysError(self, quantity, error, selection, forcedMean=None, tol=1.0e-3):
         """Calculate the systematic error of a (sub-selection of a) quantity

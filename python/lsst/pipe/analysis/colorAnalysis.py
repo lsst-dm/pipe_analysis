@@ -22,7 +22,8 @@ from .utils import (Filenamer, Enforcer, concatenateCatalogs, getFluxKeys, addCo
                     makeBadArray, addFlag, addIntFloatOrStrColumn, calibrateCoaddSourceCatalog,
                     fluxToPlotString, writeParquet, getRepoInfo, orthogonalRegression,
                     distanceSquaredToPoly, p2p1CoeffsFromLinearFit, linesFromP2P1Coeffs,
-                    makeEqnStr, catColors, addMetricMeasurement, updateVerifyJob, computeMeanOfFrac)
+                    makeEqnStr, catColors, addMetricMeasurement, updateVerifyJob, computeMeanOfFrac,
+                    calcQuartileClippedStats)
 from .plotUtils import (AllLabeller, OverlapsStarGalaxyLabeller, plotText, labelCamera, setPtSize,
                         determineExternalCalLabel)
 
@@ -1361,11 +1362,8 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
             keep &= select
             poly = np.polyfit(xx[keep], yy[keep], order)
             dy = yy - np.polyval(poly, xx)
-            q1, q3 = np.percentile(dy[keep], [25, 75])
-            # The difference between q3 and q1 is the interquartile distance.
-            # 0.74*interquartileDistance is an estimate of standard deviation.
-            clip = rej*0.74*(q3 - q1)
-            keep = np.logical_not(np.abs(dy) > clip)
+            clippedStats = calcQuartileClippedStats(dy[keep], nSigmaToClip=rej)
+            keep = np.logical_not(np.abs(dy) > clippedStats.clipValue)
             # After the first iteration, reset the vertical and horizontal clipping to be less restrictive
             if ii == 0:
                 selectXRange = selectXRange if not xFitRange else ((xx > xMinPad) & (xx < xMaxPad))
@@ -1398,9 +1396,8 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     for ii in range(iterations - 1):
         initialGuess = list(reversed(orthRegCoeffs))
         dy = yy - np.polyval(orthRegCoeffs, xx)
-        q1, q3 = np.percentile(dy[keepOdr], [25, 75])
-        clip = rej*0.74*(q3 - q1)
-        keepOdr = np.logical_not(np.abs(dy) > clip) & np.isfinite(xx) & np.isfinite(yy)
+        clippedStats = calcQuartileClippedStats(dy[keepOdr], nSigmaToClip=rej)
+        keepOdr = np.logical_not(np.abs(dy) > clippedStats.clipValue) & np.isfinite(xx) & np.isfinite(yy)
         # After the first iteration, reset the vertical and horizontal clipping to be less restrictive
         if ii == 0:
             selectXRange = selectXRange if not xFitRange else ((xx > xMinPad) & (xx < xMaxPad))
@@ -1677,26 +1674,25 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
     distance = np.sqrt(distance2)
     distance *= np.where(yy[kept] >= polyFit(xx[kept]), 1.0, -1.0)
     distance *= unitScale
-    q1, median, q3 = np.percentile(distance, [25, 50, 75])
-    good = np.logical_not(np.abs(distance - median) > 3.0*0.74*(q3 - q1))
-    mean = distance[good].mean()
-    stdDev = distance[good].std()
-    rms = np.sqrt(np.mean(distance[good]**2))
+    clippedStats = calcQuartileClippedStats(distance, nSigmaToClip=3.0)
+    good = clippedStats.goodArray
     # Get rid of LaTeX-specific characters for log message printing
     log.info("Polynomial fit: {:2}".format("".join(x for x in polyStr if x not in "{}$")))
     log.info(("Statistics from {0:} of Distance to polynomial ({9:s}): {7:s}\'star\': " +
               "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; median={5:.4f}; clip={6:.4f})" +
-              "{8:s}").format(dataId, mean, stdDev, len(xx[keep]), len(xx), np.median(distance[good]),
-                              3.0*0.74*(q3 - q1), "{", "}", unitStr))
-    meanStr = "mean = {0:5.2f}".format(mean)
-    stdStr = "  std = {0:5.2f}".format(stdDev)
-    rmsStr = "  rms = {0:5.2f}".format(rms)
+              "{8:s}").format(dataId, clippedStats.mean, clippedStats.stdDev, len(xx[keep]), len(xx),
+                              clippedStats.median, clippedStats.clipValue, "{", "}", unitStr))
+    meanStr = "mean = {0:5.2f}".format(clippedStats.mean)
+    stdStr = "  std = {0:5.2f}".format(clippedStats.stdDev)
+    rmsStr = "  rms = {0:5.2f}".format(clippedStats.rms)
 
-    count, bins, ignored = axes[1].hist(distance[good], bins=numBins, range=(-4.0*stdDev, 4.0*stdDev),
+    count, bins, ignored = axes[1].hist(distance[good], bins=numBins,
+                                        range=(-4.0*clippedStats.stdDev, 4.0*clippedStats.stdDev),
                                         density=True, color=polyColor, alpha=0.6)
-    axes[1].plot(bins, 1/(stdDev*np.sqrt(2*np.pi))*np.exp(-(bins-mean)**2/(2*stdDev**2)),
+    axes[1].plot(bins, (1/(clippedStats.stdDev*np.sqrt(2*np.pi))*np.exp(-(bins - clippedStats.mean)**2
+                                                                        /(2*clippedStats.stdDev**2))),
                  color=polyColor)
-    axes[1].axvline(x=mean, color=polyColor, linestyle=":")
+    axes[1].axvline(x=clippedStats.mean, color=polyColor, linestyle=":")
     kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=7, color=polyColor)
     axes[1].annotate(meanStr, xy=(0.34, 0.965), **kwargs)
     axes[1].annotate(stdStr, xy=(0.34, 0.93), **kwargs)
@@ -1713,7 +1709,8 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         pCmean = pCkept[good].mean()
         pCstdDev = pCkept[good].std()
 
-        count, nBins, ignored = axes[1].hist(pCkept[good], bins=bins, range=(-4.0*stdDev, 4.0*stdDev),
+        count, nBins, ignored = axes[1].hist(pCkept[good], bins=bins,
+                                             range=(-4.0*clippedStats.stdDev, 4.0*clippedStats.stdDev),
                                              density=True, color="blue", alpha=0.6)
         axes[1].plot(bins, 1/(pCstdDev*np.sqrt(2*np.pi))*np.exp(-(bins-pCmean)**2/(2*pCstdDev**2)),
                      color="blue")
@@ -1732,7 +1729,8 @@ def colorColorPolyFitPlot(dataId, filename, log, xx, yy, xLabel, yLabel, filterS
         fitP2kept = fitP2[kept].copy()
         fitP2mean = fitP2kept[good].mean()
         fitP2stdDev = fitP2kept[good].std()
-        count, nBins, ignored = axes[1].hist(fitP2kept[good], bins=bins, range=(-4.0*stdDev, 4.0*stdDev),
+        count, nBins, ignored = axes[1].hist(fitP2kept[good], bins=bins,
+                                             range=(-4.0*clippedStats.stdDev, 4.0*clippedStats.stdDev),
                                              density=True, color="green", alpha=0.6)
         axes[1].plot(bins, 1/(fitP2stdDev*np.sqrt(2*np.pi))*np.exp(-(bins-fitP2mean)**2/(2*fitP2stdDev**2)),
                      color="green")
