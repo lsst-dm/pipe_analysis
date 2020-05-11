@@ -924,11 +924,13 @@ def determineExternalCalLabel(repoInfo, patch, coaddName="deep"):
         uberCalLabel = "externCal: MEAS_MOSAIC"
     elif not repoInfo.butler.datasetExists("fcr_md", dataId=visitDataId):
         uberCalLabel = "photoCal: "
-        if repoInfo.butler.datasetExists("fgcm_tract_photoCalib", dataId=visitDataId):
-            uberCalLabel += "FGCMTRACT"
-        elif repoInfo.butler.datasetExists("fgcm_photoCalib", dataId=visitDataId):
-            uberCalLabel += "FGCM"
-        elif repoInfo.butler.datasetExists("jointcal_photoCalib", dataId=visitDataId):
+        if repoInfo.camera.getName() == "HSC":  # fgcm only in play for HSC data to date
+            if repoInfo.butler.datasetExists("fgcm_tract_photoCalib", dataId=visitDataId):
+                uberCalLabel += "FGCMTRACT"
+            elif repoInfo.butler.datasetExists("fgcm_photoCalib", dataId=visitDataId):
+                uberCalLabel += "FGCM"
+        if ("FGCM" not in uberCalLabel
+            and  repoInfo.butler.datasetExists("jointcal_photoCalib", dataId=visitDataId)):
             uberCalLabel += "JOINTCAL"
         else:
             uberCalLabel += "SFM"
