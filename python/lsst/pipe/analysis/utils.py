@@ -40,7 +40,8 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "writeParquet", "getRepoInfo", "findCcdKey", "getCcdNameRefList", "getDataExistsRefList",
            "orthogonalRegression", "distanceSquaredToPoly", "p1CoeffsFromP2x0y0", "p2p1CoeffsFromLinearFit",
            "lineFromP2Coeffs", "linesFromP2P1Coeffs", "makeEqnStr", "catColors", "setAliasMaps",
-           "addPreComputedColumns", "addMetricMeasurement", "updateVerifyJob", "computeMeanOfFrac"]
+           "addPreComputedColumns", "addMetricMeasurement", "updateVerifyJob", "computeMeanOfFrac",
+           "calcQuartileClippedStats"]
 
 
 NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
@@ -1131,11 +1132,16 @@ def fluxToPlotString(fluxToPlot):
                   "base_PsfFlux": "PSF",
                   "base_GaussianFlux": "Gaussian",
                   "ext_photometryKron_KronFlux": "Kron",
+                  "base_InputCount_value": "InputCount",
                   "modelfit_CModel_instFlux": "CModel",
                   "modelfit_CModel_flux": "CModel",
                   "modelfit_CModel": "CModel",
                   "base_CircularApertureFlux_12_0_instFlux": "CircApRad12pix",
-                  "base_CircularApertureFlux_12_0": "CircApRad12pix"}
+                  "base_CircularApertureFlux_12_0": "CircApRad12pix",
+                  "base_CircularApertureFlux_9_0_instFlux": "CircApRad9pix",
+                  "base_CircularApertureFlux_9_0": "CircApRad9pix",
+                  "base_CircularApertureFlux_25_0_instFlux": "CircApRad25pix",
+                  "base_CircularApertureFlux_25_0": "CircApRad25pix"}
     if fluxToPlot in fluxStrMap:
         return fluxStrMap[fluxToPlot]
     else:
@@ -1934,3 +1940,61 @@ def computeMeanOfFrac(valueArray, tailStr="upper", fraction=0.1, floorFactor=1):
                            "was provided")
 
     return meanOfFrac
+
+def calcQuartileClippedStats(dataArray, nSigmaToClip=3.0):
+    """Calculate the quartile-based clipped statistics of a data array.
+
+    The difference between quartiles[2] and quartiles[0] is the interquartile
+    distance.  0.74*interquartileDistance is an estimate of standard deviation
+    so, in the case that ``dataArray`` has an approximately Gaussian
+    distribution, this is equivalent to nSigma clipping.
+
+    Parameters
+    ----------
+    dataArray : `list` or `numpy.ndarray` of `float`
+        List or array containing the values for which the quartile-based
+        clipped statistics are to be calculated.
+    nSigmaToClip : `float`, optional
+        Number of \"sigma\" outside of which to clip data when computing the
+        statistics.
+
+    Returns
+    -------
+    result : `lsst.pipe.base.Struct`
+        The quartile-based clipped statistics with ``nSigmaToClip`` clipping.
+        Atributes are:
+
+        ``median``
+            The median of the full ``dataArray`` (`float`).
+        ``mean``
+            The quartile-based clipped mean (`float`).
+        ``stdDev``
+            The quartile-based clipped standard deviation (`float`).
+        ``rms``
+            The quartile-based clipped root-mean-squared (`float`).
+        ``clipValue``
+            The value outside of which to clip the data before computing the
+            statistics (`float`).
+        ``goodArray``
+            A boolean array indicating which data points in ``dataArray`` were
+            used in the calculation of the statistics, where `False` indicates
+            a clipped datapoint (`numpy.ndarray` of `bool`).
+    """
+    quartiles = np.percentile(dataArray, [25, 50, 75])
+    assert len(quartiles) == 3
+    median = quartiles[1]
+    interQuartileDistance = quartiles[2] - quartiles[0]
+    clipValue = nSigmaToClip*0.74*interQuartileDistance
+    good = np.logical_not(np.abs(dataArray - median) > clipValue)
+    quartileClippedMean = dataArray[good].mean()
+    quartileClippedStdDev = dataArray[good].std()
+    quartileClippedRms = np.sqrt(np.mean(dataArray[good]**2))
+
+    return Struct(
+        median=median,
+        mean=quartileClippedMean,
+        stdDev=quartileClippedStdDev,
+        rms=quartileClippedRms,
+        clipValue=clipValue,
+        goodArray=good,
+    )

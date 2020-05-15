@@ -342,7 +342,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if any(doPlot for doPlot in [self.config.doPlotFootprintNpix, self.config.doPlotQuiver,
                                          self.config.doPlotMags, self.config.doPlotSizes,
                                          self.config.doPlotCentroids, self.config.doPlotStarGalaxy,
-                                         self.config.doWriteParquetTables]):
+                                         self.config.doPlotSkyObjects, self.config.doWriteParquetTables]):
                 if self.config.hasFakes:
                     inputFakes = repoInfo.butler.get("deepCoadd_fakeSourceCat", dataId=repoInfo.dataId)
                     inputFakes = inputFakes.toDataFrame()
@@ -353,7 +353,17 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 else:
                     commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", repoInfo,
                                                              aliasDictList=aliasDictList)
-
+                # Make sub-catalog of sky sources before flag culling as many of
+                # these will have flags set due to measurement difficulties in
+                # regions that are really blank sky
+                skySrcCat = None
+                if self.config.doPlotSkyObjects:
+                    if "sky_source" in catalog.schema:
+                        skySrcCat = catalog[catalog["sky_source"]].copy(deep=True)
+                    else:
+                        self.log.warn("doPlotSkyObjects is True, but the \"sky_source\" "
+                                 "column does not exist in catalog.schema.  Skipping "
+                                 "skyObjects plot.")
                 # Set boolean arrays indicating sources deemed unsuitable for qa analyses
                 self.catLabel = "nChild = 0"
                 bad = makeBadArray(catalog, flagList=self.config.analysis.flags,
@@ -410,6 +420,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 # Dict of all parameters common to plot* functions
                 plotKwargs = dict(butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
                                   hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo)
+                if self.config.doPlotSkyObjects and skySrcCat is not None:
+                    self.plotSkyObjects(skySrcCat, filenamer(repoInfo.dataId, description="skySources",
+                                                             style="hist"), repoInfo.dataId, **plotKwargs)
                 if self.config.doPlotPsfFluxSnHists:
                     self.plotPsfFluxSnHists(commonZpCat,
                                             filenamer(repoInfo.dataId, description="base_PsfFlux_raw",
@@ -544,9 +557,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 catalog = setAliasMaps(catalog, aliasDictList)
 
             # Add ccdId column (useful to have in Parquet tables for subsequent interactive analysis)
-            if self.config.doWriteParquetTables:
-                catalog = addIntFloatOrStrColumn(catalog, dataRef.dataId[repoInfo.ccdKey], "ccdId",
-                                                 "Id of CCD on which source was detected")
+            catalog = addIntFloatOrStrColumn(catalog, dataRef.dataId[repoInfo.ccdKey], "ccdId",
+                                             "Id of CCD on which source was detected")
 
             # Compute Focal Plane coordinates for each source if not already there
             if self.config.hasFakes:
