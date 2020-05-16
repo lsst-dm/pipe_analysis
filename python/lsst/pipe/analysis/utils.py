@@ -1,23 +1,22 @@
 from __future__ import print_function
 
-import os
 import re
 
 import astropy.units as units
 import numpy as np
+import matplotlib.pyplot as plt
 import scipy.odr as scipyOdr
 import scipy.optimize as scipyOptimize
 import scipy.stats as scipyStats
 
 from contextlib import contextmanager
 
-from lsst.daf.persistence.safeFileIo import safeMakeDir
 from lsst.pipe.base import Struct, TaskError
 
 import lsst.afw.cameraGeom as cameraGeom
+import lsst.geom as geom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
-import lsst.geom as geom
 import lsst.pex.config as pexConfig
 import lsst.verify as verify
 
@@ -26,7 +25,7 @@ try:
 except ImportError:
     applyMosaicResultsCatalog = None
 
-__all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCompare",
+__all__ = ["Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCompare",
            "AstrometryDiff", "AngularDistance", "TraceSize", "PsfTraceSizeDiff", "TraceSizeCompare",
            "PercentDiff", "E1Resids", "E2Resids", "E1ResidsHsmRegauss", "E2ResidsHsmRegauss",
            "FootNpixDiffCompare", "MagDiffErr", "MagDiffCompareErr", "ApCorrDiffErr",
@@ -41,10 +40,53 @@ __all__ = ["Filenamer", "Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches"
            "orthogonalRegression", "distanceSquaredToPoly", "p1CoeffsFromP2x0y0", "p2p1CoeffsFromLinearFit",
            "lineFromP2Coeffs", "linesFromP2P1Coeffs", "makeEqnStr", "catColors", "setAliasMaps",
            "addPreComputedColumns", "addMetricMeasurement", "updateVerifyJob", "computeMeanOfFrac",
-           "calcQuartileClippedStats"]
+           "calcQuartileClippedStats", "savePlots"]
 
 
 NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
+
+
+def savePlots(plotList, plotType, dataId, butler):
+    """Persist plots and parse stats yielded by the supplied generator
+
+    Parameters
+    ----------
+    plotList : `list`
+        List of generators that will yield plots
+    plotType : `str`
+        Tells the butler what type of plot is being saved
+    dataId : `dict`
+        The dataId that will be used in persisting plots
+    butler : `lsst.daf.persistence.Butler`
+        The butler that might be used in persisting the plots
+    """
+    allStats = {}
+    allStatsHigh = {}
+    for plots in plotList:
+        # In this context next is called to "prime" the generator
+        # Each plotting function yields right after it is called so that
+        # each python execution frame is created, but not run. Calling next
+        # on the reference to the plot function begins the execution of the
+        # body, which will then yield each plot the function creates.
+        next(plots)
+        for plot in plots:
+            if hasattr(plot, 'dpi'):
+                dpi = plot.dpi
+                plot.fig.set_dpi(dpi)
+            if hasattr(plot, 'description'):
+                dataId['description'] = plot.description
+                dataId['style'] = plot.style
+                key = plot.description
+                butler.put(plot.fig, plotType, dataId)
+            else:
+                raise AttributeError("Yielded struct is missing description")
+            plt.close(plot.fig)
+            if hasattr(plot, 'stats'):
+                allStats[key] = plot.stats
+            if hasattr(plot, 'statsHigh'):
+                allStatsHigh[key] = plot.statsHigh
+    return allStats, allStatsHigh
+
 
 def writeParquet(dataRef, table, badArray=None):
     """Write an afwTable to a desired ParquetTable butler dataset
@@ -86,30 +128,6 @@ def writeParquet(dataRef, table, badArray=None):
     df = df.set_index('id', drop=True)
 
     dataRef.put(ParquetTable(dataFrame=df))
-
-class Filenamer(object):
-    """Callable that provides a filename given a style"""
-    def __init__(self, butler, dataset, dataId={}, subdir=""):
-        self.butler = butler
-        self.dataset = dataset
-        self.dataId = dataId
-        self.subdir = subdir
-
-    def __call__(self, dataId, **kwargs):
-        filename = self.butler.get(self.dataset + "_filename", self.dataId, **kwargs)[0]
-        # When trying to write to a different rerun (or output), if the given dataset exists in the _parent
-        # rerun (or input) directory, _parent is added to the filename, and thus the output files
-        # will actually oversrite those in the _parent rerun (or input) directory (which is bad if
-        # your intention is to write to a different output dir!).  So, here we check for the presence
-        # of _parent in the filename and strip it out if present.
-        if "_parent/" in filename:
-            print("Note: stripping _parent from filename: ", filename)
-            filename = filename.replace("_parent/", "")
-        if self.subdir:
-            lastSlashInd = filename.rfind("/")
-            filename = filename[:lastSlashInd] + "/" + self.subdir + "/" + filename[lastSlashInd + 1:]
-        safeMakeDir(os.path.dirname(filename))
-        return filename
 
 
 class Data(Struct):
@@ -232,6 +250,7 @@ class AstrometryDiff(object):
         cosDec2 = np.cos(catalog[self.declination2]) if self.declination2 is not None else 1.0
         return (first*cosDec1 - second*cosDec2)*(1.0*geom.radians).asArcseconds()*self.unitScale
 
+
 class AngularDistance(object):
     """Functor to calculate the Haversine angular distance between two points
 
@@ -342,10 +361,10 @@ class E1Resids(object):
         self.unitScale = unitScale
 
     def __call__(self, catalog):
-        srcE1 = ((catalog[self.column + "_xx"] - catalog[self.column + "_yy"])/
-                 (catalog[self.column + "_xx"] + catalog[self.column + "_yy"]))
-        psfE1 = ((catalog[self.psfColumn + "_xx"] - catalog[self.psfColumn + "_yy"])/
-                 (catalog[self.psfColumn + "_xx"] + catalog[self.psfColumn + "_yy"]))
+        srcE1 = ((catalog[self.column + "_xx"] - catalog[self.column + "_yy"])
+                 /(catalog[self.column + "_xx"] + catalog[self.column + "_yy"]))
+        psfE1 = ((catalog[self.psfColumn + "_xx"] - catalog[self.psfColumn + "_yy"])
+                 /(catalog[self.psfColumn + "_xx"] + catalog[self.psfColumn + "_yy"]))
         e1Resids = srcE1 - psfE1
         return np.array(e1Resids)*self.unitScale
 
@@ -358,10 +377,9 @@ class E2Resids(object):
         self.unitScale = unitScale
 
     def __call__(self, catalog):
-        srcE2 = (2.0*catalog[self.column + "_xy"]/
-                 (catalog[self.column + "_xx"] + catalog[self.column + "_yy"]))
-        psfE2 = (2.0*catalog[self.psfColumn + "_xy"]/
-                 (catalog[self.psfColumn + "_xx"] + catalog[self.psfColumn + "_yy"]))
+        srcE2 = 2.0*catalog[self.column + "_xy"]/(catalog[self.column + "_xx"] + catalog[self.column + "_yy"])
+        psfE2 = (2.0*catalog[self.psfColumn + "_xy"]
+                 /(catalog[self.psfColumn + "_xx"] + catalog[self.psfColumn + "_yy"]))
         e2Resids = srcE2 - psfE2
         return np.array(e2Resids)*self.unitScale
 
@@ -373,8 +391,8 @@ class E1ResidsHsmRegauss(object):
 
     def __call__(self, catalog):
         srcE1 = catalog["ext_shapeHSM_HsmShapeRegauss_e1"]
-        psfE1 = ((catalog["ext_shapeHSM_HsmPsfMoments_xx"] - catalog["ext_shapeHSM_HsmPsfMoments_yy"])/
-                 (catalog["ext_shapeHSM_HsmPsfMoments_xx"] + catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
+        psfE1 = ((catalog["ext_shapeHSM_HsmPsfMoments_xx"] - catalog["ext_shapeHSM_HsmPsfMoments_yy"])
+                 /(catalog["ext_shapeHSM_HsmPsfMoments_xx"] + catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
         e1Resids = srcE1 - psfE1
         return np.array(e1Resids)*self.unitScale
 
@@ -386,8 +404,8 @@ class E2ResidsHsmRegauss(object):
 
     def __call__(self, catalog):
         srcE2 = catalog["ext_shapeHSM_HsmShapeRegauss_e2"]
-        psfE2 = (2.0*catalog["ext_shapeHSM_HsmPsfMoments_xy"]/
-                 (catalog["ext_shapeHSM_HsmPsfMoments_xx"] + catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
+        psfE2 = (2.0*catalog["ext_shapeHSM_HsmPsfMoments_xy"]
+                 /(catalog["ext_shapeHSM_HsmPsfMoments_xx"] + catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
         e2Resids = srcE2 - psfE2
         return np.array(e2Resids)*self.unitScale
 
@@ -1274,7 +1292,7 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyExternalPhoto
         skymap = skymap if skymap else butler.get("deepCoadd_skyMap")
         try:
             tractInfo = skymap[dataId["tract"]]
-        except:
+        except KeyError:
             tractInfo = None
     return Struct(
         butler=butler,
@@ -1749,7 +1767,6 @@ def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=No
             catalog = addIntFloatOrStrColumn(catalog, magDiffErr, fieldErrName, fieldErrDoc,
                                              fieldUnits=fieldUnits.strip(" ()"))
 
-
     for compareCol, psfCompareCol, compareStr in [["base_SdssShape", "base_SdssShape_psf", "Sdss"],
                                                   ["ext_shapeHSM_HsmSourceMoments",
                                                    "ext_shapeHSM_HsmPsfMoments", "Hsm"]]:
@@ -1770,7 +1787,7 @@ def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=No
 
             # Source Trace - PSF model Trace
             fieldUnits = " (%)"
-            fieldName =  "psfTrace" + compareStr + "Diff_percent"
+            fieldName = "psfTrace" + compareStr + "Diff_percent"
             fieldDoc = fieldName + " = srcTrace" + compareStr + " - psfModelTrace" + compareStr + fieldUnits
             parameterFunc = PsfTraceSizeDiff(compareCol, psfCompareCol)
             psfTraceSizeDiff = parameterFunc(catalog)
@@ -1789,7 +1806,6 @@ def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=No
             parameterFunc = E2Resids(compareCol, psfCompareCol, unitScale)
             e2Resids = parameterFunc(catalog)
             catalog = addIntFloatOrStrColumn(catalog, e2Resids, fieldName, fieldDoc)
-
 
     # HSM Regauss E1/E2 resids
     fieldUnits = " (milli)" if toMilli else ""
@@ -1940,6 +1956,7 @@ def computeMeanOfFrac(valueArray, tailStr="upper", fraction=0.1, floorFactor=1):
                            "was provided")
 
     return meanOfFrac
+
 
 def calcQuartileClippedStats(dataArray, nSigmaToClip=3.0):
     """Calculate the quartile-based clipped statistics of a data array.

@@ -9,7 +9,7 @@ import lsst.afw.table as afwTable
 import lsst.geom as geom
 from lsst.pipe.base import Struct
 
-from .utils import checkHscStack, findCcdKey, calcQuartileClippedStats
+from .utils import calcQuartileClippedStats
 
 try:
     from lsst.meas.mosaic.updateExposure import applyMosaicResultsExposure
@@ -95,15 +95,15 @@ class CosmosLabeller(StarGalaxyLabeller):
         return np.array([0 if ii in good else 1 for ii in catalog["id"]])
 
 
-def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", fontSize=None, color="k", coordSys="axes", **kwargs):
+def plotText(textStr, fig, axis, xLoc, yLoc, prefix="", fontSize=None, color="k", coordSys="axes", **kwargs):
     """Label the plot with the string provided at a given location
 
     Parameters
     ----------
     textStr : `str`
        String of text to plot.
-    plt : `matplotlib.pyplot`
-       Instance of matplotlib pyplot to plot ``textStr``.
+    fig : `matplotlib.figure.Figure`
+       The figure to plot ``textStr`` on.
     axis : `matplotlib.axes._axes.Axes`
        Particular matplotlib axes of ``plt`` on which to plot ``testStr``.
     xLoc, yLoc : `float`
@@ -148,11 +148,11 @@ def plotText(textStr, plt, axis, xLoc, yLoc, prefix="", fontSize=None, color="k"
         raise ValueError("Unrecognized coordSys: {}.  Must be one of axes, data, figure".format(coordSys))
     if not fontSize:
         fontSize = int(9 - min(3, len(textStr)/10))
-    plt.text(xLoc, yLoc, prefix + textStr, ha="center", va="center", fontsize=fontSize, transform=transform,
+    fig.text(xLoc, yLoc, prefix + textStr, ha="center", va="center", fontsize=fontSize, transform=transform,
              color=color, **kwargs)
 
 
-def annotateAxes(filename, plt, axes, statsConf, dataSet, magThresholdConf, signalToNoiseStrConf=None,
+def annotateAxes(description, axes, statsConf, dataSet, magThresholdConf, signalToNoiseStrConf=None,
                  statsHigh=None, magThresholdHigh=None, signalToNoiseHighStr=None,
                  x0=0.03, y0=0.96, yOff=0.05, fontSize=8, ha="left", va="top", color="blue",
                  isHist=False, hscRun=None, matchRadius=None, matchRadiusUnitStr="\"",
@@ -161,12 +161,9 @@ def annotateAxes(filename, plt, axes, statsConf, dataSet, magThresholdConf, sign
 
     Parameters
     ----------
-    filename : `str`
-       String representing the full path of the plot output filename.  Used
-       here to select for/against certain annotations for certain styles of
-       plots.
-    plt : `matplotlib.pyplot`
-       Instance of the matplotlib plot to be annotated.
+    description : `str`
+       String representing the type of plot. Used here to select for/against
+       certain annotations for certain styles of plots.
     axes : `matplotlib.axes._axes.Axes`
        Particular matplotlib axes of ``plt`` on which to plot the annotations.
     statsConf : `lsst.pipe.analysis.utils.Stats`
@@ -240,9 +237,9 @@ def annotateAxes(filename, plt, axes, statsConf, dataSet, magThresholdConf, sign
        values (used for plot legends).
     """
     xThresh = axes.get_xlim()[0] + 0.58*(axes.get_xlim()[1] - axes.get_xlim()[0])
-    for stats, magThreshold, signalToNoiseStr, y00 in [[statsConf, magThresholdConf, signalToNoiseStrConf, y0],
-                                                       [statsHigh, magThresholdHigh, signalToNoiseHighStr,
-                                                        0.18]]:
+    plotInfo = [[statsConf, magThresholdConf, signalToNoiseStrConf, y0],
+                [statsHigh, magThresholdHigh, signalToNoiseHighStr, 0.18]]
+    for stats, magThreshold, signalToNoiseStr, y00 in plotInfo:
         axes.annotate(dataSet + r" N = {0.num:d} (of {0.total:d})".format(stats[dataSet]),
                       xy=(x0, y00), xycoords="axes fraction", ha=ha, va=va, fontsize=fontSize, color=color)
         if signalToNoiseStr:
@@ -264,9 +261,9 @@ def annotateAxes(filename, plt, axes, statsConf, dataSet, magThresholdConf, sign
             medianStr = "{0.median:.2f}".format(stats[dataSet])
             stdevStr = "{0.stdev:.2f}".format(stats[dataSet])
             statsUnitStr = " (milli)"
-            if any(ss in filename for ss in ["_ra", "_dec", "distance"]):
+            if any(ss in description for ss in ["_ra", "_dec", "distance"]):
                 statsUnitStr = " (mas)"
-            if any(ss in filename for ss in ["Flux", "_photometry", "_mag"]):
+            if any(ss in description for ss in ["Flux", "_photometry", "_mag"]):
                 statsUnitStr = " (mmag)"
         lenStr = 0.12 + 0.017*(max(len(meanStr), len(stdevStr)))
         strKwargs = dict(xycoords="axes fraction", va=va, fontsize=fontSize, color="k")
@@ -303,27 +300,40 @@ def annotateAxes(filename, plt, axes, statsConf, dataSet, magThresholdConf, sign
     return l1, l2
 
 
-def labelVisit(filename, plt, axis, xLoc, yLoc, color="k", fontSize=9):
-    labelStr = None
-    if filename.find("tract-") >= 0:
-        labelStr = "tract: "
-        i1 = filename.find("tract-") + len("tract-")
-        i2 = filename.find("/", i1)
-        labelStr += filename[i1:i2]
-    if filename.find("visit-") >= 0:
-        labelStr += " visit: "
-        i1 = filename.find("visit-") + len("visit-")
-        i2 = filename.find("/", i1)
-        labelStr += filename[i1:i2]
-    if labelStr is not None:
-        plt.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=fontSize,
-                 transform=axis.transAxes, color=color)
+def labelVisit(plotInfoDict, fig, axis, xLoc, yLoc, color="k", fontSize=9):
+    """Add Visit information to the plot
+
+    Parameters
+    ----------
+    plotInfoDict : `dict`
+        A dict containing useful information to add to the plot.
+    fig : `matplotlib.figure.Figure`
+        The plot to add the information to.
+    axis : `matplotlib.axes._subplots.AxesSubplot`
+        The specfic axis to add the information to.
+    xLoc : `float`
+        The x location to put the label at.
+    yLoc : `float`
+        The y location to put the label at.
+    color : `str`
+        The color to make the label.
+        default : "k"
+    fontSize : ``
+        The fontsize to use for the label.
+        default : 9
+    """
+    if plotInfoDict["visit"] is None:
+        labelStr = "Tract: {}".format(plotInfoDict["tract"])
+    else:
+        labelStr = "Tract: {} Visit: {}".format(plotInfoDict["tract"], plotInfoDict["visit"])
+    plt.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=fontSize, transform=axis.transAxes,
+             color=color)
 
 
-def labelCamera(camera, plt, axis, xLoc, yLoc, color="k", fontSize=10):
-    labelStr = "camera: " + str(camera.getName())
-    plt.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=fontSize,
-             transform=axis.transAxes, color=color)
+def labelCamera(plotInfoDict, fig, axis, xLoc, yLoc, color="k", fontSize=10):
+    labelStr = "camera: " + plotInfoDict["camera"]
+    fig.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=fontSize, transform=axis.transAxes,
+             color=color)
 
 
 def filterStrFromFilename(filename):
@@ -385,7 +395,7 @@ def plotCameraOutline(axes, camera, ccdList, color="k", fontSize=6, metricPerCcd
             hasRotatedCcds = True
             break
     if metricPerCcdDict:  # color-code the ccds by the per-ccd metric measurement
-        cmap=plt.cm.viridis
+        cmap = plt.cm.viridis
         metricPerCcdArray = np.fromiter(metricPerCcdDict.values(), dtype="float32")
         finiteMetrics = np.isfinite(metricPerCcdArray)
         clippedStats = calcQuartileClippedStats(metricPerCcdArray[finiteMetrics], nSigmaToClip=5.0)
@@ -397,9 +407,8 @@ def plotCameraOutline(axes, camera, ccdList, color="k", fontSize=6, metricPerCcd
     for ic, ccd in enumerate(camera):
         ccdCorners = ccd.getCorners(cameraGeom.FOCAL_PLANE)
         if ccd.getType() == cameraGeom.DetectorType.SCIENCE:
-            plt.gca().add_patch(patches.Rectangle(ccdCorners[0], *list(ccdCorners[2] - ccdCorners[0]),
-                                                  facecolor="none", edgecolor="k", ls="solid", lw=0.5,
-                                                  alpha=0.5))
+            axes.add_patch(patches.Rectangle(ccdCorners[0], *list(ccdCorners[2] - ccdCorners[0]),
+                           facecolor="none", edgecolor="k", ls="solid", lw=0.5, alpha=0.5))
         if ccd.getId() in intCcdList:
             if metricPerCcdDict is None:
                 if hasRotatedCcds:
@@ -408,7 +417,7 @@ def plotCameraOutline(axes, camera, ccdList, color="k", fontSize=6, metricPerCcd
                 elif ccd.getName()[0] == "R":
                     try:
                         fillColor = colors[(int(ccd.getName()[1]) + int(ccd.getName()[2]))%len(colors)]
-                    except:
+                    except Exception:
                         fillColor = colors[ic%len(colors)]
                 else:
                     fillColor = colors[ic%len(colors)]
@@ -416,10 +425,9 @@ def plotCameraOutline(axes, camera, ccdList, color="k", fontSize=6, metricPerCcd
                 cmapBinIndex = np.digitize(metricPerCcdDict[str(ccd.getId())], cmapBins)
                 fillColor = cmap.colors[cmapBinIndex]
             ccdCorners = ccd.getCorners(cameraGeom.FOCAL_PLANE)
-            plt.gca().add_patch(patches.Rectangle(ccdCorners[0], *list(ccdCorners[2] - ccdCorners[0]),
-                                                  fill=True, facecolor=fillColor, edgecolor="k",
-                                                  ls="solid", lw=1.0, alpha=0.7))
-
+            axes.add_patch(patches.Rectangle(ccdCorners[0], *list(ccdCorners[2] - ccdCorners[0]),
+                                             fill=True, facecolor=fillColor, edgecolor="k",
+                                             ls="solid", lw=1.0, alpha=0.7))
     axes.set_xlim(-camLimits, camLimits)
     axes.set_ylim(-camLimits, camLimits)
     if camera.getName() == "HSC":
@@ -559,80 +567,55 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
         cbar.set_label(label=metricStr, size=fontSize + 1)
 
 
-def plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=None, zpLabel=None, fontSize=8):
-    """!Plot outlines of CCDs in ccdList
-    """
-    dataIdCopy = dataId.copy()
-    if "raftName" in dataId:  # Pop these (if present) so that the ccd is looked up by just the detector field
-        dataIdCopy.pop("raftName", None)
-        dataIdCopy.pop("detectorName", None)
-    ccdKey = findCcdKey(dataId)
-    # Pop (if present) so that the ccd is looked up by just the ccdKey field
-    for keyName in ["extension", ]:
-        if keyName != ccdKey and keyName in dataIdCopy:
-            print("Popping:", keyName)
-            dataIdCopy.pop(keyName, None)
-    for ccd in ccdList:
-        ccdLabelStr = str(ccd)
-        if "raft" in dataId:
-            if len(ccd) != 4:
-                if len(ccd) > 4:
-                    errorStr = "Only raft/sensor combos with x,y coords 0 through 9 have been accommodated"
-                else:
-                    errorStr = "Only 2 by 2 = 4 integer raft/sensor combo names have been accommodated"
-                RuntimeError(errorStr)
-            raft = ccd[0] + "," + ccd[1]
-            dataIdCopy["raft"] = raft
-            ccd = ccd[-2] + "," + ccd[-1]
-            ccdLabelStr = "R" + str(raft) + "S" + str(ccd)
-        dataIdCopy[ccdKey] = ccd
-        # Check metadata to see if stack used was HSC
-        metadata = butler.get("calexp_md", dataIdCopy)
-        hscRun = checkHscStack(metadata)
-        if zpLabel and (zpLabel == "MEAS_MOSAIC" or "MEAS_MOSAIC_1" in zpLabel):
-            # Unfortunate, but not easily avoided
-            calexp = butler.get("calexp", dataIdCopy)
-            dataRef = butler.dataRef("raw", dataId=dataIdCopy)
-            applyMosaicResultsExposure(dataRef, calexp=calexp)
-            wcs = calexp.getWcs()
-        elif zpLabel and (zpLabel == "MMphotoCalib" or zpLabel == "JOINTCAL" or
-                          "MMphotoCalib" in zpLabel or "JOINTCAL_1" in zpLabel):
-            wcs = butler.get("jointcal_wcs", dataIdCopy)
-        else:
-            wcs = butler.get("calexp_wcs", dataIdCopy)
-        bbox = butler.get("calexp_bbox", dataIdCopy)
-        w = bbox.getWidth()
-        h = bbox.getHeight()
-        if zpLabel is not None:
-            if hscRun and (zpLabel == "MEAS_MOSAIC" or "MEAS_MOSAIC_1" in zpLabel):
-                det = butler.get("calexp_detector", dataIdCopy)
-                nQuarter = det.getOrientation().getNQuarter()
-                if nQuarter%2 != 0:
-                    w = bbox.getHeight()
-                    h = bbox.getWidth()
+def plotCcdOutline(axes, areaDict, ccdList, tractInfo=None, zpLabel=None, fontSize=8):
+    """Plot the outlines of the ccds in ccdList on a given axis.
 
-        ras = list()
-        decs = list()
-        coords = list()
-        for x, y in zip([0, w, w, 0, 0], [0, 0, h, h, 0]):
-            xy = geom.Point2D(x, y)
-            ra = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
-            dec = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
-            ras.append(ra)
-            decs.append(dec)
-            coords.append(geom.SpherePoint(ra, dec, geom.degrees))
-        xy = geom.Point2D(w/2, h/2)
-        centerX = np.rad2deg(np.float64(wcs.pixelToSky(xy)[0]))
-        centerY = np.rad2deg(np.float64(wcs.pixelToSky(xy)[1]))
+    Parameters
+    ----------
+    axes : `matplotlib.axes._subplots.AxesSubplot`
+        The axes to draw the ccds on.
+    areaDict : `dict`
+        A dictionary containing information about the ccds and their corners using the wcs of the visit
+    ccdList : `list`
+        A list of the ccds used in this analysis.
+    tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
+        The information about the tract
+        Default is None
+    zpLabel : `str`
+        The label for the zero point.
+        Default is None.
+    fontSize : `int`
+        The fontsize to use for the ccd labels.
+        Default is 8.
+    """
+    for ccd in ccdList:
+        # Use the precomputed corners to make lists of ra and dec to plot
+        ccdCorners = areaDict["corners_{}".format(ccd)]
+        ra0 = ccdCorners[0].getRa().asDegrees()
+        ra1 = ccdCorners[1].getRa().asDegrees()
+        dec0 = ccdCorners[0].getDec().asDegrees()
+        dec1 = ccdCorners[1].getDec().asDegrees()
+        ras = [ra0, ra1, ra1, ra0, ra0]
+        decs = [dec0, dec0, dec1, dec1, dec0]
+
+        # Add the other two corners to the list of points to check if inside the tract
+        ccdCorners.extend([geom.SpherePoint(ra1, dec0, geom.degrees),
+                           geom.SpherePoint(ra0, dec1, geom.degrees)])
+
+        cenX = ra0 + (ra1 - ra0) / 2
+        cenY = dec0 + (dec1 - dec0) / 2
+
+        # Only plot the ccds with any corner in the tract given in tractInfo, plot all if no tractInfo
         inTract = False
         if tractInfo is not None:
-            for coord in coords:
+            for coord in ccdCorners:
                 if tractInfo.contains(coord):
                     inTract = True
                     break
+
         if not tractInfo or inTract:
             axes.plot(ras, decs, "k-", linewidth=1)
-            axes.text(centerX, centerY, "%s" % str(ccdLabelStr), ha="center", va="center", fontsize=fontSize)
+            axes.text(cenX, cenY, "{}".format(ccd), ha="center", va="center", fontsize=fontSize)
 
 
 def plotPatchOutline(axes, tractInfo, patchList, plotUnits="deg", idFontSize=None):
@@ -930,12 +913,12 @@ def determineExternalCalLabel(repoInfo, patch, coaddName="deep"):
             elif repoInfo.butler.datasetExists("fgcm_photoCalib", dataId=visitDataId):
                 uberCalLabel += "FGCM"
         if ("FGCM" not in uberCalLabel
-            and  repoInfo.butler.datasetExists("jointcal_photoCalib", dataId=visitDataId)):
+                and repoInfo.butler.datasetExists("jointcal_photoCalib", dataId=visitDataId)):
             uberCalLabel += "JOINTCAL"
         else:
             uberCalLabel += "SFM"
         uberCalLabel += "  wcs: "
-        if  repoInfo.butler.datasetExists("jointcal_wcs", dataId=visitDataId):
+        if repoInfo.butler.datasetExists("jointcal_wcs", dataId=visitDataId):
             uberCalLabel += "JOINTCAL"
         else:
             uberCalLabel += "SFM"

@@ -34,8 +34,10 @@ import astropy.coordinates as coord
 from astropy import units as u
 from astropy.stats import mad_std as sigmaMAD
 
+import lsst.pipe.base as pipeBase
+
 __all__ = ["addDegreePositions", "matchCatalogs", "addNearestNeighbor", "getPlotInfo",
-           "fakesAreaDepth", "fakesPositionCompare", "fakesMagnitudeBlendedness",
+           "calcFakesAreaDepth", "plotFakesAreaDepth", "fakesPositionCompare", "fakesMagnitudeBlendedness",
            "fakesMagnitudeNearestNeighbor", "fakesMagnitudeCompare"]
 
 
@@ -175,12 +177,23 @@ def getPlotInfo(repoInfo):
     camera = repoInfo.camera.getName()
     dataId = repoInfo.dataId
     filterName = dataId["filter"]
-    visit = str(dataId["visit"])
+    # Try and get the visit info and patch info but the data might not have them so just set to None
+    try:
+        visit = str(dataId["visit"])
+    except KeyError:
+        visit = None
+
+    try:
+        patch = dataId["patch"]
+    except KeyError:
+        patch = None
+
     tract = str(dataId["tract"])
-    dataset = repoInfo.dataset
+    photoCalibDataset = repoInfo.photoCalibDataset
+    skyDataset = repoInfo.skyWcsDataset
     rerun = list(repoInfo.butler.storage.repositoryCfgs)[0]
-    plotInfoDict = {"camera": camera, "filter": filterName, "visit": visit, "tract": tract,
-                    "dataset": dataset, "rerun": rerun}
+    plotInfoDict = dict(camera=camera, filter=filterName, visit=visit, tract=tract,
+                        calibDataset=photoCalibDataset, rerun=rerun, skyDataset=skyDataset, patch=patch)
 
     return plotInfoDict
 
@@ -205,7 +218,7 @@ def addProvenanceInfo(fig, plotInfoDict):
 
     plt.text(0.02, 0.98, "rerun: " + plotInfoDict["rerun"], fontsize=8, alpha=0.8, transform=fig.transFigure)
 
-    if "jointcal" in plotInfoDict["dataset"]:
+    if "jointcal" in plotInfoDict["calibDataset"]:
         plt.text(0.02, 0.02, "JointCal Used? Yes", fontsize=8, alpha=0.8, transform=fig.transFigure)
     else:
         plt.text(0.02, 0.02, "JointCal Used? No", fontsize=8, alpha=0.8, transform=fig.transFigure)
@@ -213,9 +226,9 @@ def addProvenanceInfo(fig, plotInfoDict):
     return fig
 
 
-def fakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict, areaDict, repoInfo,
-                   measColType="base_PsfFlux_", distNeighbor=2.0 / 3600.0):
-    """Plot the area vs depth for the given catalog
+def calcFakesAreaDepth(inputFakesMatched, processedFakesMatched, areaDict, measColType="base_PsfFlux_",
+                       distNeighbor=2.0 / 3600.0, numSigmas=10):
+    """Calculate the area vs depth for the given catalog
 
     Parameters
     ----------
@@ -223,34 +236,41 @@ def fakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict, areaD
         The catalog used to add the fakes originally, matched to the processed catalog.
     processedFakesMatched : `pandas.core.frame.DataFrame`
         The catalog produced by the stack from the images with fakes in.
-    plotInfoDict : `dict`
-        A dict containing useful information to add to the plot, passed to addProvenanceInfo.
     areaDict : `dict`
         A dict containing the area of each ccd.
-    repoInfo : `lsst.pipe.base.struct.Struct`
-        A struct that contains information about the input data.
     measColType : `string`
         default : 'base_CircularApertureFlux_25_0_'
         Which type of flux/magnitude column to use for calculating the depth.
+    distNeighbor : `float`
+        The smallest distance to the nearest other source allowed to use the object for
+        calculations.
+    numSigmas : `float`
+        default : `10`
+        How many sigmas to calculate the median depth for.
 
     Returns
     -------
-    medMag10 : `float`
-        The median of the magnitudes at flux/flux error of 10 from all the ccds.
-    medMag100 : `float`
-        The median of the magnitudes at flux/flux error of 100 from all the ccds.
+    depthsToPlot : `np.ndarray`
+        The depth bins used to calculate the area to.
+    cumAreas : `np.ndarray`
+        The area to each depth
+    magLimHalfArea : `float`
+        The magnitude limit which half the data is deeper than.
+    magLim25 : `float`
+        The magnitude limit which 25% of the data is deeper than.
+    magLim75 : `float`
+        The magnitude limit which 75% of the data is deeper than.
+    medMagsToLimit : `float`
+        The median of the magnitudes at numSigmas for each ccd.
 
     Notes
     -----
-    Returns the median magnitude from all the CCDs at a signal to noise of 10 and a signal to noise of 100.
-    measColType needs to have an associated magnitude column already computed. plotInfoDict should also
-    contain outputName which is the output path and filename for the plot to be written to.
+    measColType needs to have an associated magnitude column already computed.
     """
 
     ccds = list(set(processedFakesMatched["ccdId"].values))
 
-    mag10s = np.array([np.nan]*len(ccds))
-    mag100s = np.array([np.nan]*len(ccds))
+    magsToLimit = np.array([np.nan]*len(ccds))
     areas = []
 
     for (i, ccd) in enumerate(ccds):
@@ -283,58 +303,92 @@ def fakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict, areaD
                     del magsSorted[inds[1]]
             interpSpline = UnivariateSpline(fluxDivFluxErrsSorted, magsSorted, s=0)
 
-            mag10s[i] = interpSpline(10.0)
-            mag100s[i] = interpSpline(100.0)
+            magsToLimit[i] = interpSpline(numSigmas)
 
-    sigmas = ["10", "100"]
     areas = np.array(areas)/(3600.0**2)
-    for (i, depths) in enumerate([mag10s, mag100s]):
-        bins = np.linspace(min(depths), max(depths), 101)
-        areasOut = np.zeros(100)
-        n = 0
-        magLimHalfArea = None
-        magLim25 = None
-        magLim75 = None
-        while n < len(bins)-1:
-            ids = np.where((depths >= bins[n]) & (depths < bins[n + 1]))[0]
-            areasOut[n] += np.sum(areas[ids])
-            if np.sum(areasOut) > np.sum(areas) / 2.0 and magLimHalfArea is None:
-                magLimHalfArea = (bins[n] + bins[n + 1]) / 2.0
-            if np.sum(areasOut) > np.sum(areas) * 0.25 and magLim25 is None:
-                magLim25 = (bins[n] + bins[n + 1]) / 2.0
-            if np.sum(areasOut) > np.sum(areas) * 0.75 and magLim75 is None:
-                magLim75 = (bins[n] + bins[n + 1]) / 2.0
-            n += 1
+    bins = np.linspace(min(magsToLimit), max(magsToLimit), 101)
+    areasOut = np.zeros(100)
+    n = 0
+    magLimHalfArea = None
+    magLim25 = None
+    magLim75 = None
+    while n < len(bins)-1:
+        ids = np.where((magsToLimit >= bins[n]) & (magsToLimit < bins[n + 1]))[0]
+        areasOut[n] += np.sum(areas[ids])
+        if np.sum(areasOut) > np.sum(areas) / 2.0 and magLimHalfArea is None:
+            magLimHalfArea = (bins[n] + bins[n + 1]) / 2.0
+        if np.sum(areasOut) > np.sum(areas) * 0.25 and magLim25 is None:
+            magLim25 = (bins[n] + bins[n + 1]) / 2.0
+        if np.sum(areasOut) > np.sum(areas) * 0.75 and magLim75 is None:
+            magLim75 = (bins[n] + bins[n + 1]) / 2.0
+        n += 1
 
-        cumAreas = np.zeros(100)
-        n = 0
-        for area in areasOut[::-1]:
-            cumAreas[n] = area + cumAreas[n-1]
-            n += 1
+    cumAreas = np.cumsum(areasOut[::-1])
 
-        plt.plot(bins[::-1][1:], cumAreas)
-        plt.xlabel("Magnitude Limit (" + sigmas[i] + " sigma)", fontsize=15)
-        plt.ylabel("Area / deg^2", fontsize=15)
-        plt.title('Total Area to Given Depth \n (Recovered fake stars with no match within 2")')
-        labelHA = "Mag. Lim. for 50% of the area: {:0.2f}".format(magLimHalfArea)
-        plt.axvline(magLimHalfArea, label=labelHA, color="k", ls=":")
-        label25 = "Mag. Lim. for 25% of the area: {:0.2f}".format(magLim25)
-        plt.axvline(magLim25, label=label25, color="k", ls="--")
-        label75 = "Mag. Lim. for 75% of the area: {:0.2f}".format(magLim75)
-        plt.axvline(magLim75, label=label75, color="k", ls="--")
-        plt.legend(loc="best")
+    medMagsToLimit = np.median(magsToLimit)
+    depthsToPlot = bins[::-1][1:]
 
-        fig = plt.gcf()
-        fig = addProvenanceInfo(fig, plotInfoDict)
+    return pipeBase.Struct(depthsToPlot=depthsToPlot, cumAreas=cumAreas, magLimHalfArea=magLimHalfArea,
+                           magLim25=magLim25, magLim75=magLim75, medMagsToLimit=medMagsToLimit)
 
-        repoInfo.dataId["description"] = "areaDepth" + sigmas[i]
-        repoInfo.butler.put(fig, "plotFakes", repoInfo.dataId)
-        plt.close()
 
-    medMag10 = np.median(mag10s)
-    medMag100 = np.median(mag100s)
+def plotFakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict, areaDict,
+                       measColType="base_PsfFlux_", distNeighbor=2.0 / 3600.0, numSigmas=10):
+    """Plot the area vs depth for the given catalog
 
-    return medMag10, medMag100
+    Parameters
+    ----------
+    inputFakesMatched : `pandas.core.frame.DataFrame`
+        The catalog used to add the fakes originally, matched to the processed catalog.
+    processedFakesMatched : `pandas.core.frame.DataFrame`
+        The catalog produced by the stack from the images with fakes in.
+    plotInfoDict : `dict`
+        A dict containing useful information to add to the plot, passed to addProvenanceInfo.
+    areaDict : `dict`
+        A dict containing the area of each ccd.
+    measColType : `string`
+        default : 'base_CircularApertureFlux_25_0_'
+        Which type of flux/magnitude column to use for calculating the depth.
+    distNeighbor : `float`
+        The smallest distance to the nearest other source allowed to use the object for
+        calculations.
+    numSigmas : `float`
+        default : `10`
+        How many sigmas to calculate the median depth for.
+
+    Returns
+    -------
+    medMag : `float`
+        The median of the magnitudes at flux/flux error of `numSigmas` from all the ccds.
+
+    Notes
+    -----
+    measColType needs to have an associated magnitude column already computed.
+    """
+    yield
+    areaDepthStruct = calcFakesAreaDepth(inputFakesMatched, processedFakesMatched, areaDict,
+                                         measColType="base_PsfFlux_", distNeighbor=2.0 / 3600.0,
+                                         numSigmas=numSigmas)
+
+    plt.plot(areaDepthStruct.depthsToPlot, areaDepthStruct.cumAreas)
+    plt.xlabel("Magnitude Limit ({:0.0f} sigma)".format(numSigmas), fontsize=15)
+    plt.ylabel("Area / deg^2", fontsize=15)
+    plt.title('Total Area to Given Depth \n (Recovered fake stars with no match within 2")')
+    labelHA = "Mag. Lim. for 50% of the area: {:0.2f}".format(areaDepthStruct.magLimHalfArea)
+    plt.axvline(areaDepthStruct.magLimHalfArea, label=labelHA, color="k", ls=":")
+    label25 = "Mag. Lim. for 25% of the area: {:0.2f}".format(areaDepthStruct.magLim25)
+    plt.axvline(areaDepthStruct.magLim25, label=label25, color="k", ls="--")
+    label75 = "Mag. Lim. for 75% of the area: {:0.2f}".format(areaDepthStruct.magLim75)
+    plt.axvline(areaDepthStruct.magLim75, label=label75, color="k", ls="--")
+    plt.legend(loc="best")
+
+    fig = plt.gcf()
+    fig = addProvenanceInfo(fig, plotInfoDict)
+
+    description = "areaDepth{:0.0f}".format(numSigmas)
+    stats = {"MedDepth{:0.0f}".format(numSigmas): areaDepthStruct.medMagsToLimit}
+
+    yield pipeBase.Struct(fig=fig, stats=stats, description=description, style="fakes")
 
 
 def plotWithTwoHists(xs, ys, xName, yName, xLabel, yLabel, title, plotInfoDict, statsUnit, yLims=False,
@@ -653,7 +707,7 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict, b
     return fig
 
 
-def fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict, repoInfo,
+def fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict,
                          raFakesCol="raJ2000_deg", decFakesCol="decJ2000_deg", raCatCol="coord_ra_deg",
                          decCatCol="coord_dec_deg", magCol="base_PsfFlux_mag"):
     """Make a plot showing the RA and Dec offsets from the input positions.
@@ -666,8 +720,6 @@ def fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict,
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
         A dict containing useful information to add to the plot, passed to addProvenanceInfo.
-    repoInfo : `lsst.pipe.base.struct.Struct`
-        A struct that contains information about the input data.
     raFakesCol : `string`
         default : 'raJ2000_deg'
         The RA column to use from the fakes catalog.
@@ -704,7 +756,7 @@ def fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict,
     for the RA and Dec offsets. plotInfoDict should also contain the magnitude limit that the plot should go
     to (magLim) and the path and filename that the figure should be written to (outputName).
     """
-
+    yield
     pointsToUse = (processedFakesMatched[magCol].values < plotInfoDict["magLim"])
 
     processedFakesMatched = processedFakesMatched[pointsToUse]
@@ -727,14 +779,13 @@ def fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict,
     fig, dRAMed, dRASigmaMAD, dDecMed, dDecSigmaMAD = plotWithTwoHists(dRA, dDec, xName, yName, xLabel,
                                                                        yLabel, title, plotInfoDict, statsUnit)
 
-    repoInfo.dataId["description"] = "positionCompare"
-    repoInfo.butler.put(fig, "plotFakes", repoInfo.dataId)
-    plt.close()
+    description = "positionCompare"
+    stats = {"dRAMed": dRAMed, "dRASigmaMAD": dRASigmaMAD, "dDecMed": dDecMed, "dDecSigmaMAD": dDecSigmaMAD}
 
-    return dRAMed, dRASigmaMAD, dDecMed, dDecSigmaMAD
+    yield pipeBase.Struct(fig=fig, stats=stats, description=description, style="fakes")
 
 
-def fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict, repoInfo,
+def fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict,
                           magCol="base_PsfFlux_mag"):
     """Make a plot showing the comparison between the input and extracted magnitudes.
 
@@ -746,8 +797,6 @@ def fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
         A dict containing useful information to add to the plot.
-    repoInfo : `lsst.pipe.base.struct.Struct`
-        A struct that contains information about the input data.
     magCol : `string`
         default : 'base_PsfFlux_mag'
         The magnitude column to use from the catalog.
@@ -765,6 +814,7 @@ def fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict
     containing camera, filter, visit, tract and dataset (jointcal or not). plotInfoDict should also contain
     the magnitude limit that the plot should go to (magLim).
     """
+    yield
     band = plotInfoDict["filter"][-1].lower()
 
     stars = (inputFakesMatched["sourceType"] == "star")
@@ -777,20 +827,20 @@ def fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict
     maskForStats = (xs < plotInfoDict["magLim"])
     xLabel = "Input Magnitude / milli mags"
     yLabel = "Output - Input Magnitude / milli mags"
-    title = "Magnitude Difference For Fake Stars"
+    title = "Magnitude Difference For Fake Stars \n (" + magCol + ")"
 
     fig = plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict)
 
     # Don't have good mags for galaxies at this point.
     # To Do: coadd version of plot with cmodel mags.
 
-    repoInfo.dataId["description"] = "magnitudeCompare"
-    repoInfo.butler.put(fig, "plotFakes", repoInfo.dataId)
+    description = "magnitudeCompare_" + magCol
+    stats = None
 
-    plt.close()
+    yield pipeBase.Struct(fig=fig, stats=stats, description=description, style="fakes")
 
 
-def fakesMagnitudeNearestNeighbor(inputFakesMatched, processedFakesMatched, plotInfoDict, repoInfo,
+def fakesMagnitudeNearestNeighbor(inputFakesMatched, processedFakesMatched, plotInfoDict,
                                   magCol="base_PsfFlux_mag"):
     """Make a plot showing the comparison between the input and extracted magnitudes against the distance
        to the neareast neighbor.
@@ -803,8 +853,6 @@ def fakesMagnitudeNearestNeighbor(inputFakesMatched, processedFakesMatched, plot
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
         A dict containing useful information to add to the plot.
-    repoInfo : `lsst.pipe.base.struct.Struct`
-        A struct that contains information about the input data.
     magCol : `string`
         default : 'base_PsfFlux_mag'
         The magnitude column to use from the catalog.
@@ -817,6 +865,7 @@ def fakesMagnitudeNearestNeighbor(inputFakesMatched, processedFakesMatched, plot
     containing camera, filter, visit, tract and dataset (jointcal or not). plotInfoDict should also contain
     the magnitude limit that the plot should go to (magLim).
     """
+    yield
     band = plotInfoDict["filter"][-1].lower()
 
     stars = (inputFakesMatched["sourceType"] == "star")
@@ -839,13 +888,13 @@ def fakesMagnitudeNearestNeighbor(inputFakesMatched, processedFakesMatched, plot
 
     fig = plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict)
 
-    repoInfo.dataId["description"] = "magnitudeNearestNeighbor"
-    repoInfo.butler.put(fig, "plotFakes", repoInfo.dataId)
+    description = "magnitudeNearestNeighbor"
+    stats = None
 
-    plt.close()
+    yield pipeBase.Struct(fig=fig, stats=stats, description=description, style="fakes")
 
 
-def fakesMagnitudeBlendedness(inputFakesMatched, processedFakesMatched, plotInfoDict, repoInfo,
+def fakesMagnitudeBlendedness(inputFakesMatched, processedFakesMatched, plotInfoDict,
                               magCol="base_PsfFlux_mag"):
     """Make a plot showing the comparison between the input and extracted magnitudes against blendedness.
 
@@ -857,8 +906,6 @@ def fakesMagnitudeBlendedness(inputFakesMatched, processedFakesMatched, plotInfo
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
         A dict containing useful information to add to the plot, passed to addProvenanceInfo.
-    repoInfo : `lsst.pipe.base.struct.Struct`
-        A struct that contains information about the input data.
     magCol : `string`
         default : 'base_PsfFlux_mag'
         The magnitude column to use from the catalog.
@@ -871,6 +918,7 @@ def fakesMagnitudeBlendedness(inputFakesMatched, processedFakesMatched, plotInfo
     containing camera, filter, visit, tract and dataset (jointcal or not). plotInfoDict should also contain
     the magnitude limit that the plot should go to (magLim).
     """
+    yield
     band = plotInfoDict["filter"][-1].lower()
 
     stars = (inputFakesMatched["sourceType"] == "star")
@@ -890,14 +938,14 @@ def fakesMagnitudeBlendedness(inputFakesMatched, processedFakesMatched, plotInfo
 
     fig = plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict)
 
-    repoInfo.dataId["description"] = "magnitudeBlendedness"
-    repoInfo.butler.put(fig, "plotFakes", repoInfo.dataId)
+    description = "magnitudeBlendedness"
+    stats = None
 
-    plt.close()
+    yield pipeBase.Struct(fig=fig, stats=stats, description=description, style="fakes")
 
 
 def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, plotInfoDict, areaDict,
-                          repoInfo, raFakesCol="raJ2000_deg", decFakesCol="decJ2000_deg",
+                          raFakesCol="raJ2000_deg", decFakesCol="decJ2000_deg",
                           raCatCol="coord_ra_deg", decCatCol="coord_dec_deg", distNeighbor=2.0 / 3600.0):
     """Makes three plots, one showing a two dimensional histogram of the fraction of fakes recovered,
     one a 1D histogram showing the area against the depth and one showing the fraction of input fakes
@@ -915,8 +963,6 @@ def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, 
         A dict containing useful information to add to the plot, passed to addProvenanceInfo.
      areaDict : `dict`
         A dict containing the area of each ccd.
-    repoInfo : `lsst.pipe.base.struct.Struct`
-        A struct that contains information about the input data.
     raFakesCol : `string`
         default : 'raJ2000_deg'
         The RA column to use from the fakes catalog.
@@ -938,6 +984,7 @@ def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, 
     The third is a histogram showing the fraction recovered in each magnitude bin with the number input and
     recovered overplotted.
     """
+    yield
 
     band = plotInfoDict["filter"][-1].lower()
 
@@ -1026,9 +1073,9 @@ def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, 
     plt.ylim(minDec - scaleDec, maxDec + scaleDec)
     plt.subplots_adjust(right=0.99)
 
-    # Save the graph
-    repoInfo.dataId["description"] = "completenessHist2D"
-    repoInfo.butler.put(fig, "plotFakes", repoInfo.dataId)
+    description = "completenessHist2D"
+    stats = None
+    yield pipeBase.Struct(fig=fig, stats=stats, description=description, style="fakes")
     plt.close()
 
     # Now condense this information into a histogram
@@ -1086,9 +1133,9 @@ def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, 
     fig = plt.gcf()
     fig = addProvenanceInfo(fig, plotInfoDict)
 
-    # Save the graph
-    repoInfo.dataId["description"] = "completenessAreaDepth"
-    repoInfo.butler.put(fig, "plotFakes", repoInfo.dataId)
+    description = "completenessAreaDepth"
+    stats = None
+    yield pipeBase.Struct(fig=fig, stats=stats, description=description, style="fakes")
     plt.close()
 
     # Make plot showing the fraction recovered in magnitude bins
@@ -1123,7 +1170,7 @@ def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, 
     fig = plt.gcf()
     addProvenanceInfo(fig, plotInfoDict)
 
-    # Save the graph
-    repoInfo.dataId["description"] = "completenessHist"
-    repoInfo.butler.put(fig, "plotFakes", repoInfo.dataId)
+    description = "completenessHist"
+    stats = None
+    yield pipeBase.Struct(fig=fig, stats=stats, description=description, style="fakes")
     plt.close()

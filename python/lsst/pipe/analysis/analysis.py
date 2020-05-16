@@ -10,14 +10,14 @@ import re
 
 import lsst.afw.geom as afwGeom
 import lsst.geom as geom
-from lsst.display.matplotlib.matplotlib import AsinhNormalize
 from lsst.pex.config import Config, Field, ListField, DictField
+from lsst.pipe.base import Struct
 
-from .utils import (Data, Stats, E1Resids, E2Resids, checkIdLists, fluxToPlotString, computeMeanOfFrac,
+from .utils import (Data, Stats, E1Resids, E2Resids, fluxToPlotString, computeMeanOfFrac,
                     calcQuartileClippedStats)
 from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotText, plotCameraOutline,
                         plotTractOutline, plotPatchOutline, plotCcdOutline, labelCamera, getQuiver,
-                        getRaDecMinMaxPatchList, bboxToXyCoordLists, makeAlphaCmap, buildTractImage)
+                        getRaDecMinMaxPatchList, bboxToXyCoordLists, makeAlphaCmap)
 
 __all__ = ["AnalysisConfig", "Analysis"]
 
@@ -143,7 +143,9 @@ class Analysis(object):
         # self.config.flags.  Rather, only cull on flags explicitly set in the
         # flags variable for calib_*_used subsamples.
         if ("matches" not in self.shortName and "overlap" not in self.shortName and "quiver" not in
-            self.shortName and "inputCounts" not in self.shortName and "skyObjects" not in self.shortName):
+                self.shortName and "inputCounts" not in self.shortName and
+                "skyObjects" not in self.shortName):
+
             flagsList = flags.copy()
             flagsList = flagsList + list(self.config.flags) if self.calibUsedOnly == 0 else flagsList
             for flagName in set(flagsList):
@@ -165,8 +167,8 @@ class Analysis(object):
         else:
             self.signalToNoiseThreshold = self.config.signalToNoiseThreshold
             self.signalToNoiseHighThreshold = self.config.signalToNoiseHighThreshold
-        if (("galacticExtinction" in self.shortName and self.magThreshold > 90.0)
-            or any(ss in self.shortName for ss in ["skySources", "skyObjects"])):
+        if (("galacticExtinction" in self.shortName and self.magThreshold > 90.0) or
+                any(ss in self.shortName for ss in ["skySources", "skyObjects"])):
             self.signalToNoiseThreshold = 0.0
             self.signalToNoiseHighThreshold = 0.0
 
@@ -216,7 +218,8 @@ class Analysis(object):
         goodSn0 &= self.signalToNoise >= 2.0
         self.magMin = (computeMeanOfFrac(self.mag[goodSn0], tailStr="lower", fraction=0.005, floorFactor=1) -
                        1.5)
-        self.magMax = computeMeanOfFrac(self.mag[goodSn0], tailStr="upper", fraction=0.05, floorFactor=1) + 0.5
+        self.magMax = (computeMeanOfFrac(self.mag[goodSn0], tailStr="upper", fraction=0.05, floorFactor=1) +
+                       0.5)
 
         if labeller is not None:
             labels = labeller(catalog, compareCat) if compareCat else labeller(catalog)
@@ -245,7 +248,7 @@ class Analysis(object):
                                     min(self.stats[dataType].mean - 20.0*self.stats[dataType].stdev,
                                         -0.005*self.unitScale))
                     if (abs(self.stats[dataType].mean) < 0.0005*self.unitScale and
-                        abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
+                            abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
                         minmax = 2.0*max(abs(min(self.quantity[self.good])),
                                          abs(max(self.quantity[self.good])))
                         self.qMin = -minmax if minmax > 0 else self.qMin
@@ -256,14 +259,13 @@ class Analysis(object):
                                     max(self.stats[dataType].mean + 20.0*self.stats[dataType].stdev,
                                         0.005*self.unitScale))
                     if (abs(self.stats[dataType].mean) < 0.0005*self.unitScale and
-                        abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
+                            abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
                         minmax = 2.0*max(abs(min(self.quantity[self.good])),
                                          abs(max(self.quantity[self.good])))
                         self.qMax = minmax if minmax > 0 else self.qMax
 
-    def plotAgainstMag(self, filename, stats=None, camera=None, ccdList=None, tractInfo=None, patchList=None,
-                       hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None,
-                       doPrintMedian=False):
+    def plotAgainstMag(self, description, plotInfoDict, stats=None, matchRadius=None, matchRadiusUnitStr=None,
+                       zpLabel=None, forcedStr=None, doPrintMedian=False):
         """Plot quantity against magnitude"""
         fig, axes = plt.subplots(1, 1)
         plt.axhline(0, linestyle="--", color="0.4")
@@ -285,36 +287,33 @@ class Analysis(object):
         axes.set_ylim(self.qMin, self.qMax)
         axes.set_xlim(magMin, magMax)
         if stats is not None:
-            annotateAxes(filename, plt, axes, stats, "star", self.magThreshold,
+            annotateAxes(description, axes, stats, "star", self.magThreshold,
                          signalToNoiseStr=self.signalToNoiseStr, statsHigh=self.statsHigh,
                          magThresholdHigh=self.magThresholdHigh,
-                         signalToNoiseHighStr=self.signalToNoiseHighStr, hscRun=hscRun,
+                         signalToNoiseHighStr=self.signalToNoiseHighStr,
                          matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
                          unitScale=self.unitScale, doPrintMedian=doPrintMedian)
         axes.legend(handles=dataPoints, loc=1, fontsize=8)
-        labelVisit(filename, plt, axes, 0.5, 1.05)
+        labelVisit(plotInfoDict, fig, axes, 0.5, 1.05)
         if zpLabel is not None:
             prefix = "" if "GalExt" in zpLabel else "zp: "
-            plotText(zpLabel, plt, axes, 0.13, -0.09, prefix=prefix, color="green")
+            plotText(zpLabel, fig, axes, 0.13, -0.09, prefix=prefix, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
-        fig.savefig(filename, dpi=120)
-        plt.close(fig)
+            plotText(forcedStr, fig, axes, 0.85, -0.09, prefix="cat: ", color="green")
+        yield Struct(fig=fig, description=description, stats=self.stats, statsHigh=self.statsHigh, dpi=120,
+                     style="psfMag")
 
-    def plotAgainstMagAndHist(self, log, filename, stats=None, camera=None, ccdList=None, tractInfo=None,
-                              patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
-                              zpLabel=None, forcedStr=None, plotRunStats=True, highlightList=None,
-                              filterStr=None, extraLabels=None, uberCalLabel=None, doPrintMedian=False):
+    def plotAgainstMagAndHist(self, log, description, plotInfoDict, stats=None, matchRadius=None,
+                              matchRadiusUnitStr=None, zpLabel=None, forcedStr=None, plotRunStats=True,
+                              highlightList=None, extraLabels=None, uberCalLabel=None, doPrintMedian=False):
         """Plot quantity against magnitude with side histogram"""
-        if filterStr is None:
-            filterStr = ""
-            filterLabelStr = ""
+
+        if plotInfoDict["plotType"] == "plotVisit" or plotInfoDict["plotType"] == "plotCoadd":
+            filterLabelStr = "[{}]".format(plotInfoDict["filter"])
+            if "lsst" in plotInfoDict["camera"]:
+                filterLabelStr = "[{}-{}]".format(plotInfoDict["camera"], plotInfoDict["filter"])
         else:
-            if camera is not None:
-                # Add camera name to filter string
-                if len(filterStr) < len(camera.getName()):
-                    filterStr = camera.getName() + "-" + filterStr
-            filterLabelStr = "[" + filterStr + "]" if "/color/" not in filename else ""
+            filterLabelStr = ""
 
         nullfmt = NullFormatter()  # no labels for histograms
         # definitions for the axes
@@ -326,8 +325,6 @@ class Analysis(object):
         rect_histx = [left, bottom_h, width, 0.22]
         rect_histy = [left_h, bottom, 0.18, height]
         topRight = [left_h - 0.013, bottom_h, 0.22, 0.22]
-        # start with a rectangular Figure
-        plt.figure(1)
 
         axScatter = plt.axes(rect_scatter)
         axScatter.axhline(0, linestyle="--", color="0.4")
@@ -341,15 +338,24 @@ class Analysis(object):
 
         axScatter.tick_params(which="both", direction="in", labelsize=9)
 
-        if camera is not None and ccdList is not None:
+        if plotInfoDict["plotType"] == "plotCompareVisit":
+            ccdList = plotInfoDict["allCcdList"]
+        elif plotInfoDict["plotType"] == "plotVisit":
+            ccdList = plotInfoDict["ccdList"]
+        if "Visit" in plotInfoDict["plotType"] and plotInfoDict["camera"] is not None and ccdList is not None:
             axTopRight = plt.axes(topRight)
             axTopRight.set_aspect("equal")
-            plotCameraOutline(axTopRight, camera, ccdList)
+            plotCameraOutline(axTopRight, plotInfoDict["cameraObj"], ccdList)
 
-        if self.config.doPlotTractOutline and tractInfo is not None and patchList:
+        if "Coadd" in plotInfoDict["plotType"] or "Color" in plotInfoDict["plotType"]:
+            tractLevelPlot = True
+        else:
+            tractLevelPlot = False
+
+        if self.config.doPlotTractOutline and tractLevelPlot:
             axTopRight = plt.axes(topRight)
             axTopRight.set_aspect("equal")
-            plotTractOutline(axTopRight, tractInfo, patchList)
+            plotTractOutline(axTopRight, plotInfoDict["tractInfo"], plotInfoDict["patchList"])
 
         dataType = "all" if "all" in self.data else "star"
         inLimits = self.data[dataType].quantity < self.qMax
@@ -367,11 +373,11 @@ class Analysis(object):
         # Make sure plot limit extends low enough to show well below the star/galaxy separation line.
         # Add delta as opposed to directly changing self.qMin to not affect other plots
         deltaMin = 0.0
-        if "galaxy" in self.data and len(self.data["galaxy"].quantity) > 0 and "-mag_" in filename:
-            if "GaussianFlux" in filename:
+        if "galaxy" in self.data and len(self.data["galaxy"].quantity) > 0 and "-mag_" in description:
+            if "GaussianFlux" in description:
                 galMin = np.round(2.5*np.log10(self.config.visitClassFluxRatio) - 0.08, 2)*self.unitScale
                 deltaMin = max(0.0, self.qMin - galMin)
-            if "CModel" in filename:
+            if "CModel" in description:
                 galMin = np.round(2.5*np.log10(self.config.coaddClassFluxRatio) - 0.08, 2)*self.unitScale
                 deltaMin = max(0.0, self.qMin - galMin)
 
@@ -504,14 +510,14 @@ class Analysis(object):
                               facecolors=data.color, edgecolors="face",
                               label=name, alpha=alpha, linewidth=0.5)
 
-            if stats is not None and (name == "star" or name == "all") and "foot" not in filename:
+            if stats is not None and (name == "star" or name == "all") and "foot" not in description:
                 labelStr = self.signalToNoiseStr if self.signalToNoiseStr else "stats"
                 axScatter.scatter(data.mag[stats[name].dataUsed],
                                   data.quantity[stats[name].dataUsed], s=ptSize,
-                                  marker="o",  facecolors="none", edgecolors=data.color,
+                                  marker="o", facecolors="none", edgecolors=data.color,
                                   label=labelStr, alpha=1, linewidth=0.5)
 
-            if self.statsHigh is not None and (name == "star" or name == "all") and "foot" not in filename:
+            if self.statsHigh is not None and (name == "star" or name == "all") and "foot" not in description:
                 axScatter.scatter(data.mag[self.statsHigh[name].dataUsed],
                                   data.quantity[self.statsHigh[name].dataUsed], s=ptSize,
                                   marker="o", facecolors=data.color, edgecolors="face",
@@ -522,11 +528,12 @@ class Analysis(object):
                          label=name)
         # Make sure stars used histogram is plotted last
         for name, data in self.data.items():
-            if (name == "star" or name == "all") and "foot" not in filename:
+            if (name == "star" or name == "all") and "foot" not in description:
                 if stats is not None:
                     labelStr = self.signalToNoiseStr if self.signalToNoiseStr else "stats"
                     axHisty.hist(data.quantity[stats[name].dataUsed], bins=yBins, facecolor="none",
-                                 edgecolor=data.color, linewidth=0.5, orientation="horizontal", label=labelStr)
+                                 edgecolor=data.color, linewidth=0.5, orientation="horizontal",
+                                 label=labelStr)
                     axHistx.hist(data.mag[stats[name].dataUsed], bins=xBins, facecolor="none",
                                  edgecolor=data.color, linewidth=0.5, label=labelStr)
                 if self.statsHigh is not None and (name == "star" or name == "all"):
@@ -549,11 +556,11 @@ class Analysis(object):
         axScatter.set_xlabel("%s mag %s" % (fluxToPlotString(self.fluxColumn), filterLabelStr), fontSize=11)
         axScatter.set_ylabel(yLabel, fontsize=fontSize)
 
-        if stats is not None and "foot" not in filename:
-            l1, l2 = annotateAxes(filename, plt, axScatter, stats, dataType, self.magThreshold,
+        if stats is not None and "foot" not in description:
+            l1, l2 = annotateAxes(description, axScatter, stats, dataType, self.magThreshold,
                                   signalToNoiseStrConf=self.signalToNoiseStr, statsHigh=self.statsHigh,
                                   magThresholdHigh=self.magThresholdHigh,
-                                  signalToNoiseHighStr=self.signalToNoiseHighStr, hscRun=hscRun,
+                                  signalToNoiseHighStr=self.signalToNoiseHighStr,
                                   matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
                                   unitScale=self.unitScale, doPrintMedian=doPrintMedian)
             dataPoints = dataPoints + runStats + [l1, l2]
@@ -568,7 +575,7 @@ class Analysis(object):
             axHisty2.set_ylim(axScatterY1*sigmaToFwhm, axScatterY2*sigmaToFwhm)
             axHisty2.yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
             axHisty2.tick_params(axis="y", which="both", direction="in", labelsize=8)
-            axHisty2.set_ylabel("FWHM: $2\sqrt{2\,ln\,2}*$Trace (pixels)", rotation=270, labelpad=13,
+            axHisty2.set_ylabel(r"FWHM: $2\sqrt{2\,ln\,2}*$Trace (pixels)", rotation=270, labelpad=13,
                                 fontsize=fontSize)
 
         # Label total number of objects of each data type
@@ -588,7 +595,7 @@ class Analysis(object):
             plt.text(xLoc, yLoc, "N$_{" + name[:4] + "}$ = " + str(len(data.mag)), ha="left", va="center",
                      fontsize=7, transform=axScatter.transAxes, color=data.color)
 
-        labelVisit(filename, plt, axScatter, 1.18, -0.11, color="green")
+        labelVisit(plotInfoDict, plt.gcf(), axScatter, 1.18, -0.11, color="green")
         if zpLabel is not None:
             # The following sets yOff to accommodate the longer labels for the
             # compare scripts and/or for the presence of the extra uberCalLabel
@@ -596,23 +603,23 @@ class Analysis(object):
             yOff = 0.02 if uberCalLabel is not None else 0
             yOff = -0.02 if "_2" in zpLabel else yOff
             prefix = "" if "GalExt" in zpLabel else "zp: "
-            plotText(zpLabel, plt, axScatter, 0.11, -0.1 + yOff, prefix=prefix, fontSize=7, color="green")
+            plotText(zpLabel, plt.gcf(), axScatter, 0.11, -0.1 + yOff, prefix=prefix, fontSize=7,
+                     color="green")
         if uberCalLabel:
             uberFontSize = 5 if "_2" in uberCalLabel else 7
-            plotText(uberCalLabel, plt, axScatter, 0.11, -0.13, fontSize=uberFontSize, color="green")
+            plotText(uberCalLabel, plt.gcf(), axScatter, 0.11, -0.13, fontSize=uberFontSize, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axScatter, 0.87, -0.11, prefix="cat: ", fontSize=7, color="green")
+            plotText(forcedStr, plt.gcf(), axScatter, 0.87, -0.11, prefix="cat: ", fontSize=7, color="green")
         if extraLabels is not None:
             for i, extraLabel in enumerate(extraLabels):
-                plotText(extraLabel, plt, axScatter, 0.3, 0.21 + i*0.05, fontSize=7, color="tab:orange")
-        plt.savefig(filename, dpi=120)
-        plt.close()
+                plotText(extraLabel, plt.gcf(), axScatter, 0.3, 0.21 + i*0.05, fontSize=7, color="tab:orange")
+        yield Struct(fig=plt.gcf(), description=description, stats=self.stats, statsHigh=self.statsHigh,
+                     dpi=120, style="psfMagHist")
 
-    def plotHistogram(self, filename, numBins=51, stats=None, hscRun=None, camera=None, ccdList=None,
-                      tractInfo=None, patchList=None, zpLabel=None, forcedStr=None, filterStr=None,
-                      magThreshold=None, matchRadius=None, matchRadiusUnitStr=None, uberCalLabel=None,
-                      doPrintMedian=False, vertLineList=None, logPlot=True, density=False, cumulative=False,
-                      addDataList=None, addDataLabelList=None):
+    def plotHistogram(self, description, plotInfoDict, numBins=51, stats=None, zpLabel=None,
+                      forcedStr=None, filterStr=None, magThreshold=None, matchRadius=None,
+                      matchRadiusUnitStr=None, uberCalLabel=None, doPrintMedian=False, vertLineList=None,
+                      logPlot=True, density=False, cumulative=False, addDataList=None, addDataLabelList=None):
         """Plot histogram of quantity"""
         fig, axes = plt.subplots(1, 1)
         axes.axvline(0, linestyle="--", color="0.6")
@@ -664,10 +671,6 @@ class Analysis(object):
         axes.set_ylim(numMin, numMax)
         if filterStr is None:
             filterStr = ""
-        if camera is not None:
-            if len(filterStr) < len(camera.getName()):
-                # Add camera name to filter string
-                filterStr = camera.getName() + "-" + filterStr
         axes.set_xlabel("{0:s} [{1:s}]".format(self.quantityName, filterStr), fontsize=9)
         axes.set_ylabel("Number", fontsize=9)
         axes.set_yscale("log", nonposy="clip")
@@ -675,15 +678,15 @@ class Analysis(object):
         if self.qMin == 0.0:
             x0, y0 = 0.68, 0.81
         if stats is not None:
-            annotateAxes(filename, plt, axes, stats, "star", self.magThreshold,
+            annotateAxes(description, plt, axes, stats, "star", self.magThreshold,
                          signalToNoiseStr=self.signalToNoiseStr, x0=x0, y0=y0,
-                         isHist=True, hscRun=hscRun, matchRadius=matchRadius,
+                         isHist=True, matchRadius=matchRadius,
                          matchRadiusUnitStr=matchRadiusUnitStr, unitScale=self.unitScale,
                          doPrintMedian=doPrintMedian)
         axes.legend(loc="upper right", fontsize=8)
-        if camera is not None:
-            labelCamera(camera, plt, axes, 0.5, 1.09)
-        labelVisit(filename, plt, axes, 0.5, 1.04)
+        if plotInfoDict["camera"] is not None:
+            labelCamera(plotInfoDict, plt.gcf(), axes, 0.5, 1.09)
+        labelVisit(plotInfoDict, plt.gcf(), axes, 0.5, 1.04)
         if zpLabel is not None:
             prefix = "" if "GalExt" in zpLabel else "zp: "
             plotText(zpLabel, plt, axes, 0.10, -0.10, prefix=prefix, fontSize=7, color="green")
@@ -691,22 +694,25 @@ class Analysis(object):
             plotText(uberCalLabel, plt, axes, 0.10, -0.13, fontSize=7, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.90, -0.10, prefix="cat: ", fontSize=7, color="green")
-        if camera is not None and ccdList is not None:
+        if plotInfoDict["camera"] is not None and plotInfoDict["plotType"] == "plotVisit":
             axTopMiddle = plt.axes([0.42, 0.68, 0.2, 0.2])
             axTopMiddle.set_aspect("equal")
-            plotCameraOutline(axTopMiddle, camera, ccdList)
-        if self.config.doPlotTractOutline and tractInfo is not None and patchList:
+            if plotInfoDict["plotType"] == "plotCompareVisit":
+                plotCameraOutline(axTopMiddle, plotInfoDict["cameraObj"], plotInfoDict["allCcdList"])
+            else:
+                plotCameraOutline(axTopMiddle, plotInfoDict["cameraObj"], plotInfoDict["ccdList"])
+        if self.config.doPlotTractOutline and "Coadd" in plotInfoDict["plotType"]:
             axTopMiddle = plt.axes([0.42, 0.68, 0.2, 0.2])
             axTopMiddle.set_aspect("equal")
-            plotTractOutline(axTopMiddle, tractInfo, patchList)
+            plotTractOutline(axTopMiddle, plotInfoDict["tractInfo"], plotInfoDict["patchList"])
 
-        fig.savefig(filename, dpi=120)
-        plt.close(fig)
+        yield Struct(fig=fig, description=description, stats=self.stats, statsHigh=self.statsHigh, dpi=120,
+                     style="hist")
 
-    def plotSkyPosition(self, filename, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
-                        camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
+    def plotSkyPosition(self, description, plotInfoDict, areaDict, cmap=plt.cm.Spectral, stats=None,
                         matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, highlightList=None,
-                        forcedStr=None, dataName="star", uberCalLabel=None, doPrintMedian=False):
+                        forcedStr=None, dataName="star", uberCalLabel=None, doPrintMedian=False,
+                        style="sky-all"):
         """Plot quantity as a function of position"""
         pad = 0.02  # Number of degrees to pad the axis ranges
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
@@ -725,67 +731,80 @@ class Analysis(object):
         magThreshold = self.magThreshold
         if dataName == "galaxy" and magThreshold < 99.0:
             magThreshold += 1.0  # plot to fainter mags for galaxies
-        if dataName == "star" and "matches" in filename and magThreshold < 99.0:
+        if dataName == "star" and "matches" in description and magThreshold < 99.0:
             magThreshold += 1.0  # plot to fainter mags for matching against ref cat
         good = (self.mag < magThreshold if magThreshold > 0 else np.ones(len(self.mag), dtype=bool))
-        if ((dataName == "star" or "matches" in filename or "compare" in filename) and
-                "pStar" not in filename and "race" not in filename and "resolution" not in filename):
+        if ((dataName == "star" or "matches" in description or "Compare" in plotInfoDict["plotType"]) and
+                ("pStar" not in description and "race" not in description and "resolution" not in description)
+                or ("compareUnforced" in description)):
+
             vMin, vMax = 0.4*self.qMin, 0.4*self.qMax
-            if "-mag_" in filename or any(ss in filename for ss in ["compareUnforced", "overlap", "matches"]):
+            if "mag_" in description or any(ss in description for ss in
+                                            ["compareUnforced", "overlap", "matches"]):
                 vMin, vMax = 0.6*vMin, 0.6*vMax
-            if "-matches" in filename and "_mag" in filename:
+            if "matches" in description and "_mag" in description:
                 vMax = -vMin
-        elif "CModel" in filename and "overlap" not in filename:
+        elif "CModel" in description and "overlap" not in description:
             vMin, vMax = 1.5*self.qMin, 0.5*self.qMax
-        elif "raceDiff" in filename or "Resids" in filename:
+        elif "raceDiff" in description or "Resids" in description:
             vMin, vMax = 0.5*self.qMin, 0.5*self.qMax
-        elif "race" in filename:
+        elif "race" in description:
             yDelta = 0.05*(self.qMax - self.qMin)
             vMin, vMax = self.qMin + yDelta, self.qMax - yDelta
-        elif "pStar" in filename:
+        elif "pStar" in description:
             vMin, vMax = 0.0, 1.0
-        elif "resolution" in filename and "compare" not in filename:
+        elif "resolution" in description and "Compare" not in plotInfoDict["plotType"]:
             vMin, vMax = 0.0, 0.2
-        elif "galacticExtinction" in filename and "compare" not in filename:
+        elif "galacticExtinction" in description and "compare" not in description:
             vMin, vMax = min(1.05*self.qMin, 0.98*self.qMax), max(1.02*self.qMin, 0.95*self.qMax)
         else:
             vMin, vMax = self.qMin, self.qMax
-        if "compare" not in filename:
-            if dataName == "star" and "deconvMom" in filename:
+        if "Compare" not in plotInfoDict["plotType"]:
+            if dataName == "star" and "deconvMom" in description:
                 vMin, vMax = -0.1, 0.1
-            if dataName == "galaxy" and "deconvMom" in filename:
+            if dataName == "galaxy" and "deconvMom" in description:
                 vMin, vMax = -0.1, 3.0*self.qMax
-            if dataName == "galaxy" and "resolution" in filename:
+            if dataName == "galaxy" and "resolution" in description:
                 vMin, vMax = 0.0, 1.0
-        if dataName == "galaxy" and "-mag_" in filename:
+        if (dataName == "galaxy" and "mag_" in description and
+                ("matches" not in description or plotInfoDict["plotType"] == "plotColor")):
             vMin = 3.0*self.qMin
-            if "GaussianFlux" in filename:
+            if "GaussianFlux" in description:
                 vMin, vMax = 5.0*self.qMin, 0.0
-        if (dataName == "galaxy" and ("CircularApertureFlux" in filename or "KronFlux" in filename) and
-                "compare" not in filename and "overlap" not in filename):
+        if (dataName == "galaxy" and ("CircularApertureFlux" in description or "KronFlux" in description) and
+                "Compare" not in plotInfoDict["plotType"] and "overlap" not in description and
+                "compareUnforced" not in description):
             vMin, vMax = 4.0*self.qMin, 1.0*self.qMax
 
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.35"))
         axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=8)
         ptSize = None
 
-        if dataId is not None and butler is not None and ccdList is not None:
-            if any(ss in filename for ss in ["commonZp", "_raw"]):
-                plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=None, zpLabel=zpLabel)
+        if "Visit" in plotInfoDict["plotType"]:
+            if plotInfoDict["plotType"] == "plotCompareVisit":
+                ccdList = plotInfoDict["allCcdList"]
             else:
-                plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=tractInfo, zpLabel=zpLabel)
-            if tractInfo is not None:
-                tractRa, tractDec = bboxToXyCoordLists(tractInfo.getBBox(), wcs=tractInfo.getWcs())
-                axes.plot(tractRa, tractDec, "w--", linewidth=1, alpha=0.7, label=str(tractInfo.getId()))
+                ccdList = plotInfoDict["ccdList"]
+            if any(ss in description for ss in ["commonZp", "_raw"]):
+                plotCcdOutline(axes, areaDict, ccdList, zpLabel=zpLabel)
+            else:
+                plotCcdOutline(axes, areaDict, ccdList, tractInfo=plotInfoDict["tractInfo"], zpLabel=zpLabel)
+            if plotInfoDict["tractInfo"] is not None:
+                tractBBox = plotInfoDict["tractInfo"].getBBox()
+                tractWcs = plotInfoDict["tractInfo"].getWcs()
+                tractRa, tractDec = bboxToXyCoordLists(tractBBox, wcs=tractWcs)
+                axes.plot(tractRa, tractDec, "w--", linewidth=1, alpha=0.7, label=plotInfoDict["tract"])
 
-        if tractInfo is not None and patchList is not None:
-            patchBoundary = getRaDecMinMaxPatchList(patchList, tractInfo, pad=pad, nDecimals=2, raMin=raMin,
-                                                    raMax=raMax, decMin=decMin, decMax=decMax)
+        tractLevelPlot = "Coadd" in plotInfoDict["plotType"] or "Color" in plotInfoDict["plotType"]
+        if plotInfoDict["tractInfo"] is not None and tractLevelPlot:
+            patchBoundary = getRaDecMinMaxPatchList(plotInfoDict["patchList"], plotInfoDict["tractInfo"],
+                                                    pad=pad, nDecimals=2, raMin=raMin, raMax=raMax,
+                                                    decMin=decMin, decMax=decMax)
             raMin = patchBoundary.raMin
             raMax = patchBoundary.raMax
             decMin = patchBoundary.decMin
             decMax = patchBoundary.decMax
-            plotPatchOutline(axes, tractInfo, patchList)
+            plotPatchOutline(axes, plotInfoDict["tractInfo"], plotInfoDict["patchList"])
 
         stats0 = None
         lightShades = ["white", "lavenderblush", "floralwhite", "paleturquoise", ]
@@ -823,12 +842,10 @@ class Analysis(object):
         if stats0 is None:  # No data to plot
             plt.close(fig)
             return
-        filterStr = dataId["filter"] if dataId is not None else ""
-        if filterStr and camera is not None:
-            # Add camera name to filter string
-            if len(filterStr) < len(camera.getName()):
-                filterStr = camera.getName() + "-" + filterStr
-        filterLabelStr = "[" + filterStr + "]" if (filterStr and "/color/" not in filename) else ""
+        filterStr = plotInfoDict["filter"]
+        filterLabelStr = "[" + filterStr + "]" if ("color" not in plotInfoDict["plotType"]) else ""
+        if "lsst" in plotInfoDict["camera"]:
+            filterLabelStr = "[" + plotInfoDict["camera"] + "-" + plotInfoDict["filter"] + "]"
         axes.set_xlabel("RA (deg) {0:s}".format(filterLabelStr))
         axes.set_ylabel("Dec (deg) {0:s}".format(filterLabelStr))
 
@@ -842,11 +859,10 @@ class Analysis(object):
         fontSize = min(10, max(6, 10 - int(np.log(max(1, len(colorbarLabel) - 50)))))
         cb.ax.tick_params(labelsize=max(6, fontSize - 1))
         cb.set_label(colorbarLabel, fontsize=fontSize, rotation=270, labelpad=15)
-        if hscRun is not None:
-            axes.set_title("HSC stack run: " + hscRun, color="#800080")
-        if camera is not None:
-            labelCamera(camera, plt, axes, 0.5, 1.09)
-        labelVisit(filename, plt, axes, 0.5, 1.04)
+        if plotInfoDict["hscRun"] is not None:
+            axes.set_title("HSC stack run: " + plotInfoDict["hscRun"], color="#800080")
+        labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
+        labelVisit(plotInfoDict, fig, axes, 0.5, 1.04)
         if zpLabel is not None:
             prefix = "" if "GalExt" in zpLabel else "zp: "
             plotText(zpLabel, plt, axes, 0.14, -0.07, prefix=prefix, color="green")
@@ -894,11 +910,11 @@ class Analysis(object):
         axes.annotate(r"N = {0} [mag<{1:.1f}]".format(stats0.num, magThreshold),
                       xy=(x0 + lenStr + 0.012, 1.035), ha="left", **strKwargs)
 
-        fig.savefig(filename, dpi=150)
-        plt.close(fig)
+        yield Struct(fig=fig, description=description, stats=self.stats, statsHigh=self.statsHigh, dpi=150,
+                     style=style)
 
-    def plotRaDec(self, filename, stats=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
-                  zpLabel=None, forcedStr=None, uberCalLabel=None, doPrintMedian=False):
+    def plotRaDec(self, description, plotInfoDict, stats=None, matchRadius=None, matchRadiusUnitStr=None,
+                  zpLabel=None, forcedStr=None, uberCalLabel=None, doPrintMedian=False, style="radec"):
         """Plot quantity as a function of RA, Dec"""
 
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
@@ -928,15 +944,16 @@ class Analysis(object):
 
         axes[0].legend()
         if stats is not None:
-            annotateAxes(filename, plt, axes[0], stats, "star", self.magThreshold,
+            annotateAxes(description, axes[0], stats, "star", self.magThreshold,
                          signalToNoiseStr=self.signalToNoiseStr, x0=0.03, yOff=0.07,
-                         hscRun=hscRun, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                         hscRun=plotInfoDict["hscRun"], matchRadius=matchRadius,
+                         matchRadiusUnitStr=matchRadiusUnitStr,
                          unitScale=self.unitScale, doPrintMedian=doPrintMedian)
-            annotateAxes(filename, plt, axes[1], stats, "star", self.magThreshold,
+            annotateAxes(description, axes[1], stats, "star", self.magThreshold,
                          signalToNoiseStr=self.signalToNoiseStr, x0=0.03, yOff=0.07,
-                         hscRun=hscRun, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                         hscRun=["hscRun"], matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
                          unitScale=self.unitScale, doPrintMedian=doPrintMedian)
-        labelVisit(filename, plt, axes[0], 0.5, 1.1)
+        labelVisit(plotInfoDict, fig, axes[0], 0.5, 1.1)
         if zpLabel is not None:
             prefix = "" if "GalExt" in zpLabel else "zp: "
             plotText(zpLabel, plt, axes[0], 0.13, -0.09, prefix=prefix, color="green")
@@ -944,11 +961,10 @@ class Analysis(object):
             plotText(uberCalLabel, plt, axes[0], 0.13, -0.14, fontSize=8, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes[0], 0.85, -0.09, prefix="cat: ", color="green")
-        fig.savefig(filename, dpi=120)
-        plt.close(fig)
+        yield Struct(fig=fig, description=description, stats=self.stats, statsHigh=self.statsHigh, dpi=120,
+                     style=style)
 
-    def plotQuiver(self, catalog, filename, log, cmap=plt.cm.Spectral, stats=None, dataId=None, butler=None,
-                   camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None,
+    def plotQuiver(self, catalog, description, plotInfoDict, areaDict, log, cmap=plt.cm.Spectral, stats=None,
                    matchRadius=None, zpLabel=None, forcedStr=None, dataName="star", uberCalLabel=None,
                    scale=1):
         """Plot ellipticity residuals quiver plot"""
@@ -1004,18 +1020,20 @@ class Analysis(object):
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.7"))
         axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=8)
 
-        if dataId is not None and butler is not None and ccdList is not None:
-            plotCcdOutline(axes, butler, dataId, ccdList, tractInfo=tractInfo, zpLabel=zpLabel)
+        if plotInfoDict["plotType"] == "plotVisit":
+            plotCcdOutline(axes, areaDict, plotInfoDict["ccdList"], tractInfo=plotInfoDict["tractInfo"],
+                           zpLabel=zpLabel)
 
-        if tractInfo is not None and patchList is not None:
-            for ip, patch in enumerate(tractInfo):
-                if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
-                    raPatch, decPatch = bboxToXyCoordLists(patch.getOuterBBox(), wcs=tractInfo.getWcs())
+        if plotInfoDict["tractInfo"] is not None and "Coadd" in plotInfoDict["plotType"]:
+            for ip, patch in enumerate(plotInfoDict["tractInfo"]):
+                if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in plotInfoDict["patchList"]:
+                    wcs = plotInfoDict["tractInfo"].getWcs()
+                    raPatch, decPatch = bboxToXyCoordLists(patch.getOuterBBox(), wcs=wcs)
                     raMin = min(np.round(min(raPatch) - pad, 2), raMin)
                     raMax = max(np.round(max(raPatch) + pad, 2), raMax)
                     decMin = min(np.round(min(decPatch) - pad, 2), decMin)
                     decMax = max(np.round(max(decPatch) + pad, 2), decMax)
-            plotPatchOutline(axes, tractInfo, patchList)
+            plotPatchOutline(axes, plotInfoDict["tractInfo"], plotInfoDict["patchList"])
 
         e1 = E1Resids(compareCol, psfCompareCol)
         e1 = e1(catalog)
@@ -1032,12 +1050,9 @@ class Analysis(object):
 
         getQuiver(ra, dec, e1, e2, axes, color=plt.cm.jet(nz(e)), scale=scale, width=0.002, label=catStr)
 
-        filterStr = dataId["filter"] if dataId is not None else ""
-        if filterStr and camera is not None:
-            # Add camera name to filter string
-            if len(filterStr) < len(camera.getName()):
-                filterStr = camera.getName() + "-" + filterStr
-        filterLabelStr = "[" + filterStr + "]"
+        filterLabelStr = "[" + plotInfoDict["filter"] + "]"
+        if "lsst" in plotInfoDict["camera"]:
+            filterLabelStr = "[" + plotInfoDict["camera"] + "-" + plotInfoDict["filter"] + "]"
         axes.set_xlabel("RA (deg) {0:s}".format(filterLabelStr))
         axes.set_ylabel("Dec (deg) {0:s}".format(filterLabelStr))
 
@@ -1046,7 +1061,8 @@ class Analysis(object):
 
         good = np.ones(len(e), dtype=bool)
         stats0 = self.calculateStats(e, good, thresholdType=thresholdType, thresholdValue=thresholdValue)
-        log.info("plotQuiver: Statistics from %s of %s: %s" % (dataId, self.quantityName, stats0))
+        log.info("plotQuiver: Statistics from %s of %s: %s" % (plotInfoDict["dataId"], self.quantityName,
+                                                               stats0))
         meanStr = "{0.mean:.4f}".format(stats0)
         stdevStr = "{0.stdev:.4f}".format(stats0)
 
@@ -1063,27 +1079,24 @@ class Analysis(object):
         axes.annotate(r"N = {0}".format(stats0.num), xy=(x0 + lenStr + 0.02, 1.035), xycoords="axes fraction",
                       ha="left", va="center", fontsize=8)
 
-        if hscRun is not None:
-            axes.set_title("HSC stack run: " + hscRun, color="#800080")
-        if camera is not None:
-            labelCamera(camera, plt, axes, 0.5, 1.09)
-        labelVisit(filename, plt, axes, 0.5, 1.04)
+        if plotInfoDict["hscRun"] is not None:
+            axes.set_title("HSC stack run: " + plotInfoDict["hscRun"], color="#800080")
+        labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
+        labelVisit(plotInfoDict, fig, axes, 0.5, 1.04)
         if zpLabel is not None:
-            plotText(zpLabel, plt, axes, 0.14, -0.08, prefix="zp: ", color="green")
+            plotText(zpLabel, fig, axes, 0.14, -0.08, prefix="zp: ", color="green")
         if uberCalLabel:
-            plotText(uberCalLabel, plt, axes, 0.14, -0.12, fontSize=7, color="green")
-        plotText(shapeAlgorithm, plt, axes, 0.85, -0.08, prefix="Shape Alg: ", fontSize=8, color="green")
+            plotText(uberCalLabel, fig, axes, 0.14, -0.12, fontSize=7, color="green")
+        plotText(shapeAlgorithm, fig, axes, 0.85, -0.08, prefix="Shape Alg: ", fontSize=8, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
+            plotText(forcedStr, fig, axes, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
         axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.1), fancybox=True, shadow=True, fontsize=8)
 
-        fig.savefig(filename, dpi=150)
-        plt.close(fig)
+        yield Struct(fig=fig, description=description, stats=stats, statsHigh=None, dpi=150, style="quiver")
 
-    def plotInputCounts(self, catalog, filename, log, dataId, butler, tractInfo, patchList=None, camera=None,
-                        forcedStr=None, uberCalLabel=None, cmap=plt.cm.viridis, alpha=0.5,
-                        doPlotTractImage=True, doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000,
-                        columnName="base_InputCount_value", fluxScale=1e12):
+    def plotInputCounts(self, catalog, description, plotInfoDict, log, forcedStr=None, uberCalLabel=None,
+                        cmap=plt.cm.viridis, alpha=0.5, doPlotPatchOutline=True, sizeFactor=5.0,
+                        maxDiamPix=1000, columnName="base_InputCount_value", fluxScale=1e12):
         """Plot grayscale image of tract with base_InputCounts_value overplotted
 
         Parameters
@@ -1092,18 +1105,12 @@ class Analysis(object):
            The source catalog whose objects will be plotted as ellipses (scaled
            by a factor of ``sizeFactor`` but truncated to a maximum diameter
            of ``maxDiamPix``) and color-mapped by their base_InputCount_value.
-        filename : `str`
-           Full path and name of the file to which the plot will be written.
+        description : `str`
+           The type of plot being made, used by the butler to save the figure.
+        plotInfoDict : `dict`
+            A dictionary of useful plot information.
         log : `lsst.log.Log`
            Logger object for logging messages.
-        dataId : `lsst.daf.persistence.DataId`
-           An instance of `lsst.daf.persistence.DataId` from which to extract
-           the filter name.
-        butler : `lsst.daf.persistence.Butler`
-        tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
-           Tract information object.
-        patchList : `list` of `str`, optional
-           List of patch IDs with data to be plotted.
         camera : `lsst.afw.cameraGeom.Camera`, optional
            The camera associated with the dataset (used to label the plot with
            the camera's name).
@@ -1115,9 +1122,6 @@ class Analysis(object):
         alpha : `float`, optional
            The matplotlib blending value, between 0 (transparent) and 1 (opaque)
            Default is 0.5.
-        doPlotTractImage : `bool`, optional
-           A boolean indicating whether to plot the tract image (grayscale and
-           asinh stretched).  Default is `True`.
         doPlotPatchOutline : `bool`, optional
            A boolean indicating whether to overplot the patch outlines and
            index labels.  Default is `True`.
@@ -1132,20 +1136,11 @@ class Analysis(object):
            given object gets truncated to this size, an opaque blue outline
            will be plotted around its ellipse.  Default is 1000.
         """
-        tractBbox = tractInfo.getBBox()
-        tractWcs = tractInfo.getWcs()
+        tractBbox = plotInfoDict["tractInfo"].getBBox()
+        tractWcs = plotInfoDict["tractInfo"].getWcs()
 
         fig, axes = plt.subplots(1, 1)
         axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=7)
-        if doPlotTractImage:
-            image = buildTractImage(butler, dataId, tractInfo, patchList=patchList)
-            med = np.nanmedian(image.array)
-            mad = np.nanmedian(abs(image.array - med))
-            imMin = med - 3.0*1.4826*mad
-            imMax = med + 10.0*1.4826*mad
-            norm = AsinhNormalize(minimum=imMin, dataRange=imMax - imMin, Q=8)
-            extent = tractBbox.getMinX(), tractBbox.getMaxX(), tractBbox.getMinY(), tractBbox.getMaxY()
-            axes.imshow(image.array, extent=extent, cmap="gray_r", norm=norm)
 
         centStr = "slot_Centroid"
         shapeStr = "slot_Shape"
@@ -1231,12 +1226,10 @@ class Analysis(object):
         axes.set_xlim(tractBbox.getMinX(), tractBbox.getMaxX())
         axes.set_ylim(tractBbox.getMinY(), tractBbox.getMaxY())
 
-        filterStr = dataId["filter"]
-        if filterStr and camera is not None:
-            # Add camera name to filter string
-            if len(filterStr) < len(camera.getName()):
-                filterStr = camera.getName() + "-" + filterStr
+        filterStr = plotInfoDict["filter"]
         filterLabelStr = "[" + filterStr + "]"
+        if "lsst" in plotInfoDict["camera"]:
+            filterLabelStr = "[" + plotInfoDict["camera"] + "-" + plotInfoDict["filter"] + "]"
         axes.set_xlabel("xTract (pixels) {0:s}".format(filterLabelStr), size=9)
         axes.set_ylabel("yTract (pixels) {0:s}".format(filterLabelStr), size=9)
 
@@ -1255,23 +1248,22 @@ class Analysis(object):
         plt.text(-0.17, 0.97, str("{:.2f}".format(tract0N.getY())), **textKwargs)
         textKwargs["fontsize"] = 8
         plt.text(0.45, -0.11, "RA (deg)", **textKwargs)
-        plt.text(-0.19, 0.5, "DEC (deg)", rotation=90, **textKwargs)
+        plt.text(-0.17, 0.5, "DEC (deg)", rotation=90, **textKwargs)
 
         if doPlotPatchOutline:
-            plotPatchOutline(axes, tractInfo, patchList, plotUnits="pixel", idFontSize=5)
-        if camera is not None:
-            labelCamera(camera, plt, axes, 0.5, 1.09)
-        labelVisit(filename, plt, axes, 0.5, 1.04)
+            plotPatchOutline(axes, plotInfoDict["tractInfo"], plotInfoDict["patchList"], plotUnits="pixel",
+                             idFontSize=5)
+        if plotInfoDict["camera"] is not None:
+            labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
+        labelVisit(plotInfoDict, fig, axes, 0.5, 1.04)
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes, 0.96, -0.11, prefix="cat: ", fontSize=7, color="green")
+            plotText(forcedStr, fig, axes, 0.96, -0.11, prefix="cat: ", fontSize=7, color="green")
         if uberCalLabel:
-            plotText(uberCalLabel, plt, axes, 0.08, -0.11, fontSize=7, color="green")
+            plotText(uberCalLabel, fig, axes, 0.08, -0.11, fontSize=7, color="green")
 
-        fig.savefig(filename, dpi=1200)  # Needs to be fairly hi-res to see enough detail
-        plt.close(fig)
+        yield Struct(fig=fig, description=description, stats=None, statsHigh=None, dpi=1200, style="tract")
 
-    def plotSkyObjects(self, skyObjCat, filename, log, dataId, camera=None, ccdList=None, tractInfo=None,
-                       patchList=None, zpLabel=None, forcedStr=None):
+    def plotSkyObjects(self, skyObjCat, description, plotInfoDict, log, zpLabel=None, forcedStr=None):
         """Plot histograms of sky object/source measurements.
 
         Also plots the focal plane or tract outline to indicate which sub-units
@@ -1284,25 +1276,18 @@ class Analysis(object):
         ----------
         skyObjCat : `lsst.afw.table.SourceCatalog`
             The sky objects source catalog.
-        filename : `str`
-            Full path and name of the file to which the plot will be written.
+        description : `str`
+            The description of the plot, used to save the figure.
+        plotInfoDict : `dict`
+            A dictionary of useful plot information.
         log : `lsst.log.Log`
             Logger object for logging messages.
-        dataId : `lsst.daf.persistence.DataId`
-            An instance of `lsst.daf.persistence.DataId` from which to extract
-            the filter name.
         zpLabel : `str`, optional
             A label indicating the external calibration applied (currently
             either jointcal, fgcm, fgcm_tract, or meas_mosaic, but the latter
             is effectively retired).
         forcedStr : `str`, optional
             String to label the catalog type (forced vs. unforced) on the plot.
-        ccdList : `list` of `int`, optional
-            List of ccd IDs with data to be plotted.
-        tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`, optional
-           Tract information object.
-        patchList : `list` of `str`, optional
-           List of patch IDs with data to be plotted.
         """
         fig, axes = plt.subplots(nrows=1, ncols=2, sharex=False, sharey=False)
         fig.subplots_adjust(wspace=0.17, bottom=0.18, left=0.08, right=0.76, top=0.9)
@@ -1315,7 +1300,10 @@ class Analysis(object):
         axes[1].yaxis.set_major_formatter(FormatStrFormatter('%.3f'))
         prop_cycle = plt.rcParams["axes.prop_cycle"]
         colors = prop_cycle.by_key()["color"]
-        filterStr = dataId["filter"]
+        if "lsst" in plotInfoDict["camera"]:
+            filterStr = plotInfoDict["camera"] + "-" + plotInfoDict["filter"]
+        else:
+            filterStr = plotInfoDict["filter"]
         fluxStrList = ["base_PsfFlux_instFlux", "base_CircularApertureFlux_9_0_instFlux",
                        "base_CircularApertureFlux_12_0_instFlux", "base_CircularApertureFlux_25_0_instFlux"]
         fluxScale = 1e12
@@ -1364,7 +1352,6 @@ class Analysis(object):
             chiArr = skyFluxArr/skyFluxErrArr
             meanChi = chiArr[clippedStats.goodArray].mean()
             stdDevChi = chiArr[clippedStats.goodArray].std()
-            rmsChi = np.sqrt(np.mean(chiArr[clippedStats.goodArray]**2))
             meanChiStr = "mean = {0:5.2f}".format(meanChi)
             stdChiStr = "  std = {0:5.2f}".format(stdDevChi)
             numChiStr = "    N = {}".format(len(chiArr[clippedStats.goodArray]))
@@ -1402,9 +1389,9 @@ class Analysis(object):
         axes[1].axvline(x=0.0, color="black", linestyle="--")
         axes[1].legend(loc=legendLoc, fontsize=6)
 
-        if camera is not None:
-            labelCamera(camera, plt, axes[0], 0.5, 1.04)
-        labelVisit(filename, plt, axes[1], 0.5, 1.04)
+        if plotInfoDict["camera"] is not None:
+            labelCamera(plotInfoDict, fig, axes[0], 0.5, 1.04)
+        labelVisit(plotInfoDict, fig, axes[1], 0.5, 1.04)
         if forcedStr is not None:
             plotText(forcedStr, plt, axes[0], 0.99, -0.15, prefix="cat: ", fontSize=8, color="green")
 
@@ -1414,11 +1401,11 @@ class Analysis(object):
         metricStr = "mean(" + fluxToPlotString(metricFluxStr) + ")"
         metricPerUnitDict = {}
         unitList = None
-        if ccdList is not None:
-            unitList = ccdList
+        if plotInfoDict["ccdList"] is not None:
+            unitList = plotInfoDict["ccdList"]
             unitStr = "ccdId"
-        elif patchList is not None:
-            unitList = patchList
+        elif plotInfoDict["patchList"] is not None:
+            unitList = plotInfoDict["patchList"]
             unitStr = "patchId"
         for iUnit in unitList:
             if unitStr == "patchId":  # can't read String fields via afwTableSourceCatalog
@@ -1436,25 +1423,23 @@ class Analysis(object):
                 metricPerUnitDict[str(iUnit)] = np.nan
                 log.info("No good sky objects for %s %s" % (unitStr, iUnit))
 
-        if camera is not None and ccdList is not None:
+        if plotInfoDict["camera"] is not None and plotInfoDict["ccdList"] is not None:
             axTopRight = plt.axes(topRight)
             axTopRight.set_aspect("equal")
-            plotCameraOutline(axTopRight, camera, ccdList, metricPerCcdDict=metricPerUnitDict,
-                              metricStr=metricStr, fig=fig)
-        if self.config.doPlotTractOutline and tractInfo is not None and len(patchList) > 0:
+            plotCameraOutline(axTopRight, plotInfoDict["camera"], plotInfoDict["ccdList"],
+                              metricPerCcdDict=metricPerUnitDict, metricStr=metricStr, fig=fig)
+        if (self.config.doPlotTractOutline and plotInfoDict["tractInfo"] is not None and
+                len(plotInfoDict["patchList"]) > 0):
             axTopRight = plt.axes(topRight)
             axTopRight.set_aspect("equal")
-            plotTractOutline(axTopRight, tractInfo, patchList, metricPerPatchDict=metricPerUnitDict,
-                             metricStr=metricStr, fig=fig)
+            plotTractOutline(axTopRight, plotInfoDict["tractInfo"], plotInfoDict["patchList"],
+                             metricPerPatchDict=metricPerUnitDict, metricStr=metricStr, fig=fig)
 
-        fig.savefig(filename, dpi=120)
-        plt.close(fig)
-        return
+        yield Struct(fig=fig, description=description, stats=None, statsHigh=None, dpi=120, style="hist")
 
-    def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
-                tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
-                zpLabel=None, forcedStr=None, postFix="", plotRunStats=True, highlightList=None,
-                extraLabels=None, uberCalLabel=None, doPrintMedian=False):
+    def plotAll(self, description, plotInfoDict, areaDict, log, enforcer=None, matchRadius=None,
+                matchRadiusUnitStr=None, zpLabel=None, forcedStr=None, postFix="", plotRunStats=True,
+                highlightList=None, extraLabels=None, uberCalLabel=None, doPrintMedian=False):
         """Make all plots"""
         stats = self.stats
         # Make sure you have some good data to plot
@@ -1463,65 +1448,69 @@ class Analysis(object):
                      format(self.shortName))
             return
         # Dict of all parameters common to plot* functions
-        plotKwargs = dict(stats=stats, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                          patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                          matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel,
-                          forcedStr=forcedStr, uberCalLabel=uberCalLabel, doPrintMedian=doPrintMedian)
+        plotKwargs = dict(stats=stats, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                          zpLabel=zpLabel, forcedStr=forcedStr, uberCalLabel=uberCalLabel,
+                          doPrintMedian=doPrintMedian)
         if "galacticExtinction" not in self.shortName:
-            self.plotAgainstMagAndHist(log, filenamer(dataId, description=self.shortName,
-                                                      style="psfMagHist" + postFix),
-                                       plotRunStats=plotRunStats, highlightList=highlightList,
-                                       filterStr=dataId["filter"], extraLabels=extraLabels, **plotKwargs)
+            yield from self.plotAgainstMagAndHist(log, description, plotInfoDict, plotRunStats=plotRunStats,
+                                                  highlightList=highlightList, extraLabels=extraLabels,
+                                                  **plotKwargs)
 
         if self.config.doPlotOldMagsHist and "galacticExtinction" not in self.shortName:
-            self.plotAgainstMag(filenamer(dataId, description=self.shortName, style="psfMag" + postFix),
-                                **plotKwargs)
-            self.plotHistogram(filenamer(dataId, description=self.shortName, style="hist" + postFix),
-                               **plotKwargs)
+            yield from self.plotAgainstMag(self.shortName, **plotKwargs)
+            yield from self.plotHistogram(self.shortName, plotInfoDict, **plotKwargs)
 
-        skyPositionKwargs = dict(dataId=dataId, butler=butler, highlightList=highlightList)
+        skyPositionKwargs = dict(highlightList=highlightList)
         skyPositionKwargs.update(plotKwargs)
         if "all" in self.data:
             styleStr = "sky-all"
             dataName = "all"
             if self.checkGoodDataExists(dataName, stats, log, styleStr):
-                self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
-                                     dataName=dataName, **skyPositionKwargs)
+                yield from self.plotSkyPosition(self.shortName, plotInfoDict, areaDict,
+                                                style=styleStr + postFix, dataName=dataName,
+                                                **skyPositionKwargs)
         if "star" in self.data:
             styleStr = "sky-stars"
             dataName = "star"
             if self.checkGoodDataExists(dataName, stats, log, styleStr):
-                self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
-                                     dataName=dataName, **skyPositionKwargs)
+                yield from self.plotSkyPosition(self.shortName, plotInfoDict, areaDict,
+                                                style=styleStr + postFix, dataName=dataName,
+                                                **skyPositionKwargs)
+
         if "galaxy" in self.data and (not any(ss in self.shortName for ss in
                                               ["pStar", "race", "Xx", "Yy", "Resids", "gri", "riz", "izy",
                                                "z9y", "color_"])):
             styleStr = "sky-gals"
             dataName = "galaxy"
             if self.checkGoodDataExists(dataName, stats, log, styleStr):
-                self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
-                                     dataName=dataName, **skyPositionKwargs)
+                yield from self.plotSkyPosition(self.shortName, plotInfoDict, areaDict,
+                                                style=styleStr + postFix, dataName=dataName,
+                                                **skyPositionKwargs)
+
         if ("unknown" in self.data
             and (not any(ss in self.shortName for ss in ["pStar", "race", "Xx", "Yy", "Resids", "gri",
                                                          "riz", "izy", "z9y", "color_"]))):
             styleStr = "sky-unkn"
             dataName = "unknown"
             if self.checkGoodDataExists(dataName, stats, log, styleStr):
-                self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
-                                     dataName=dataName, **skyPositionKwargs)
+                yield from self.plotSkyPosition(self.shortName, plotInfoDict, areaDict,
+                                                style=styleStr + postFix, dataName=dataName,
+                                                **skyPositionKwargs)
         if "diff_" in self.shortName:
             styleStr = "sky-split"
             dataName = "split"
             if self.checkGoodDataExists(dataName, stats, log, styleStr):
-                self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
-                                     dataName=dataName, **skyPositionKwargs)
+                yield from self.plotSkyPosition(self.shortName, plotInfoDict, areaDict,
+                                                style=styleStr + postFix, dataName=dataName,
+                                                **skyPositionKwargs)
 
         if self.config.doPlotRaDec:
-            self.plotRaDec(filenamer(dataId, description=self.shortName, style="radec" + postFix),
-                           **plotKwargs)
-        log.info("Statistics from %s of %s: %s" % (dataId, self.quantityName, stats))
+            yield from self.plotRaDec(self.shortName, style="radec" + postFix, **plotKwargs)
+
+        log.info("Statistics from %s of %s: %s" % (plotInfoDict["dataId"], self.quantityName, stats))
         if enforcer:
-            enforcer(stats, dataId, log, self.quantityName)
+            enforcer(stats, plotInfoDict["dataId"], log, self.quantityName)
+        # TO DO: DM-24795, Should this be returned? Is it vanishing into the ether?
         return stats
 
     def statistics(self, magThreshold=None, signalToNoiseThreshold=None, forcedMean=None):
@@ -1544,7 +1533,7 @@ class Analysis(object):
         """
         thresholdList = [magThreshold, signalToNoiseThreshold]
         if (all(threshold is not None for threshold in thresholdList) or
-            all(threshold is None for threshold in thresholdList)):
+                all(threshold is None for threshold in thresholdList)):
             raise RuntimeError("Must specify one AND ONLY one of magThreshold and signalToNoiseThreshold. "
                                "They are currently set to {0:} and {1:}, respectively".
                                format(magThreshold, signalToNoiseThreshold))
@@ -1716,10 +1705,10 @@ class Analysis(object):
            Returns `True` if data points were included in ``stats`` for
            ``dataName``, else `False`.
         """
-        if stats[dataName].num == 0 :
+        if stats[dataName].num == 0:
             log.warn("No good data points to plot for: {:} {:}.  Skipping {:} plot.".
                      format(self.shortName, dataName, styleStr))
-            answer =  False
+            answer = False
         else:
             answer = True
         return answer
