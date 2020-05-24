@@ -821,6 +821,7 @@ class Analysis(object):
                          c=data.quantity[good[data.selection]], cmap=cmap, vmin=vMin, vmax=vMax)
 
         if stats0 is None:  # No data to plot
+            plt.close(fig)
             return
         filterStr = dataId["filter"] if dataId is not None else ""
         if filterStr and camera is not None:
