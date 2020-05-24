@@ -234,35 +234,32 @@ class Analysis(object):
                 self.stats = self.statistics(magThreshold=self.magThreshold, forcedMean=forcedMean)
             self.statsHigh = self.statistics(signalToNoiseThreshold=self.signalToNoiseHighThreshold,
                                              forcedMean=forcedMean)
-            # Make sure you have some good data to plot: only check first dataset in labeller.plot
-            # list as it is the most important one (and the only available in many cases where
-            # StarGalaxyLabeller is used.
-            if (self.stats[labeller.plot[0]].num) == 0:
-                raise RuntimeError("No good data points to plot for sample labelled: {:}".
-                                   format(labeller.plot[0]))
             # Ensure plot limits always encompass at least mean +/- 6.0*stdev, at most mean +/- 20.0*stddev,
             # and clipped stats range + 25%
             dataType = "all" if "all" in self.data else "star"
-            if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar", "resolution",
-                                                       "race", "psfInst", "psfCal"]):
-                self.qMin = max(min(self.qMin, self.stats[dataType].mean - 6.0*self.stats[dataType].stdev,
-                                self.stats[dataType].median - 1.25*self.stats[dataType].clip),
-                                min(self.stats[dataType].mean - 20.0*self.stats[dataType].stdev,
-                                    -0.005*self.unitScale))
-                if (abs(self.stats[dataType].mean) < 0.0005*self.unitScale and
-                    abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
-                    minmax = 2.0*max(abs(min(self.quantity[self.good])), abs(max(self.quantity[self.good])))
-                    self.qMin = -minmax if minmax > 0 else self.qMin
-            if not any(ss in self.shortName for ss in ["footNpix", "pStar", "resolution", "race",
-                                                       "psfInst", "psfCal"]):
-                self.qMax = min(max(self.qMax, self.stats[dataType].mean + 6.0*self.stats[dataType].stdev,
-                                self.stats[dataType].median + 1.25*self.stats[dataType].clip),
-                                max(self.stats[dataType].mean + 20.0*self.stats[dataType].stdev,
-                                    0.005*self.unitScale))
-                if (abs(self.stats[dataType].mean) < 0.0005*self.unitScale and
-                    abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
-                    minmax = 2.0*max(abs(min(self.quantity[self.good])), abs(max(self.quantity[self.good])))
-                    self.qMax = minmax if minmax > 0 else self.qMax
+            if self.stats[dataType].num > 0:
+                if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar", "resolution",
+                                                           "race", "psfInst", "psfCal"]):
+                    self.qMin = max(min(self.qMin, self.stats[dataType].mean - 6.0*self.stats[dataType].stdev,
+                                        self.stats[dataType].median - 1.25*self.stats[dataType].clip),
+                                    min(self.stats[dataType].mean - 20.0*self.stats[dataType].stdev,
+                                        -0.005*self.unitScale))
+                    if (abs(self.stats[dataType].mean) < 0.0005*self.unitScale and
+                        abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
+                        minmax = 2.0*max(abs(min(self.quantity[self.good])),
+                                         abs(max(self.quantity[self.good])))
+                        self.qMin = -minmax if minmax > 0 else self.qMin
+                if not any(ss in self.shortName for ss in ["footNpix", "pStar", "resolution", "race",
+                                                           "psfInst", "psfCal"]):
+                    self.qMax = min(max(self.qMax, self.stats[dataType].mean + 6.0*self.stats[dataType].stdev,
+                                        self.stats[dataType].median + 1.25*self.stats[dataType].clip),
+                                    max(self.stats[dataType].mean + 20.0*self.stats[dataType].stdev,
+                                        0.005*self.unitScale))
+                    if (abs(self.stats[dataType].mean) < 0.0005*self.unitScale and
+                        abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
+                        minmax = 2.0*max(abs(min(self.quantity[self.good])),
+                                         abs(max(self.quantity[self.good])))
+                        self.qMax = minmax if minmax > 0 else self.qMax
 
     def plotAgainstMag(self, filename, stats=None, camera=None, ccdList=None, tractInfo=None, patchList=None,
                        hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None,
@@ -1458,6 +1455,10 @@ class Analysis(object):
                 extraLabels=None, uberCalLabel=None, doPrintMedian=False):
         """Make all plots"""
         stats = self.stats
+        # Make sure you have some good data to plot
+        if all(stats[stat].num == 0 for stat in stats):
+            log.warn("No good data points to plot for: {:}.  Skipping plots...".format(self.shortName))
+            return
         # Dict of all parameters common to plot* functions
         plotKwargs = dict(stats=stats, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
                           patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
@@ -1480,32 +1481,37 @@ class Analysis(object):
         if "all" in self.data:
             styleStr = "sky-all"
             dataName = "all"
-            self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
-                                 dataName=dataName, **skyPositionKwargs)
+            if self.checkGoodDataExists(dataName, stats, log, styleStr):
+                self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
+                                     dataName=dataName, **skyPositionKwargs)
         if "star" in self.data:
             styleStr = "sky-stars"
             dataName = "star"
-            self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
-                                 dataName=dataName, **skyPositionKwargs)
+            if self.checkGoodDataExists(dataName, stats, log, styleStr):
+                self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
+                                     dataName=dataName, **skyPositionKwargs)
         if "galaxy" in self.data and (not any(ss in self.shortName for ss in
                                               ["pStar", "race", "Xx", "Yy", "Resids", "gri", "riz", "izy",
                                                "z9y", "color_"])):
             styleStr = "sky-gals"
             dataName = "galaxy"
-            self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
-                                 dataName=dataName, **skyPositionKwargs)
-        if ("unknown" in self.data and stats["unknown"].num > 0
+            if self.checkGoodDataExists(dataName, stats, log, styleStr):
+                self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
+                                     dataName=dataName, **skyPositionKwargs)
+        if ("unknown" in self.data
             and (not any(ss in self.shortName for ss in ["pStar", "race", "Xx", "Yy", "Resids", "gri",
                                                          "riz", "izy", "z9y", "color_"]))):
             styleStr = "sky-unkn"
             dataName = "unknown"
-            self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
-                                 dataName=dataName, **skyPositionKwargs)
-        if "diff_" in self.shortName and stats["split"].num > 0:
+            if self.checkGoodDataExists(dataName, stats, log, styleStr):
+                self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
+                                     dataName=dataName, **skyPositionKwargs)
+        if "diff_" in self.shortName:
             styleStr = "sky-split"
             dataName = "split"
-            self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
-                                 dataName=dataName, **skyPositionKwargs)
+            if self.checkGoodDataExists(dataName, stats, log, styleStr):
+                self.plotSkyPosition(filenamer(dataId, description=self.shortName, style=styleStr + postFix),
+                                     dataName=dataName, **skyPositionKwargs)
 
         if self.config.doPlotRaDec:
             self.plotRaDec(filenamer(dataId, description=self.shortName, style="radec" + postFix),
@@ -1686,4 +1692,31 @@ class Analysis(object):
         print("calculateSysError: {0:.4f}, {1:.4f}, {2:.4f}".format(function(answer**2),
                                                                     function((answer+0.001)**2),
                                                                     function((answer-0.001)**2)))
+        return answer
+
+    def checkGoodDataExists(self, dataName, stats, log, styleStr):
+        """Check if good data points exist in stats object for given data type
+
+        Parameters
+        ----------
+        dataName : `str`
+            The name and key of the dataset for consideration in the ``stats``
+            object.
+        stats : `dict` of `lsst.pipe.analysis.utils.Stats`
+            A dictionary containing the statistics information per ``dataName``.
+        log : `lsst.log.Log`
+            Logger object for logging messages.
+
+        Returns
+        -------
+        answer : `bool`
+           Returns `True` if data points were included in ``stats`` for
+           ``dataName``, else `False`.
+        """
+        if stats[dataName].num == 0 :
+            log.warn("No good data points to plot for: {:} {:}.  Skipping {:} plot.".
+                     format(self.shortName, dataName, styleStr))
+            answer =  False
+        else:
+            answer = True
         return answer
