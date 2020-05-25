@@ -356,7 +356,7 @@ class Analysis(object):
         inLimits &= self.data[dataType].quantity > self.qMin
         if self.data[dataType].quantity.any():
             if len(self.data[dataType].quantity[inLimits]) < max(1.0, 0.35*len(self.data[dataType].quantity)):
-                log.info("No data within limits...decreasing/increasing qMin/qMax")
+                log.info("plotAgainstMagAndHist: No data within limits...decreasing/increasing qMin/qMax")
             while (len(self.data[dataType].quantity[inLimits]) <
                    max(1.0, 0.35*len(self.data[dataType].quantity))):
                 self.qMin -= 0.1*np.abs(self.qMin)
@@ -431,10 +431,11 @@ class Analysis(object):
         ptSize = None
         for name, data in self.data.items():
             if not data.plot:
-                log.info("Not plotting data for dataset: {0:s} (N = {1:d})".format(name, len(data.mag)))
+                log.info("plotAgainstMagAndHist: Not plotting data for dataset: {0:s} (N = {1:d})".
+                         format(name, len(data.mag)))
                 continue
             if not data.mag.any():
-                log.info("No data for dataset: {:s}".format(name))
+                log.info("plotAgainstMagAndHist: No data for dataset: {:s}".format(name))
                 continue
             if ptSize is None:
                 ptSize = setPtSize(len(data.mag))
@@ -1044,7 +1045,7 @@ class Analysis(object):
 
         good = np.ones(len(e), dtype=bool)
         stats0 = self.calculateStats(e, good, thresholdType=thresholdType, thresholdValue=thresholdValue)
-        log.info("Statistics from %s of %s: %s" % (dataId, self.quantityName, stats0))
+        log.info("plotQuiver: Statistics from %s of %s: %s" % (dataId, self.quantityName, stats0))
         meanStr = "{0.mean:.4f}".format(stats0)
         stdevStr = "{0.stdev:.4f}".format(stats0)
 
@@ -1207,8 +1208,8 @@ class Analysis(object):
             alphaCmap.set_under("r")
             alphaCmap.set_over("r")
         else:
-            log.warn("Unknown extend string for matplotlib colorbar: {:}.  Setting to \"neither\"".
-                     format(cbarExtend))
+            log.warn("plotInputCounts: Unknown extend string for matplotlib colorbar: {:}.  Setting to "
+                     "\"neither\"".format(cbarExtend))
             cbarExtend = "neither"
 
         ellipsePatchList = [matplotlib.patches.Ellipse(xy=xy, width=diamA, height=diamB, angle=theta)
@@ -1457,7 +1458,8 @@ class Analysis(object):
         stats = self.stats
         # Make sure you have some good data to plot
         if all(stats[stat].num == 0 for stat in stats):
-            log.warn("No good data points to plot for: {:}.  Skipping plots...".format(self.shortName))
+            log.warn("plotAll: No good data points to plot for: {:}.  Skipping plots...".
+                     format(self.shortName))
             return
         # Dict of all parameters common to plot* functions
         plotKwargs = dict(stats=stats, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
