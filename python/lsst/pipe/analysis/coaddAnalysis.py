@@ -13,7 +13,7 @@ from collections import defaultdict
 from lsst.daf.persistence.butler import Butler
 from lsst.pex.config import (Config, Field, ConfigField, ListField, DictField, ConfigDictField,
                              ConfigurableField)
-from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError
+from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError, Struct
 from lsst.pipe.drivers.utils import TractDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
 from lsst.meas.astrom import AstrometryConfig
@@ -22,7 +22,7 @@ from lsst.pipe.tasks.colorterms import Colorterm, ColortermLibrary
 from lsst.meas.algorithms import LoadIndexedReferenceObjectsTask
 
 from .analysis import AnalysisConfig, Analysis
-from .utils import (Filenamer, Enforcer, MagDiff, MagDiffMatches, MagDiffCompare,
+from .utils import (Enforcer, MagDiff, MagDiffMatches, MagDiffCompare,
                     AstrometryDiff, TraceSize, PsfTraceSizeDiff, TraceSizeCompare, PercentDiff,
                     E1Resids, E2Resids, E1ResidsHsmRegauss, E2ResidsHsmRegauss, FootNpixDiffCompare,
                     MagDiffCompareErr, CentroidDiff, deconvMom,
@@ -31,10 +31,11 @@ from .utils import (Filenamer, Enforcer, MagDiff, MagDiffMatches, MagDiffCompare
                     addFootprintNPix, makeBadArray, addIntFloatOrStrColumn,
                     calibrateCoaddSourceCatalog, backoutApCorr, matchNanojanskyToAB,
                     fluxToPlotString, andCatalog, writeParquet, getRepoInfo, setAliasMaps,
-                    addPreComputedColumns, computeMeanOfFrac)
+                    addPreComputedColumns, computeMeanOfFrac, savePlots)
 from .plotUtils import (CosmosLabeller, AllLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
                         MatchesStarGalaxyLabeller, determineExternalCalLabel)
 
+from .fakesAnalysis import getPlotInfo
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 import lsst.geom as geom
@@ -43,6 +44,7 @@ __all__ = ["CoaddAnalysisConfig", "CoaddAnalysisRunner", "CoaddAnalysisTask", "C
            "CompareCoaddAnalysisRunner", "CompareCoaddAnalysisTask"]
 
 NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
+
 
 class CoaddAnalysisConfig(Config):
     coaddName = Field(dtype=str, default="deep", doc="Name for coadd")
@@ -76,8 +78,10 @@ class CoaddAnalysisConfig(Config):
                              doc="Add a field containing 12 pix circular aperture flux to HSC table?")
     doPlotStarGalaxy = Field(dtype=bool, default=True, doc=("Plot star/galaxy? "
                                                             "(ignored if plotMatchesOnly is True)"))
-    doPlotOverlaps = Field(dtype=bool, default=True, doc="Plot overlaps? (ignored if plotMatchesOnly is True)")
-    plotMatchesOnly = Field(dtype=bool, default=False, doc="Only make plots related to reference cat matches?")
+    doPlotOverlaps = Field(dtype=bool, default=True, doc=("Plot overlaps? "
+                                                          "(ignored if plotMatchesOnly is True)"))
+    plotMatchesOnly = Field(dtype=bool, default=False, doc=("Only make plots related to reference cat"
+                                                            "matches?"))
     doPlotMatches = Field(dtype=bool, default=True, doc="Plot matches?")
     doPlotCompareUnforced = Field(dtype=bool, default=True, doc=("Plot difference between forced and unforced"
                                                                  "? (ignored if plotMatchesOnly is True)"))
@@ -99,7 +103,7 @@ class CoaddAnalysisConfig(Config):
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(fluxColumn)")
     # We want the following to come from the *_meas catalogs as they reflect
     # what happened in SFP calibration.
-    columnsToCopyFromMeas = ListField(dtype=str, default=["calib_",],
+    columnsToCopyFromMeas = ListField(dtype=str, default=["calib_", ],
                                       doc="List of string \"prefixes\" to identify the columns to copy.  "
                                       "All columns with names that start with one of these strings will be "
                                       "copied from the *_meas catalogs into the *_forced_src catalogs.")
@@ -122,6 +126,7 @@ class CoaddAnalysisConfig(Config):
                                       "issued and table writing is skipped."))
     writeParquetOnly = Field(dtype=bool, default=False,
                              doc="Only write out Parquet tables (i.e. do not produce any plots)?")
+    hasFakes = Field(dtype=bool, default=False, doc="Include the analysis of the added fake sources?")
 
     def saveToStream(self, outfile, root="root"):
         """Required for loading colorterms from a Config outside the 'lsst' namespace"""
@@ -213,6 +218,8 @@ class CoaddAnalysisTask(CmdLineTask):
         self.matchControl.symmetricMatch = False
 
     def runDataRef(self, patchRefList, subdir="", cosmos=None):
+        plotList = []
+
         haveForced = False  # do forced datasets exits (may not for single band datasets)
         dataset = "Coadd_forced_src"
         # Explicit input file was checked in CoaddAnalysisRunner, so a check on datasetExists
@@ -233,7 +240,6 @@ class CoaddAnalysisTask(CmdLineTask):
         self.log.info("patchList size: {:d}".format(len(patchList)))
         repoInfo = getRepoInfo(patchRefList[0], coaddName=self.config.coaddName, coaddDataset=dataset)
         subdir = "patch-" + str(patchList[0]) if len(patchList) == 1 else subdir
-        filenamer = Filenamer(repoInfo.butler, self.outputDataset, repoInfo.dataId, subdir=subdir)
         # Find a visit/ccd input so that you can check for meas_mosaic input (i.e. to set uberCalLabel)
         self.uberCalLabel = determineExternalCalLabel(repoInfo, patchList[0], coaddName=self.config.coaddName)
         self.log.info(f"External calibration(s) used: {self.uberCalLabel}")
@@ -247,24 +253,29 @@ class CoaddAnalysisTask(CmdLineTask):
         # they do not get explicitly filtered out).
         highlightList = [(self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0, "turquoise"), ]
         # Dict of all parameters common to plot* functions
-        plotKwargs = dict(butler=repoInfo.butler, camera=repoInfo.camera, tractInfo=repoInfo.tractInfo,
-                          patchList=patchList, hscRun=repoInfo.hscRun, zpLabel=self.zpLabel,
-                          uberCalLabel=self.uberCalLabel)
+        plotKwargs = dict(zpLabel=self.zpLabel, uberCalLabel=self.uberCalLabel)
 
-        if any (doPlot for doPlot in [self.config.doPlotMags, self.config.doPlotStarGalaxy,
-                                      self.config.doPlotOverlaps, self.config.doPlotCompareUnforced,
-                                      self.config.doPlotSkyObjects, self.config.doPlotSkyObjectsSky,
-                                      cosmos, self.config.externalCatalogs,
-                                      self.config.doWriteParquetTables]):
+        if any(doPlot for doPlot in [self.config.doPlotMags, self.config.doPlotStarGalaxy,
+                                     self.config.doPlotOverlaps, self.config.doPlotCompareUnforced,
+                                     self.config.doPlotSkyObjects, self.config.doPlotSkyObjectsSky,
+                                     cosmos, self.config.externalCatalogs,
+                                     self.config.doWriteParquetTables]):
             if haveForced:
-                forced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_forced_src")
+                catStruct = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_forced_src",
+                                              repoInfo)
+                forced = catStruct.catalog
+                areaDict = catStruct.areaDict
+
                 forced = self.calibrateCatalogs(forced, wcs=repoInfo.wcs)
-            unforced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_meas")
+
+                unforced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_meas",
+                                             repoInfo).catalog
             unforced = self.calibrateCatalogs(unforced, wcs=repoInfo.wcs)
             plotKwargs.update(dict(zpLabel=self.zpLabel))
             if haveForced:
                 # copy over some fields from _ref and _meas catalogs to _forced_src catalog
-                refCat = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_ref")
+                refCat = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_ref",
+                                           repoInfo).catalog
                 if len(forced) != len(refCat):
                     raise RuntimeError(("Lengths of forced (N = {0:d}) and ref (N = {0:d}) cats don't match").
                                        format(len(forced), len(refCat)))
@@ -303,32 +314,36 @@ class CoaddAnalysisTask(CmdLineTask):
                            & (unforced["deblend_nChild"] == 0) & ~unforced["base_PixelFlags_flag_edge"])
                 skyObjCat = unforced[goodSky].copy(deep=True)
 
+            plotInfoDict = getPlotInfo(repoInfo)
+            plotInfoDict.update(dict(cameraObj=repoInfo.camera, patchList=patchList, hscRun=repoInfo.hscRun,
+                                     tractInfo=repoInfo.tractInfo, dataId=repoInfo.dataId,
+                                     plotType="plotCoadd", ccdList=None))
             # Must do the overlaps before purging the catalogs of non-primary sources
             if self.config.doPlotOverlaps and not self.config.writeParquetOnly:
                 # Determine if any patches in the patchList actually overlap
-                overlappingPatches = checkPatchOverlap(patchList, repoInfo.tractInfo)
+                overlappingPatches = checkPatchOverlap(plotInfoDict["patchList"], plotInfoDict["tractInfo"])
                 if not overlappingPatches:
                     self.log.info("No overlapping patches...skipping overlap plots")
                 else:
                     if haveForced:
                         forcedOverlaps = self.overlaps(forced)
                         if forcedOverlaps:
-                            self.plotOverlaps(forcedOverlaps, filenamer, repoInfo.dataId,
-                                              matchRadius=self.config.matchOverlapRadius,
-                                              matchRadiusUnitStr="\"",
-                                              forcedStr=forcedStr, postFix="_forced",
-                                              fluxToPlotList=["modelfit_CModel", ],
-                                              highlightList=highlightList, **plotKwargs)
+                            plotList.append(self.plotOverlaps(forcedOverlaps, plotInfoDict, areaDict,
+                                                              matchRadius=self.config.matchOverlapRadius,
+                                                              matchRadiusUnitStr="\"",
+                                                              forcedStr=forcedStr, postFix="_forced",
+                                                              fluxToPlotList=["modelfit_CModel", ],
+                                                              **plotKwargs))
                             self.log.info("Number of forced overlap objects matched = {:d}".
                                           format(len(forcedOverlaps)))
                     unforcedOverlaps = self.overlaps(unforced)
                     if unforcedOverlaps:
-                        self.plotOverlaps(unforcedOverlaps, filenamer, repoInfo.dataId,
-                                          matchRadius=self.config.matchOverlapRadius,
-                                          matchRadiusUnitStr="\"",
-                                          forcedStr="unforced", postFix="_unforced",
-                                          fluxToPlotList=["modelfit_CModel", ],
-                                          highlightList=highlightList, **plotKwargs)
+                        plotList.append(self.plotOverlaps(unforcedOverlaps, plotInfoDict, areaDict,
+                                                          matchRadius=self.config.matchOverlapRadius,
+                                                          matchRadiusUnitStr="\"",
+                                                          forcedStr="unforced", postFix="_unforced",
+                                                          fluxToPlotList=["modelfit_CModel", ],
+                                                          highlightList=highlightList, **plotKwargs))
                         self.log.info("Number of unforced overlap objects matched = {:d}".
                                       format(len(unforcedOverlaps)))
 
@@ -341,8 +356,9 @@ class CoaddAnalysisTask(CmdLineTask):
                 forcedMatched = forced[~badCombined].copy(deep=True)
 
                 if self.config.doPlotCompareUnforced:
-                    self.plotCompareUnforced(forcedMatched, unforcedMatched, filenamer, repoInfo.dataId,
-                                             highlightList=highlightList, **plotKwargs)
+                    plotList.append(self.plotCompareUnforced(forcedMatched, unforcedMatched, plotInfoDict,
+                                                             areaDict, highlightList=highlightList,
+                                                             **plotKwargs))
 
             # Create and write parquet tables
             if self.config.doWriteParquetTables:
@@ -378,78 +394,69 @@ class CoaddAnalysisTask(CmdLineTask):
                 self.log.info("\nNumber of sources in catalog: unforced = {0:d}".format(len(unforced)))
 
             if self.config.doPlotPsfFluxSnHists:
-                self.plotPsfFluxSnHists(unforced,
-                                        filenamer(repoInfo.dataId, description="base_PsfFlux_cal",
-                                                  style="hist"),
-                                        repoInfo.dataId, forcedStr="unforced " + self.catLabel, **plotKwargs)
+                plotList.append(self.plotPsfFluxSnHists(unforced, "base_PsfFlux_cal", plotInfoDict, areaDict,
+                                                        forcedStr="unforced " + self.catLabel, **plotKwargs))
             if self.config.doPlotSkyObjects:
-                self.plotSkyObjects(skyObjCat, filenamer(repoInfo.dataId, description="skyObjects",
-                                                         style="hist"),
-                                    repoInfo.dataId, forcedStr="unforced", camera=repoInfo.camera,
-                                    tractInfo=repoInfo.tractInfo, patchList=patchList)
+                plotList.append(self.plotSkyObjects(skyObjCat, plotInfoDict, areaDict, forcedStr="unforced"))
             if self.config.doPlotSkyObjectsSky:
-                self.plotSkyObjectsSky(skyObjCatAll, filenamer(repoInfo.dataId, description="skyObjects",
-                                                               style="tract"),
-                                       dataId=repoInfo.dataId, butler=repoInfo.butler,
-                                       tractInfo=repoInfo.tractInfo, patchList=patchList,
-                                       camera=repoInfo.camera, forcedStr="unforced", alpha=0.7,
-                                       doPlotTractImage=True, doPlotPatchOutline=True, sizeFactor=3.0,
-                                       maxDiamPix=1000)
+                plotList.append(self.plotSkyObjectsSky(skyObjCatAll, "skyObjects", forcedStr="unforced",
+                                                       alpha=0.7, doPlotTractImage=True,
+                                                       doPlotPatchOutline=True, sizeFactor=3.0,
+                                                       maxDiamPix=1000))
 
             if self.config.doPlotFootprintNpix:
-                self.plotFootprintHist(forced,
-                                       filenamer(repoInfo.dataId, description="footNpix", style="hist"),
-                                       repoInfo.dataId, **plotKwargs)
-                self.plotFootprint(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr,
-                                   highlightList=highlightList, **plotKwargs)
+                plotList.append(self.plotFootprintHist(forced, "footNpix", plotInfoDict, **plotKwargs))
+                plotList.append(self.plotFootprint(forced, plotInfoDict, areaDict, forcedStr=forcedStr,
+                                                   **plotKwargs))
 
             if self.config.doPlotQuiver:
-                self.plotQuiver(unforced,
-                                filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
-                                dataId=repoInfo.dataId, forcedStr="unforced " + self.catLabel, scale=2,
-                                **plotKwargs)
+                plotList.append(self.plotQuiver(unforced, "ellipResids", plotInfoDict, areaDict,
+                                                forcedStr="unforced " + self.catLabel, scale=2, **plotKwargs))
 
             if self.config.doPlotInputCounts:
-                self.plotInputCounts(unforced, filenamer(repoInfo.dataId, description="inputCounts",
-                                                         style="tract"), dataId=repoInfo.dataId,
-                                     forcedStr="unforced " + self.catLabel, alpha=0.5,
-                                     doPlotTractImage=True, doPlotPatchOutline=True, sizeFactor=5.0,
-                                     maxDiamPix=1000, **plotKwargs)
+                plotList.append(self.plotInputCounts(unforced, "inputCounts", plotInfoDict,
+                                                     forcedStr="unforced " + self.catLabel, alpha=0.5,
+                                                     doPlotPatchOutline=True, sizeFactor=5.0,
+                                                     maxDiamPix=1000, **plotKwargs))
 
             plotKwargs.update(dict(highlightList=highlightList))
             if self.config.doPlotMags:
-                self.plotMags(unforced, filenamer, repoInfo.dataId, forcedStr="unforced " + self.catLabel,
-                              postFix="_unforced", **plotKwargs)
+                plotList.append(self.plotMags(unforced, plotInfoDict, areaDict,
+                                              forcedStr="unforced " + self.catLabel,
+                                              postFix="_unforced", **plotKwargs))
                 if haveForced:
                     plotKwargs.update(dict(highlightList=highlightList +
                                            [("merge_measurement_" + repoInfo.genericFilterName, 0,
                                              "yellow")]))
-                    self.plotMags(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr, postFix="_forced",
-                                  **plotKwargs)
+
+                    plotList.append(self.plotMags(forced, plotInfoDict, areaDict, forcedStr=forcedStr,
+                                                  postFix="_forced", **plotKwargs))
                     plotKwargs.update(dict(highlightList=highlightList))
             if self.config.doPlotStarGalaxy:
                 if "ext_shapeHSM_HsmSourceMoments_xx" in unforced.schema:
-                    self.plotStarGal(unforced, filenamer, repoInfo.dataId,
-                                     forcedStr="unforced " + self.catLabel, **plotKwargs)
+                    plotList.append(self.plotStarGal(unforced, plotInfoDict, areaDict,
+                                                     forcedStr="unforced " + self.catLabel, **plotKwargs))
                 else:
                     self.log.warn("Cannot run plotStarGal: ext_shapeHSM_HsmSourceMoments_xx not "
                                   "in forced.schema")
 
             if self.config.doPlotSizes:
                 if all(ss in unforced.schema for ss in ["base_SdssShape_psf_xx", "calib_psf_used"]):
-                    self.plotSizes(unforced, filenamer, repoInfo.dataId, forcedStr="unforced " + self.catLabel,
-                                   postFix="_unforced", **plotKwargs)
+                    plotList.append(self.plotSizes(unforced, plotInfoDict, areaDict,
+                                                   forcedStr="unforced " + self.catLabel,
+                                                   postFix="_unforced", **plotKwargs))
                 else:
                     self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx and/or calib_psf_used "
                                   "not in unforced.schema")
                 if haveForced:
                     if all(ss in forced.schema for ss in ["base_SdssShape_psf_xx", "calib_psf_used"]):
-                        self.plotSizes(forced, filenamer, repoInfo.dataId, forcedStr=forcedStr, **plotKwargs)
+                        plotList.append(self.plotSizes(forced, plotInfoDict, areaDict,
+                                                       forcedStr=forcedStr, **plotKwargs))
                     else:
                         self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx and/or calib_psf_used "
                                       "not in forced.schema")
             if cosmos:
-                self.plotCosmos(forced, filenamer, cosmos, repoInfo.dataId)
+                plotList.append(self.plotCosmos(forced, plotInfoDict, areaDict, cosmos, repoInfo.dataId))
 
         if self.config.doPlotMatches:
             if haveForced:
@@ -464,21 +471,25 @@ class CoaddAnalysisTask(CmdLineTask):
             matchHighlightList = [("src_" + self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0,
                                    "turquoise"), ]
             plotKwargs.update(dict(highlightList=matchHighlightList))
-            self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId, forcedStr=forcedStr,
-                             **plotKwargs)
+            plotList.append(self.plotMatches(matches, plotInfoDict, areaDict, forcedStr=forcedStr,
+                                             **plotKwargs))
 
         for cat in self.config.externalCatalogs:
             with andCatalog(cat):
                 matches = self.matchCatalog(forced, repoInfo.filterName, self.config.externalCatalogs[cat])
                 if matches is not None:
-                    self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
-                                     forcedStr=forcedStr, matchRadius=self.matchRadius,
-                                     matchRadiusUnitStr=self.matchRadiusUnitStr, **plotKwargs)
+                    plotList.append(self.plotMatches(matches, plotInfoDict, areaDict,
+                                                     forcedStr=forcedStr, matchRadius=self.matchRadius,
+                                                     matchRadiusUnitStr=self.matchRadiusUnitStr,
+                                                     **plotKwargs))
                 else:
                     self.log.warn("Could not create match catalog for {:}.  Is "
                                   "lsst.meas.extensions.astrometryNet setup?".format(cat))
 
-    def readCatalogs(self, patchRefList, dataset):
+        self.allStats, self.allStatsHigh = savePlots(plotList, "plotCoadd", repoInfo.dataId, repoInfo.butler)
+
+    def readCatalogs(self, patchRefList, dataset, repoInfo, fakeCat=None, raFakesCol="raJ2000",
+                     decFakesCol="decJ2000"):
         """Read in and concatenate catalogs of type dataset in lists of data references
 
         If self.config.doWriteParquetTables is True, before appending each catalog to a single
@@ -491,6 +502,20 @@ class CoaddAnalysisTask(CmdLineTask):
            A list of butler data references whose catalogs of dataset type are to be read in
         dataset : `str`
            Name of the catalog dataset to be read in
+        repoInfo : `lsst.pipe.base.Struct`
+           A struct containing relevant information about the repository under
+           study.  Elements used here include the dataset names for any external
+           calibrations to be applied.
+        fakeCat : `pandas.core.frame.DataFrame`
+            Default : None
+            Catalog of fake sources, used if hasFakes is True in which case a column (onPatch)
+            is added with the patch number if the fake source overlaps a ccd and np.nan if it does not.
+        raFakesCol : `str`
+            The name of the R.A. column to use from the fakes catalogue.
+            Default : `raJ2000`
+        decFakesCol : `str`
+            The name of the Dec, column to use from the fakes catalogue.
+            Default : `decFakesCol`
 
         Raises
         ------
@@ -502,15 +527,59 @@ class CoaddAnalysisTask(CmdLineTask):
         `list` of concatenated `lsst.afw.table.source.source.SourceCatalog`s
         """
         catList = []
+        areaDict = {}
         for patchRef in patchRefList:
             if patchRef.datasetExists(dataset):
                 cat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
                 cat = addIntFloatOrStrColumn(cat, patchRef.dataId["patch"], "patchId",
                                              "Patch on which source was detected")
+                if self.config.hasFakes:
+                    fname = repoInfo.butler.getUri("fakes_deepCoadd_calexp", patchRef.dataId)
+                else:
+                    fname = repoInfo.butler.getUri("deepCoadd_calexp", patchRef.dataId)
+                reader = afwImage.ExposureFitsReader(fname)
+                wcs = reader.readWcs()
+                mask = reader.readMask()
+                numGoodPix = len(np.where(~(mask.array.flatten() & mask.getPlaneBitMask("BAD")))[0])
+                pixScale = wcs.getPixelScale().asArcseconds()
+                area = pixScale**2 * numGoodPix
+                areaDict[patchRef.dataId["patch"]] = area
+
+                patchWidth = mask.getWidth()
+                patchHeight = mask.getHeight()
+
+                patchCorners = wcs.pixelToSky([geom.Point2D(0, 0), geom.Point2D(patchWidth, patchHeight)])
+                areaDict["corners_" + str(patchRef.dataId["patch"])] = patchCorners
+
+                if self.config.hasFakes:
+                    # Check which fake sources fall in the patch
+                    minRa = np.min(cat["coord_ra"])
+                    maxRa = np.max(cat["coord_ra"])
+                    minDec = np.min(cat["coord_dec"])
+                    maxDec = np.max(cat["coord_dec"])
+                    possOnPatch = ((fakeCat[raFakesCol].values > minRa) &
+                                   (fakeCat[raFakesCol].values < maxRa) &
+                                   (fakeCat[decFakesCol].values > minDec) &
+                                   (fakeCat[decFakesCol].values < maxDec))
+
+                    validPatchPolygon = mask.getInfo().getValidPolygon()
+
+                    def isInPolygon(df):
+                        skyCoord = geom.SpherePoint(df.raFakesCol, df.decFakesCol, geom.radians)
+                        pixCoord = wcs.skyToPixel(skyCoord)
+                        return validPatchPolygon.contains(pixCoord)
+
+                    fakeCat["isOnPatch"] = fakeCat[possOnPatch].apply(isInPolygon, axis=1)
+                    fakeCat.loc[fakeCat["isOnPatch"], "onPatch"] = patchRef.dataId["patch"]
+
                 catList.append(cat)
         if not catList:
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
-        return concatenateCatalogs(catList)
+
+        if self.config.hasFakes:
+            fakeCat = None
+
+        return Struct(catalog=concatenateCatalogs(catList), areaDict=areaDict, fakeCat=fakeCat)
 
     def readSrcMatches(self, dataRefList, dataset, hscRun=None, wcs=None, aliasDictList=None):
         catList = []
@@ -639,10 +708,10 @@ class CoaddAnalysisTask(CmdLineTask):
         calibrated = calibrateCoaddSourceCatalog(catalog, self.config.analysis.coaddZp)
         return calibrated
 
-    def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
-                 patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None,
-                 forcedStr=None, fluxToPlotList=None, postFix="", highlightList=None,
-                 uberCalLabel=None):
+    def plotMags(self, catalog, plotInfoDict, areaDict, matchRadius=None,
+                 matchRadiusUnitStr=None, zpLabel=None, forcedStr=None, fluxToPlotList=None,
+                 postFix="", flagsCat=None, highlightList=None, uberCalLabel=None):
+        yield
         if not fluxToPlotList:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
@@ -651,16 +720,16 @@ class CoaddAnalysisTask(CmdLineTask):
             if col + "_instFlux" in catalog.schema:
                 shortName = "mag_" + col + postFix
                 self.log.info("shortName = {:s}".format(shortName))
-                self.AnalysisClass(catalog, MagDiff(col + "_instFlux", "base_PsfFlux_instFlux",
-                                                    unitScale=self.unitScale),
-                                   "Mag(%s) - PSFMag (%s)" % (fluxToPlotString(col), unitStr),
-                                   shortName, self.config.analysis, labeller=StarGalaxyLabeller(),
-                                   unitScale=self.unitScale,
-                                   ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
-                                             camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                                             patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                             zpLabel=zpLabel, forcedStr=forcedStr, uberCalLabel=uberCalLabel,
-                                             highlightList=highlightList)
+                yield from self.AnalysisClass(catalog, MagDiff(col + "_instFlux", "base_PsfFlux_instFlux",
+                                                               unitScale=self.unitScale),
+                                              "Mag(%s) - PSFMag (%s)" % (fluxToPlotString(col), unitStr),
+                                              shortName, self.config.analysis, labeller=StarGalaxyLabeller(),
+                                              unitScale=self.unitScale,
+                                              ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                        enforcer=enforcer, matchRadius=matchRadius,
+                                                        zpLabel=zpLabel, forcedStr=forcedStr,
+                                                        uberCalLabel=uberCalLabel,
+                                                        highlightList=highlightList)
                 # Also make comparison plots for calib_psf_used only objects for
                 # the circular aperture plots.
                 if "CircularApertureFlux_12_0" in col:
@@ -672,28 +741,27 @@ class CoaddAnalysisTask(CmdLineTask):
                     for i, flagName in enumerate([col + "_flag", ] + list(self.config.analysis.flags)):
                         if not any(flagName in highlight for highlight in calibHighlightList):
                             calibHighlightList += [(flagName, 0, flagColors[i%len(flagColors)]), ]
-                    self.AnalysisClass(catalog, MagDiff(col + "_instFlux", "base_PsfFlux_instFlux",
-                                                        unitScale=self.unitScale),
-                                       ("%s - PSF (calib_psf_used) (%s)" % (fluxToPlotString(col), unitStr)),
-                                       shortName, self.config.analysis, goodKeys=["calib_psf_used"],
-                                       labeller=StarGalaxyLabeller(), unitScale=self.unitScale,
-                                       fluxColumn="base_CircularApertureFlux_12_0_instFlux",
-                                       ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
-                                                 butler=butler, camera=camera, ccdList=ccdList,
-                                                 tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
-                                                 matchRadius=matchRadius, zpLabel=zpLabel,
-                                                 forcedStr=forcedStr, uberCalLabel=uberCalLabel,
-                                                 highlightList=calibHighlightList)
+                    yield from self.AnalysisClass(catalog,
+                                                  MagDiff(col + "_instFlux", "base_PsfFlux_instFlux",
+                                                          unitScale=self.unitScale),
+                                                  ("%s - PSF (calib_psf_used) (%s)" % (fluxToPlotString(col),
+                                                   unitStr)),
+                                                  shortName, self.config.analysis,
+                                                  goodKeys=["calib_psf_used"],
+                                                  labeller=StarGalaxyLabeller(), unitScale=self.unitScale,
+                                                  fluxColumn="base_CircularApertureFlux_12_0_instFlux"
+                                                  ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                            enforcer=enforcer, matchRadius=matchRadius,
+                                                            zpLabel=zpLabel, forcedStr=forcedStr,
+                                                            uberCalLabel=uberCalLabel,
+                                                            highlightList=calibHighlightList)
 
-    def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
-                  patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None, postFix="",
-                  highlightList=None, uberCalLabel=None):
-        enforcer = None
+    def plotSizes(self, catalog, plotInfoDict, areaDict, matchRadius=None, zpLabel=None, forcedStr=None,
+                  postFix="", highlightList=None, uberCalLabel=None):
+        yield
         unitStr = " (milli)" if self.config.toMilli else ""
-        plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                             patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                             zpLabel=zpLabel, forcedStr=forcedStr, highlightList=highlightList,
-                             uberCalLabel=uberCalLabel)
+        plotAllKwargs = dict(matchRadius=matchRadius, zpLabel=zpLabel, forcedStr=forcedStr,
+                             uberCalLabel=uberCalLabel, highlightList=highlightList)
         calibHighlightList0 = None
         for col in ["base_PsfFlux", ]:
             if col + "_instFlux" in catalog.schema:
@@ -711,7 +779,9 @@ class CoaddAnalysisTask(CmdLineTask):
                 shortName = "trace" + postFix + "_calib_psf_used"
                 psfUsed = catalog[catalog["calib_psf_used"]].copy(deep=True)
                 sdssTrace = traceSizeFunc(psfUsed)
-                sdssTrace = sdssTrace[np.where(np.isfinite(sdssTrace))]
+                goodVals = np.isfinite(sdssTrace)
+                psfUsed = psfUsed[goodVals].copy(deep=True)
+                sdssTrace = sdssTrace[goodVals]
                 traceMean = np.around(np.nanmean(sdssTrace), 2)
                 traceStd = max(0.03, np.around(4.5*np.nanstd(sdssTrace), 2))
                 qMin = traceMean - traceStd
@@ -722,12 +792,14 @@ class CoaddAnalysisTask(CmdLineTask):
                     if not any(compareCol + "_flag" in highlight for highlight in calibHighlightList):
                         calibHighlightList += [(compareCol + "_flag", 0, "greenyellow"), ]
                 plotAllKwargs.update(highlightList=calibHighlightList)
-                self.AnalysisClass(psfUsed, TraceSize(compareCol),
-                                   ("          SdssShape Trace (calib_psf_used): "
-                                    "$\sqrt{0.5*(I_{xx}+I_{yy})}$ (pixels)"), shortName, self.config.analysis,
-                                   goodKeys=["calib_psf_used"], qMin=qMin, qMax=qMax,
-                                   labeller=StarGalaxyLabeller(),
-                                   ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+                yield from self.AnalysisClass(psfUsed, sdssTrace,
+                                              ("          SdssShape Trace (calib_psf_used): "
+                                               r"$\sqrt{0.5*(I_{xx}+I_{yy})}$ (pixels)"),
+                                              shortName, self.config.analysis,
+                                              goodKeys=["calib_psf_used"], qMin=qMin, qMax=qMax,
+                                              labeller=StarGalaxyLabeller()
+                                              ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                        **plotAllKwargs)
                 if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
                     shortName = "hsmTrace" + postFix + "_calib_psf_used"
                     compareCol = "ext_shapeHSM_HsmSourceMoments"
@@ -737,13 +809,13 @@ class CoaddAnalysisTask(CmdLineTask):
                         if not any(compareCol + "_flag" in highlight for highlight in calibHighlightList):
                             calibHighlightList += [(compareCol + "_flag", 0, "greenyellow"), ]
                     plotAllKwargs.update(highlightList=calibHighlightList)
-                    self.AnalysisClass(psfUsed, TraceSize(compareCol),
-                                       ("          HSM Trace (calib_psf_used): $\sqrt{0.5*(I_{xx}+I_{yy})}$"
-                                        " (pixels)"), shortName, self.config.analysis,
-                                       goodKeys=["calib_psf_used"], qMin=qMin, qMax=qMax,
-                                       labeller=StarGalaxyLabeller(),
-                                       ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
-                                                 **plotAllKwargs)
+                    yield from self.AnalysisClass(psfUsed, TraceSize(compareCol),
+                                                  (r"          HSM Trace (calib_psf_used): $\sqrt{0.5*(I_{xx}"
+                                                   r"+I_{yy})}$ (pixels)"), shortName, self.config.analysis,
+                                                  goodKeys=["calib_psf_used"], qMin=qMin, qMax=qMax,
+                                                  labeller=StarGalaxyLabeller()
+                                                  ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                            **plotAllKwargs)
 
                 # Now for all stars.
                 compareCol = "base_SdssShape"
@@ -752,20 +824,23 @@ class CoaddAnalysisTask(CmdLineTask):
                 sdssTrace = traceSizeFunc(starsOnly)
                 self.log.info("shortName = {:s}".format(shortName))
                 plotAllKwargs.update(highlightList=highlightList)
-                self.AnalysisClass(starsOnly, TraceSize(compareCol),
-                                   "  SdssShape Trace: $\sqrt{0.5*(I_{xx}+I_{yy})}$ (pixels)", shortName,
-                                   self.config.analysis, qMin=qMin, qMax=qMax, labeller=StarGalaxyLabeller(),
-                                   ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+                yield from self.AnalysisClass(starsOnly, sdssTrace,
+                                              r"  SdssShape Trace: $\sqrt{0.5*(I_{xx}+I_{yy})}$ (pixels)",
+                                              shortName, self.config.analysis, qMin=qMin, qMax=qMax,
+                                              labeller=StarGalaxyLabeller()).plotAll(shortName, plotInfoDict,
+                                                                                     areaDict, self.log,
+                                                                                     **plotAllKwargs)
                 if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
                     shortName = "hsmTrace" + postFix
                     compareCol = "ext_shapeHSM_HsmSourceMoments"
                     self.log.info("shortName = {:s}".format(shortName))
-                    self.AnalysisClass(starsOnly, TraceSize(compareCol),
-                                       "HSM Trace: $\sqrt{0.5*(I_{xx}+I_{yy})}$ (pixels)", shortName,
-                                       self.config.analysis, qMin=qMin, qMax=qMax,
-                                       labeller=StarGalaxyLabeller(),
-                                       ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
-                                                 **plotAllKwargs)
+                    yield from self.AnalysisClass(starsOnly, TraceSize(compareCol),
+                                                  r"HSM Trace: $\sqrt{0.5*(I_{xx}+I_{yy})}$ (pixels)",
+                                                  shortName, self.config.analysis, qMin=qMin, qMax=qMax,
+                                                  labeller=StarGalaxyLabeller()).plotAll(shortName,
+                                                                                         plotInfoDict,
+                                                                                         areaDict, self.log,
+                                                                                         **plotAllKwargs)
 
             if col + "_instFlux" in catalog.schema:
                 shortName = "psfTraceDiff" + postFix
@@ -778,27 +853,37 @@ class CoaddAnalysisTask(CmdLineTask):
                         calibHighlightList += [(psfCompareCol + "_flag", 0, "lime"), ]
                     plotAllKwargs.update(highlightList=calibHighlightList)
                 self.log.info("shortName = {:s}".format(shortName))
-                self.AnalysisClass(catalog, PsfTraceSizeDiff(compareCol, psfCompareCol),
-                                   "    SdssShape Trace % diff (psf_used - PSFmodel)", shortName,
-                                   self.config.analysis, goodKeys=["calib_psf_used"], qMin=-3.0, qMax=3.0,
-                                   labeller=StarGalaxyLabeller(),
-                                   ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+                yield from self.AnalysisClass(catalog, PsfTraceSizeDiff(compareCol, psfCompareCol),
+                                              "    SdssShape Trace % diff (psf_used - PSFmodel)", shortName,
+                                              self.config.analysis, flags=[col + "_flag"],
+                                              goodKeys=["calib_psf_used"], qMin=-3.0, qMax=3.0,
+                                              labeller=StarGalaxyLabeller()
+                                              ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                        **plotAllKwargs)
 
                 shortName = "e1Resids" + postFix
                 self.log.info("shortName = {:s}".format(shortName))
-                self.AnalysisClass(catalog, E1Resids(compareCol, psfCompareCol, unitScale=self.unitScale),
-                                   "        SdssShape e1 resids (psf_used - PSFmodel)%s" % unitStr, shortName,
-                                   self.config.analysis, goodKeys=["calib_psf_used"], qMin=-0.05, qMax=0.05,
-                                   labeller=StarGalaxyLabeller(), unitScale=self.unitScale,
-                                   ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+                yield from self.AnalysisClass(catalog, E1Resids(compareCol, psfCompareCol,
+                                              unitScale=self.unitScale),
+                                              "        SdssShape e1 resids (psf_used - PSFmodel)%s" % unitStr,
+                                              shortName, self.config.analysis,
+                                              goodKeys=["calib_psf_used"], qMin=-0.05, qMax=0.05,
+                                              labeller=StarGalaxyLabeller(),
+                                              unitScale=self.unitScale).plotAll(shortName, plotInfoDict,
+                                                                                areaDict, self.log,
+                                                                                **plotAllKwargs)
 
                 shortName = "e2Resids" + postFix
                 self.log.info("shortName = {:s}".format(shortName))
-                self.AnalysisClass(catalog, E2Resids(compareCol, psfCompareCol, unitScale=self.unitScale),
-                                   "       SdssShape e2 resids (psf_used - PSFmodel)%s" % unitStr, shortName,
-                                   self.config.analysis, goodKeys=["calib_psf_used"], qMin=-0.05, qMax=0.05,
-                                   labeller=StarGalaxyLabeller(), unitScale=self.unitScale,
-                                   ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+                yield from self.AnalysisClass(catalog, E2Resids(compareCol, psfCompareCol,
+                                              unitScale=self.unitScale),
+                                              "       SdssShape e2 resids (psf_used - PSFmodel)%s" % unitStr,
+                                              shortName, self.config.analysis,
+                                              goodKeys=["calib_psf_used"], qMin=-0.05, qMax=0.05,
+                                              labeller=StarGalaxyLabeller(),
+                                              unitScale=self.unitScale).plotAll(shortName, plotInfoDict,
+                                                                                areaDict, self.log,
+                                                                                **plotAllKwargs)
 
                 if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
                     shortName = "psfHsmTraceDiff" + postFix
@@ -812,105 +897,114 @@ class CoaddAnalysisTask(CmdLineTask):
                             calibHighlightList += [(psfCompareCol + "_flag", 0, "lime"), ]
                     plotAllKwargs.update(highlightList=calibHighlightList)
                     self.log.info("shortName = {:s}".format(shortName))
-                    self.AnalysisClass(catalog, PsfTraceSizeDiff(compareCol, psfCompareCol),
-                                       "HSM Trace % diff (psf_used - PSFmodel)", shortName,
-                                       self.config.analysis, goodKeys=["calib_psf_used"], qMin=-3.0, qMax=3.0,
-                                       labeller=StarGalaxyLabeller(),
-                                       ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
-                                                 **plotAllKwargs)
+
+                    yield from self.AnalysisClass(catalog, PsfTraceSizeDiff(compareCol, psfCompareCol),
+                                                  "HSM Trace % diff (psf_used - PSFmodel)", shortName,
+                                                  self.config.analysis,
+                                                  goodKeys=["calib_psf_used"], qMin=-3.0, qMax=3.0,
+                                                  labeller=StarGalaxyLabeller(),
+                                                  ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                            **plotAllKwargs)
                     shortName = "e1ResidsHsm" + postFix
                     self.log.info("shortName = {:s}".format(shortName))
-                    self.AnalysisClass(catalog, E1Resids(compareCol, psfCompareCol, unitScale=self.unitScale),
-                                       "   HSM e1 resids (psf_used - PSFmodel)%s" % unitStr, shortName,
-                                       self.config.analysis, goodKeys=["calib_psf_used"], qMin=-0.05,
-                                       qMax=0.05, labeller=StarGalaxyLabeller(), unitScale=self.unitScale,
-                                       ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
-                                                 **plotAllKwargs)
+                    yield from self.AnalysisClass(catalog, E1Resids(compareCol, psfCompareCol,
+                                                  unitScale=self.unitScale),
+                                                  "   HSM e1 resids (psf_used - PSFmodel)%s" % unitStr,
+                                                  shortName, self.config.analysis,
+                                                  goodKeys=["calib_psf_used"], qMin=-0.05, qMax=0.05,
+                                                  labeller=StarGalaxyLabeller(),
+                                                  unitScale=self.unitScale).plotAll(shortName, plotInfoDict,
+                                                                                    areaDict, self.log,
+                                                                                    **plotAllKwargs)
                     shortName = "e2ResidsHsm" + postFix
                     self.log.info("shortName = {:s}".format(shortName))
-                    self.AnalysisClass(catalog, E2Resids(compareCol, psfCompareCol, unitScale=self.unitScale),
-                                       "   HSM e2 resids (psf_used - PSFmodel)%s" % unitStr, shortName,
-                                       self.config.analysis, goodKeys=["calib_psf_used"], qMin=-0.05,
-                                       qMax=0.05, labeller=StarGalaxyLabeller(), unitScale=self.unitScale,
-                                       ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
-                                                 **plotAllKwargs)
+                    yield from self.AnalysisClass(catalog, E2Resids(compareCol, psfCompareCol,
+                                                  unitScale=self.unitScale),
+                                                  "   HSM e2 resids (psf_used - PSFmodel)%s" % unitStr,
+                                                  shortName, self.config.analysis,
+                                                  goodKeys=["calib_psf_used"], qMin=-0.05, qMax=0.05,
+                                                  labeller=StarGalaxyLabeller(),
+                                                  unitScale=self.unitScale).plotAll(shortName, plotInfoDict,
+                                                                                    areaDict, self.log,
+                                                                                    **plotAllKwargs)
 
                     shortName = "e1ResidsHsmRegauss" + postFix
                     self.log.info("shortName = {:s}".format(shortName))
-                    self.AnalysisClass(catalog, E1ResidsHsmRegauss(unitScale=self.unitScale),
-                                       "       HsmRegauss e1 resids (psf_used - HsmPsfMoments)%s" % unitStr,
-                                       shortName, self.config.analysis, goodKeys=["calib_psf_used"],
-                                       qMin=-0.05, qMax=0.05, labeller=StarGalaxyLabeller(),
-                                       unitScale=self.unitScale,
-                                       ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
-                                                 **plotAllKwargs)
+                    yield from self.AnalysisClass(catalog, E1ResidsHsmRegauss(unitScale=self.unitScale),
+                                                  "       HsmRegauss e1 resids (psf_used - HsmPsfMoments)%s" %
+                                                  unitStr, shortName, self.config.analysis,
+                                                  goodKeys=["calib_psf_used"], qMin=-0.05, qMax=0.05,
+                                                  labeller=StarGalaxyLabeller(),
+                                                  unitScale=self.unitScale).plotAll(shortName, plotInfoDict,
+                                                                                    areaDict, self.log,
+                                                                                    **plotAllKwargs)
 
                     shortName = "e2ResidsHsmRegauss" + postFix
                     self.log.info("shortName = {:s}".format(shortName))
-                    self.AnalysisClass(catalog, E2ResidsHsmRegauss(unitScale=self.unitScale),
-                                       "       HsmRegauss e2 resids (psf_used - HsmPsfMoments)%s" % unitStr,
-                                       shortName, self.config.analysis, goodKeys=["calib_psf_used"],
-                                       qMin=-0.05, qMax=0.05, labeller=StarGalaxyLabeller(),
-                                       unitScale=self.unitScale,
-                                       ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
-                                                 **plotAllKwargs)
+                    yield from self.AnalysisClass(catalog, E2ResidsHsmRegauss(unitScale=self.unitScale),
+                                                  "       HsmRegauss e2 resids (psf_used - HsmPsfMoments)%s" %
+                                                  unitStr, shortName, self.config.analysis,
+                                                  goodKeys=["calib_psf_used"], qMin=-0.05, qMax=0.05,
+                                                  labeller=StarGalaxyLabeller(),
+                                                  unitScale=self.unitScale).plotAll(shortName, plotInfoDict,
+                                                                                    areaDict, self.log,
+                                                                                    **plotAllKwargs)
 
-    def plotCentroidXY(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
-                       tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                       forcedStr=None, highlightList=None, uberCalLabel=None):
+    def plotCentroidXY(self, catalog, plotInfoDict, areaDict, matchRadius=None, zpLabel=None,
+                       forcedStr=None, flagsCat=None, uberCalLabel=None, highlightList=None):
+        yield
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in ["base_SdssCentroid_x", "base_SdssCentroid_y"]:
             if col in catalog.schema:
                 shortName = col
                 self.log.info("shortName = {:s}".format(shortName))
-                self.AnalysisClass(catalog, catalog[col], "(%s)" % col, shortName, self.config.analysis,
-                                   labeller=StarGalaxyLabeller(),
-                                   ).plotFP(dataId, filenamer, self.log, enforcer=enforcer, camera=camera,
-                                            ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
-                                            zpLabel=zpLabel, forcedStr=forcedStr)
+                yield from self.AnalysisClass(catalog, catalog[col], "(%s)" % col, shortName,
+                                              self.config.analysis, labeller=StarGalaxyLabeller(),
+                                              ).plotFP(shortName, plotInfoDict, self.log, enforcer=enforcer,
+                                                       matchRadius=matchRadius, zpLabel=zpLabel,
+                                                       forcedStr=forcedStr)
 
-    def plotFootprint(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
-                      tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                      forcedStr=None, postFix="", plotRunStats=False, highlightList=None,
-                      uberCalLabel=None):
+    def plotFootprint(self, catalog, plotInfoDict, areaDict, matchRadius=None, zpLabel=None, forcedStr=None,
+                      postFix="", flagsCat=None, plotRunStats=False, highlightList=None, uberCalLabel=None):
+        yield
         enforcer = None
-        plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                             patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                             zpLabel=zpLabel, forcedStr=forcedStr, highlightList=highlightList,
-                             uberCalLabel=uberCalLabel)
+        plotAllKwargs = dict(matchRadius=matchRadius, zpLabel=zpLabel, forcedStr=forcedStr,
+                             uberCalLabel=uberCalLabel, highlightList=highlightList)
         if "calib_psf_used" in catalog.schema:
             shortName = "footNpix_calib_psf_used"
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
-                               self.config.analysis, goodKeys=["calib_psf_used"], qMin=-100, qMax=2000,
-                               labeller=StarGalaxyLabeller(),
-                               ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
-                                         plotRunStats=plotRunStats, **plotAllKwargs)
+
+            yield from self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName,
+                                          shortName, self.config.analysis, goodKeys=["calib_psf_used"],
+                                          qMin=-100, qMax=2000, labeller=StarGalaxyLabeller(),
+                                          ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                    plotRunStats=plotRunStats, **plotAllKwargs)
         shortName = "footNpix"
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
-                           self.config.analysis, qMin=0, qMax=3000, labeller=StarGalaxyLabeller(),
-                           ).plotAll(dataId, filenamer, self.log, enforcer=enforcer,
-                                     plotRunStats=plotRunStats, **plotAllKwargs)
+        yield from self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
+                                      self.config.analysis, flags=["base_Footprint_nPix_flag"],
+                                      qMin=0, qMax=3000, labeller=StarGalaxyLabeller()
+                                      ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                enforcer=enforcer, plotRunStats=plotRunStats, **plotAllKwargs)
 
-    def plotFootprintHist(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
-                          tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                          postFix="", uberCalLabel=None):
+    def plotFootprintHist(self, catalog, description, plotInfoDict, matchRadius=None, zpLabel=None,
+                          postFix="", flagsCat=None, uberCalLabel=None):
+        yield
         stats = None
         shortName = "footNpix"
         self.log.info("shortName = {:s}".format(shortName + "Hist"))
-        self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
-                           self.config.analysis, flags=["base_Footprint_nPix_flag"], qMin=0, qMax=3000,
-                           labeller=StarGalaxyLabeller(),
-                           ).plotHistogram(filenamer, stats=stats, camera=camera, ccdList=ccdList,
-                                           tractInfo=tractInfo, patchList=patchList, hscRun=hscRun,
-                                           matchRadius=matchRadius, zpLabel=zpLabel,
-                                           filterStr=dataId['filter'], uberCalLabel=uberCalLabel)
+        yield from self.AnalysisClass(catalog, catalog["base_Footprint_nPix"], "%s" % shortName, shortName,
+                                      self.config.analysis, flags=["base_Footprint_nPix_flag"], qMin=0,
+                                      qMax=3000, labeller=StarGalaxyLabeller()
+                                      ).plotHistogram(description, plotInfoDict, stats=stats,
+                                                      matchRadius=matchRadius, zpLabel=zpLabel,
+                                                      filterStr=plotInfoDict["filter"],
+                                                      uberCalLabel=uberCalLabel)
 
-    def plotPsfFluxSnHists(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
-                           tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                           forcedStr=None, uberCalLabel=None, postFix="", logPlot=True, density=True,
-                           cumulative=-1):
+    def plotPsfFluxSnHists(self, catalog, description, plotInfoDict, areaDict, matchRadius=None,
+                           zpLabel=None, forcedStr=None, uberCalLabel=None, postFix="",
+                           logPlot=True, density=True, cumulative=-1):
+        yield
         stats = None
         shortName = "psfInstFlux" if zpLabel == "raw" else "psfCalFlux"
         self.log.info("shortName = {:s}".format(shortName))
@@ -936,7 +1030,7 @@ class CoaddAnalysisTask(CmdLineTask):
         goodSn = psfSn > highSn
         psfFluxSnGtHigh = psfFlux[goodSn]
         goodFlux = psfFlux > lowFlux
-        psfSnFluxGtLow= psfSn[goodFlux]
+        psfSnFluxGtLow = psfSn[goodFlux]
         goodFlux = psfFlux > highFlux
         psfSnFluxGtHigh = psfSn[goodFlux]
         psfUsedCat = catalog[catalog["calib_psf_used"]]
@@ -944,78 +1038,84 @@ class CoaddAnalysisTask(CmdLineTask):
         psfUsedPsfFluxErr = psfUsedCat["base_PsfFlux_instFluxErr"]*factor
         psfUsedPsfSn = psfUsedPsfFlux/psfUsedPsfFluxErr
 
-        self.AnalysisClass(catalog, psfFlux, "%s" % shortName, shortName,
-                           self.config.analysis, qMin=0,
-                           qMax = int(min(99999, max(4.0*np.nanmedian(psfFlux), 0.25*np.nanmax(psfFlux)))),
-                           labeller=AllLabeller(),
-                           ).plotHistogram(filenamer, numBins="sqrt", stats=stats, camera=camera,
-                                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
-                                           hscRun=hscRun, zpLabel=zpLabel,
-                                           forcedStr=forcedStr, filterStr=dataId["filter"],
-                                           uberCalLabel=uberCalLabel, vertLineList=[lowFlux, highFlux],
-                                           logPlot=logPlot, density=False, cumulative=cumulative,
-                                           addDataList=[psfFluxSnGtLow, psfFluxSnGtHigh, psfUsedPsfFlux],
-                                           addDataLabelList=["S/N>{:.1f}".format(lowSn),
-                                                             "S/N>{:.1f}".format(highSn), "psf_used"])
+        if "lsst" in plotInfoDict["camera"]:
+            filterStr = "[" + plotInfoDict["camera"] + "-" + plotInfoDict["filter"] + "]"
+        else:
+            filterStr = plotInfoDict["filter"]
+
+        yield from self.AnalysisClass(catalog, psfFlux, "%s" % shortName, shortName,
+                                      self.config.analysis, qMin=0,
+                                      qMax=int(min(99999, max(4.0*np.median(psfFlux), 0.25*np.max(psfFlux)))),
+                                      labeller=AllLabeller()
+                                      ).plotHistogram(description, plotInfoDict, numBins="sqrt", stats=stats,
+                                                      zpLabel=zpLabel, forcedStr=forcedStr,
+                                                      filterStr=filterStr,
+                                                      uberCalLabel=uberCalLabel,
+                                                      vertLineList=[lowFlux, highFlux],
+                                                      logPlot=logPlot, density=False, cumulative=cumulative,
+                                                      addDataList=[psfFluxSnGtLow, psfFluxSnGtHigh,
+                                                                   psfUsedPsfFlux],
+                                                      addDataLabelList=["S/N>{:.1f}".format(lowSn),
+                                                                        "S/N>{:.1f}".format(highSn),
+                                                                        "psf_used"])
         shortName = "psfInstFlux/psfInstFluxErr" if zpLabel == "raw" else "psfCalFlux/psfCalFluxErr"
-        filenamer = filenamer.replace("Flux", "FluxSn")
+        description = description.replace("Flux", "FluxSn")
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(catalog, psfSn, "%s" % "S/N = " + shortName, shortName,
-                           self.config.analysis, qMin=0, qMax = 4*highSn, labeller=AllLabeller(),
-                           ).plotHistogram(filenamer, numBins="sqrt", stats=stats, camera=camera,
-                                           ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
-                                           hscRun=hscRun, zpLabel=zpLabel,
-                                           forcedStr=forcedStr, filterStr=dataId["filter"],
-                                           uberCalLabel=uberCalLabel, vertLineList=[lowSn, highSn],
-                                           logPlot=logPlot, density=False, cumulative=cumulative,
-                                           addDataList=[psfSnFluxGtLow, psfSnFluxGtHigh, psfUsedPsfSn],
-                                           addDataLabelList=["Flux>{:.1f}".format(lowFlux),
-                                                             "Flux>{:.1f}".format(highFlux), "psf_used"])
+        yield from self.AnalysisClass(catalog, psfSn, "%s" % "S/N = " + shortName, shortName,
+                                      self.config.analysis, flags=["base_PsfFlux_flag"], qMin=0,
+                                      qMax=4*highSn, labeller=AllLabeller()
+                                      ).plotHistogram(description, plotInfoDict, numBins="sqrt", stats=stats,
+                                                      zpLabel=zpLabel, forcedStr=forcedStr,
+                                                      filterStr=filterStr,
+                                                      uberCalLabel=uberCalLabel, vertLineList=[lowSn, highSn],
+                                                      logPlot=logPlot, density=False, cumulative=cumulative,
+                                                      addDataList=[psfSnFluxGtLow, psfSnFluxGtHigh,
+                                                                   psfUsedPsfSn],
+                                                      addDataLabelList=["Flux>{:.1f}".format(lowFlux),
+                                                                        "Flux>{:.1f}".format(highFlux),
+                                                                        "psf_used"])
 
-        skyplotKwargs = dict(dataId=dataId, butler=butler, stats=stats, camera=camera, ccdList=ccdList,
-                             tractInfo=tractInfo, patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                             matchRadiusUnitStr=None, zpLabel=zpLabel)
-        filenamer = filenamer.replace("hist", "sky-all")
+        skyplotKwargs = dict(stats=stats, matchRadius=matchRadius, matchRadiusUnitStr=None, zpLabel=zpLabel)
 
-        self.AnalysisClass(catalog, psfSn, "%s" % "S/N = " + shortName, shortName, self.config.analysis,
-                           qMin=0, qMax = 1.25*highSn, labeller=AllLabeller(),
-                           ).plotSkyPosition(filenamer, dataName="all", **skyplotKwargs)
+        yield from self.AnalysisClass(catalog, psfSn, "%s" % "S/N = " + shortName, shortName,
+                                      self.config.analysis, qMin=0, qMax=1.25*highSn, labeller=AllLabeller(),
+                                      ).plotSkyPosition(description, plotInfoDict, areaDict,
+                                                        dataName="all", **skyplotKwargs)
 
-
-    def plotStarGal(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
-                    patchList=None, hscRun=None, matchRadius=None, zpLabel=None, forcedStr=None,
+    def plotStarGal(self, catalog, plotInfoDict, areaDict, matchRadius=None, zpLabel=None, forcedStr=None,
                     highlightList=None, uberCalLabel=None):
-        enforcer = None
-        plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                             patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                             zpLabel=zpLabel, forcedStr=forcedStr, uberCalLabel=uberCalLabel)
+        yield
+        plotAllKwargs = dict(matchRadius=matchRadius, zpLabel=zpLabel, forcedStr=forcedStr,
+                             uberCalLabel=uberCalLabel)
         shortName = "pStar"
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(catalog, deconvMomStarGal, "P(star) from deconvolved moments",
-                           shortName, self.config.analysis, qMin=-0.1, qMax=1.39,
-                           labeller=StarGalaxyLabeller(),
-                           ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+        yield from self.AnalysisClass(catalog, deconvMomStarGal, "P(star) from deconvolved moments",
+                                      shortName, self.config.analysis, qMin=-0.1, qMax=1.39,
+                                      labeller=StarGalaxyLabeller()
+                                      ).plotAll(shortName, plotInfoDict, areaDict, self.log, **plotAllKwargs)
         shortName = "deconvMom"
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(catalog, deconvMom, "Deconvolved moments", shortName,
-                           self.config.analysis, qMin=-1.0, qMax=3.0, labeller=StarGalaxyLabeller(),
-                           ).plotAll(dataId, filenamer, self.log,
-                                     enforcer=Enforcer(requireLess={"star": {"stdev": 0.2}}),
-                                     **plotAllKwargs)
+        yield from self.AnalysisClass(catalog, deconvMom, "Deconvolved moments", shortName,
+                                      self.config.analysis, qMin=-1.0, qMax=3.0,
+                                      labeller=StarGalaxyLabeller()
+                                      ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                enforcer=Enforcer(requireLess={"star": {"stdev": 0.2}}),
+                                                **plotAllKwargs)
 
         if "ext_shapeHSM_HsmShapeRegauss_resolution" in catalog.schema:
             shortName = "resolution"
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(catalog, catalog["ext_shapeHSM_HsmShapeRegauss_resolution"],
-                               "Resolution Factor from HsmRegauss",
-                               shortName, self.config.analysis, qMin=-0.1, qMax=1.15,
-                               labeller=StarGalaxyLabeller(),
-                               ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+            yield from self.AnalysisClass(catalog, catalog["ext_shapeHSM_HsmShapeRegauss_resolution"],
+                                          "Resolution Factor from HsmRegauss",
+                                          shortName, self.config.analysis, qMin=-0.1, qMax=1.15,
+                                          labeller=StarGalaxyLabeller()
+                                          ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                    **plotAllKwargs)
 
-    def plotCompareUnforced(self, forced, unforced, filenamer, dataId, butler=None, camera=None, ccdList=None,
-                            tractInfo=None, patchList=None, hscRun=None, zpLabel=None, fluxToPlotList=None,
-                            highlightList=None, uberCalLabel=None, matchRadius=None,
-                            matchRadiusUnitStr=None, matchControl=None):
+    def plotCompareUnforced(self, forced, unforced, plotInfoDict, areaDict, zpLabel=None, fluxToPlotList=None,
+                            uberCalLabel=None, matchRadius=None, matchRadiusUnitStr=None, matchControl=None,
+                            highlightList=None):
+        yield
         fluxToPlotList = fluxToPlotList if fluxToPlotList else self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = None
@@ -1024,16 +1124,17 @@ class CoaddAnalysisTask(CmdLineTask):
             shortName = "compareUnforced_" + col
             self.log.info("shortName = {:s}".format(shortName))
             if col + "_instFlux" in forced.schema:
-                self.AnalysisClass(forced, magDiffFunc(forced, unforced),
-                                   "  Forced - Unforced mag [%s] (%s)" % (fluxToPlotString(col), unitStr),
-                                   shortName, self.config.analysis, prefix="",
-                                   labeller=OverlapsStarGalaxyLabeller(first="", second=""),
-                                   unitScale=self.unitScale, compareCat=unforced,
-                                   ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
-                                             camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                                             patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                             matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel,
-                                             highlightList=highlightList, uberCalLabel=uberCalLabel)
+                yield from self.AnalysisClass(forced, magDiffFunc(forced, unforced),
+                                              "  Forced - Unforced mag [%s] (%s)" %
+                                              (fluxToPlotString(col), unitStr),
+                                              shortName, self.config.analysis, prefix="",
+                                              labeller=OverlapsStarGalaxyLabeller(first="", second=""),
+                                              unitScale=self.unitScale, compareCat=unforced,
+                                              ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                        enforcer=enforcer, matchRadius=matchRadius,
+                                                        matchRadiusUnitStr=matchRadiusUnitStr,
+                                                        highlightList=highlightList,
+                                                        zpLabel=zpLabel, uberCalLabel=uberCalLabel)
 
     def isBad(self, source):
         """Return True if any of config.badFlags are set for this source."""
@@ -1051,63 +1152,60 @@ class CoaddAnalysisTask(CmdLineTask):
             self.log.info("Did not find any overlapping matches")
         return joinMatches(matches, "first_", "second_")
 
-    def plotOverlaps(self, overlaps, filenamer, dataId, butler=None, camera=None, ccdList=None,
-                     tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
+    def plotOverlaps(self, overlaps, plotInfoDict, areaDict, matchRadius=None, matchRadiusUnitStr=None,
                      zpLabel=None, forcedStr=None, postFix="", fluxToPlotList=None, highlightList=None,
                      uberCalLabel=None):
+        yield
         if not fluxToPlotList:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
         magEnforcer = Enforcer(requireLess={"star": {"stdev": 0.003*self.unitScale}})
-        plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                             patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                             matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, forcedStr=forcedStr,
-                             highlightList=highlightList, uberCalLabel=uberCalLabel)
+        plotAllKwargs = dict(matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel,
+                             forcedStr=forcedStr, uberCalLabel=uberCalLabel, highlightList=highlightList)
         for col in fluxToPlotList:
             shortName = "overlap_" + col + postFix
             self.log.info("shortName = {:s}".format(shortName))
             if "first_" + col + "_instFlux" in overlaps.schema:
-                self.AnalysisClass(overlaps, MagDiff("first_" + col + "_instFlux",
-                                                     "second_" + col + "_instFlux",
-                                                     unitScale=self.unitScale),
-                                   "  Overlap mag difference (%s) (%s)" % (fluxToPlotString(col), unitStr),
-                                   shortName, self.config.analysis, prefix="first_", flags=[col + "_flag"],
-                                   labeller=OverlapsStarGalaxyLabeller(), magThreshold=23,
-                                   unitScale=self.unitScale,
-                                   ).plotAll(dataId, filenamer, self.log, enforcer=magEnforcer,
-                                             **plotAllKwargs)
+                yield from self.AnalysisClass(overlaps, MagDiff("first_" + col + "_instFlux",
+                                                                "second_" + col + "_instFlux",
+                                                                unitScale=self.unitScale),
+                                              "  Overlap mag difference (%s) (%s)" %
+                                              (fluxToPlotString(col), unitStr),
+                                              shortName, self.config.analysis, prefix="first_",
+                                              flags=[col + "_flag"], labeller=OverlapsStarGalaxyLabeller(),
+                                              magThreshold=23, unitScale=self.unitScale
+                                              ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                        enforcer=magEnforcer, **plotAllKwargs)
         unitStr = "mas" if self.config.toMilli else "arcsec"
         distEnforcer = Enforcer(requireLess={"star": {"stdev": 0.005*self.unitScale}})
         shortName = "overlap_distance" + postFix
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(overlaps,
-                           lambda cat: cat["distance"]*(1.0*geom.radians).asArcseconds()*self.unitScale,
-                           "Distance (%s)" % unitStr, shortName, self.config.analysis, prefix="first_",
-                           qMin=-0.01, qMax=0.11, labeller=OverlapsStarGalaxyLabeller(), forcedMean=0.0,
-                           unitScale=self.unitScale,
-                           ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, doPrintMedian=True,
-                                     **plotAllKwargs)
+        yield from self.AnalysisClass(
+            overlaps, lambda cat: cat["distance"]*(1.0*geom.radians).asArcseconds()*self.unitScale,
+            "Distance (%s)" % unitStr, shortName, self.config.analysis, prefix="first_", qMin=-0.01,
+            qMax=0.11, labeller=OverlapsStarGalaxyLabeller(), forcedMean=0.0,
+            unitScale=self.unitScale).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                              enforcer=distEnforcer, doPrintMedian=True, **plotAllKwargs)
 
-    def plotMatches(self, matches, filterName, filenamer, dataId, description="matches", butler=None,
-                    camera=None, ccdList=None, tractInfo=None, patchList=None, hscRun=None, matchRadius=None,
+    def plotMatches(self, matches, plotInfoDict, areaDict, description="matches", matchRadius=None,
                     matchRadiusUnitStr=None, zpLabel=None, forcedStr=None, highlightList=None,
                     uberCalLabel=None):
+        yield
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.030*self.unitScale}}),
         fluxToPlotList = ["base_PsfFlux", "base_CircularApertureFlux_12_0"]
-        plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                             patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                             matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, forcedStr=forcedStr,
-                             highlightList=highlightList, uberCalLabel=uberCalLabel)
+        plotAllKwargs = dict(matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel,
+                             forcedStr=forcedStr, uberCalLabel=uberCalLabel, highlightList=highlightList)
         if self.config.doApplyColorTerms:
-            ct = self.config.colorterms.getColorterm(filterName, self.config.refObjLoader.ref_dataset_name)
+            ct = self.config.colorterms.getColorterm(plotInfoDict["filter"],
+                                                     self.config.refObjLoader.ref_dataset_name)
         else:
             # Pass in a null colorterm.
             # Obtain the filter name from the reference loader filter map, if present, otherwise set
             # to the canonical filter name.
-            refFilterName = (self.config.refObjLoader.filterMap[filterName] if
-                             filterName in self.config.refObjLoader.filterMap.keys() else
-                             afwImage.Filter(afwImage.Filter(filterName).getId()).getName())
+            refFilterName = (self.config.refObjLoader.filterMap[plotInfoDict["filter"]] if
+                             plotInfoDict["filter"] in self.config.refObjLoader.filterMap.keys() else
+                             afwImage.Filter(afwImage.Filter(plotInfoDict["filter"]).getId()).getName())
             ct = Colorterm(primary=refFilterName, secondary=refFilterName)
             self.log.warn("Note: no colorterms loaded for {:s}, thus no colorterms will be applied to "
                           "the reference catalog".format(self.config.refObjLoader.ref_dataset_name))
@@ -1122,128 +1220,132 @@ class CoaddAnalysisTask(CmdLineTask):
             if "src_calib_psf_used" in matches.schema:
                 shortName = description + "_" + fluxToPlotString(fluxName) + "_mag_calib_psf_used"
                 self.log.info("shortName = {:s}".format(shortName))
-                self.AnalysisClass(matches, MagDiffMatches(fluxName, ct, zp=0.0, unitScale=self.unitScale),
-                                   "%s - ref (calib_psf_used) (%s)" % (fluxToPlotString(fluxName), unitStr),
-                                   shortName,
-                                   self.config.analysisMatches, prefix="src_", goodKeys=["calib_psf_used"],
-                                   qMin=-0.15, qMax=0.1, labeller=MatchesStarGalaxyLabeller(),
-                                   unitScale=self.unitScale,
-                                   ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+                yield from self.AnalysisClass(matches, MagDiffMatches(fluxName, ct, zp=0.0,
+                                                                      unitScale=self.unitScale),
+                                              "%s - ref (calib_psf_used) (%s)" %
+                                              (fluxToPlotString(fluxName), unitStr), shortName,
+                                              self.config.analysisMatches, prefix="src_",
+                                              goodKeys=["calib_psf_used"], qMin=-0.15, qMax=0.1,
+                                              labeller=MatchesStarGalaxyLabeller(),
+                                              unitScale=self.unitScale).plotAll(shortName, plotInfoDict,
+                                                                                areaDict, self.log,
+                                                                                enforcer=enforcer,
+                                                                                **plotAllKwargs)
             if "src_calib_photometry_used" in matches.schema:
                 shortName = description + "_" + fluxToPlotString(fluxName) + "_mag_calib_photometry_used"
                 self.log.info("shortName = {:s}".format(shortName))
-                self.AnalysisClass(matches, MagDiffMatches(fluxName, ct, zp=0.0, unitScale=self.unitScale),
-                                   "   %s - ref (calib_photom_used) (%s)" % (fluxToPlotString(fluxName),
-                                                                             unitStr),
-                                   shortName, self.config.analysisMatches, prefix="src_",
-                                   goodKeys=["calib_photometry_used"], qMin=-0.15, qMax=0.15,
-                                   labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale,
-                                   ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+                yield from self.AnalysisClass(matches, MagDiffMatches(fluxName, ct, zp=0.0,
+                                                                      unitScale=self.unitScale),
+                                              "   %s - ref (calib_photom_used) (%s)" %
+                                              (fluxToPlotString(fluxName), unitStr),
+                                              shortName, self.config.analysisMatches, prefix="src_",
+                                              goodKeys=["calib_photometry_used"], qMin=-0.15, qMax=0.15,
+                                              labeller=MatchesStarGalaxyLabeller(),
+                                              unitScale=self.unitScale).plotAll(shortName, plotInfoDict,
+                                                                                areaDict, self.log,
+                                                                                enforcer=enforcer,
+                                                                                **plotAllKwargs)
             shortName = description + "_" + fluxToPlotString(fluxName) + "_mag"
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(matches, MagDiffMatches(fluxName, ct, zp=0.0, unitScale=self.unitScale),
-                               "%s - ref (%s)" % (fluxToPlotString(fluxName), unitStr), shortName,
-                               self.config.analysisMatches,
-                               prefix="src_", qMin=-0.15, qMax=0.5, labeller=MatchesStarGalaxyLabeller(),
-                               unitScale=self.unitScale,
-                               ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
-            plotAllKwargs.update(highlightList=highlightList)
+            yield from self.AnalysisClass(matches, MagDiffMatches(fluxName, ct, zp=0.0,
+                                                                  unitScale=self.unitScale),
+                                          "%s - ref (%s)" % (fluxToPlotString(fluxName), unitStr), shortName,
+                                          self.config.analysisMatches, prefix="src_", qMin=-0.15, qMax=0.5,
+                                          labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale,
+                                          ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                    enforcer=enforcer, **plotAllKwargs)
 
+            plotAllKwargs.update(highlightList=highlightList)
         # Astrometry (positional) difference plots
         unitStr = "mas" if self.config.toMilli else "arcsec"
         qMatchScale = matchRadius if matchRadius else self.matchRadius
         if "src_calib_astrometry_used" in matches.schema:
             shortName = description + "_distance_calib_astrometry_used"
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(matches,
-                               lambda cat:
-                                   cat["distance"]*(1.0*geom.radians).asArcseconds()*self.unitScale,
-                               "Distance (%s) (calib_astrom_used)" % unitStr, shortName,
-                               self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
-                               qMin=-0.01*qMatchScale, qMax=0.5*qMatchScale,
-                               labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale,
-                               ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, doPrintMedian=True,
-                                         **plotAllKwargs)
+
+            yield from self.AnalysisClass(
+                matches, lambda cat: cat["distance"]*(1.0*geom.radians).asArcseconds()*self.unitScale,
+                "Distance (%s) (calib_astrom_used)" % unitStr, shortName,
+                self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
+                qMin=-0.01*qMatchScale, qMax=0.5*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
+                unitScale=self.unitScale).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                  enforcer=enforcer, doPrintMedian=True, **plotAllKwargs)
         shortName = description + "_distance"
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(matches,
-                           lambda cat: cat["distance"]*(1.0*geom.radians).asArcseconds()*self.unitScale,
-                           "Distance (%s)" % unitStr, shortName, self.config.analysisMatches, prefix="src_",
-                           qMin=-0.05*qMatchScale, qMax=0.3*qMatchScale,
-                           labeller=MatchesStarGalaxyLabeller(), forcedMean=0.0, unitScale=self.unitScale,
-                           ).plotAll(dataId, filenamer, self.log,
-                                     enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
-                                     doPrintMedian=True, **plotAllKwargs)
+        stdevEnforcer = Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}})
+        yield from self.AnalysisClass(
+            matches, lambda cat: cat["distance"]*(1.0*geom.radians).asArcseconds()*self.unitScale,
+            "Distance (%s)" % unitStr, shortName, self.config.analysisMatches, prefix="src_",
+            qMin=-0.05*qMatchScale, qMax=0.3*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
+            forcedMean=0.0, unitScale=self.unitScale).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                              enforcer=stdevEnforcer, doPrintMedian=True,
+                                                              **plotAllKwargs)
         if "src_calib_astrometry_used" in matches.schema:
             shortName = description + "_raCosDec_calib_astrometry_used"
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra",
-                                                       declination1="src_coord_dec",
-                                                       declination2="ref_coord_dec",
-                                                       unitScale=self.unitScale),
-                               "      $\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s) (calib_astrom_used)" % unitStr,
-                               shortName, self.config.analysisMatches, prefix="src_",
-                               goodKeys=["calib_astrometry_used"], qMin=-0.2*qMatchScale,
-                               qMax=0.2*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
-                               unitScale=self.unitScale,
-                               ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+            yield from self.AnalysisClass(
+                matches,
+                AstrometryDiff("src_coord_ra", "ref_coord_ra", declination1="src_coord_dec",
+                               declination2="ref_coord_dec", unitScale=self.unitScale),
+                r"      $\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s) (calib_astrom_used)" % unitStr,
+                shortName, self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
+                qMin=-0.2*qMatchScale, qMax=0.2*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
+                unitScale=self.unitScale).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                  enforcer=enforcer, **plotAllKwargs)
         shortName = description + "_raCosDec"
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra",
-                                                   declination1="src_coord_dec", declination2="ref_coord_dec",
-                                                   unitScale=self.unitScale),
-                           "$\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr, shortName,
-                           self.config.analysisMatches, prefix="src_", qMin=-0.2*qMatchScale,
-                           qMax=0.2*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
-                           unitScale=self.unitScale,
-                           ).plotAll(dataId, filenamer, self.log,
-                                     enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
-                                     **plotAllKwargs)
+        stdevEnforcer = Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}})
+        yield from self.AnalysisClass(
+            matches,
+            AstrometryDiff("src_coord_ra", "ref_coord_ra", declination1="src_coord_dec",
+                           declination2="ref_coord_dec", unitScale=self.unitScale),
+            r"$\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr, shortName, self.config.analysisMatches,
+            prefix="src_", qMin=-0.2*qMatchScale, qMax=0.2*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
+            unitScale=self.unitScale).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                              enforcer=stdevEnforcer, **plotAllKwargs)
         if "src_calib_astrometry_used" in matches.schema:
             shortName = description + "_ra_calib_astrometry_used"
             self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(matches,
-                               AstrometryDiff("src_coord_ra", "ref_coord_ra", unitScale=self.unitScale),
-                               "$\Delta$RA (%s) (calib_astrom_used)" % unitStr, shortName,
-                               self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
-                               qMin=-0.25*qMatchScale, qMax=0.25*qMatchScale,
-                               labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale,
-                               ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+            yield from self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra",
+                                                                  unitScale=self.unitScale),
+                                          r"$\Delta$RA (%s) (calib_astrom_used)" % unitStr, shortName,
+                                          self.config.analysisMatches, prefix="src_",
+                                          goodKeys=["calib_astrometry_used"], qMin=-0.25*qMatchScale,
+                                          qMax=0.25*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
+                                          unitScale=self.unitScale
+                                          ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                    enforcer=enforcer, **plotAllKwargs)
         shortName = description + "_ra"
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(matches, AstrometryDiff("src_coord_ra", "ref_coord_ra", unitScale=self.unitScale),
-                           "$\Delta$RA (%s)" % unitStr, shortName, self.config.analysisMatches,
-                           prefix="src_", qMin=-0.25*qMatchScale, qMax=0.25*qMatchScale,
-                           labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale,
-                           ).plotAll(dataId, filenamer, self.log,
-                                     enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
-                                     **plotAllKwargs)
-        if "src_calib_astrometry_used" in matches.schema:
-            shortName = description + "_dec_calib_astrometry_used"
-            self.log.info("shortName = {:s}".format(shortName))
-            self.AnalysisClass(matches,
-                               AstrometryDiff("src_coord_dec", "ref_coord_dec", unitScale=self.unitScale),
-                               "$\delta_{Dec}$ (%s) (calib_astrom_used)" % unitStr, shortName,
-                               self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
-                               qMin=-0.25*qMatchScale, qMax=0.25*qMatchScale,
-                               labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale,
-                               ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+        yield from self.AnalysisClass(
+            matches, AstrometryDiff("src_coord_ra", "ref_coord_ra", unitScale=self.unitScale),
+            r"$\Delta$RA (%s)" % unitStr, shortName, self.config.analysisMatches, prefix="src_",
+            qMin=-0.25*qMatchScale, qMax=0.25*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
+            unitScale=self.unitScale).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                              enforcer=stdevEnforcer, **plotAllKwargs)
+        shortName = description + "_dec_calib_astrometry_used"
+        self.log.info("shortName = {:s}".format(shortName))
+        yield from self.AnalysisClass(
+            matches, AstrometryDiff("src_coord_dec", "ref_coord_dec", unitScale=self.unitScale),
+            r"$\delta_{Dec}$ (%s) (calib_astrom_used)" % unitStr, shortName, self.config.analysisMatches,
+            prefix="src_", goodKeys=["calib_astrometry_used"], qMin=-0.25*qMatchScale,
+            qMax=0.25*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
+            unitScale=self.unitScale).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                              enforcer=enforcer, **plotAllKwargs)
         shortName = description + "_dec"
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(matches,
-                           AstrometryDiff("src_coord_dec", "ref_coord_dec", unitScale=self.unitScale),
-                           "$\delta_{Dec}$ (%s)" % unitStr, shortName, self.config.analysisMatches,
-                           prefix="src_", qMin=-0.3*qMatchScale, qMax=0.3*qMatchScale,
-                           labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale,
-                           ).plotAll(dataId, filenamer, self.log,
-                                     enforcer=Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}}),
-                                     **plotAllKwargs)
+        yield from self.AnalysisClass(
+            matches, AstrometryDiff("src_coord_dec", "ref_coord_dec", unitScale=self.unitScale),
+            r"$\delta_{Dec}$ (%s)" % unitStr, shortName, self.config.analysisMatches, prefix="src_",
+            qMin=-0.3*qMatchScale, qMax=0.3*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
+            unitScale=self.unitScale).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                              enforcer=stdevEnforcer, **plotAllKwargs)
 
-    def plotCosmos(self, catalog, filenamer, cosmos, dataId):
+    def plotCosmos(self, catalog, plotInfoDict, areaDict, cosmos):
         labeller = CosmosLabeller(cosmos, self.config.matchRadiusRaDec*geom.arcseconds)
         self.AnalysisClass(catalog, deconvMom, "Deconvolved moments", "cosmos", self.config.analysis,
                            qMin=-1.0, qMax=6.0, labeller=labeller,
-                           ).plotAll(dataId, filenamer, self.log,
+                           ).plotAll("cosmos", plotInfoDict, areaDict, self.log,
                                      enforcer=Enforcer(requireLess={"star": {"stdev": 0.2}}))
 
     def matchCatalog(self, catalog, filterName, astrometryConfig):
@@ -1260,71 +1362,68 @@ class CoaddAnalysisTask(CmdLineTask):
         matches = matchNanojanskyToAB(matches)
         return joinMatches(matches, "ref_", "src_")
 
-    def plotQuiver(self, catalog, filenamer, dataId=None, butler=None, camera=None, ccdList=None,
-                   tractInfo=None, patchList=None, hscRun=None, matchRadius=None, zpLabel=None,
-                   forcedStr=None, postFix="", uberCalLabel=None, scale=1):
+    def plotQuiver(self, catalog, description, plotInfoDict, areaDict, matchRadius=None,
+                   zpLabel=None, forcedStr=None, postFix="", flagsCat=None, uberCalLabel=None, scale=1):
+        yield
         stats = None
         shortName = "quiver"
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(catalog, None, "%s" % shortName, shortName,
-                           self.config.analysis, labeller=None,
-                           ).plotQuiver(catalog, filenamer, self.log, stats=stats, dataId=dataId,
-                                        butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                                        patchList=patchList, hscRun=hscRun, zpLabel=zpLabel,
-                                        forcedStr=forcedStr, uberCalLabel=uberCalLabel, scale=scale)
+        yield from self.AnalysisClass(catalog, None, "%s" % shortName, shortName,
+                                      self.config.analysis, labeller=None,
+                                      ).plotQuiver(catalog, description, plotInfoDict, areaDict, self.log,
+                                                   stats=stats, zpLabel=zpLabel, forcedStr=forcedStr,
+                                                   uberCalLabel=uberCalLabel, scale=scale)
 
-    def plotSkyObjects(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
-                       tractInfo=None, patchList=None, hscRun=None, zpLabel=None,
-                       forcedStr=None, postFix="", flagsCat=None):
+    def plotSkyObjects(self, catalog, plotInfoDict, areaDict, zpLabel=None, forcedStr=None, postFix="",
+                       flagsCat=None):
+        yield
         stats = None
         shortName = "skyObjects"
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(catalog, None, "%s" % shortName, shortName,
-                           self.config.analysis, labeller=None,
-                           ).plotSkyObjects(catalog, filenamer, self.log, dataId, camera=camera,
-                                            ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
-                                            zpLabel=zpLabel, forcedStr=forcedStr)
+        yield from self.AnalysisClass(catalog, None, "%s" % shortName, shortName, self.config.analysis,
+                                      labeller=None,).plotSkyObjects(catalog, shortName, plotInfoDict,
+                                                                     self.log, zpLabel=zpLabel,
+                                                                     forcedStr=forcedStr)
 
-        skyplotKwargs = dict(dataId=dataId, butler=butler, stats=stats, camera=camera, ccdList=ccdList,
-                             tractInfo=tractInfo, patchList=patchList, hscRun=hscRun, zpLabel=zpLabel)
-        filenamer = filenamer.replace("hist", "sky-all")
+        skyplotKwargs = dict(stats=stats, zpLabel=zpLabel)
         skyFlux = "base_CircularApertureFlux_9_0_instFlux"
         skyFluxStr = fluxToPlotString(skyFlux)
         skyFluxes = catalog[skyFlux]*1e12
         qMin, qMax = 0.75*min(skyFluxes), 0.75*max(skyFluxes)
-        self.AnalysisClass(catalog, skyFluxes,
-                           "%s" % "flux(*1e+12)= " + shortName + "[" + skyFluxStr + "]", shortName,
-                           self.config.analysis, qMin=qMin, qMax=qMax, labeller=AllLabeller(),
-                           ).plotSkyPosition(filenamer, dataName="all", **skyplotKwargs)
+        yield from self.AnalysisClass(catalog, skyFluxes,
+                                      "%s" % "flux(*1e+12)= " + shortName + "[" + skyFluxStr + "]", shortName,
+                                      self.config.analysis, qMin=qMin, qMax=qMax, labeller=AllLabeller(),
+                                      ).plotSkyPosition(shortName, plotInfoDict, areaDict,
+                                                        dataName="all", **skyplotKwargs)
 
-    def plotSkyObjectsSky(self, catalog, filenamer, dataId, butler, tractInfo, patchList=None, camera=None,
-                          hscRun=None, forcedStr=None, alpha=0.7, doPlotTractImage=True,
+    def plotSkyObjectsSky(self, catalog, plotInfoDict, forcedStr=None, alpha=0.7, doPlotTractImage=True,
                           doPlotPatchOutline=True, sizeFactor=3.0, maxDiamPix=1000,
                           columnName="base_CircularApertureFlux_9_0_instFlux"):
+        yield
         shortName = "skyObjectsSky"
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(catalog, None, "%s" % shortName, shortName,
-                           self.config.analysis, labeller=None,
-                           ).plotInputCounts(catalog, filenamer, self.log, dataId, butler, tractInfo,
-                                             patchList=patchList, camera=camera, forcedStr=forcedStr,
-                                             alpha=alpha, doPlotTractImage=doPlotTractImage,
-                                             doPlotPatchOutline=doPlotPatchOutline,
-                                             sizeFactor=sizeFactor, maxDiamPix=maxDiamPix,
-                                             columnName=columnName)
+        yield from self.AnalysisClass(catalog, None, "%s" % shortName, shortName, self.config.analysis,
+                                      labeller=None,).plotInputCounts(catalog, plotInfoDict, self.log,
+                                                                      forcedStr=forcedStr,
+                                                                      alpha=alpha,
+                                                                      doPlotTractImage=doPlotTractImage,
+                                                                      doPlotPatchOutline=doPlotPatchOutline,
+                                                                      sizeFactor=sizeFactor,
+                                                                      maxDiamPix=maxDiamPix,
+                                                                      columnName=columnName)
 
-    def plotInputCounts(self, catalog, filenamer, dataId, butler, tractInfo, patchList=None, camera=None,
-                        hscRun=None, zpLabel=None, forcedStr=None, uberCalLabel=None, alpha=0.5,
-                        doPlotTractImage=True, doPlotPatchOutline=True, sizeFactor=5.0, maxDiamPix=1000):
+    def plotInputCounts(self, catalog, description, plotInfoDict, zpLabel=None, forcedStr=None,
+                        uberCalLabel=None, alpha=0.5, doPlotPatchOutline=True, sizeFactor=5.0,
+                        maxDiamPix=1000):
+        yield
         shortName = "inputCounts"
         self.log.info("shortName = {:s}".format(shortName))
-        self.AnalysisClass(catalog, None, "%s" % shortName, shortName,
-                           self.config.analysis, labeller=None,
-                           ).plotInputCounts(catalog, filenamer, self.log, dataId, butler, tractInfo,
-                                             patchList=patchList, camera=camera, forcedStr=forcedStr,
-                                             uberCalLabel=uberCalLabel, alpha=alpha,
-                                             doPlotTractImage=doPlotTractImage,
-                                             doPlotPatchOutline=doPlotPatchOutline,
-                                             sizeFactor=sizeFactor, maxDiamPix=maxDiamPix)
+        yield from self.AnalysisClass(catalog, None, "%s" % shortName, shortName,
+                                      self.config.analysis, labeller=None,
+                                      ).plotInputCounts(catalog, description, plotInfoDict, self.log,
+                                                        forcedStr=forcedStr, uberCalLabel=uberCalLabel,
+                                                        alpha=alpha, doPlotPatchOutline=doPlotPatchOutline,
+                                                        sizeFactor=sizeFactor, maxDiamPix=maxDiamPix)
 
     def _getConfigName(self):
         return None
@@ -1394,6 +1493,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         self.matchControl.symmetricMatch = False
 
     def runDataRef(self, patchRefList1, patchRefList2, subdir=""):
+        plotList = []
         haveForced = True  # do forced datasets exits (may not for single band datasets)
         dataset = "Coadd_forced_src"
         patchRefExistsList1 = [patchRef1 for patchRef1 in patchRefList1 if
@@ -1429,31 +1529,34 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         self.log.info(f"External calibration(s) used: {self.uberCalLabel}")
 
         if haveForced:
-            forced1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_forced_src")
-            forced1 = self.calibrateCatalogs(forced1, wcs=repoInfo1.wcs)
-            forced2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_forced_src")
-            forced2 = self.calibrateCatalogs(forced2, wcs=repoInfo2.wcs)
-        unforced1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_meas")
+            catStruct1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_forced_src",
+                                           repoInfo1)
+            areaDict1 = catStruct1.areaDict
+            forced1 = self.calibrateCatalogs(catStruct1.catalog, wcs=repoInfo1.wcs)
+            catStruct2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_forced_src",
+                                           repoInfo2)
+            forced2 = self.calibrateCatalogs(catStruct2.catalog, wcs=repoInfo2.wcs)
+        unforced1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_meas", repoInfo1).catalog
         unforced1 = self.calibrateCatalogs(unforced1, wcs=repoInfo1.wcs)
-        unforced2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_meas")
+        unforced2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_meas", repoInfo2).catalog
         unforced2 = self.calibrateCatalogs(unforced2, wcs=repoInfo2.wcs)
 
         forcedStr = "forced" if haveForced else "unforced"
 
         if haveForced:
             # copy over some fields from _ref and _meas catalogs to _forced_src catalog
-            refCat1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_ref")
+            refCat1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_ref", repoInfo1).catalog
             refColList1 = [s for s in refCat1.schema.getNames() if
                            s.startswith(tuple(self.config.columnsToCopyFromRef))]
-            refCat2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_ref")
+            refCat2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_ref", repoInfo2).catalog
             refColList2 = [s for s in refCat2.schema.getNames() if
                            s.startswith(tuple(self.config.columnsToCopyFromRef))]
-            refColsToCopy1 = [col for col in refColList1 if col not in forced1.schema
-                              and col in refCat1.schema
-                              and not (repoInfo1.hscRun and col == "slot_Centroid_flag")]
-            refColsToCopy2 = [col for col in refColList2 if col not in forced2.schema
-                              and col in refCat2.schema
-                              and not (repoInfo2.hscRun and col == "slot_Centroid_flag")]
+            refColsToCopy1 = [col for col in refColList1 if col not in forced1.schema and
+                              col in refCat1.schema and
+                              not (repoInfo1.hscRun and col == "slot_Centroid_flag")]
+            refColsToCopy2 = [col for col in refColList2 if col not in forced2.schema and
+                              col in refCat2.schema and
+                              not (repoInfo2.hscRun and col == "slot_Centroid_flag")]
             forced1 = addColumnsToSchema(refCat1, forced1, refColsToCopy1)
             forced2 = addColumnsToSchema(refCat2, forced2, refColsToCopy2)
             measColList1 = [s for s in unforced1.schema.getNames() if
@@ -1516,42 +1619,74 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                       len(forced1), len(forced2)))
 
         subdir = "patch-" + str(patchList1[0]) if len(patchList1) == 1 else subdir
-        filenamer = Filenamer(repoInfo1.butler, "plotCompareCoadd", repoInfo1.dataId, subdir=subdir)
         hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
         # Always highlight points with x-axis flag set (for cases where
         # they do not get explicitly filtered out).
         highlightList = [(self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0, "turquoise"), ]
         # Dict of all parameters common to plot* functions
-        plotKwargs1 = dict(butler=repoInfo1.butler, camera=repoInfo1.camera, tractInfo=repoInfo1.tractInfo,
-                           patchList=patchList1, hscRun=hscRun, matchRadius=self.matchRadius,
-                           matchRadiusUnitStr=self.matchRadiusUnitStr, zpLabel=self.zpLabel,
-                           highlightList=highlightList, uberCalLabel=self.uberCalLabel)
+        plotKwargs1 = dict(matchRadius=self.matchRadius, matchRadiusUnitStr=self.matchRadiusUnitStr,
+                           zpLabel=self.zpLabel, highlightList=highlightList, uberCalLabel=self.uberCalLabel)
+        plotInfoDict = getPlotInfo(repoInfo1)
+        plotInfoDict.update(dict(cameraObj=repoInfo1.camera, patchList=patchList1, hscRun=hscRun,
+                                 tractInfo=repoInfo1.tractInfo, dataId=repoInfo1.dataId,
+                                 plotType="plotCompareCoadd", hscRun1=repoInfo1.hscRun,
+                                 hscRun2=repoInfo2.hscRun))
 
         if self.config.doPlotMags:
-            self.plotMags(forced, filenamer, repoInfo1.dataId, forcedStr=forcedStr, **plotKwargs1)
+            plotList.append(self.plotMags(forced, plotInfoDict, areaDict1, forcedStr=forcedStr,
+                                          **plotKwargs1))
 
         if self.config.doPlotSizes:
             if ("first_base_SdssShape_psf_xx" in forced.schema and
                "second_base_SdssShape_psf_xx" in forced.schema):
-                self.plotSizes(forced, filenamer, repoInfo1.dataId, forcedStr=forcedStr, **plotKwargs1)
+                plotList.append(self.plotSizes(forced, plotInfoDict, areaDict1, forcedStr=forcedStr,
+                                               **plotKwargs1))
             else:
                 self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
 
         if self.config.doApCorrs:
-            self.plotApCorrs(unforced, filenamer, repoInfo1.dataId, forcedStr="unforced " + self.catLabel,
-                             **plotKwargs1)
+            plotList.append(self.plotApCorrs(unforced, plotInfoDict, areaDict1,
+                                             forcedStr="unforced " + self.catLabel, **plotKwargs1))
         if self.config.doPlotCentroids:
-            self.plotCentroids(forced, filenamer, repoInfo1.dataId, forcedStr=forcedStr,
-                               hscRun1=repoInfo1.hscRun, hscRun2=repoInfo2.hscRun, **plotKwargs1)
+            plotList.append(self.plotCentroids(forced, plotInfoDict, areaDict1, forcedStr=forcedStr,
+                                               **plotKwargs1))
         if self.config.doPlotStarGalaxy:
-            self.plotStarGal(forced, filenamer, repoInfo1.dataId, forcedStr=forcedStr, **plotKwargs1)
+            plotList.append(self.plotStarGal(forced, plotInfoDict, areaDict1, forcedStr=forcedStr,
+                                             **plotKwargs1))
+        self.allStats, self.allStatsHigh = savePlots(plotList, "plotCompareCoadd", repoInfo1.dataId,
+                                                     repoInfo1.butler)
 
-    def readCatalogs(self, patchRefList, dataset):
+    def readCatalogs(self, patchRefList, dataset, repoInfo):
+        catList = []
+        areaDict = {}
+        for patchRef in patchRefList:
+            if not patchRef.datasetExists(dataset):
+                continue
+            else:
+                patchCat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+                catList.append(patchCat)
+                fname = repoInfo.butler.getUri("deepCoadd_calexp", patchRef.dataId)
+                reader = afwImage.ExposureFitsReader(fname)
+                wcs = reader.readWcs()
+                mask = reader.readMask()
+
+            goodPix = np.where(~(mask.array.flatten() & mask.getPlaneBitMask("BAD")))[0]
+            numGoodPix = len(goodPix)
+            pixScale = wcs.getPixelScale().asArcseconds()
+            area = pixScale**2 * numGoodPix
+            areaDict[patchRef.dataId["patch"]] = area
+
+            patchWidth = mask.getWidth()
+            patchHeight = mask.getHeight()
+
+            patchCorners = wcs.pixelToSky([geom.Point2D(0, 0), geom.Point2D(patchWidth, patchHeight)])
+            areaDict["corners_" + str(patchRef.dataId["patch"])] = patchCorners
+
         catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS) for
                    patchRef in patchRefList if patchRef.datasetExists(dataset)]
         if not catList:
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
-        return concatenateCatalogs(catList)
+        return Struct(catalog=concatenateCatalogs(catList), areaDict=areaDict)
 
     def matchCatalogs(self, catalog1, catalog2, matchRadius=None, matchControl=None):
         matchRadius = matchRadius if matchRadius else self.matchRadius
@@ -1576,120 +1711,129 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         calibrated = calibrateCoaddSourceCatalog(catalog, self.config.analysis.coaddZp)
         return calibrated
 
-    def plotMags(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
-                 patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None,
-                 forcedStr=None, fluxToPlotList=None, postFix="", highlightList=None,
-                 uberCalLabel=None):
+    def plotMags(self, catalog, plotInfoDict, areaDict, matchRadius=None, matchRadiusUnitStr=None,
+                 zpLabel=None, forcedStr=None, fluxToPlotList=None, postFix="",
+                 highlightList=None, uberCalLabel=None):
+        yield
         if not fluxToPlotList:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
         for col in fluxToPlotList:
             if ("first_" + col + "_instFlux" in catalog.schema and "second_" + col + "_instFlux" in
-                catalog.schema):
+                    catalog.schema):
                 shortName = "diff_" + col + postFix
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, MagDiffCompare(col + "_instFlux", unitScale=self.unitScale),
-                         "      Run Comparison: %s mag diff (%s)" % (fluxToPlotString(col), unitStr),
-                         shortName, self.config.analysis, prefix="first_", qMin=-0.05, qMax=0.05,
-                         errFunc=MagDiffCompareErr(col + "_instFlux", unitScale=self.unitScale),
-                         labeller=OverlapsStarGalaxyLabeller(), unitScale=self.unitScale,
-                         ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
-                                   camera=camera, ccdList=ccdList, tractInfo=tractInfo, patchList=patchList,
-                                   hscRun=hscRun, matchRadius=matchRadius,
-                                   matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel,
-                                   uberCalLabel=uberCalLabel, forcedStr=forcedStr,
-                                   highlightList=highlightList)
+                yield from Analysis(catalog, MagDiffCompare(col + "_instFlux", unitScale=self.unitScale),
+                                    "      Run Comparison: %s mag diff (%s)" %
+                                    (fluxToPlotString(col), unitStr), shortName, self.config.analysis,
+                                    prefix="first_", qMin=-0.05, qMax=0.05,
+                                    errFunc=MagDiffCompareErr(col + "_instFlux", unitScale=self.unitScale),
+                                    labeller=OverlapsStarGalaxyLabeller(),
+                                    unitScale=self.unitScale,).plotAll(shortName, plotInfoDict, areaDict,
+                                                                       self.log, enforcer=enforcer,
+                                                                       matchRadius=matchRadius,
+                                                                       matchRadiusUnitStr=matchRadiusUnitStr,
+                                                                       zpLabel=zpLabel,
+                                                                       uberCalLabel=uberCalLabel,
+                                                                       forcedStr=forcedStr,
+                                                                       highlightList=highlightList)
 
-    def plotCentroids(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
-                      tractInfo=None, patchList=None, hscRun=None, hscRun1=None, hscRun2=None,
-                      matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None,
-                      highlightList=None, uberCalLabel=None):
+    def plotCentroids(self, catalog, plotInfoDict, areaDict, matchRadius=None, matchRadiusUnitStr=None,
+                      zpLabel=None, forcedStr=None, highlightList=None, uberCalLabel=None):
+        yield
         unitStr = "milliPixels" if self.config.toMilli else "pixels"
         distEnforcer = None
         centroidStr1, centroidStr2 = "base_SdssCentroid", "base_SdssCentroid"
-        if bool(hscRun1) ^ bool(hscRun2):
-            if not hscRun1:
+        if bool(plotInfoDict["hscRun1"]) ^ bool(plotInfoDict["hscRun2"]):
+            if not plotInfoDict["hscRun1"]:
                 centroidStr1 = "base_SdssCentroid_Rot"
-            if not hscRun2:
+            if not plotInfoDict["hscRun2"]:
                 centroidStr2 = "base_SdssCentroid_Rot"
-        plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                             patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                             matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, forcedStr=forcedStr,
-                             uberCalLabel=uberCalLabel)
+        plotAllKwargs = dict(matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel,
+                             forcedStr=forcedStr, uberCalLabel=uberCalLabel)
 
         shortName = "diff_x"
         self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, CentroidDiff("x", centroid1=centroidStr1, centroid2=centroidStr2,
-                                       unitScale=self.unitScale),
-                 "Run Comparison: x offset (%s)" % unitStr, shortName, self.config.analysis, prefix="first_",
-                 qMin=-0.08, qMax=0.08, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
-                 ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, **plotAllKwargs)
+        yield from Analysis(catalog, CentroidDiff("x", centroid1=centroidStr1, centroid2=centroidStr2,
+                                                  unitScale=self.unitScale),
+                            "Run Comparison: x offset (%s)" % unitStr, shortName,
+                            self.config.analysis, prefix="first_",
+                            qMin=-0.08, qMax=0.08, errFunc=None,
+                            labeller=OverlapsStarGalaxyLabeller()).\
+            plotAll(shortName, plotInfoDict, areaDict, self.log, enforcer=distEnforcer, **plotAllKwargs)
         shortName = "diff_y"
         self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, CentroidDiff("y", centroid1=centroidStr1, centroid2=centroidStr2,
-                                       unitScale=self.unitScale),
-                 "Run Comparison: y offset (%s)" % unitStr, shortName, self.config.analysis, prefix="first_",
-                 qMin=-0.08, qMax=0.08, errFunc=None, labeller=OverlapsStarGalaxyLabeller(),
-                 ).plotAll(dataId, filenamer, self.log, enforcer=distEnforcer, **plotAllKwargs)
+        yield from Analysis(catalog, CentroidDiff("y", centroid1=centroidStr1, centroid2=centroidStr2,
+                                                  unitScale=self.unitScale),
+                            "Run Comparison: y offset (%s)" % unitStr, shortName, self.config.analysis,
+                            prefix="first_", qMin=-0.08, qMax=0.08, errFunc=None,
+                            labeller=OverlapsStarGalaxyLabeller()).plotAll(shortName, plotInfoDict,
+                                                                           areaDict, self.log,
+                                                                           enforcer=distEnforcer,
+                                                                           **plotAllKwargs)
 
         unitStr = "mas" if self.config.toMilli else "arcsec"
         shortName = "diff_raCosDec"
         self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, AstrometryDiff("first_coord_ra", "second_coord_ra", declination1="first_coord_dec",
-                                         declination2="second_coord_dec", unitScale=self.unitScale),
-                 "   Run Comparison: $\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr, shortName,
-                 self.config.analysisMatches, prefix="first_", qMin=-0.2*matchRadius, qMax=0.2*matchRadius,
-                 labeller=OverlapsStarGalaxyLabeller(), unitScale=self.unitScale,
-                 ).plotAll(dataId, filenamer, self.log, **plotAllKwargs)
+        yield from Analysis(catalog, AstrometryDiff("first_coord_ra", "second_coord_ra",
+                                                    declination1="first_coord_dec",
+                                                    declination2="second_coord_dec",
+                                                    unitScale=self.unitScale),
+                            r"   Run Comparison: $\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr,
+                            shortName, self.config.analysisMatches, prefix="first_", qMin=-0.2*matchRadius,
+                            qMax=0.2*matchRadius, labeller=OverlapsStarGalaxyLabeller(),
+                            unitScale=self.unitScale,
+                            ).plotAll(shortName, plotInfoDict, areaDict, self.log, **plotAllKwargs)
         shortName = "diff_ra"
         self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, AstrometryDiff("first_coord_ra", "second_coord_ra", declination1=None,
-                                         declination2=None, unitScale=self.unitScale),
-                 "Run Comparison: $\Delta$RA (%s)" % unitStr, shortName, self.config.analysisMatches,
-                 prefix="first_", qMin=-0.25*matchRadius, qMax=0.25*matchRadius,
-                 labeller=OverlapsStarGalaxyLabeller(), unitScale=self.unitScale,
-                 ).plotAll(dataId, filenamer, self.log, **plotAllKwargs)
+        yield from Analysis(catalog, AstrometryDiff("first_coord_ra", "second_coord_ra", declination1=None,
+                                                    declination2=None, unitScale=self.unitScale),
+                            r"Run Comparison: $\Delta$RA (%s)" % unitStr, shortName,
+                            self.config.analysisMatches, prefix="first_", qMin=-0.25*matchRadius,
+                            qMax=0.25*matchRadius, labeller=OverlapsStarGalaxyLabeller(),
+                            unitScale=self.unitScale,
+                            ).plotAll(shortName, plotInfoDict, areaDict, self.log, **plotAllKwargs)
         shortName = "diff_dec"
         self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, AstrometryDiff("first_coord_dec", "second_coord_dec", unitScale=self.unitScale),
-                 "$\delta_{Dec}$ (%s)" % unitStr, shortName, self.config.analysisMatches, prefix="first_",
-                 qMin=-0.3*matchRadius, qMax=0.3*matchRadius, labeller=OverlapsStarGalaxyLabeller(),
-                 unitScale=self.unitScale,
-                 ).plotAll(dataId, filenamer, self.log, **plotAllKwargs)
+        yield from Analysis(catalog, AstrometryDiff("first_coord_dec", "second_coord_dec",
+                                                    unitScale=self.unitScale),
+                            r"$\delta_{Dec}$ (%s)" % unitStr, shortName, self.config.analysisMatches,
+                            prefix="first_", qMin=-0.3*matchRadius, qMax=0.3*matchRadius,
+                            labeller=OverlapsStarGalaxyLabeller(),
+                            unitScale=self.unitScale,
+                            ).plotAll(shortName, plotInfoDict, areaDict, self.log, **plotAllKwargs)
 
-    def plotFootprint(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
-                      tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
+    def plotFootprint(self, catalog, plotInfoDict, areaDict, matchRadius=None, matchRadiusUnitStr=None,
                       zpLabel=None, forcedStr=None, postFix="", highlightList=None,
                       uberCalLabel=None):
+        yield
         enforcer = None
-        plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                             patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                             matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel,
-                             forcedStr=forcedStr, uberCalLabel=uberCalLabel, postFix=postFix)
+        plotAllKwargs = dict(matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                             zpLabel=zpLabel, forcedStr=forcedStr, uberCalLabel=uberCalLabel, postFix=postFix)
         shortName = "diff_footNpix"
         col = "base_Footprint_nPix"
         self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, FootNpixDiffCompare(col), "  Run Comparison: Footprint nPix difference", shortName,
-                 self.config.analysis, prefix="first_", qMin=-250, qMax=250,
-                 labeller=OverlapsStarGalaxyLabeller(),
-                 ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+        yield from Analysis(catalog, FootNpixDiffCompare(col), "  Run Comparison: Footprint nPix difference",
+                            shortName, self.config.analysis, prefix="first_", qMin=-250, qMax=250,
+                            labeller=OverlapsStarGalaxyLabeller()
+                            ).plotAll(shortName, plotInfoDict, areaDict, self.log, enforcer=enforcer,
+                                      **plotAllKwargs)
         shortName = "diff_footNpix_calib_psf_used"
         self.log.info("shortName = {:s}".format(shortName))
-        Analysis(catalog, FootNpixDiffCompare(col), "     Run Comparison: Footprint nPix diff (psf_used)",
-                 shortName, self.config.analysis, prefix="first_", goodKeys=["calib_psf_used"],
-                 qMin=-150, qMax=150, labeller=OverlapsStarGalaxyLabeller(),
-                 ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, highlightList=highlightList,
-                           **plotAllKwargs)
+        yield from Analysis(catalog, FootNpixDiffCompare(col),
+                            "     Run Comparison: Footprint nPix diff (psf_used)",
+                            shortName, self.config.analysis, prefix="first_", goodKeys=["calib_psf_used"],
+                            qMin=-150, qMax=150, labeller=OverlapsStarGalaxyLabeller(),
+                            ).plotAll(shortName, plotInfoDict, areaDict, self.log, enforcer=enforcer,
+                                      highlightList=highlightList, **plotAllKwargs)
 
-    def plotSizes(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
-                  patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None,
-                  forcedStr=None, highlightList=None, uberCalLabel=None):
+    def plotSizes(self, catalog, plotInfoDict, areaDict, matchRadius=None, matchRadiusUnitStr=None,
+                  zpLabel=None, forcedStr=None, highlightList=None, uberCalLabel=None):
+        yield
         enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.02*self.unitScale}})
-        plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                             patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                             matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, forcedStr=forcedStr,
-                             uberCalLabel=uberCalLabel)
+        plotAllKwargs = dict(matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                             zpLabel=zpLabel, forcedStr=forcedStr, uberCalLabel=uberCalLabel)
         for col in ["base_PsfFlux"]:
             if ("first_" + col + "_instFlux" in catalog.schema and
                "second_" + col + "_instFlux" in catalog.schema):
@@ -1701,21 +1845,27 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                  shortNameBase)
                     compareCol = "base_SdssShape"
                     self.log.info("shortName = {:s}".format(shortName))
-                    Analysis(catalog, TraceSizeCompare(compareCol),
-                             "    SdssShape Trace Radius Diff (%)" + subCatString, shortName,
-                             self.config.analysis, prefix="first_", goodKeys=goodFlags, qMin=-0.5, qMax=1.5,
-                             labeller=OverlapsStarGalaxyLabeller(),
-                             ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+                    yield from Analysis(catalog, TraceSizeCompare(compareCol),
+                                        "    SdssShape Trace Radius Diff (%)" + subCatString,
+                                        shortName, self.config.analysis, prefix="first_",
+                                        goodKeys=goodFlags, qMin=-0.5, qMax=1.5,
+                                        labeller=OverlapsStarGalaxyLabeller()).plotAll(shortName,
+                                                                                       plotInfoDict, areaDict,
+                                                                                       self.log,
+                                                                                       enforcer=enforcer,
+                                                                                       **plotAllKwargs)
 
                     shortNameBase = "psfTrace"
                     shortName = (shortNameBase + "_calib_psf_used" if "calib_psf_used" in goodFlags else
                                  shortNameBase)
                     self.log.info("shortName = {:s}".format(shortName))
-                    Analysis(catalog, TraceSizeCompare(compareCol + "_psf"),
-                             "       SdssShape PSF Trace Radius Diff (%)" + subCatString, shortName,
-                             self.config.analysis, prefix="first_", goodKeys=goodFlags, qMin=-1.1, qMax=1.1,
-                             labeller=OverlapsStarGalaxyLabeller(),
-                             ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+                    yield from Analysis(catalog, TraceSizeCompare(compareCol + "_psf"),
+                                        "       SdssShape PSF Trace Radius Diff (%)" + subCatString,
+                                        shortName, self.config.analysis, prefix="first_",
+                                        goodKeys=goodFlags, qMin=-1.1, qMax=1.1,
+                                        labeller=OverlapsStarGalaxyLabeller(),
+                                        ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                  enforcer=enforcer, **plotAllKwargs)
 
                     if "first_ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
                         shortNameBase = "hsmTrace"
@@ -1723,77 +1873,82 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                      shortNameBase)
                         compareCol = "ext_shapeHSM_HsmSourceMoments"
                         self.log.info("shortName = {:s}".format(shortName))
-                        Analysis(catalog, TraceSizeCompare(compareCol),
-                                 "   HSM Trace Radius Diff (%)" + subCatString, shortName,
-                                 self.config.analysis, prefix="first_", goodKeys=goodFlags,
-                                 qMin=-0.5, qMax=1.5, labeller=OverlapsStarGalaxyLabeller(),
-                                 ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+                        yield from Analysis(catalog, TraceSizeCompare(compareCol),
+                                            "   HSM Trace Radius Diff (%)" + subCatString, shortName,
+                                            self.config.analysis, prefix="first_",
+                                            goodKeys=goodFlags, qMin=-0.5, qMax=1.5,
+                                            labeller=OverlapsStarGalaxyLabeller(),
+                                            ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                      enforcer=enforcer, **plotAllKwargs)
                         shortNameBase = "hsmPsfTrace"
                         shortName = (shortNameBase + "_calib_psf_used" if "calib_psf_used" in goodFlags else
                                      shortNameBase)
                     if "first_ext_shapeHSM_PsfMoments_xx" in catalog.schema:
                         compareCol = "ext_shapeHSM_HsmPsfMoments"
                         self.log.info("shortName = {:s}".format(shortName))
-                        Analysis(catalog, TraceSizeCompare(compareCol),
-                                 "      HSM PSF Trace Radius Diff (%)" + subCatString, shortName,
-                                 self.config.analysis, prefix="first_", goodKeys=goodFlags,
-                                 qMin=-1.1, qMax=1.1, labeller=OverlapsStarGalaxyLabeller(),
-                                 ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+                        yield from Analysis(catalog, TraceSizeCompare(compareCol),
+                                            "      HSM PSF Trace Radius Diff (%)" + subCatString,
+                                            shortName, self.config.analysis, prefix="first_",
+                                            goodKeys=goodFlags, qMin=-1.1, qMax=1.1,
+                                            labeller=OverlapsStarGalaxyLabeller(),
+                                            ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                      enforcer=enforcer, **plotAllKwargs)
 
                 compareCol = "base_SdssShape"
                 shortName = "sdssXx"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, PercentDiff(compareCol + "_xx"), "SdssShape xx Moment Diff (%)", shortName,
-                         self.config.analysis, prefix="first_", qMin=-0.5, qMax=1.5,
-                         labeller=OverlapsStarGalaxyLabeller(),
-                         ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+                yield from Analysis(catalog, PercentDiff(compareCol + "_xx"), "SdssShape xx Moment Diff (%)",
+                                    shortName, self.config.analysis, prefix="first_",
+                                    qMin=-0.5, qMax=1.5, labeller=OverlapsStarGalaxyLabeller(),
+                                    ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                              enforcer=enforcer, **plotAllKwargs)
                 shortName = "sdssYy"
                 self.log.info("shortName = {:s}".format(shortName))
-                Analysis(catalog, PercentDiff(compareCol +"_yy"), "SdssShape yy Moment Diff (%)", shortName,
-                         self.config.analysis, prefix="first_", qMin=-0.5, qMax=1.5,
-                         labeller=OverlapsStarGalaxyLabeller(),
-                         ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+                yield from Analysis(catalog, PercentDiff(compareCol + "_yy"), "SdssShape yy Moment Diff (%)",
+                                    shortName, self.config.analysis, prefix="first_",
+                                    qMin=-0.5, qMax=1.5, labeller=OverlapsStarGalaxyLabeller(),
+                                    ).plotAll(shortName, plotInfoDict, areaDict, self.log, enforcer=enforcer,
+                                              **plotAllKwargs)
 
-    def plotStarGal(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None, tractInfo=None,
-                    patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None,
-                    forcedStr=None, highlightList=None, uberCalLabel=None):
+    def plotStarGal(self, catalog, plotInfoDict, areaDict, matchRadius=None, matchRadiusUnitStr=None,
+                    zpLabel=None, forcedStr=None, highlightList=None, uberCalLabel=None):
+        yield
         enforcer = None
-        plotAllKwargs = dict(butler=butler, camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                             patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                             matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, forcedStr=forcedStr,
-                             highlightList=highlightList, uberCalLabel=uberCalLabel)
+        plotAllKwargs = dict(matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel,
+                             forcedStr=forcedStr, highlightList=highlightList, uberCalLabel=uberCalLabel)
         baseCol = "ext_shapeHSM_HsmShapeRegauss"
         col = baseCol + "_resolution"
         if "first_" + col in catalog.schema:
             shortName = "diff_resolution"
             self.log.info("shortName = {:s}".format(shortName))
-            Analysis(catalog, PercentDiff(col),
-                     "           Run Comparison: HsmRegauss Resolution (% diff)",
-                     shortName, self.config.analysis, prefix="first_", qMin=-0.2, qMax=0.2,
-                     labeller=OverlapsStarGalaxyLabeller(),
-                     ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+            yield from Analysis(catalog, PercentDiff(col),
+                                "           Run Comparison: HsmRegauss Resolution (% diff)",
+                                shortName, self.config.analysis, prefix="first_",
+                                qMin=-0.2, qMax=0.2, labeller=OverlapsStarGalaxyLabeller()
+                                ).plotAll(shortName, plotInfoDict, areaDict, self.log, enforcer=enforcer,
+                                          **plotAllKwargs)
         col = baseCol + "_e1"
         if "first_" + col in catalog.schema:
             shortName = "diff_HsmShapeRegauss_e1"
             self.log.info("shortName = {:s}".format(shortName))
-            Analysis(catalog, PercentDiff(col),
-                     "    Run Comparison: HsmRegauss e1 (% diff)",
-                     shortName, self.config.analysis, prefix="first_", qMin=-0.2, qMax=0.2,
-                     labeller=OverlapsStarGalaxyLabeller(),
-                     ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+            yield from Analysis(catalog, PercentDiff(col), "    Run Comparison: HsmRegauss e1 (% diff)",
+                                shortName, self.config.analysis, prefix="first_",
+                                qMin=-0.2, qMax=0.2, labeller=OverlapsStarGalaxyLabeller()
+                                ).plotAll(shortName, plotInfoDict, areaDict, self.log, enforcer=enforcer,
+                                          **plotAllKwargs)
         col = baseCol + "_e2"
         if "first_" + col in catalog.schema:
             shortName = "diff_HsmShapeRegauss_e2"
             self.log.info("shortName = {:s}".format(shortName))
-            Analysis(catalog, PercentDiff(col),
-                     "    Run Comparison: HsmRegauss e2 (% diff)",
-                     shortName, self.config.analysis, prefix="first_", qMin=-0.2, qMax=0.2,
-                     labeller=OverlapsStarGalaxyLabeller(),
-                     ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, **plotAllKwargs)
+            yield from Analysis(catalog, PercentDiff(col), "    Run Comparison: HsmRegauss e2 (% diff)",
+                                shortName, self.config.analysis, prefix="first_",
+                                qMin=-0.2, qMax=0.2, labeller=OverlapsStarGalaxyLabeller()
+                                ).plotAll(shortName, plotInfoDict, areaDict, self.log, enforcer=enforcer,
+                                          **plotAllKwargs)
 
-    def plotApCorrs(self, catalog, filenamer, dataId, butler=None, camera=None, ccdList=None,
-                    tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
+    def plotApCorrs(self, catalog, plotInfoDict, areaDict, matchRadius=None, matchRadiusUnitStr=None,
                     zpLabel=None, forcedStr=None, fluxToPlotList=None, highlightList=None, uberCalLabel=None):
+        yield
         if not fluxToPlotList:
             fluxToPlotList = self.config.fluxToPlotList
         unitStr = "mmag" if self.config.toMilli else "mag"
@@ -1806,16 +1961,19 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                 # but here so we don't encounter the fatal error in Analysis
                 if (len(np.where(np.isfinite(catalog["first_" + col + "_apCorr"]))[0]) > 0 and
                    len(np.where(np.isfinite(catalog["second_" + col + "_apCorr"]))[0]) > 0):
-                    Analysis(catalog, MagDiffCompare(col + "_apCorr", unitScale=self.unitScale),
-                             "  Run Comparison: %s apCorr diff (%s)" % (fluxToPlotString(col), unitStr),
-                             shortName, self.config.analysis, prefix="first_", qMin=-0.025, qMax=0.025,
-                             labeller=OverlapsStarGalaxyLabeller(), unitScale=self.unitScale
-                             ).plotAll(dataId, filenamer, self.log, enforcer=enforcer, butler=butler,
-                                       camera=camera, ccdList=ccdList, tractInfo=tractInfo,
-                                       patchList=patchList, hscRun=hscRun, matchRadius=matchRadius,
-                                       matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=None,
-                                       forcedStr=forcedStr, highlightList=highlightList +
-                                       [(col + "_flag_apCorr", 0, "lime"), ], uberCalLabel=uberCalLabel)
+                    yield from Analysis(catalog, MagDiffCompare(col + "_apCorr", unitScale=self.unitScale),
+                                        "  Run Comparison: %s apCorr diff (%s)" %
+                                        (fluxToPlotString(col), unitStr),
+                                        shortName, self.config.analysis, prefix="first_", qMin=-0.025,
+                                        qMax=0.025, labeller=OverlapsStarGalaxyLabeller(),
+                                        unitScale=self.unitScale
+                                        ).plotAll(shortName, plotInfoDict, areaDict, self.log,
+                                                  enforcer=enforcer, matchRadius=matchRadius,
+                                                  matchRadiusUnitStr=matchRadiusUnitStr,
+                                                  zpLabel=None, forcedStr=forcedStr,
+                                                  highlightList=highlightList +
+                                                  [(col + "_flag_apCorr", 0, "lime"), ],
+                                                  uberCalLabel=uberCalLabel)
                 else:
                     self.log.warn("No valid data points for shortName = {:s}.  Skipping...".format(shortName))
 

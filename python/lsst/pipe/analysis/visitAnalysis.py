@@ -11,21 +11,21 @@ from collections import defaultdict
 
 from lsst.daf.persistence.butler import Butler
 from lsst.pex.config import Field, ChoiceField
-from lsst.pipe.base import ArgumentParser, TaskRunner, TaskError
+from lsst.pipe.base import ArgumentParser, TaskRunner, TaskError, Struct
 from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
 from .analysis import Analysis
 from .coaddAnalysis import CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisTask
-from .utils import (Filenamer, AngularDistance, concatenateCatalogs, addApertureFluxesHSC, addFpPoint,
+from .utils import (AngularDistance, concatenateCatalogs, addApertureFluxesHSC, addFpPoint,
                     addFootprintNPix, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
                     calibrateSourceCatalogMosaic, calibrateSourceCatalogPhotoCalib,
                     calibrateSourceCatalog, backoutApCorr, matchNanojanskyToAB, andCatalog, writeParquet,
                     getRepoInfo, getCcdNameRefList, getDataExistsRefList, setAliasMaps,
-                    addPreComputedColumns)
+                    addPreComputedColumns, savePlots)
 from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText
 from .fakesAnalysis import (addDegreePositions, matchCatalogs, addNearestNeighbor, fakesPositionCompare,
-                            getPlotInfo, fakesAreaDepth, fakesMagnitudeCompare, fakesMagnitudeNearestNeighbor,
-                            fakesMagnitudeBlendedness, fakesCompletenessPlot)
+                            getPlotInfo, calcFakesAreaDepth, plotFakesAreaDepth, fakesMagnitudeCompare,
+                            fakesMagnitudeNearestNeighbor, fakesMagnitudeBlendedness, fakesCompletenessPlot)
 
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
@@ -33,36 +33,34 @@ import lsst.geom as geom
 
 
 class CcdAnalysis(Analysis):
-    def plotAll(self, dataId, filenamer, log, enforcer=None, butler=None, camera=None, ccdList=None,
-                tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
-                zpLabel=None, forcedStr=None, uberCalLabel=None, postFix="", plotRunStats=True,
-                highlightList=None, haveFpCoords=None, doPrintMedian=False):
+    def plotAll(self, description, plotInfoDict, areaDict, log, enforcer=None, matchRadius=None,
+                matchRadiusUnitStr=None, zpLabel=None, forcedStr=None, uberCalLabel=None, postFix="",
+                plotRunStats=True, highlightList=None, haveFpCoords=None, doPrintMedian=False):
         stats = self.stats
         if self.config.doPlotCcdXy:
-            self.plotCcd(filenamer(dataId, description=self.shortName, style="ccd" + postFix),
-                         stats=self.stats, hscRun=hscRun, matchRadius=matchRadius,
-                         matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel)
+            yield from self.plotCcd(self.shortName, style="ccd" + postFix, stats=self.stats,
+                                    matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                                    zpLabel=zpLabel)
         if self.config.doPlotFP and haveFpCoords:
-            self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa" + postFix),
-                                stats=stats, camera=camera, ccdList=ccdList, hscRun=hscRun,
-                                matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
-                                zpLabel=zpLabel)
+            yield from self.plotFocalPlane(self.shortname, plotInfoDict, style="fpa" + postFix,
+                                           stats=stats, matchRadius=matchRadius,
+                                           matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel)
 
-        return Analysis.plotAll(self, dataId, filenamer, log, enforcer=enforcer, butler=butler, camera=camera,
-                                ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
-                                matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, postFix=postFix,
-                                plotRunStats=plotRunStats, highlightList=highlightList,
-                                doPrintMedian=doPrintMedian)
+        yield from Analysis.plotAll(self, description, plotInfoDict, areaDict, log, enforcer=enforcer,
+                                    matchRadius=matchRadius,
+                                    matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, postFix=postFix,
+                                    plotRunStats=plotRunStats, highlightList=highlightList,
+                                    doPrintMedian=doPrintMedian)
 
-    def plotFP(self, dataId, filenamer, log, enforcer=None, camera=None, ccdList=None, hscRun=None,
-               matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None):
-        self.plotFocalPlane(filenamer(dataId, description=self.shortName, style="fpa"), stats=self.stats,
-                            camera=camera, ccdList=ccdList, hscRun=hscRun, matchRadius=matchRadius,
-                            matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, forcedStr=forcedStr)
+    def plotFP(self, description, plotInfoDict, log, enforcer=None, matchRadius=None, matchRadiusUnitStr=None,
+               zpLabel=None, forcedStr=None):
+        yield from self.plotFocalPlane(self.shortName, plotInfoDict, style="fpa", stats=self.stats,
+                                       matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                                       zpLabel=zpLabel, forcedStr=forcedStr)
 
-    def plotCcd(self, filename, centroid="base_SdssCentroid", cmap=plt.cm.nipy_spectral, idBits=32,
-                visitMultiplier=200, stats=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,
-                zpLabel=None, doPrintMedian=False):
+    def plotCcd(self, description, plotInfoDict, centroid="base_SdssCentroid", cmap=plt.cm.nipy_spectral,
+                idBits=32, visitMultiplier=200, stats=None, matchRadius=None,
+                matchRadiusUnitStr=None, zpLabel=None, doPrintMedian=False, style="ccd"):
         """Plot quantity as a function of CCD x,y"""
         xx = self.catalog[self.prefix + centroid + "_x"]
         yy = self.catalog[self.prefix + centroid + "_y"]
@@ -96,12 +94,12 @@ class CcdAnalysis(Analysis):
         axes[1].set_xlabel("y_ccd")
         fig.text(0.02, 0.5, self.quantityName, ha="center", va="center", rotation="vertical")
         if stats is not None:
-            annotateAxes(filename, plt, axes[0], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
-                         hscRun=hscRun, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
-                         unitScale=self.unitScale, doPrintMedian=doPrintMedian)
-            annotateAxes(filename, plt, axes[1], stats, "star", self.config.magThreshold, x0=0.03, yOff=0.07,
-                         hscRun=hscRun, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
-                         unitScale=self.unitScale, doPrintMedian=doPrintMedian)
+            annotateAxes(description, plt, axes[0], stats, "star", self.config.magThreshold, x0=0.03,
+                         yOff=0.07, hscRun=plotInfoDict["hscRun"], matchRadiusUnitStr=matchRadiusUnitStr,
+                         unitScale=self.unitScale, doPrintMedian=doPrintMedian, matchRadius=matchRadius)
+            annotateAxes(description, plt, axes[1], stats, "star", self.config.magThreshold, x0=0.03,
+                         yOff=0.07, hscRun=plotInfoDict["hscRun"], matchRadiusUnitStr=matchRadiusUnitStr,
+                         unitScale=self.unitScale, doPrintMedian=doPrintMedian, matchRadius=matchRadius)
         axes[0].set_xlim(-100, 2150)
         axes[1].set_xlim(-100, 4300)
         axes[0].set_ylim(self.qMin, self.qMax)
@@ -113,15 +111,13 @@ class CcdAnalysis(Analysis):
         cax = fig.add_axes([0.83, 0.15, 0.04, 0.7])
         cb = fig.colorbar(mappable, cax=cax)
         cb.set_label("CCD index", rotation=270, labelpad=15)
-        labelVisit(filename, plt, axes[0], 0.5, 1.1)
+        labelVisit(description, plt, axes[0], 0.5, 1.1)
         if zpLabel:
             plotText(zpLabel, plt, axes[0], 0.08, -0.11, prefix="zp: ", color="green")
-        fig.savefig(filename)
-        plt.close(fig)
+        yield Struct(fig=fig, description=description, style=style, stats=stats)
 
-    def plotFocalPlane(self, filename, cmap=plt.cm.Spectral, stats=None, camera=None, ccdList=None,
-                       hscRun=None, matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None,
-                       fontSize=8):
+    def plotFocalPlane(self, description, plotInfoDict, cmap=plt.cm.Spectral, stats=None, matchRadius=None,
+                       matchRadiusUnitStr=None, zpLabel=None, forcedStr=None, fontSize=8, style="fpa"):
         """Plot quantity colormaped on the focal plane"""
         xFp = self.catalog[self.prefix + "base_FPPosition_x"]
         yFp = self.catalog[self.prefix + "base_FPPosition_y"]
@@ -132,7 +128,7 @@ class CcdAnalysis(Analysis):
         else:
             vMin, vMax = self.qMin, self.qMax
         # Set limits to ccd pixel ranges when plotting the centroids (which are in pixel units)
-        if filename.find("Centroid") > -1:
+        if description.find("Centroid") > -1:
             cmap = plt.cm.pink
             vMin = min(0, np.round(self.data["star"].quantity.min() - 10))
             vMax = np.round(self.data["star"].quantity.max() + 50, -2)
@@ -153,17 +149,16 @@ class CcdAnalysis(Analysis):
         mappable._A = []        # fake up the array of the scalar mappable. Urgh...
         cb = plt.colorbar(mappable)
         cb.set_label(self.quantityName, rotation=270, labelpad=15)
-        if hscRun:
-            axes.set_title("HSC stack run: " + hscRun, color="#800080")
-        labelVisit(filename, plt, axes, 0.5, 1.04)
-        if camera:
-            labelCamera(camera, plt, axes, 0.5, 1.09)
+        if plotInfoDict["hscRun"]:
+            axes.set_title("HSC stack run: " + plotInfoDict["hscRun"], color="#800080")
+        labelVisit(plotInfoDict, fig, axes, 0.5, 1.04)
+        if plotInfoDict["camera"]:
+            labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
         if zpLabel:
-            plotText(zpLabel, plt, axes, 0.08, -0.1, prefix="zp: ", color="green")
+            plotText(zpLabel, fig, axes, 0.08, -0.1, prefix="zp: ", color="green")
         if forcedStr:
-            plotText(forcedStr, plt, axes, 0.86, -0.1, prefix="cat: ", color="green")
-        fig.savefig(filename)
-        plt.close(fig)
+            plotText(forcedStr, fig, axes, 0.86, -0.1, prefix="cat: ", color="green")
+        yield Struct(fig=fig, description=description, stats=stats, style=style)
 
 
 class VisitAnalysisConfig(CoaddAnalysisConfig):
@@ -260,6 +255,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         return parser
 
     def runDataRef(self, dataRefList, tract=None, subdir=""):
+        plotList = []
         self.log.info("dataRefList size: {:d}".format(len(dataRefList)))
         if tract is None:
             tractList = [0, ]
@@ -281,6 +277,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                    externalSkyWcsName=self.config.externalSkyWcsName)
             self.log.info("dataId: {!s:s}".format(repoInfo.dataId))
             ccdListPerTract = getDataExistsRefList(dataRefListTract, repoInfo.catDataset)
+
+            plotInfoDict = getPlotInfo(repoInfo)
+
             if not ccdListPerTract:
                 raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo.catDataset))
             if self.config.doApplyExternalPhotoCalib:
@@ -326,10 +325,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if self.config.doApplyExternalPhotoCalib:
                 if set(ccdListPerTract) != set(ccdSkyWcsListPerTract):
                     self.log.warn(f"Did not find {repoInfo.skyWcsDataset} external calibrations for "
-                                  f"all dataIds that do have {epoInfo.catDataset} catalogs.")
+                                  f"all dataIds that do have {repoInfo.catDataset} catalogs.")
 
             subdir = "ccd-" + str(ccdListPerTract[0]) if len(ccdListPerTract) == 1 else subdir
-            filenamer = Filenamer(repoInfo.butler, "plotVisit", repoInfo.dataId, subdir=subdir)
             # Create list of alias mappings for differing schema naming conventions (if any)
             aliasDictList = [self.config.flagsToAlias, ]
             if repoInfo.hscRun and self.config.srcSchemaMap is not None:
@@ -351,8 +349,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                         aliasDictList=aliasDictList,
                         fakeCat=inputFakes)
                 else:
-                    commonZpCat, catalog = self.readCatalogs(dataRefListTract, "src", repoInfo,
-                                                             aliasDictList=aliasDictList)
+                    commonZpCat, catalog, areaDict = self.readCatalogs(dataRefListTract, "src", repoInfo,
+                                                                       aliasDictList=aliasDictList)
                 # Make sub-catalog of sky sources before flag culling as many of
                 # these will have flags set due to measurement difficulties in
                 # regions that are really blank sky
@@ -362,8 +360,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                         skySrcCat = catalog[catalog["sky_source"]].copy(deep=True)
                     else:
                         self.log.warn("doPlotSkyObjects is True, but the \"sky_source\" "
-                                 "column does not exist in catalog.schema.  Skipping "
-                                 "skyObjects plot.")
+                                      "column does not exist in catalog.schema.  Skipping "
+                                      "skyObjects plot.")
+
                 # Set boolean arrays indicating sources deemed unsuitable for qa analyses
                 self.catLabel = "nChild = 0"
                 bad = makeBadArray(catalog, flagList=self.config.analysis.flags,
@@ -392,6 +391,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 catalog = catalog[~bad].copy(deep=True)
                 commonZpCat = commonZpCat[~badCommonZp].copy(deep=True)
 
+                plotInfoDict["plotType"] = "plotVisit"
+
                 if self.config.hasFakes:
                     processedFakes = catalog.asAstropy().to_pandas()
                     inputFakes = addDegreePositions(inputFakes, self.config.inputFakesRaCol,
@@ -400,99 +401,104 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                                         self.config.catalogDecCol)
                     processedFakes = addNearestNeighbor(processedFakes, self.config.catalogRaCol + "_deg",
                                                         self.config.catalogDecCol + "_deg")
-                    plotInfoDict = getPlotInfo(repoInfo)
                     inputFakesMatched, processedFakesMatched, inputFakes = matchCatalogs(
                         inputFakes, self.config.inputFakesRaCol + "_deg",
                         self.config.inputFakesDecCol + "_deg", processedFakes,
                         self.config.catalogRaCol + "_deg", self.config.catalogDecCol + "_deg")
-                    _, medMag100 = fakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict,
-                                                  areaDict, repoInfo)
-                    plotInfoDict["magLim"] = medMag100
-                    fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict, repoInfo)
-                    fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict, repoInfo)
-                    fakesMagnitudeNearestNeighbor(inputFakesMatched, processedFakesMatched, plotInfoDict,
-                                                  repoInfo)
-                    fakesMagnitudeBlendedness(inputFakesMatched, processedFakesMatched, plotInfoDict,
-                                              repoInfo)
-                    fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, plotInfoDict,
-                                          areaDict, repoInfo)
+
+                    areaDepthStruct = calcFakesAreaDepth(inputFakesMatched, processedFakesMatched, areaDict,
+                                                         numSigmas=100.0)
+
+                    plotList.append(plotFakesAreaDepth(inputFakesMatched, processedFakesMatched,
+                                                       plotInfoDict, areaDict))
+                    plotList.append(plotFakesAreaDepth(inputFakesMatched, processedFakesMatched,
+                                                       plotInfoDict, areaDict, numSigmas=100.0))
+
+                    plotInfoDict["magLim"] = areaDepthStruct.medMagsToLimit
+                    plotList.append(fakesPositionCompare(inputFakesMatched, processedFakesMatched,
+                                    plotInfoDict))
+                    plotList.append(fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched,
+                                                          plotInfoDict))
+                    plotList.append(fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched,
+                                                          plotInfoDict,
+                                                          magCol="base_CircularApertureFlux_12_0_mag"))
+                    plotList.append(fakesMagnitudeNearestNeighbor(inputFakesMatched, processedFakesMatched,
+                                                                  plotInfoDict))
+                    plotList.append(fakesMagnitudeBlendedness(inputFakesMatched, processedFakesMatched,
+                                                              plotInfoDict))
+                    plotList.append(fakesCompletenessPlot(inputFakes, inputFakesMatched,
+                                                          processedFakesMatched, plotInfoDict, areaDict))
 
                 # Dict of all parameters common to plot* functions
-                plotKwargs = dict(butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
-                                  hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo)
+                plotInfoDict.update(dict(cameraObj=repoInfo.camera, ccdList=ccdListPerTract,
+                                         hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo,
+                                         dataId=repoInfo.dataId))
                 if self.config.doPlotSkyObjects and skySrcCat is not None:
-                    self.plotSkyObjects(skySrcCat, filenamer(repoInfo.dataId, description="skySources",
-                                                             style="hist"), repoInfo.dataId, **plotKwargs)
+                    self.plotSkyObjects(skySrcCat, "skySources", plotInfoDict, areaDict)
                 if self.config.doPlotPsfFluxSnHists:
-                    self.plotPsfFluxSnHists(commonZpCat,
-                                            filenamer(repoInfo.dataId, description="base_PsfFlux_raw",
-                                                      style="hist"),
-                                        repoInfo.dataId, zpLabel="raw", **plotKwargs)
-                    self.plotPsfFluxSnHists(catalog,
-                                            filenamer(repoInfo.dataId, description="base_PsfFlux_cal",
-                                                      style="hist"),
-                                            repoInfo.dataId, zpLabel=self.zpLabel, **plotKwargs)
-                plotKwargs.update(dict(zpLabel=self.zpLabel))
+                    plotList.append(self.plotPsfFluxSnHists(commonZpCat, "base_PsfFlux_raw",
+                                                            plotInfoDict, areaDict, zpLabel="raw"))
+                    plotList.append(self.plotPsfFluxSnHists(catalog, "base_PsfFlux_cal",
+                                                            plotInfoDict, areaDict, zpLabel=self.zpLabel))
+                plotKwargs = dict(zpLabel=self.zpLabel)
                 if self.config.doPlotFootprintNpix:
-                    self.plotFootprintHist(catalog,
-                                           filenamer(repoInfo.dataId, description="footNpix", style="hist"),
-                                           repoInfo.dataId, **plotKwargs)
-                    self.plotFootprint(catalog, filenamer, repoInfo.dataId, plotRunStats=False,
-                                       highlightList=highlightList + [("parent", 0, "yellow"), ],
-                                       **plotKwargs)
+                    plotList.append(self.plotFootprintHist(catalog, "footNpix", plotInfoDict, **plotKwargs))
+                    plotList.append(self.plotFootprint(catalog, plotInfoDict, areaDict, plotRunStats=False,
+                                                       highlightList=[("parent", 0, "yellow"), ],
+                                                       **plotKwargs))
 
                 if self.config.doPlotQuiver:
-                    self.plotQuiver(catalog,
-                                    filenamer(repoInfo.dataId, description="ellipResids", style="quiver"),
-                                    dataId=repoInfo.dataId, scale=2, **plotKwargs)
+                    plotList.append(self.plotQuiver(catalog, "ellipResids", plotInfoDict, areaDict, scale=2,
+                                                    **plotKwargs))
 
                 plotKwargs.update(dict(highlightList=highlightList))
                 # Create mag comparison plots using common ZP
                 if self.config.doPlotMags and not commonZpDone:
                     zpLabel = "common (%s)" % self.config.analysis.commonZp
                     plotKwargs.update(dict(zpLabel=zpLabel))
-                    self.plotMags(commonZpCat, filenamer, repoInfo.dataId,
-                                  fluxToPlotList=["base_GaussianFlux", "base_CircularApertureFlux_12_0"],
-                                  postFix="_commonZp", **plotKwargs)
+                    plotList.append(self.plotMags(commonZpCat, plotInfoDict, areaDict,
+                                                  fluxToPlotList=["base_GaussianFlux",
+                                                                  "base_CircularApertureFlux_12_0"],
+                                                  postFix="_commonZp", **plotKwargs))
                     commonZpDone = True
                 # Now calibrate the source catalg to either the instrumental flux corresponding
                 # to 0th magnitude, fluxMag0, from SFM or the external-calibration solution
                 # (from jointcal, fgcm, or meas_mosaic) for remainder of plots.
                 plotKwargs.update(dict(zpLabel=self.zpLabel))
                 if self.config.doPlotMags:
-                    self.plotMags(catalog, filenamer, repoInfo.dataId, **plotKwargs)
+                    plotList.append(self.plotMags(catalog, plotInfoDict, areaDict, **plotKwargs))
                 if self.config.doPlotStarGalaxy:
                     if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
-                        self.plotStarGal(catalog, filenamer, repoInfo.dataId, **plotKwargs)
+                        plotList.append(self.plotStarGal(catalog, plotInfoDict, areaDict, **plotKwargs))
                     else:
                         self.log.warn("Cannot run plotStarGal: " +
                                       "ext_shapeHSM_HsmSourceMoments_xx not in catalog.schema")
                 if self.config.doPlotSizes:
                     if "base_SdssShape_psf_xx" in catalog.schema:
-                        self.plotSizes(catalog, filenamer, repoInfo.dataId, **plotKwargs)
+                        plotList.append(self.plotSizes(catalog, plotInfoDict, areaDict, **plotKwargs))
                     else:
                         self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
                 if self.config.doPlotCentroids and self.haveFpCoords:
-                    self.plotCentroidXY(catalog, filenamer, repoInfo.dataId, **plotKwargs)
+                    plotList.append(self.plotCentroidXY(catalog, plotInfoDict, areaDict, **plotKwargs))
 
             if self.config.doPlotMatches:
                 matches = self.readSrcMatches(dataRefListTract, "src", repoInfo, aliasDictList=aliasDictList)
                 # Dict of all parameters common to plot* functions
                 matchHighlightList = [("src_" + self.config.analysis.fluxColumn.replace("_instFlux", "_flag"),
                                        0, "turquoise"), ]
-                plotKwargs = dict(butler=repoInfo.butler, camera=repoInfo.camera, ccdList=ccdListPerTract,
-                                  hscRun=repoInfo.hscRun, zpLabel=self.zpLabel,
-                                  highlightList=matchHighlightList)
-                self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId, **plotKwargs)
+                plotList.append(self.plotMatches(matches, plotInfoDict, areaDict, zpLabel=self.zpLabel,
+                                highlightList=matchHighlightList))
 
-                for cat in self.config.externalCatalogs:
-                    if self.config.photoCatName not in cat:
-                        with andCatalog(cat):
-                            matches = self.matchCatalog(catalog, repoInfo.filterName,
-                                                        self.config.externalCatalogs[cat])
-                            self.plotMatches(matches, repoInfo.filterName, filenamer, repoInfo.dataId,
-                                             matchRadius=self.matchRadius,
-                                             matchRadiusUnitStr=self.matchRadiusUnitStr, **plotKwargs)
+            for cat in self.config.externalCatalogs:
+                if self.config.photoCatName not in cat:
+                    with andCatalog(cat):
+                        matches = self.matchCatalog(catalog, plotInfoDict["filter"],
+                                                    self.config.externalCatalogs[cat])
+                        plotList.append(self.plotMatches(matches, plotInfoDict, areaDict,
+                                                         matchRadius=self.matchRadius,
+                                                         matchRadiusUnitStr=self.matchRadiusUnitStr,
+                                                         **plotKwargs))
+        savePlots(plotList, "plotVisit", repoInfo.dataId, repoInfo.butler)
 
     def readCatalogs(self, dataRefList, dataset, repoInfo, aliasDictList=None, fakeCat=None,
                      raFakesCol="raJ2000", decFakesCol="decJ2000"):
@@ -529,6 +535,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
            ccd and wether the processing was done with an HSC stack (now
            obsolete, but processing runs still exist)
         fakeCat : `pandas.core.frame.DataFrame`
+            Default : None
             Catalog of fake sources, used if hasFakes is True in which case a column (onCcd)
             is added with the ccd number if the fake source overlaps a ccd and np.nan if it does not.
 
@@ -560,17 +567,18 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             catalog = addIntFloatOrStrColumn(catalog, dataRef.dataId[repoInfo.ccdKey], "ccdId",
                                              "Id of CCD on which source was detected")
 
+            # getUri is less safe but enables us to use an efficient
+            # ExposureFitsReader
+            fname = repoInfo.butler.getUri("calexp", dataRef.dataId)
+            reader = afwImage.ExposureFitsReader(fname)
+            wcs = reader.readWcs()
+
+            # Actual mask is needed because BAD pixels are more than
+            # just the defects
+            mask = reader.readMask()
+
             # Compute Focal Plane coordinates for each source if not already there
             if self.config.hasFakes:
-                # getUri is less safe but enables us to use an efficient
-                # ExposureFitsReader
-                fname = repoInfo.butler.getUri("calexp", dataId)
-                reader = afwImage.ExposureFitsReader(fname)
-                wcs = reader.readWcs()
-
-                # Actual mask is needed because BAD pixels are more than
-                # just the defects
-                mask = reader.readMask()
 
                 maskBad = mask.array & 2**mask.getMaskPlaneDict()['BAD']
                 good = np.count_nonzero(maskBad == 0)
@@ -578,12 +586,13 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 area = pixScale**2 * good
                 areaDict[dataRef.dataId["ccd"]] = area
 
-                ccdWidth = mask.getWidth()
-                ccdHeight = mask.getHeight()
+            ccdWidth = mask.getWidth()
+            ccdHeight = mask.getHeight()
 
-                ccdCorners = wcs.pixelToSky([geom.Point2D(0, 0), geom.Point2D(ccdWidth, ccdHeight)])
-                areaDict["corners_" + str(dataRef.dataId["ccd"])] = ccdCorners
+            ccdCorners = wcs.pixelToSky([geom.Point2D(0, 0), geom.Point2D(ccdWidth, ccdHeight)])
+            areaDict["corners_" + str(dataRef.dataId[repoInfo.ccdKey])] = ccdCorners
 
+            if self.config.hasFakes:
                 # Check which fake sources fall on the ccd
                 # TODO: this looks a bit iffy, as a fake could still be on the
                 # CCD but outside where sources were detected
@@ -608,7 +617,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     onCcd = validCcdPolygon.contains(pixCoord)
                     if onCcd:
                         onCcdList.append(rowId)
-                fakeCat["onCcd"].iloc[np.array(onCcdList)] = dataRef.dataId["ccd"]
+                fakeCat["onCcd"].iloc[np.array(onCcdList)] = dataRef.dataId[repoInfo.ccdKey]
 
             if self.config.doPlotCentroids or self.config.analysis.doPlotFP and self.haveFpCoords:
                 if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
@@ -661,7 +670,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         if self.config.hasFakes:
             return concatenateCatalogs(commonZpCatList), concatenateCatalogs(catList), areaDict, fakeCat
         else:
-            return concatenateCatalogs(commonZpCatList), concatenateCatalogs(catList)
+            return concatenateCatalogs(commonZpCatList), concatenateCatalogs(catList), areaDict
 
     def readSrcMatches(self, dataRefList, dataset, repoInfo, aliasDictList=None):
         catList = []
@@ -907,7 +916,7 @@ class CompareVisitAnalysisConfig(VisitAnalysisConfig):
                              "be applied.  Try running without setting doApplyExternalPhotoCalib (which is "
                              "only appropriate for the visitAnalysis.py script).")
         if (not self.doApplyExternalSkyWcs
-            and (self.doApplyExternalSkyWcs1 and self.doApplyExternalSkyWcs2)):
+                and (self.doApplyExternalSkyWcs1 and self.doApplyExternalSkyWcs2)):
             raise ValueError("doApplyExternalSkyWcs is set to False, but doApplyExternalSkyWcs1 and "
                              "doApplyExternalSkyWcs2, the appropriate settings for the "
                              "compareVisitAnalysis.py scirpt, are both True, so external calibrations would "
@@ -1081,7 +1090,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             aliasDictList = [self.config.flagsToAlias, ]
             if (repoInfo1.hscRun or repoInfo2.hscRun) and self.config.srcSchemaMap is not None:
                 aliasDictList += [self.config.srcSchemaMap]
-            commonZpCat1, catalog1, commonZpCat2, catalog2 = (
+            commonZpCat1, catalog1, areaDict1, commonZpCat2, catalog2, areaDict2 = (
                 self.readCatalogs(dataRefListTract1, dataRefListTract2, "src", repoInfo1, repoInfo2,
                                   doReadFootprints=doReadFootprints, aliasDictList=aliasDictList))
 
@@ -1117,24 +1126,26 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                           self.matchRadius, self.matchRadiusUnitStr, len(catalog)))
 
             subdir = "ccd-" + str(ccdListPerTract1[0]) if len(ccdIntersectList) == 1 else subdir
-            filenamer = Filenamer(repoInfo1.butler, "plotCompareVisit", repoInfo1.dataId, subdir=subdir)
             hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
 
             # Dict of all parameters common to plot* functions
             tractInfo1 = repoInfo1.tractInfo if self.config.doApplyExternalPhotoCalib1 else None
-            tractInfo2 = repoInfo2.tractInfo if self.config.doApplyExternalPhotoCalib2 else None
-            tractInfo = tractInfo1 if (tractInfo1 or tractInfo2) else None
             # Always highlight points with x-axis flag set (for cases where
             # they do not get explicitly filtered out).
             highlightList = [(self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0,
                               "turquoise"), ]
-            plotKwargs1 = dict(butler=repoInfo1.butler, camera=repoInfo1.camera, hscRun=hscRun,
-                               matchRadius=self.matchRadius, matchRadiusUnitStr=self.matchRadiusUnitStr,
-                               zpLabel=self.zpLabel, tractInfo=tractInfo, highlightList=highlightList)
+            plotKwargs1 = dict(matchRadius=self.matchRadius, matchRadiusUnitStr=self.matchRadiusUnitStr,
+                               zpLabel=self.zpLabel, highlightList=highlightList)
 
+            plotInfoDict = getPlotInfo(repoInfo1)
+
+            plotInfoDict.update({"ccdList": ccdIntersectList, "allCcdList": fullCameraCcdList1,
+                                 "plotType": "plotCompareVisit", "hscRun1": repoInfo1.hscRun,
+                                 "hscRun2": repoInfo2.hscRun, "hscRun": hscRun, "tractInfo": tractInfo1,
+                                 "dataId": repoInfo1.dataId, "cameraObj": repoInfo1.camera})
+            plotList = []
             if self.config.doPlotFootprintNpix:
-                self.plotFootprint(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
-                                   **plotKwargs1)
+                plotList.append(self.plotFootprint(catalog, plotInfoDict, areaDict1, **plotKwargs1))
 
             # Create mag comparison plots using common ZP
             if not commonZpDone:
@@ -1144,30 +1155,30 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 except Exception:
                     pass
                 plotKwargs1.update(dict(zpLabel=zpLabel))
-                self.plotMags(commonZpCat, filenamer, repoInfo1.dataId, ccdList=fullCameraCcdList1,
-                              fluxToPlotList=["base_GaussianFlux", "base_CircularApertureFlux_12_0"],
-                              postFix="_commonZp", **plotKwargs1)
+                plotList.append(self.plotMags(commonZpCat, plotInfoDict, areaDict1,
+                                              fluxToPlotList=["base_GaussianFlux",
+                                                              "base_CircularApertureFlux_12_0"],
+                                              postFix="_commonZp", **plotKwargs1))
                 commonZpDone = True
 
             plotKwargs1.update(dict(zpLabel=self.zpLabel))
             if self.config.doPlotMags:
-                self.plotMags(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList, **plotKwargs1)
+                plotList.append(self.plotMags(catalog, plotInfoDict, areaDict1, **plotKwargs1))
             if self.config.doPlotSizes:
                 if ("first_base_SdssShape_psf_xx" in catalog.schema and
                         "second_base_SdssShape_psf_xx" in catalog.schema):
-                    self.plotSizes(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
-                                   **plotKwargs1)
+                    plotList.append(self.plotSizes(catalog, plotInfoDict, areaDict1, **plotKwargs1))
                 else:
                     self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
             if self.config.doApCorrs:
-                self.plotApCorrs(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
-                                 **plotKwargs1)
+                plotList.append(self.plotApCorrs(catalog, plotInfoDict, areaDict1, **plotKwargs1))
             if self.config.doPlotCentroids:
-                self.plotCentroids(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
-                                   **plotKwargs1)
+                plotList.append(self.plotCentroids(catalog, plotInfoDict, areaDict1, **plotKwargs1))
             if self.config.doPlotStarGalaxy:
-                self.plotStarGal(catalog, filenamer, repoInfo1.dataId, ccdList=ccdIntersectList,
-                                 **plotKwargs1)
+                plotList.append(self.plotStarGal(catalog, plotInfoDict, areaDict1, **plotKwargs1))
+
+            self.allStats, self.allStatsHigh = savePlots(plotList, "plotCompareVisit", repoInfo1.dataId,
+                                                         repoInfo1.butler)
 
     def readCatalogs(self, dataRefList1, dataRefList2, dataset, repoInfo1, repoInfo2,
                      doReadFootprints=None, aliasDictList=None):
@@ -1212,14 +1223,18 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         commonZpCatList2 = []
         self.zpLabel1 = None
         self.zpLabel2 = None
-        for (iCat, catList, commonZpCatList, dataRefList, repoInfo, doApplyExternalPhotoCalib,
-             doApplyExternalSkyWcs, useMeasMosaic) in [
-                 [1, catList1, commonZpCatList1, dataRefList1, repoInfo1,
-                  self.config.doApplyExternalPhotoCalib1, self.config.doApplyExternalSkyWcs1,
-                  self.config.useMeasMosaic1],
-                 [2, catList2, commonZpCatList2, dataRefList2, repoInfo2,
-                  self.config.doApplyExternalPhotoCalib2, self.config.doApplyExternalSkyWcs2,
-                  self.config.useMeasMosaic2]]:
+        areaDict1 = {}
+        areaDict2 = {}
+
+        info1 = [catList1, commonZpCatList1, dataRefList1, repoInfo1, self.config.doApplyExternalPhotoCalib1,
+                 self.config.doApplyExternalSkyWcs1, self.config.useMeasMosaic1, areaDict1]
+        info2 = [catList2, commonZpCatList2, dataRefList2, repoInfo2, self.config.doApplyExternalPhotoCalib2,
+                 self.config.doApplyExternalSkyWcs2, self.config.useMeasMosaic2, areaDict2]
+
+        for (iCat, catInfoList) in enumerate([info1, info2]):
+            [catList, commonZpCatList, dataRefList, repoInfo, doApplyExternalPhotoCalib,
+                doApplyExternalSkyWcs, useMeasMosaic, areaDict] = catInfoList
+
             for dataRef in dataRefList:
                 if not dataRef.datasetExists(dataset):
                     continue
@@ -1244,6 +1259,29 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                     fluxMag0 = photoCalib.getInstFluxAtZeroMagnitude()
                 det = repoInfo.butler.get("calexp_detector", dataRef.dataId)
                 nQuarter = det.getOrientation().getNQuarter()
+
+                # getUri is less safe but enables us to use an efficient
+                # ExposureFitsReader
+                fname = repoInfo.butler.getUri("calexp", dataRef.dataId)
+                reader = afwImage.ExposureFitsReader(fname)
+                wcs = reader.readWcs()
+
+                # Actual mask is needed because BAD pixels are more than
+                # just the defects
+                mask = reader.readMask()
+
+                maskBad = mask.array & 2**mask.getMaskPlaneDict()['BAD']
+                good = np.count_nonzero(maskBad == 0)
+                pixScale = wcs.getPixelScale().asArcseconds()
+                area = pixScale**2 * good
+                areaDict[dataRef.dataId["ccd"]] = area
+
+                ccdWidth = mask.getWidth()
+                ccdHeight = mask.getHeight()
+
+                ccdCorners = wcs.pixelToSky([geom.Point2D(0, 0), geom.Point2D(ccdWidth, ccdHeight)])
+                areaDict["corners_" + str(dataRef.dataId["ccd"])] = ccdCorners
+
                 # add footprint nPix column
                 if self.config.doPlotFootprintNpix:
                     srcCat = addFootprintNPix(srcCat)
@@ -1261,7 +1299,6 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 commonZpCat = srcCat.copy(True)
                 commonZpCat = calibrateSourceCatalog(commonZpCat, self.config.analysis.commonZp)
                 commonZpCatList.append(commonZpCat)
-
 
                 if self.config.doApplyExternalPhotoCalib:
                     if repoInfo.hscRun:
@@ -1284,8 +1321,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 srcCat, zpLabel = self.calibrateCatalogs(dataRef, srcCat, fluxMag0, repoInfo,
                                                          doApplyExternalPhotoCalib, doApplyExternalSkyWcs,
                                                          useMeasMosaic, iCat)
-                self.zpLabel1 = zpLabel if iCat == 1 and not self.zpLabel1 else self.zpLabel1
-                self.zpLabel2 = zpLabel if iCat == 2 and not self.zpLabel2 else self.zpLabel2
+                self.zpLabel1 = zpLabel if iCat == 0 and not self.zpLabel1 else self.zpLabel1
+                self.zpLabel2 = zpLabel if iCat == 1 and not self.zpLabel2 else self.zpLabel2
 
                 catList.append(srcCat)
 
@@ -1296,8 +1333,8 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         if not catList2:
             raise TaskError("No catalogs read: %s" % ([dataRefList2[0].dataId for dataRef2 in dataRefList2]))
 
-        return (concatenateCatalogs(commonZpCatList1), concatenateCatalogs(catList1),
-                concatenateCatalogs(commonZpCatList2), concatenateCatalogs(catList2))
+        return (concatenateCatalogs(commonZpCatList1), concatenateCatalogs(catList1), areaDict1,
+                concatenateCatalogs(commonZpCatList2), concatenateCatalogs(catList2), areaDict2)
 
     def calibrateCatalogs(self, dataRef, catalog, fluxMag0, repoInfo, doApplyExternalPhotoCalib,
                           doApplyExternalSkyWcs, useMeasMosaic, iCat):
@@ -1331,7 +1368,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
            calibration (even if photoCalib object exists).  For testing
            implementations.
         iCat : `int`
-           Integer representing whether this is comparison catalog number 1 or 2
+           Integer representing whether this is comparison catalog number 0 or 1
 
         Returns
         -------
@@ -1350,7 +1387,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 # calibration (as opposed to meas_mosaic's fcr object).
                 zpLabel = ("MMphotoCalib" if dataRef.datasetExists("fcr_md")
                            else repoInfo.photoCalibDataset.split("_")[0].upper())
-                zpLabel += "_" + str(iCat)
+                zpLabel += "_" + str(iCat + 1)
                 calibrated = calibrateSourceCatalogPhotoCalib(dataRef, catalog, repoInfo.photoCalibDataset,
                                                               zp=self.zp)
             else:
