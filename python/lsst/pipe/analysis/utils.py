@@ -27,7 +27,7 @@ except ImportError:
 
 __all__ = ["Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCompare",
            "AstrometryDiff", "AngularDistance", "TraceSize", "PsfTraceSizeDiff", "TraceSizeCompare",
-           "PercentDiff", "E1Resids", "E2Resids", "E1ResidsHsmRegauss", "E2ResidsHsmRegauss",
+           "PercentDiff", "E1", "E2", "E1Resids", "E2Resids", "E1ResidsHsmRegauss", "E2ResidsHsmRegauss",
            "FootNpixDiffCompare", "MagDiffErr", "MagDiffCompareErr", "ApCorrDiffErr",
            "CentroidDiff", "CentroidDiffErr", "deconvMom", "deconvMomStarGal",
            "concatenateCatalogs", "joinMatches", "checkIdLists", "checkPatchOverlap",
@@ -315,7 +315,7 @@ class TraceSize(object):
 
 
 class PsfTraceSizeDiff(object):
-    """Functor to calculate trace radius size difference (%) between object and psf model"""
+    """Functor to calculate trace radius size difference (%) between object and PSF model"""
     def __init__(self, column, psfColumn):
         self.column = column
         self.psfColumn = psfColumn
@@ -353,39 +353,134 @@ class PercentDiff(object):
         return np.array(percentDiff)
 
 
+class E1(object):
+    """Function to calculate e1 ellipticities from a given catalog
+
+    Parameters
+    ----------
+    column: `str`
+        The name of the shape measurement algorithm (SdssShape or HsmRegauss).
+    unitScale : 'float`, optional
+        A numerical scaling factor to multiply the ellipticity (1.0 by default)
+
+    Returns
+    -------
+    e1 : `numpy.array`
+        A numpy array of e1 ellipticity values
+    """
+
+    def __init__(self, column, unitScale=1.0):
+        self.column = column
+        self.unitScale = unitScale
+
+    def __call__(self, catalog):
+        e1 = ((catalog[self.column + "_xx"] - catalog[self.column + "_yy"])
+              /(catalog[self.column + "_xx"] + catalog[self.column + "_yy"]))
+        return np.array(e1)*self.unitScale
+
+
+class E2(object):
+    """Function to calculate e2 ellipticities from a given catalog
+
+    Parameters
+    ----------
+    column: `str`
+        The name of the shape measurement algorithm (SdssShape or HsmRegauss).
+    unitScale : 'float`, optional
+        A numerical scaling factor to multiply the ellipticity (1.0 by default)
+
+    Returns
+    -------
+    e2 : `numpy.array`
+        A numpy array of e2 ellipticity values
+    """
+
+    def __init__(self, column, unitScale=1.0):
+        self.column = column
+        self.unitScale = unitScale
+
+    def __call__(self, catalog):
+        e2 = (2.0*catalog[self.column + "_xy"]
+              /(catalog[self.column + "_xx"] + catalog[self.column + "_yy"]))
+        return np.array(e2)*self.unitScale
+
+
 class E1Resids(object):
-    """Functor to calculate e1 ellipticity residuals for a given object and psf model"""
+    """Functor to calculate e1 ellipticity residuals from an object catalog
+    and PSF model
+
+    Parameters
+    ---------
+    column: `str`
+        The name of the shape measuremet algorithm (SdssShape or HsmRegauss).
+    psfColumn: `str`
+        The name used for PSF shape measurements from the same algorithm.
+    unitScale: `float`, optional
+       A numerical scaling factor to multiply both the object and PSF
+       ellipticities (1.0 by default)
+
+    Returns
+    -------
+    e1Resids : `numpy.array`
+        A numpy array of e1 residual ellipticity values
+    """
+
     def __init__(self, column, psfColumn, unitScale=1.0):
         self.column = column
         self.psfColumn = psfColumn
         self.unitScale = unitScale
 
     def __call__(self, catalog):
-        srcE1 = ((catalog[self.column + "_xx"] - catalog[self.column + "_yy"])
-                 /(catalog[self.column + "_xx"] + catalog[self.column + "_yy"]))
-        psfE1 = ((catalog[self.psfColumn + "_xx"] - catalog[self.psfColumn + "_yy"])
-                 /(catalog[self.psfColumn + "_xx"] + catalog[self.psfColumn + "_yy"]))
+        srcE1func = E1(self.column, self.unitScale)
+        psfE1func = E1(self.psfColumn, self.unitScale)
+
+        srcE1 = srcE1func(catalog)
+        psfE1 = psfE1func(catalog)
+
         e1Resids = srcE1 - psfE1
-        return np.array(e1Resids)*self.unitScale
+        return e1Resids
 
 
 class E2Resids(object):
-    """Functor to calculate e2 ellipticity residuals for a given object and psf model"""
+    """Functor to calculate e2 ellipticity residuals from an object catalog
+    and PSF model
+
+    Parameters
+    ---------
+    column: `str`
+        The name of the shape measuremet algorithm (SdssShape or HsmRegauss).
+    psfColumn: `str`
+        The name used for PSF shape measurements from the same algorithm.
+    unitScale: `float`, optional
+       A numerical scaling factor to multiply both the object and PSF
+       ellipticities (1.0 by default)
+
+    Returns
+    -------
+    e2Resids : `numpy.array`
+        A numpy array of e2 residual ellipticity values
+    """
+
     def __init__(self, column, psfColumn, unitScale=1.0):
         self.column = column
         self.psfColumn = psfColumn
         self.unitScale = unitScale
 
     def __call__(self, catalog):
-        srcE2 = 2.0*catalog[self.column + "_xy"]/(catalog[self.column + "_xx"] + catalog[self.column + "_yy"])
-        psfE2 = (2.0*catalog[self.psfColumn + "_xy"]
-                 /(catalog[self.psfColumn + "_xx"] + catalog[self.psfColumn + "_yy"]))
+        srcE2func = E2(self.column, self.unitScale)
+        psfE2func = E2(self.psfColumn, self.unitScale)
+
+        srcE2 = srcE2func(catalog)
+        psfE2 = psfE2func(catalog)
+
         e2Resids = srcE2 - psfE2
-        return np.array(e2Resids)*self.unitScale
+        return e2Resids
 
 
 class E1ResidsHsmRegauss(object):
-    """Functor to calculate HSM e1 ellipticity residuals for a given object and psf model"""
+    """Functor to calculate HSM e1 ellipticity residuals from a given star
+    catalog and PSF model
+    """
     def __init__(self, unitScale=1.0):
         self.unitScale = unitScale
 
@@ -398,7 +493,9 @@ class E1ResidsHsmRegauss(object):
 
 
 class E2ResidsHsmRegauss(object):
-    """Functor to calculate HSM e1 ellipticity residuals for a given object and psf model"""
+    """Functor to calculate HSM e1 ellipticity residuals from a given star
+    catalog and PSF model
+    """
     def __init__(self, unitScale=1.0):
         self.unitScale = unitScale
 
