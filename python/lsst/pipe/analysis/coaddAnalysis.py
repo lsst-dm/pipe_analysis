@@ -914,7 +914,6 @@ class CoaddAnalysisTask(CmdLineTask):
                 shortName = "trace" + postFix + "_calib_psf_used"
                 psfUsed = catalog[catalog["calib_psf_used"]].copy(deep=True)
                 sdssTrace = traceSizeFunc(psfUsed)
-                sdssTrace = sdssTrace[np.where(np.isfinite(sdssTrace))]
                 traceMean = np.around(np.nanmean(sdssTrace), 2)
                 traceStd = max(0.03, np.around(4.5*np.nanstd(sdssTrace), 2))
                 qMin = traceMean - traceStd
