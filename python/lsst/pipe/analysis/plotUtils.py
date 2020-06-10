@@ -326,7 +326,7 @@ def labelVisit(plotInfoDict, fig, axis, xLoc, yLoc, color="k", fontSize=9):
         labelStr = "Tract: {}".format(plotInfoDict["tract"])
     else:
         labelStr = "Tract: {} Visit: {}".format(plotInfoDict["tract"], plotInfoDict["visit"])
-    plt.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=fontSize, transform=axis.transAxes,
+    fig.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=fontSize, transform=axis.transAxes,
              color=color)
 
 
