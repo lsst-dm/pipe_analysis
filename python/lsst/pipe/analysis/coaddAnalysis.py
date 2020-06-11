@@ -1564,6 +1564,13 @@ class CoaddAnalysisTask(CmdLineTask):
 
 class CompareCoaddAnalysisConfig(CoaddAnalysisConfig):
 
+    doReadParquetTables1 = Field(dtype=bool, default=True,
+                                 doc=("Read parquet tables from postprocessing (e.g. deepCoadd_obj) as "
+                                      "input1 data instead of afwTable catalogs."))
+    doReadParquetTables2 = Field(dtype=bool, default=True,
+                                 doc=("Read parquet tables from postprocessing (e.g. deepCoadd_obj) as "
+                                      "input2 data instead of afwTable catalogs."))
+
     def setDefaults(self):
         CoaddAnalysisConfig.setDefaults(self)
         self.matchRadiusRaDec = 0.2
@@ -1592,7 +1599,7 @@ class CompareCoaddAnalysisRunner(TaskRunner):
                 refList1, refList2 in zip(parsedCmd.id.refList, idParser.refList)]
 
 
-class CompareCoaddAnalysisTask(CmdLineTask):
+class CompareCoaddAnalysisTask(CoaddAnalysisTask):
     ConfigClass = CompareCoaddAnalysisConfig
     RunnerClass = CompareCoaddAnalysisRunner
     _DefaultName = "compareCoaddAnalysis"
@@ -1618,31 +1625,35 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
     def runDataRef(self, patchRefList1, patchRefList2, subdir=""):
         haveForced = True  # do forced datasets exits (may not for single band datasets)
-        dataset = "Coadd_forced_src"
+        dataset1 = "Coadd_obj" if self.config.doReadParquetTables1 else "Coadd_forced_src"
         patchRefExistsList1 = [patchRef1 for patchRef1 in patchRefList1 if
-                               patchRef1.datasetExists(self.config.coaddName + dataset)]
-        if not patchRefExistsList1:
+                               patchRef1.datasetExists(self.config.coaddName + dataset1)]
+        dataset2 = "Coadd_obj" if self.config.doReadParquetTables2 else "Coadd_forced_src"
+        patchRefExistsList2 = [patchRef2 for patchRef2 in patchRefList2 if
+                               patchRef2.datasetExists(self.config.coaddName + dataset2)]
+        if not patchRefExistsList1 or not patchRefExistsList2:
             haveForced = False
-
+        forcedStr = "forced" if haveForced else "unforced"
         if not haveForced:
-            self.log.warn("No forced dataset exist for tract: {0:d} filter: {1:s}.  "
-                          "Plotting unforced results only.".format(patchRefList1[0].dataId["tract"],
-                                                                   patchRefList1[0].dataId["filter"]))
-            dataset = "Coadd_meas"
+            self.log.warn("Forced datasets do not exist for both input1 and input2 for tract: {0:d} "
+                          "filter: {1:s}.  Plotting unforced results only.".
+                          format(patchRefList1[0].dataId["tract"], patchRefList1[0].dataId["filter"]))
+            dataset1 = "Coadd_meas"
+            dataset2 = "Coadd_meas"
             patchRefExistsList1 = [patchRef1 for patchRef1 in patchRefList1 if
-                                   patchRef1.datasetExists(self.config.coaddName + dataset)]
+                                   patchRef1.datasetExists(self.config.coaddName + dataset1)]
         if not patchRefExistsList1:
             raise TaskError("No data exists in patRefList1: %s" %
                             ([patchRef1.dataId for patchRef1 in patchRefList1]))
         patchRefList2 = [dataRef2 for dataRef2 in patchRefList2 if
-                         dataRef2.datasetExists(self.config.coaddName + dataset)]
+                         dataRef2.datasetExists(self.config.coaddName + dataset2)]
 
         patchList1 = [dataRef1.dataId["patch"] for dataRef1 in patchRefList1 if
-                      dataRef1.datasetExists(self.config.coaddName + dataset)]
+                      dataRef1.datasetExists(self.config.coaddName + dataset1)]
         patchRefList1 = patchRefExistsList1
 
-        repoInfo1 = getRepoInfo(patchRefList1[0], coaddName=self.config.coaddName, coaddDataset=dataset)
-        repoInfo2 = getRepoInfo(patchRefList2[0], coaddName=self.config.coaddName, coaddDataset=dataset)
+        repoInfo1 = getRepoInfo(patchRefList1[0], coaddName=self.config.coaddName, coaddDataset=dataset1)
+        repoInfo2 = getRepoInfo(patchRefList2[0], coaddName=self.config.coaddName, coaddDataset=dataset2)
         # Find a visit/ccd input so that you can check for meas_mosaic input
         # (i.e. to set uberCalLabel).
         self.uberCalLabel1 = determineExternalCalLabel(repoInfo1, patchList1[0],
@@ -1652,76 +1663,32 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         self.uberCalLabel = self.uberCalLabel1 + "_1\n" + self.uberCalLabel2 + "_2"
         self.log.info(f"External calibration(s) used: {self.uberCalLabel}")
 
-        if haveForced:
-            forced1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_forced_src")
-            forced1 = self.calibrateCatalogs(forced1, wcs=repoInfo1.wcs)
-            forced2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_forced_src")
-            forced2 = self.calibrateCatalogs(forced2, wcs=repoInfo2.wcs)
-        unforced1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_meas")
-        unforced1 = self.calibrateCatalogs(unforced1, wcs=repoInfo1.wcs)
-        unforced2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_meas")
-        unforced2 = self.calibrateCatalogs(unforced2, wcs=repoInfo2.wcs)
-
-        forcedStr = "forced" if haveForced else "unforced"
-
-        unforced1Schema = getSchema(unforced1)
-        unforced2Schema = getSchema(unforced2)
-        if haveForced:
-            forced1Schema = getSchema(forced1)
-            forced2Schema = getSchema(forced2)
-            # Copy over some fields from _ref and _meas catalogs to _forced_src
-            # catalog.
-            refCat1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_ref")
-            refCat1Schema = getSchema(refCat1)
-            refColList1 = []
-            for strPrefix in self.config.columnsToCopyFromRef:
-                refColList1.extend(refCat1Schema.extract(strPrefix + "*"))
-            refCat2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_ref")
-            refCat2Schema = getSchema(refCat2)
-            refColList2 = []
-            for strPrefix in self.config.columnsToCopyFromRef:
-                refColList2.extend(refCat2Schema.extract(strPrefix + "*"))
-            refColsToCopy1 = [col for col in refColList1 if col not in forced1Schema
-                              and not any(s in col for s in self.config.notInColStrList)
-                              and col in refCat1Schema
-                              and not (repoInfo1.hscRun and col == "slot_Centroid_flag")]
-            refColsToCopy2 = [col for col in refColList2 if col not in forced2Schema
-                              and not any(s in col for s in self.config.notInColStrList)
-                              and col in refCat2Schema
-                              and not (repoInfo2.hscRun and col == "slot_Centroid_flag")]
-            forced1 = addColumnsToSchema(refCat1, forced1, refColsToCopy1)
-            forced2 = addColumnsToSchema(refCat2, forced2, refColsToCopy2)
-            measColList1 = []
-            for strPrefix in self.config.columnsToCopyFromMeas:
-                measColList1.extend(unforced1Schema.extract(strPrefix + "*"))
-            measColList2 = []
-            for strPrefix in self.config.columnsToCopyFromMeas:
-                measColList2.extend(unforced2Schema.extract(strPrefix + "*"))
-            measColsToCopy1 = [col for col in measColList1 if col not in forced1Schema
-                               and not any(s in col for s in self.config.notInColStrList)
-                               and col in unforced1Schema and not
-                               (repoInfo1.hscRun and col == "slot_Centroid_flag")]
-            measColsToCopy2 = [col for col in measColList2 if col not in forced2Schema
-                               and not any(s in col for s in self.config.notInColStrList)
-                               and col in unforced2Schema and not
-                               (repoInfo2.hscRun and col == "slot_Centroid_flag")]
-            forced1 = addColumnsToSchema(unforced1, forced1, measColsToCopy1)
-            forced2 = addColumnsToSchema(unforced2, forced2, measColsToCopy2)
-
-        # Set an alias map for differing schema naming conventions of different
-        # stacks (if any).
-        repoList = [repoInfo1.hscRun, repoInfo2.hscRun]
-        coaddList = [unforced1, unforced2]
-        if haveForced:
-            repoList += repoList
-            coaddList += [forced1, forced2]
-        aliasDictList0 = [self.config.flagsToAlias, ]
-        for hscRun, catalog in zip(repoList, coaddList):
-            aliasDictList = aliasDictList0
-            if hscRun and self.config.srcSchemaMap is not None:
-                aliasDictList += [self.config.srcSchemaMap]
-            if aliasDictList:
-                catalog = setAliasMaps(catalog, aliasDictList)
+        if self.config.doReadParquetTables1:
+            if haveForced:
+                forced1 = self.readParquetTables(patchRefList1, self.config.coaddName + "Coadd_obj",
+                                                 "forced_src")
+                forced1 = self.calibrateCatalogs(forced1, wcs=repoInfo1.wcs)
+            unforced1 = self.readParquetTables(patchRefList1, self.config.coaddName + "Coadd_obj", "meas")
+            unforced1 = self.calibrateCatalogs(unforced1, wcs=repoInfo1.wcs)
+        else:
+            aliasDictList = [self.config.flagsToAlias, ]
+            if repoInfo1.hscRun and self.config.srcSchemaMap is not None:
+                aliasDictList1 = aliasDictList + [self.config.srcSchemaMap]
+            if repoInfo2.hscRun and self.config.srcSchemaMap is not None:
+                aliasDictList2 = aliasDictList + [self.config.srcSchemaMap]
+            self.readAfwTables(patchRefList1, self.config.coaddName, repoInfo1, haveForced,
+                               aliasDictList=aliasDictList1)
+            self.readAfwTables(patchRefList1, self.config.coaddName, repoInfo1, haveForced,
+                               aliasDictList=aliasDictList2)
+        if self.config.doReadParquetTables2:
+            if haveForced:
+                forced2 = self.readParquetTables(patchRefList2, self.config.coaddName + "Coadd_obj",
+                                                 "forced_src")
+                forced2 = self.calibrateCatalogs(forced2, wcs=repoInfo2.wcs)
+            unforced2 = self.readParquetTables(patchRefList2, self.config.coaddName + "Coadd_obj", "meas")
+            unforced2 = self.calibrateCatalogs(unforced2, wcs=repoInfo2.wcs)
+        else:
+            self.readAfwTables(patchRefList2, self.config.coaddName, repoInfo2, haveForced)
 
         # Set boolean array indicating sources deemed unsuitable for qa
         # analyses.
@@ -1747,25 +1714,20 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
         self.catLabel = "nChild = 0"
         forcedStr = forcedStr + " " + self.catLabel
-
-        aliasDictList = aliasDictList0
-        if hscRun and self.config.srcSchemaMap is not None:
-            aliasDictList += [self.config.srcSchemaMap]
-        if aliasDictList:
-            forced = setAliasMaps(forced, aliasDictList)
-            unforced = setAliasMaps(unforced, aliasDictList)
         forcedSchema = getSchema(forced)
 
-        self.log.info("\nNumber of sources in forced catalogs: first = {0:d} and second = {1:d}".format(
-                      len(forced1), len(forced2)))
+        self.log.info("\nNumber of sources in unforced catalogs: first = {0:d} and second = {1:d}".format(
+                      len(unforced1), len(unforced2)))
+        self.log.info("\nNumber of matched sources in unforced catalogs: {0:d}".format(len(unforced)))
 
         subdir = "patch-" + str(patchList1[0]) if len(patchList1) == 1 else subdir
         filenamer = Filenamer(repoInfo1.butler, "plotCompareCoadd", repoInfo1.dataId, subdir=subdir)
-        hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
         # Always highlight points with x-axis flag set (for cases where
         # they do not get explicitly filtered out).
         highlightList = [(self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0, "turquoise"), ]
         # Dict of all parameters common to plot* functions
+
+        hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
         plotKwargs1 = dict(butler=repoInfo1.butler, camera=repoInfo1.camera, tractInfo=repoInfo1.tractInfo,
                            patchList=patchList1, hscRun=hscRun, matchRadius=self.matchRadius,
                            matchRadiusUnitStr=self.matchRadiusUnitStr, zpLabel=self.zpLabel,
@@ -1789,13 +1751,6 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                hscRun1=repoInfo1.hscRun, hscRun2=repoInfo2.hscRun, **plotKwargs1)
         if self.config.doPlotStarGalaxy:
             self.plotStarGal(forced, filenamer, repoInfo1.dataId, forcedStr=forcedStr, **plotKwargs1)
-
-    def readCatalogs(self, patchRefList, dataset):
-        catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS) for
-                   patchRef in patchRefList if patchRef.datasetExists(dataset)]
-        if not catList:
-            raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
-        return concatenateCatalogs(catList)
 
     def calibrateCatalogs(self, catalog, wcs=None):
         self.zpLabel = "common (" + str(self.config.analysis.coaddZp) + ")"
