@@ -340,7 +340,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if any(doPlot for doPlot in [self.config.doPlotFootprintNpix, self.config.doPlotQuiver,
                                          self.config.doPlotMags, self.config.doPlotSizes,
                                          self.config.doPlotCentroids, self.config.doPlotStarGalaxy,
-                                         self.config.doPlotSkyObjects, self.config.doWriteParquetTables]):
+                                         self.config.doPlotSkyObjects, self.config.doPlotRhoStatistics,
+                                         self.config.doWriteParquetTables]):
                 if self.config.hasFakes:
                     inputFakes = repoInfo.butler.get("deepCoadd_fakeSourceCat", dataId=repoInfo.dataId)
                     inputFakes = inputFakes.toDataFrame()
@@ -450,6 +451,10 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 if self.config.doPlotQuiver:
                     plotList.append(self.plotQuiver(catalog, "ellipResids", plotInfoDict, areaDict, scale=2,
                                                     **plotKwargs))
+
+                if self.config.doPlotRhoStatistics:
+                    plotList.append(self.plotRhoStatistics(catalog, plotInfoDict,
+                                                           **plotKwargs))
 
                 plotKwargs.update(dict(highlightList=highlightList))
                 # Create mag comparison plots using common ZP
