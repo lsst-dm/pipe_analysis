@@ -19,6 +19,7 @@ import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 import lsst.pex.config as pexConfig
 import lsst.verify as verify
+import treecorr
 
 try:
     from lsst.meas.mosaic.updateExposure import applyMosaicResultsCatalog
@@ -505,6 +506,76 @@ class E2ResidsHsmRegauss(object):
                  /(catalog["ext_shapeHSM_HsmPsfMoments_xx"] + catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
         e2Resids = srcE2 - psfE2
         return np.array(e2Resids)*self.unitScale
+
+
+class RhoStatistics(object):
+    """Functor to compute Rho statistics (Rowe (2010), Jarvis et al., (2016))
+    from a given star catalog and PSF model
+
+    Parameters
+    ----------
+
+    column : `str`
+        The name of the shape measurement algorithm (SdssShape or HsmRegauss).
+    psfColumn: `str`
+        The name used for PSF shape measurements from the same algorithm.
+    **kwargs
+        Additional keyword arguments passed to treecorr. See
+        https://rmjarvis.github.io/TreeCorr/_build/html/gg.html for details.
+
+    Returns
+    -------
+    rhoStats : `dict` [`int', 'treecorr.GGCorrelation`]
+        A dictionary with keys 1..5, containing treecorr.GGCorrelation objects
+        corresponding to Rho statistic index
+    """
+    def __init__(self, column, psfColumn, **kwargs):
+        self.column = column
+        self.psfColumn = psfColumn
+        self.e1Func = E1(self.psfColumn)
+        self.e2Func = E2(self.psfColumn)
+        self.e1ResidsFunc = E1Resids(self.column, self.psfColumn)
+        self.e2ResidsFunc = E2Resids(self.column, self.psfColumn)
+        self.traceSizeFunc = TraceSize(self.column)
+        self.psfTraceSizeFunc = TraceSize(self.psfColumn)
+        self.kwargs = kwargs
+
+    def __call__(self, catalog):
+        e1 = self.e1Func(catalog)
+        e2 = self.e2Func(catalog)
+        e1Res = self.e1ResidsFunc(catalog)
+        e2Res = self.e2ResidsFunc(catalog)
+        traceSize2 = self.traceSizeFunc(catalog)**2
+        psfTraceSize2 = self.psfTraceSizeFunc(catalog)**2
+        SizeRes = (traceSize2 - psfTraceSize2)/(0.5*(traceSize2 + psfTraceSize2))
+
+        isFinite = np.isfinite(e1Res) & np.isfinite(e2Res) & np.isfinite(SizeRes)
+        e1 = e1[isFinite]
+        e2 = e2[isFinite]
+        e1Res = e1Res[isFinite]
+        e2Res = e2Res[isFinite]
+        SizeRes = SizeRes[isFinite]
+
+        # Scale the SizeRes by ellipticities
+        e1SizeRes = e1*SizeRes
+        e2SizeRes = e2*SizeRes
+
+        # Package the arguments to capture auto-/cross-correlations for the
+        # Rho statistics
+        args = {1: (e1Res, e2Res, None, None),
+                2: (e1, e2, e1Res, e2Res),
+                3: (e1SizeRes, e2SizeRes, None, None),
+                4: (e1Res, e2Res, e1SizeRes, e2SizeRes),
+                5: (e1, e2, e1SizeRes, e2SizeRes)}
+
+        ra = np.rad2deg(catalog["coord_ra"][isFinite])*60.  # arcmin
+        dec = np.rad2deg(catalog["coord_dec"][isFinite])*60.  # arcmin
+
+        # Pass the appropriate arguments to the correlator and build a dict
+        rhoStats = {rhoIndex: corr2(ra, dec, *(args[rhoIndex]), raUnits="arcmin", decUnits="arcmin",
+                                    **self.kwargs) for rhoIndex in range(1, 6)}
+
+        return rhoStats
 
 
 class FootNpixDiffCompare(object):
@@ -2112,3 +2183,55 @@ def calcQuartileClippedStats(dataArray, nSigmaToClip=3.0):
         clipValue=clipValue,
         goodArray=good,
     )
+
+
+def corr2(ra, dec, g1a, g2a, g1b=None, g2b=None, raUnits="degrees", decUnits="degrees", **treecorrKwargs):
+    """ Function to compute correlations between atmost two shear-like fields.
+
+    This is used to compute Rho statistics, given the appropriate shear-like
+    fields.
+
+    Parameters
+    ----------
+    ra : `numpy.array`
+       The right ascension values of entries in the catalog
+    dec : `numpy.array`
+       The declination values of entres in the catalog
+    g1a : `numpy.array`
+       The first component of the primary shear-like field
+    g2a : `numpy.array`
+       The second component of the primary shear-like field
+    g1b : `numpy.array`, optional
+       The first component of the secondary shear-like field.
+       Autocorrelation of the primary field is computed if None
+       (None by default)
+    g2b : `numpy.array`, optional
+       The second component of the secondary shear-like field.
+       Autocorrelation of the primary field is computed if None
+       (None by default)
+    raUnits : `str`, optional
+       Unit of the right ascension values (degrees by default)
+    decUnits : `str`, optional
+       Unit of the declination values (degrees by default)
+
+    Additionally, keyword arguments to treecorr.GGCorrelation may be passed
+
+    Returns
+    -------
+    xy : `treecorr.GGCorrelation`
+       A treecorr.GGCorrelation object containing the correlation function
+    """
+
+    xy = treecorr.GGCorrelation(**treecorrKwargs)
+    catA = treecorr.Catalog(ra=ra, dec=dec, g1=g1a, g2=g2a, ra_units=raUnits,
+                            dec_units=decUnits)
+    if g1b is None or g2b is None:
+        # Calculate the auto-correlation
+        xy.process(catA)
+    else:
+        catB = treecorr.Catalog(ra=ra, dec=dec, g1=g1b, g2=g2b, ra_units=raUnits,
+                                dec_units=decUnits)
+        # Calculate the cross-correlation
+        xy.process(catA, catB)
+
+    return xy
