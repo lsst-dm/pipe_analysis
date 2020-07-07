@@ -3,9 +3,11 @@
 from __future__ import print_function
 
 import os
+import astropy.coordinates as coord
 import astropy.units as units
 import numpy as np
 np.seterr(all="ignore")  # noqa E402
+import pandas as pd
 import functools
 
 from collections import defaultdict
@@ -25,13 +27,11 @@ from .analysis import AnalysisConfig, Analysis
 from .utils import (Filenamer, Enforcer, MagDiff, MagDiffMatches, MagDiffCompare,
                     AstrometryDiff, TraceSize, PsfTraceSizeDiff, TraceSizeCompare, PercentDiff,
                     E1Resids, E2Resids, E1ResidsHsmRegauss, E2ResidsHsmRegauss, FootNpixDiffCompare,
-                    MagDiffCompareErr, CentroidDiff, deconvMom,
-                    deconvMomStarGal, concatenateCatalogs, joinMatches, checkPatchOverlap,
-                    addColumnsToSchema, addApertureFluxesHSC, addFpPoint,
-                    addFootprintNPix, makeBadArray, addIntFloatOrStrColumn,
-                    calibrateCoaddSourceCatalog, backoutApCorr, matchNanojanskyToAB,
-                    fluxToPlotString, andCatalog, writeParquet, getRepoInfo, setAliasMaps,
-                    addPreComputedColumns, computeMeanOfFrac, getSchema)
+                    MagDiffCompareErr, CentroidDiff, deconvMom, deconvMomStarGal, concatenateCatalogs,
+                    joinMatches, matchAndJoinCatalogs, checkPatchOverlap, addColumnsToSchema, addFpPoint,
+                    addFootprintNPix, makeBadArray, addIntFloatOrStrColumn, calibrateCoaddSourceCatalog,
+                    backoutApCorr, matchNanojanskyToAB, fluxToPlotString, andCatalog, writeParquet,
+                    getRepoInfo, addAliasColumns, addPreComputedColumns, computeMeanOfFrac, getSchema)
 from .plotUtils import (CosmosLabeller, AllLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
                         MatchesStarGalaxyLabeller, determineExternalCalLabel)
 
@@ -303,12 +303,20 @@ class CoaddAnalysisTask(CmdLineTask):
                            & (unforced["deblend_nChild"] == 0) & ~unforced["base_PixelFlags_flag_edge"])
                 skyObjCat = unforced[goodSky].copy(deep=True)
 
+            # Convert to pandas DataFrames
+            unforced = unforced.asAstropy().to_pandas()
+            if haveForced:
+                forced = forced.asAstropy().to_pandas()
+
             unforcedSchema = getSchema(unforced)
             if haveForced:
                 forcedSchema = getSchema(forced)
             plotKwargs.update(dict(zpLabel=self.zpLabel))
 
-            # Must do the overlaps before purging the catalogs of non-primary sources
+            # Must do the overlaps before purging the catalogs of non-primary
+            # sources.  We only really need one set of these plots and the
+            # matching takes a fair amount of time, so only plot for one
+            # catalog, favoring the forced catalog if it exists.
             if self.config.doPlotOverlaps and not self.config.writeParquetOnly:
                 # Determine if any patches in the patchList actually overlap
                 overlappingPatches = checkPatchOverlap(patchList, repoInfo.tractInfo)
@@ -316,8 +324,8 @@ class CoaddAnalysisTask(CmdLineTask):
                     self.log.info("No overlapping patches...skipping overlap plots")
                 else:
                     if haveForced:
-                        forcedOverlaps = self.overlaps(forced)
-                        if forcedOverlaps:
+                        forcedOverlaps = self.overlaps(forced, patchList, repoInfo.tractInfo)
+                        if forcedOverlaps is not None:
                             self.plotOverlaps(forcedOverlaps, filenamer, repoInfo.dataId,
                                               matchRadius=self.config.matchOverlapRadius,
                                               matchRadiusUnitStr="\"",
@@ -326,16 +334,22 @@ class CoaddAnalysisTask(CmdLineTask):
                                               highlightList=highlightList, **plotKwargs)
                             self.log.info("Number of forced overlap objects matched = {:d}".
                                           format(len(forcedOverlaps)))
-                    unforcedOverlaps = self.overlaps(unforced)
-                    if unforcedOverlaps:
-                        self.plotOverlaps(unforcedOverlaps, filenamer, repoInfo.dataId,
-                                          matchRadius=self.config.matchOverlapRadius,
-                                          matchRadiusUnitStr="\"",
-                                          forcedStr="unforced", postFix="_unforced",
-                                          fluxToPlotList=["modelfit_CModel", ],
-                                          highlightList=highlightList, **plotKwargs)
-                        self.log.info("Number of unforced overlap objects matched = {:d}".
-                                      format(len(unforcedOverlaps)))
+                        else:
+                            self.log.info("No of forced overlap objects matched. Overlap plots skipped.")
+                    else:
+                        unforcedOverlaps = self.overlaps(unforced, patchList, repoInfo.tractInfo)
+                        if unforcedOverlaps is not None:
+                            self.plotOverlaps(unforcedOverlaps, filenamer, repoInfo.dataId,
+                                              matchRadius=self.config.matchOverlapRadius,
+                                              matchRadiusUnitStr="\"",
+                                              forcedStr="unforced", postFix="_unforced",
+                                              fluxToPlotList=["modelfit_CModel", ],
+                                              highlightList=highlightList, **plotKwargs)
+                                              highlightList=highlightList, **plotKwargs)
+                            self.log.info("Number of unforced overlap objects matched = {:d}".
+                                          format(len(unforcedOverlaps)))
+                        else:
+                            self.log.info("No of unforced overlap objects matched. Overlap plots skipped.")
 
             # Set boolean array indicating sources deemed unsuitable for qa analyses
             badUnforced = makeBadArray(unforced, onlyReadStars=self.config.onlyReadStars)
@@ -483,7 +497,59 @@ class CoaddAnalysisTask(CmdLineTask):
                     self.log.warn("Could not create match catalog for {:}.  Is "
                                   "lsst.meas.extensions.astrometryNet setup?".format(cat))
 
-    def readCatalogs(self, patchRefList, dataset):
+    def readAfwTables(self, patchRefList, coaddName, repoInfo, haveForced, aliasDictList=None):
+        if haveForced:
+            forced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_forced_src",
+                                       readFootprintsAs="heavy")
+            forced = self.calibrateCatalogs(forced, wcs=repoInfo.wcs)
+        unforced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_meas",
+                                     readFootprintsAs="heavy")
+        unforced = self.calibrateCatalogs(unforced, wcs=repoInfo.wcs)
+
+        if haveForced:
+            # Copy over some fields from _ref and _meas catalogs to
+            # _forced_src catalog.
+            refCat = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_ref")
+            if len(forced) != len(refCat):
+                raise RuntimeError(("Lengths of forced (N = {0:d}) and ref (N = {0:d}) cats "
+                                    "don't match").format(len(forced), len(refCat)))
+            refColList = []
+            for strPrefix in self.config.columnsToCopyFromRef:
+                refColList.extend(refCat.schema.extract(strPrefix + "*"))
+            refColsToCopy = [col for col in refColList if col not in forced.schema
+                             and not any(s in col for s in self.config.notInColStrList)
+                             and col in refCat.schema
+                             and not (repoInfo.hscRun and col == "slot_Centroid_flag")]
+            forced = addColumnsToSchema(refCat, forced, refColsToCopy)
+            measColList = []
+            for strPrefix in self.config.columnsToCopyFromMeas:
+                measColList.extend(refCat.schema.extract(strPrefix + "*"))
+            measColsToCopy = [col for col in measColList if col not in forced.schema
+                              and not any(s in col for s in self.config.notInColStrList)
+                              and col in unforced.schema
+                              and not (repoInfo.hscRun and col == "slot_Centroid_flag")]
+            forced = addColumnsToSchema(unforced, forced, measColsToCopy)
+
+        # Set some "aliases" for differing schema naming conventions.  Note: we
+        # lose the alias maps when converting to pandas, so now must actually
+        # make a copy of the "old" column to a new one with the "new" name.
+        # This is really just a backwards-compatibility accommodation for
+        # catalogs that are already pretty old, so it will be a no-op in most
+        # cases and will likely disappear in the not-too-distant future.
+        if aliasDictList:
+            unforced = addAliasColumns(unforced, aliasDictList)
+            if haveForced:
+                forced = addAliasColumns(forced, aliasDictList)
+
+        if self.config.doPlotFootprintArea and "base_FootprintArea_value" not in unforced.schema:
+            unforced = addFootprintArea(unforced, fromCat=unforced)
+        # Convert to pandas DataFrames
+        unforced = unforced.asAstropy().to_pandas()
+        if haveForced:
+            forced = forced.asAstropy().to_pandas()
+        return forced, unforced
+
+    def readCatalogs(self, patchRefList, dataset, readFootprintsAs=None):
         """Read in and concatenate catalogs of type dataset in lists of data references
 
         If self.config.doWriteParquetTables is True, before appending each catalog to a single
@@ -496,11 +562,22 @@ class CoaddAnalysisTask(CmdLineTask):
            A list of butler data references whose catalogs of dataset type are to be read in
         dataset : `str`
            Name of the catalog dataset to be read in
+        readFootprintsAs : `None` or `str`, optional
+           A string dictating if and what type of Footprint to read in along
+           with the catalog:
+           `None` (the default): do not read in Footprints.
+           "light": read in regular Footprints (include SpanSet and list of
+                    peaks per Footprint).
+           "heavy": read in HeavyFootprints (include regular Footprint plus
+                    flux values per Footprint).
 
         Raises
         ------
         `TaskError`
            If no data is read in for the dataRefList
+        `RuntimeError`
+           If entry for ``readFootprintsAs`` is not recognized (i.e. not one
+           of `None`, \"light\", or \"heavy\".
 
         Returns
         -------
@@ -509,7 +586,16 @@ class CoaddAnalysisTask(CmdLineTask):
         catList = []
         for patchRef in patchRefList:
             if patchRef.datasetExists(dataset):
-                cat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+                if not readFootprintsAs:
+                    catFlags = afwTable.SOURCE_IO_NO_FOOTPRINTS
+                elif readFootprintsAs == "light":
+                    catFlags = afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS
+                elif readFootprintsAs == "heavy":
+                    catFlags = 0
+                else:
+                    raise RuntimeError("Unknown entry for readFootprintsAs: {:}.  Only recognize one of: "
+                                       "None, \"light\", or \"heavy\"".format(readFootprintsAs))
+                cat = patchRef.get(dataset, immediate=True, flags=catFlags)
                 cat = addIntFloatOrStrColumn(cat, patchRef.dataId["patch"], "patchId",
                                              "Patch on which source was detected")
                 catList.append(cat)
@@ -560,13 +646,17 @@ class CoaddAnalysisTask(CmdLineTask):
                 catalog = addColumnsToSchema(unforced, catalog, measColsToCopy)
 
                 if aliasDictList:
-                    catalog = setAliasMaps(catalog, aliasDictList)
+                    catalog = addAliasColumns(catalog, aliasDictList)
+            catalog = self.calibrateCatalogs(catalog, wcs=wcs)
+
+            # Convert to pandas DataFrames
+            catalog = catalog.asAstropy().to_pandas()
+            schema = getSchema(catalog)
 
             # Set boolean array indicating sources deemed unsuitable for qa analyses
             transCentFlag = "base_TransformedCentroid_flag"
-            badFlagList = [transCentFlag, ] if transCentFlag in catalog.schema else ["slot_Centroid_flag", ]
+            badFlagList = [transCentFlag, ] if transCentFlag in schema else ["slot_Centroid_flag", ]
             bad = makeBadArray(catalog, flagList=badFlagList, onlyReadStars=self.config.onlyReadStars)
-            catalog = self.calibrateCatalogs(catalog, wcs=wcs)
 
             if dataset.startswith("deepCoadd_"):
                 packedMatches = butler.get("deepCoadd_measMatch", dataRef.dataId)
@@ -574,7 +664,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 packedMatches = butler.get(dataset + "Match", dataRef.dataId)
 
             # Purge the match list of sources flagged in the catalog
-            badIds = catalog["id"][bad]
+            badIds = catalog["id"][bad].array
             badMatch = np.zeros(len(packedMatches), dtype=bool)
             for iMat, iMatch in enumerate(packedMatches):
                 if iMatch["second"] in badIds:
@@ -614,9 +704,11 @@ class CoaddAnalysisTask(CmdLineTask):
             matchMeta = butler.get(dataset, dataRef.dataId,
                                    flags=afwTable.SOURCE_IO_NO_FOOTPRINTS).getTable().getMetadata()
             catalog = matchesToCatalog(matches, matchMeta)
+            schema = getSchema(catalog)
+
             # Compute Focal Plane coordinates for each source if not already there
             if self.config.analysisMatches.doPlotFP:
-                if "src_base_FPPosition_x" not in catalog.schema and "src_focalplane_x" not in catalog.schema:
+                if "src_base_FPPosition_x" not in schema and "src_focalplane_x" not in schema:
                     det = butler.get("calexp_detector", dataRef.dataId)
                     catalog = addFpPoint(det, catalog, prefix="src_")
             # Optionally backout aperture corrections
@@ -1058,14 +1150,32 @@ class CoaddAnalysisTask(CmdLineTask):
                 return True
         return False
 
-    def overlaps(self, catalog):
+    def overlaps(self, catalog, patchList, tractInfo):
         badForOverlap = makeBadArray(catalog, flagList=self.config.analysis.flags,
                                      onlyReadStars=self.config.onlyReadStars, patchInnerOnly=False)
-        goodCat = catalog[~badForOverlap]
-        matches = afwTable.matchRaDec(goodCat, self.config.matchOverlapRadius*geom.arcseconds)
-        if not matches:
-            self.log.info("Did not find any overlapping matches")
-        return joinMatches(matches, "first_", "second_")
+        goodCat = catalog[~badForOverlap].copy(deep=True)
+        overlapPatchList = []
+        for patch1 in patchList:
+            for patch2 in patchList:
+                if patch1 != patch2:
+                    overlapping = checkPatchOverlap([patch1, patch2], tractInfo)
+                    if overlapping:
+                        if {patch1, patch2} not in overlapPatchList:
+                            overlapPatchList.append({patch1, patch2})
+        matchList = []
+        matchRadius = self.config.matchOverlapRadius
+        for patchPair in overlapPatchList:
+            patchPair = list(patchPair)
+            patchCat1 = goodCat[goodCat["patchId"] == patchPair[0]].copy(deep=True)
+            patchCat2 = goodCat[goodCat["patchId"] == patchPair[1]].copy(deep=True)
+            patchPairMatches = matchAndJoinCatalogs(patchCat1, patchCat2, matchRadius, log=self.log)
+            if not patchPairMatches.empty:
+                matchList.append(patchPairMatches)
+        if matchList:
+            matches = pd.concat(matchList, axis=0)
+        else:
+            matches = None
+        return matches
 
     def plotOverlaps(self, overlaps, filenamer, dataId, butler=None, camera=None, ccdList=None,
                      tractInfo=None, patchList=None, hscRun=None, matchRadius=None, matchRadiusUnitStr=None,

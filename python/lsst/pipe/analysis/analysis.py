@@ -113,7 +113,7 @@ class Analysis(object):
         self.prefix = prefix
         self.errFunc = errFunc
         if func is not None:
-            if type(func) == np.ndarray:
+            if isinstance(func, np.ndarray) or isinstance(func, pd.Series):
                 self.quantity = func
             else:
                 self.quantity = func(catalog)
@@ -221,7 +221,7 @@ class Analysis(object):
         self.magMax = computeMeanOfFrac(self.mag[goodSn0], tailStr="upper", fraction=0.05, floorFactor=1) + 0.5
 
         if labeller is not None:
-            labels = labeller(catalog, compareCat) if compareCat else labeller(catalog)
+            labels = labeller(catalog, compareCat) if compareCat is not None else labeller(catalog)
             self.data = {name: Data(catalog, self.quantity, self.mag, self.signalToNoise,
                                     self.good & (labels == value),
                                     colorList[value], self.quantityError, name in labeller.plot) for
@@ -1166,7 +1166,7 @@ class Analysis(object):
             thetas = [0.0]*len(catalog)
             edgeColors = ["None"]*len(catalog)
         else:
-            for src in catalog:
+            for _, src in catalog.iterrows():
                 edgeColor = "None"
                 srcQuad = afwGeom.Quadrupole(src[shapeStr + "_xx"], src[shapeStr + "_yy"],
                                              src[shapeStr + "_xy"])
@@ -1425,10 +1425,7 @@ class Analysis(object):
             unitList = patchList
             unitStr = "patchId"
         for iUnit in unitList:
-            if unitStr == "patchId":  # can't read String fields via afwTableSourceCatalog
-                good = skyObjCat.asAstropy()[unitStr] == iUnit
-            else:
-                good = skyObjCat[unitStr] == iUnit
+            good = skyObjCat[unitStr] == iUnit
             perUnitSkyObjCat = skyObjCat[good].copy(deep=True)
             if len(perUnitSkyObjCat) > 0:
                 perUnitSkyFlux = perUnitSkyObjCat[metricFluxStr]*fluxScale

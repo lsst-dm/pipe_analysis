@@ -39,7 +39,7 @@ class StarGalaxyLabeller(object):
     _column = "base_ClassificationExtendedness_value"
 
     def __call__(self, catalog):
-        starGal = catalog[self._column]
+        starGal = catalog[self._column].copy(deep=True)
         starGal[np.isnan(starGal)] = 9
         starGal[(starGal > 0.5) & (starGal < 1.5)] = 1
         starGal[starGal <= 0.5] = 0
@@ -56,12 +56,12 @@ class OverlapsStarGalaxyLabeller(StarGalaxyLabeller):
         self._second = second
 
     def __call__(self, catalog1, catalog2=None):
-        catalog2 = catalog2 if catalog2 else catalog1
-        starGal1 = catalog1[self._first + self._column]
+        catalog2 = catalog2 if catalog2 is not None else catalog1
+        starGal1 = catalog1[self._first + self._column].copy(deep=True)
         starGal1[np.isnan(starGal1)] = 9
         starGal1[(starGal1 > 0.5) & (starGal1 < 1.5)] = 1
         starGal1[starGal1 <= 0.5] = 0
-        starGal2 = catalog2[self._second + self._column]
+        starGal2 = catalog2[self._second + self._column].copy(deep=True)
         starGal2[np.isnan(starGal2)] = 9
         starGal2[(starGal2 > 0.5) & (starGal2 < 1.5)] = 1
         starGal2[starGal2 <= 0.5] = 0
