@@ -1136,7 +1136,7 @@ class Analysis(object):
 
             log.info("Tract id in Rho Stats: {0}".format(plotInfoDict['tract']))
 
-            yield Struct(fig=fig, description=figDescription, stats=stats, statsHigh=None, dpi=500,
+            yield Struct(fig=fig, description=figDescription, stats=stats, statsHigh=None, dpi=120,
                          style="RhoStats")
 
         if "ext_shapeHSM_HsmSourceMoments_xx" in self.catalog.schema:
@@ -1178,7 +1178,7 @@ class Analysis(object):
 
                 log.info("Tract id in Rho Stats: {0}".format(plotInfoDict['tract']))
 
-                yield Struct(fig=fig, description=figDescription, stats=stats, statsHigh=None, dpi=500,
+                yield Struct(fig=fig, description=figDescription, stats=stats, statsHigh=None, dpi=120,
                              style="RhoStats")
 
     def plotInputCounts(self, catalog, description, plotInfoDict, log, forcedStr=None, uberCalLabel=None,
