@@ -25,8 +25,8 @@ from .analysis import AnalysisConfig, Analysis
 from .utils import (Enforcer, MagDiff, MagDiffMatches, MagDiffCompare,
                     AstrometryDiff, TraceSize, PsfTraceSizeDiff, TraceSizeCompare, PercentDiff,
                     E1Resids, E2Resids, E1ResidsHsmRegauss, E2ResidsHsmRegauss, FootNpixDiffCompare,
-                    MagDiffCompareErr, CentroidDiff, deconvMom,
-                    deconvMomStarGal, concatenateCatalogs, joinMatches, checkPatchOverlap,
+                    MagDiffCompareErr, CentroidDiff, deconvMom, deconvMomStarGal,
+                    concatenateCatalogs, joinMatches, checkPatchOverlap,
                     addColumnsToSchema, addApertureFluxesHSC, addFpPoint,
                     addFootprintNPix, makeBadArray, addIntFloatOrStrColumn,
                     calibrateCoaddSourceCatalog, backoutApCorr, matchNanojanskyToAB,
@@ -85,6 +85,12 @@ class CoaddAnalysisConfig(Config):
     doPlotMatches = Field(dtype=bool, default=True, doc="Plot matches?")
     doPlotCompareUnforced = Field(dtype=bool, default=True, doc=("Plot difference between forced and unforced"
                                                                  "? (ignored if plotMatchesOnly is True)"))
+    doPlotRhoStatistics = Field(dtype=bool, default=True, doc=("Plot Rho statistics?"))
+    treecorrParams = DictField(keytype=str, itemtype=None, optional=True,
+                               default={'nbins': 11, 'min_sep': 0.5, 'max_sep': 20,
+                                        'sep_units': "arcmin", 'verbose': 0},
+                               doc=("keyword arguments to be passed to treecorr,"
+                                    "if doPlotRhoStatistics is True"))
     doPlotQuiver = Field(dtype=bool, default=True, doc=("Plot ellipticity residuals quiver plot? "
                                                         "(ignored if plotMatchesOnly is True)"))
     doPlotPsfFluxSnHists = Field(dtype=bool, default=True, doc="Plot histograms of raw PSF fluxes and S/N?")
@@ -151,6 +157,7 @@ class CoaddAnalysisConfig(Config):
             self.doPlotStarGalaxy = False
             self.doPlotOverlaps = False
             self.doPlotCompareUnforced = False
+            self.doPlotRhoStatistics = False
             self.doPlotQuiver = False
             self.doPlotFootprintNpix = False
             self.doPlotInputCounts = False
@@ -255,11 +262,12 @@ class CoaddAnalysisTask(CmdLineTask):
         # Dict of all parameters common to plot* functions
         plotKwargs = dict(zpLabel=self.zpLabel, uberCalLabel=self.uberCalLabel)
 
-        if any(doPlot for doPlot in [self.config.doPlotMags, self.config.doPlotStarGalaxy,
-                                     self.config.doPlotOverlaps, self.config.doPlotCompareUnforced,
-                                     self.config.doPlotSkyObjects, self.config.doPlotSkyObjectsSky,
-                                     cosmos, self.config.externalCatalogs,
-                                     self.config.doWriteParquetTables]):
+        if any (doPlot for doPlot in [self.config.doPlotMags, self.config.doPlotStarGalaxy,
+                                      self.config.doPlotOverlaps, self.config.doPlotCompareUnforced,
+                                      self.config.doPlotSkyObjects, self.config.doPlotSkyObjectsSky,
+                                      self.config.doPlotRhoStatistics,
+                                      cosmos, self.config.externalCatalogs,
+                                      self.config.doWriteParquetTables]):
             if haveForced:
                 catStruct = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_forced_src",
                                               repoInfo)
@@ -408,6 +416,10 @@ class CoaddAnalysisTask(CmdLineTask):
                 plotList.append(self.plotFootprintHist(forced, "footNpix", plotInfoDict, **plotKwargs))
                 plotList.append(self.plotFootprint(forced, plotInfoDict, areaDict, forcedStr=forcedStr,
                                                    **plotKwargs))
+
+            if self.config.doPlotRhoStatistics:
+                plotList.append(self.plotRhoStatistics(unforced, plotInfoDict,
+                                                       forcedStr="unforced " + self.catLabel, **plotKwargs))
 
             if self.config.doPlotQuiver:
                 plotList.append(self.plotQuiver(unforced, "ellipResids", plotInfoDict, areaDict,
@@ -1362,6 +1374,39 @@ class CoaddAnalysisTask(CmdLineTask):
         matches = matchNanojanskyToAB(matches)
         return joinMatches(matches, "ref_", "src_")
 
+    def plotRhoStatistics(self, catalog, plotInfoDict, zpLabel=None,
+                          forcedStr=None, postFix="", uberCalLabel=None):
+        """ Plot Rho Statistics with stars used for PSF modelling and
+        non-PSF stars.
+        """
+        yield
+        stats = None
+
+        # First do for calib_psf_used only.
+        shortName = "Rho" + postFix + "_calib_psf_used"
+        psfUsed = catalog[catalog["calib_psf_used"]].copy(deep=True)
+        self.log.info("shortName = {:s}".format(shortName))
+        yield from self.AnalysisClass(psfUsed, None,
+                                      ("        Sdss Rho Statistics (calib_psf_used): "),
+                                      shortName, self.config.analysis,
+                                      goodKeys=["calib_psf_used"], labeller=None
+                                      ).plotRhoStatistics(shortName, plotInfoDict, self.log,
+                                                          treecorrParams=self.config.treecorrParams,
+                                                          stats=stats, zpLabel=zpLabel, forcedStr=forcedStr,
+                                                          uberCalLabel=uberCalLabel)
+
+        # Now for all stars.
+        shortName = "Rho" + postFix + "_all_stars"
+        starsOnly = catalog[catalog["base_ClassificationExtendedness_value"] < 0.5].copy(deep=True)
+        self.log.info("shortName = {:s}".format(shortName))
+        yield from self.AnalysisClass(starsOnly, None,
+                                      ("        Sdss Rho Statistics: "),
+                                      shortName, self.config.analysis, flags=[], labeller=None
+                                      ).plotRhoStatistics(shortName, plotInfoDict, self.log,
+                                                          treecorrParams=self.config.treecorrParams,
+                                                          stats=stats, zpLabel=zpLabel, forcedStr=forcedStr,
+                                                          uberCalLabel=uberCalLabel)
+
     def plotQuiver(self, catalog, description, plotInfoDict, areaDict, matchRadius=None,
                    zpLabel=None, forcedStr=None, postFix="", flagsCat=None, uberCalLabel=None, scale=1):
         yield
@@ -1653,6 +1698,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         if self.config.doPlotStarGalaxy:
             plotList.append(self.plotStarGal(forced, plotInfoDict, areaDict1, forcedStr=forcedStr,
                                              **plotKwargs1))
+
         self.allStats, self.allStatsHigh = savePlots(plotList, "plotCompareCoadd", repoInfo1.dataId,
                                                      repoInfo1.butler)
 

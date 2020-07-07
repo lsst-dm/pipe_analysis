@@ -14,10 +14,10 @@ from lsst.pex.config import Config, Field, ListField, DictField
 from lsst.pipe.base import Struct
 
 from .utils import (Data, Stats, E1Resids, E2Resids, fluxToPlotString, computeMeanOfFrac,
-                    calcQuartileClippedStats)
+                    calcQuartileClippedStats, RhoStatistics)
 from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotText, plotCameraOutline,
                         plotTractOutline, plotPatchOutline, plotCcdOutline, labelCamera, getQuiver,
-                        getRaDecMinMaxPatchList, bboxToXyCoordLists, makeAlphaCmap)
+                        plotRhoStats, getRaDecMinMaxPatchList, bboxToXyCoordLists, makeAlphaCmap)
 
 __all__ = ["AnalysisConfig", "Analysis"]
 
@@ -242,7 +242,9 @@ class Analysis(object):
             dataType = "all" if "all" in self.data else "star"
             if self.stats[dataType].num > 0:
                 if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar", "resolution",
-                                                           "race", "psfInst", "psfCal"]):
+                                                           "race", "psfInst", "psfCal", "Rho", "hsmRho",
+                                                           "Rho_calib_psf_used", "hsmRho_calib_psf_used",
+                                                           "Rho_all_stars", "hsmRho_all_stars"]):
                     self.qMin = max(min(self.qMin, self.stats[dataType].mean - 6.0*self.stats[dataType].stdev,
                                         self.stats[dataType].median - 1.25*self.stats[dataType].clip),
                                     min(self.stats[dataType].mean - 20.0*self.stats[dataType].stdev,
@@ -253,7 +255,9 @@ class Analysis(object):
                                          abs(max(self.quantity[self.good])))
                         self.qMin = -minmax if minmax > 0 else self.qMin
                 if not any(ss in self.shortName for ss in ["footNpix", "pStar", "resolution", "race",
-                                                           "psfInst", "psfCal"]):
+                                                           "psfInst", "psfCal", "Rho", "hsmRho",
+                                                           "Rho_calib_psf_used", "hsmRho_calib_psf_used",
+                                                           "Rho_all_stars", "hsmRho_all_stars"]):
                     self.qMax = min(max(self.qMax, self.stats[dataType].mean + 6.0*self.stats[dataType].stdev,
                                         self.stats[dataType].median + 1.25*self.stats[dataType].clip),
                                     max(self.stats[dataType].mean + 20.0*self.stats[dataType].stdev,
@@ -1093,6 +1097,89 @@ class Analysis(object):
         axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.1), fancybox=True, shadow=True, fontsize=8)
 
         yield Struct(fig=fig, description=description, stats=stats, statsHigh=None, dpi=150, style="quiver")
+
+    def plotRhoStatistics(self, description, plotInfoDict, log, treecorrParams, stats,
+                          zpLabel=None, forcedStr=None, postFix="", flagsCat=None, uberCalLabel=None):
+        """ Plot Rho Statistics """
+
+        figAxes = [plt.subplots(), plt.subplots()]  # first plot for Rho 1, 3, 4 and second for Rho 2, 5
+        figs, axes = list(zip(*figAxes))
+
+        compareCol = "base_SdssShape"
+        psfCompareCol = "base_SdssShape_psf"
+        shapeAlgorithm = "SDSS"
+        flags = list(self.config.flags) + ["base_SdssShape_flag", "base_SdssShape_flag_psf"]
+
+        # Cull the catalog of flagged sources
+        bad = np.zeros(len(self.catalog), dtype=bool)
+        bad |= self.catalog["deblend_nChild"] > 0
+        for flag in flags:
+            bad |= self.catalog[flag]
+        good_catalog = self.catalog[~bad].copy(deep=True)
+
+        rhoStatsFunc = RhoStatistics(compareCol, psfCompareCol, **treecorrParams)
+        rhoStats = rhoStatsFunc(good_catalog)
+        plotRhoStats(axes, rhoStats)
+
+        for figId, figax in enumerate(figAxes):
+            fig, ax = figax
+            figDescription = description + str(figId + 1)
+            labelCamera(plotInfoDict, fig, ax, 0.5, 1.09)
+            labelVisit(plotInfoDict, fig, ax, 0.5, 1.04)
+            if zpLabel is not None:
+                plotText(zpLabel, fig, ax, 0.14, -0.08, prefix="zp: ", color="green")
+            if uberCalLabel:
+                plotText(uberCalLabel, fig, ax, 0.14, -0.12, prefix="uberCal: ", fontSize=7, color="green")
+            plotText(shapeAlgorithm, fig, ax, 0.85, -0.08, prefix="Shape Alg: ", fontSize=8, color="green")
+            if forcedStr is not None:
+                plotText(forcedStr, fig, ax, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
+
+            log.info("Tract id in Rho Stats: {0}".format(plotInfoDict['tract']))
+
+            yield Struct(fig=fig, description=figDescription, stats=stats, statsHigh=None, dpi=120,
+                         style="RhoStats")
+
+        if "ext_shapeHSM_HsmSourceMoments_xx" in self.catalog.schema:
+            figAxes = [plt.subplots(), plt.subplots()]  # first plot for Rho 1, 3, 4 and second for Rho 2, 5
+            figs, axes = list(zip(*figAxes))
+
+            description = description.replace('Rho', 'hsmRho')
+            compareCol = "ext_shapeHSM_HsmSourceMoments"
+            psfCompareCol = "ext_shapeHSM_HsmPsfMoments"
+            shapeAlgorithm = "HSM"
+            flags = list(self.config.flags) + ["ext_shapeHSM_HsmSourceMoments_flag",
+                                               "ext_shapeHSM_HsmPsfMoments_flag"]
+
+            # Cull the catalog of flagged sources
+            bad = np.zeros(len(self.catalog), dtype=bool)
+            bad |= self.catalog["deblend_nChild"] > 0
+            for flag in flags:
+                bad |= self.catalog[flag]
+            good_catalog = self.catalog[~bad].copy(deep=True)
+
+            rhoStatsFunc = RhoStatistics(compareCol, psfCompareCol, **treecorrParams)
+            rhoStats = rhoStatsFunc(good_catalog)
+            plotRhoStats(axes, rhoStats)
+
+            for figId, figax in enumerate(figAxes):
+                fig, ax = figax
+                figDescription = description + str(figId + 1)
+                labelCamera(plotInfoDict, fig, ax, 0.5, 1.09)
+                labelVisit(plotInfoDict, fig, ax, 0.5, 1.04)
+                if zpLabel is not None:
+                    plotText(zpLabel, fig, ax, 0.14, -0.08, prefix="zp: ", color="green")
+                if uberCalLabel:
+                    plotText(uberCalLabel, fig, ax, 0.14, -0.12, prefix="uberCal: ", fontSize=8,
+                             color="green")
+                plotText(shapeAlgorithm, fig, ax, 0.85, -0.08, prefix="Shape Alg: ", fontSize=8,
+                         color="green")
+                if forcedStr is not None:
+                    plotText(forcedStr, fig, ax, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
+
+                log.info("Tract id in Rho Stats: {0}".format(plotInfoDict['tract']))
+
+                yield Struct(fig=fig, description=figDescription, stats=stats, statsHigh=None, dpi=120,
+                             style="RhoStats")
 
     def plotInputCounts(self, catalog, description, plotInfoDict, log, forcedStr=None, uberCalLabel=None,
                         cmap=plt.cm.viridis, alpha=0.5, doPlotPatchOutline=True, sizeFactor=5.0,

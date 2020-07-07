@@ -326,7 +326,7 @@ def labelVisit(plotInfoDict, fig, axis, xLoc, yLoc, color="k", fontSize=9):
         labelStr = "Tract: {}".format(plotInfoDict["tract"])
     else:
         labelStr = "Tract: {} Visit: {}".format(plotInfoDict["tract"], plotInfoDict["visit"])
-    plt.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=fontSize, transform=axis.transAxes,
+    fig.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=fontSize, transform=axis.transAxes,
              color=color)
 
 
@@ -924,3 +924,39 @@ def determineExternalCalLabel(repoInfo, patch, coaddName="deep"):
             uberCalLabel += "SFM"
 
     return uberCalLabel
+
+
+def plotRhoStats(axes, rhoStats):
+    """Plot all five Rho Statistics
+
+    Parameters
+    ----------
+    axes : `list`
+        A list containing two `matplotlib.figure.ax` handles
+    rhoStats : `dict`
+        A Python dictionary object with keys 1..5, each containing a
+        treecorr.GGCorrelation object
+
+    Returns
+    -------
+        None
+    """
+    for rhoIndex in range(1, 6):
+        rho = rhoStats[rhoIndex]
+
+        # The mapping creates plots as in DES papers
+        # ax = axes[1] if rhoIndex in [2,5] else axes[0]
+        ax = axes[1 if rhoIndex in (2, 5) else 0]
+        colorStr = "C{}".format(rhoIndex)
+        isPositive = rho.xip > 0
+        ax.errorbar(rho.meanr[isPositive], rho.xip[isPositive], yerr=np.sqrt(rho.varxi)[isPositive],
+                    color=colorStr, fmt='o', label=r"$\rho_{0}(\theta)$".format(rhoIndex))
+        ax.errorbar(rho.meanr[~isPositive], -rho.xip[~isPositive], yerr=np.sqrt(rho.varxi)[~isPositive],
+                    color=colorStr, fillstyle='none', fmt='o', label=None)
+
+    for ax in axes:
+        ax.set_yscale('log')
+        ax.set_xscale('log')
+        ax.set_ylabel(r'$\rho(\theta)$')
+        ax.set_xlabel(r'$\theta$ (arcmin)')
+        ax.legend(loc='lower left')

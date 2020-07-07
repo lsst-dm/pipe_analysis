@@ -19,6 +19,7 @@ import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 import lsst.pex.config as pexConfig
 import lsst.verify as verify
+import treecorr
 
 try:
     from lsst.meas.mosaic.updateExposure import applyMosaicResultsCatalog
@@ -27,7 +28,7 @@ except ImportError:
 
 __all__ = ["Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCompare",
            "AstrometryDiff", "AngularDistance", "TraceSize", "PsfTraceSizeDiff", "TraceSizeCompare",
-           "PercentDiff", "E1Resids", "E2Resids", "E1ResidsHsmRegauss", "E2ResidsHsmRegauss",
+           "PercentDiff", "E1", "E2", "E1Resids", "E2Resids", "E1ResidsHsmRegauss", "E2ResidsHsmRegauss",
            "FootNpixDiffCompare", "MagDiffErr", "MagDiffCompareErr", "ApCorrDiffErr",
            "CentroidDiff", "CentroidDiffErr", "deconvMom", "deconvMomStarGal",
            "concatenateCatalogs", "joinMatches", "checkIdLists", "checkPatchOverlap",
@@ -315,7 +316,7 @@ class TraceSize(object):
 
 
 class PsfTraceSizeDiff(object):
-    """Functor to calculate trace radius size difference (%) between object and psf model"""
+    """Functor to calculate trace radius size difference (%) between object and PSF model"""
     def __init__(self, column, psfColumn):
         self.column = column
         self.psfColumn = psfColumn
@@ -353,39 +354,134 @@ class PercentDiff(object):
         return np.array(percentDiff)
 
 
+class E1(object):
+    """Function to calculate e1 ellipticities from a given catalog
+
+    Parameters
+    ----------
+    column: `str`
+        The name of the shape measurement algorithm (SdssShape or HsmRegauss).
+    unitScale : 'float`, optional
+        A numerical scaling factor to multiply the ellipticity (1.0 by default)
+
+    Returns
+    -------
+    e1 : `numpy.array`
+        A numpy array of e1 ellipticity values
+    """
+
+    def __init__(self, column, unitScale=1.0):
+        self.column = column
+        self.unitScale = unitScale
+
+    def __call__(self, catalog):
+        e1 = ((catalog[self.column + "_xx"] - catalog[self.column + "_yy"])
+              /(catalog[self.column + "_xx"] + catalog[self.column + "_yy"]))
+        return np.array(e1)*self.unitScale
+
+
+class E2(object):
+    """Function to calculate e2 ellipticities from a given catalog
+
+    Parameters
+    ----------
+    column: `str`
+        The name of the shape measurement algorithm (SdssShape or HsmRegauss).
+    unitScale : 'float`, optional
+        A numerical scaling factor to multiply the ellipticity (1.0 by default)
+
+    Returns
+    -------
+    e2 : `numpy.array`
+        A numpy array of e2 ellipticity values
+    """
+
+    def __init__(self, column, unitScale=1.0):
+        self.column = column
+        self.unitScale = unitScale
+
+    def __call__(self, catalog):
+        e2 = (2.0*catalog[self.column + "_xy"]
+              /(catalog[self.column + "_xx"] + catalog[self.column + "_yy"]))
+        return np.array(e2)*self.unitScale
+
+
 class E1Resids(object):
-    """Functor to calculate e1 ellipticity residuals for a given object and psf model"""
+    """Functor to calculate e1 ellipticity residuals from an object catalog
+    and PSF model
+
+    Parameters
+    ---------
+    column: `str`
+        The name of the shape measuremet algorithm (SdssShape or HsmRegauss).
+    psfColumn: `str`
+        The name used for PSF shape measurements from the same algorithm.
+    unitScale: `float`, optional
+       A numerical scaling factor to multiply both the object and PSF
+       ellipticities (1.0 by default)
+
+    Returns
+    -------
+    e1Resids : `numpy.array`
+        A numpy array of e1 residual ellipticity values
+    """
+
     def __init__(self, column, psfColumn, unitScale=1.0):
         self.column = column
         self.psfColumn = psfColumn
         self.unitScale = unitScale
 
     def __call__(self, catalog):
-        srcE1 = ((catalog[self.column + "_xx"] - catalog[self.column + "_yy"])
-                 /(catalog[self.column + "_xx"] + catalog[self.column + "_yy"]))
-        psfE1 = ((catalog[self.psfColumn + "_xx"] - catalog[self.psfColumn + "_yy"])
-                 /(catalog[self.psfColumn + "_xx"] + catalog[self.psfColumn + "_yy"]))
+        srcE1func = E1(self.column, self.unitScale)
+        psfE1func = E1(self.psfColumn, self.unitScale)
+
+        srcE1 = srcE1func(catalog)
+        psfE1 = psfE1func(catalog)
+
         e1Resids = srcE1 - psfE1
-        return np.array(e1Resids)*self.unitScale
+        return e1Resids
 
 
 class E2Resids(object):
-    """Functor to calculate e2 ellipticity residuals for a given object and psf model"""
+    """Functor to calculate e2 ellipticity residuals from an object catalog
+    and PSF model
+
+    Parameters
+    ---------
+    column: `str`
+        The name of the shape measuremet algorithm (SdssShape or HsmRegauss).
+    psfColumn: `str`
+        The name used for PSF shape measurements from the same algorithm.
+    unitScale: `float`, optional
+       A numerical scaling factor to multiply both the object and PSF
+       ellipticities (1.0 by default)
+
+    Returns
+    -------
+    e2Resids : `numpy.array`
+        A numpy array of e2 residual ellipticity values
+    """
+
     def __init__(self, column, psfColumn, unitScale=1.0):
         self.column = column
         self.psfColumn = psfColumn
         self.unitScale = unitScale
 
     def __call__(self, catalog):
-        srcE2 = 2.0*catalog[self.column + "_xy"]/(catalog[self.column + "_xx"] + catalog[self.column + "_yy"])
-        psfE2 = (2.0*catalog[self.psfColumn + "_xy"]
-                 /(catalog[self.psfColumn + "_xx"] + catalog[self.psfColumn + "_yy"]))
+        srcE2func = E2(self.column, self.unitScale)
+        psfE2func = E2(self.psfColumn, self.unitScale)
+
+        srcE2 = srcE2func(catalog)
+        psfE2 = psfE2func(catalog)
+
         e2Resids = srcE2 - psfE2
-        return np.array(e2Resids)*self.unitScale
+        return e2Resids
 
 
 class E1ResidsHsmRegauss(object):
-    """Functor to calculate HSM e1 ellipticity residuals for a given object and psf model"""
+    """Functor to calculate HSM e1 ellipticity residuals from a given star
+    catalog and PSF model
+    """
     def __init__(self, unitScale=1.0):
         self.unitScale = unitScale
 
@@ -398,7 +494,9 @@ class E1ResidsHsmRegauss(object):
 
 
 class E2ResidsHsmRegauss(object):
-    """Functor to calculate HSM e1 ellipticity residuals for a given object and psf model"""
+    """Functor to calculate HSM e1 ellipticity residuals from a given star
+    catalog and PSF model
+    """
     def __init__(self, unitScale=1.0):
         self.unitScale = unitScale
 
@@ -408,6 +506,76 @@ class E2ResidsHsmRegauss(object):
                  /(catalog["ext_shapeHSM_HsmPsfMoments_xx"] + catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
         e2Resids = srcE2 - psfE2
         return np.array(e2Resids)*self.unitScale
+
+
+class RhoStatistics(object):
+    """Functor to compute Rho statistics (Rowe (2010), Jarvis et al., (2016))
+    from a given star catalog and PSF model
+
+    Parameters
+    ----------
+
+    column : `str`
+        The name of the shape measurement algorithm (SdssShape or HsmRegauss).
+    psfColumn: `str`
+        The name used for PSF shape measurements from the same algorithm.
+    **kwargs
+        Additional keyword arguments passed to treecorr. See
+        https://rmjarvis.github.io/TreeCorr/_build/html/gg.html for details.
+
+    Returns
+    -------
+    rhoStats : `dict` [`int', 'treecorr.GGCorrelation`]
+        A dictionary with keys 1..5, containing treecorr.GGCorrelation objects
+        corresponding to Rho statistic index
+    """
+    def __init__(self, column, psfColumn, **kwargs):
+        self.column = column
+        self.psfColumn = psfColumn
+        self.e1Func = E1(self.psfColumn)
+        self.e2Func = E2(self.psfColumn)
+        self.e1ResidsFunc = E1Resids(self.column, self.psfColumn)
+        self.e2ResidsFunc = E2Resids(self.column, self.psfColumn)
+        self.traceSizeFunc = TraceSize(self.column)
+        self.psfTraceSizeFunc = TraceSize(self.psfColumn)
+        self.kwargs = kwargs
+
+    def __call__(self, catalog):
+        e1 = self.e1Func(catalog)
+        e2 = self.e2Func(catalog)
+        e1Res = self.e1ResidsFunc(catalog)
+        e2Res = self.e2ResidsFunc(catalog)
+        traceSize2 = self.traceSizeFunc(catalog)**2
+        psfTraceSize2 = self.psfTraceSizeFunc(catalog)**2
+        SizeRes = (traceSize2 - psfTraceSize2)/(0.5*(traceSize2 + psfTraceSize2))
+
+        isFinite = np.isfinite(e1Res) & np.isfinite(e2Res) & np.isfinite(SizeRes)
+        e1 = e1[isFinite]
+        e2 = e2[isFinite]
+        e1Res = e1Res[isFinite]
+        e2Res = e2Res[isFinite]
+        SizeRes = SizeRes[isFinite]
+
+        # Scale the SizeRes by ellipticities
+        e1SizeRes = e1*SizeRes
+        e2SizeRes = e2*SizeRes
+
+        # Package the arguments to capture auto-/cross-correlations for the
+        # Rho statistics
+        args = {1: (e1Res, e2Res, None, None),
+                2: (e1, e2, e1Res, e2Res),
+                3: (e1SizeRes, e2SizeRes, None, None),
+                4: (e1Res, e2Res, e1SizeRes, e2SizeRes),
+                5: (e1, e2, e1SizeRes, e2SizeRes)}
+
+        ra = np.rad2deg(catalog["coord_ra"][isFinite])*60.  # arcmin
+        dec = np.rad2deg(catalog["coord_dec"][isFinite])*60.  # arcmin
+
+        # Pass the appropriate arguments to the correlator and build a dict
+        rhoStats = {rhoIndex: corr2(ra, dec, *(args[rhoIndex]), raUnits="arcmin", decUnits="arcmin",
+                                    **self.kwargs) for rhoIndex in range(1, 6)}
+
+        return rhoStats
 
 
 class FootNpixDiffCompare(object):
@@ -2015,3 +2183,55 @@ def calcQuartileClippedStats(dataArray, nSigmaToClip=3.0):
         clipValue=clipValue,
         goodArray=good,
     )
+
+
+def corr2(ra, dec, g1a, g2a, g1b=None, g2b=None, raUnits="degrees", decUnits="degrees", **treecorrKwargs):
+    """ Function to compute correlations between atmost two shear-like fields.
+
+    This is used to compute Rho statistics, given the appropriate shear-like
+    fields.
+
+    Parameters
+    ----------
+    ra : `numpy.array`
+       The right ascension values of entries in the catalog
+    dec : `numpy.array`
+       The declination values of entres in the catalog
+    g1a : `numpy.array`
+       The first component of the primary shear-like field
+    g2a : `numpy.array`
+       The second component of the primary shear-like field
+    g1b : `numpy.array`, optional
+       The first component of the secondary shear-like field.
+       Autocorrelation of the primary field is computed if None
+       (None by default)
+    g2b : `numpy.array`, optional
+       The second component of the secondary shear-like field.
+       Autocorrelation of the primary field is computed if None
+       (None by default)
+    raUnits : `str`, optional
+       Unit of the right ascension values (degrees by default)
+    decUnits : `str`, optional
+       Unit of the declination values (degrees by default)
+
+    Additionally, keyword arguments to treecorr.GGCorrelation may be passed
+
+    Returns
+    -------
+    xy : `treecorr.GGCorrelation`
+       A treecorr.GGCorrelation object containing the correlation function
+    """
+
+    xy = treecorr.GGCorrelation(**treecorrKwargs)
+    catA = treecorr.Catalog(ra=ra, dec=dec, g1=g1a, g2=g2a, ra_units=raUnits,
+                            dec_units=decUnits)
+    if g1b is None or g2b is None:
+        # Calculate the auto-correlation
+        xy.process(catA)
+    else:
+        catB = treecorr.Catalog(ra=ra, dec=dec, g1=g1b, g2=g2b, ra_units=raUnits,
+                                dec_units=decUnits)
+        # Calculate the cross-correlation
+        xy.process(catA, catB)
+
+    return xy
