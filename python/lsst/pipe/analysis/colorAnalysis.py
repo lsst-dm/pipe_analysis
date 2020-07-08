@@ -476,7 +476,7 @@ class ColorAnalysisTask(CmdLineTask):
         self.allStats, self.allStatsHigh = savePlots(plotList, "plotColor", repoInfo.dataId, repoInfo.butler)
 
         # Update the verifyJob with relevant metadata
-        metaDict = {}
+        metaDict = {"tract": int(plotInfoDict["tract"])}
         if geLabel:
             metaDict.update({"galacticExtinctionCorrection": geLabel})
         if repoInfo.camera:
