@@ -473,6 +473,8 @@ class ColorAnalysisTask(CmdLineTask):
                                                     areaDictAll, fluxColumn, forcedStr=self.forcedStr,
                                                     geLabel=geLabel, uberCalLabel=uberCalLabel))
 
+        self.allStats, self.allStatsHigh = savePlots(plotList, "plotColor", repoInfo.dataId, repoInfo.butler)
+
         # Update the verifyJob with relevant metadata
         metaDict = {}
         if geLabel:
@@ -484,8 +486,6 @@ class ColorAnalysisTask(CmdLineTask):
         verifyJobFilename = repoInfo.butler.get("colorAnalysis_verify_job_filename",
                                                 dataId=repoInfo.dataId)[0]
         self.verifyJob.write(verifyJobFilename)
-
-        self.allStats, self.allStatsHigh = savePlots(plotList, "plotColor", repoInfo.dataId, repoInfo.butler)
 
     def readCatalogs(self, patchRefList, dataset, repoInfo):
         """Read in and concatenate catalogs of type dataset in lists of data references
