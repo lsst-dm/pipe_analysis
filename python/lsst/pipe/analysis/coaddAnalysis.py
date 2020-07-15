@@ -175,8 +175,11 @@ class CoaddAnalysisConfig(Config):
             self.doPlotOverlaps = False
             self.doPlotCompareUnforced = False
             self.doPlotQuiver = False
+            self.doPlotPsfFluxSnHists = False
             self.doPlotFootprintArea = False
             self.doPlotInputCounts = False
+            self.doPlotSkyObjects = False
+            self.doPlotSkyObjectsSky = False
 
 
 class CoaddAnalysisRunner(TaskRunner):
