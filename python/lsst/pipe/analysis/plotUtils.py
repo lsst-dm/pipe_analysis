@@ -915,7 +915,7 @@ def determineExternalCalLabel(repoInfo, patch, coaddName="deep"):
         if ("FGCM" not in uberCalLabel
                 and repoInfo.butler.datasetExists("jointcal_photoCalib", dataId=visitDataId)):
             uberCalLabel += "JOINTCAL"
-        else:
+        elif uberCalLabel == "photoCal: ":
             uberCalLabel += "SFM"
         uberCalLabel += "  wcs: "
         if repoInfo.butler.datasetExists("jointcal_wcs", dataId=visitDataId):
