@@ -312,7 +312,7 @@ class Analysis(object):
                               highlightList=None, extraLabels=None, uberCalLabel=None, doPrintMedian=False):
         """Plot quantity against magnitude with side histogram"""
 
-        if plotInfoDict["plotType"] == "plotVisit" or plotInfoDict["plotType"] == "plotCoadd":
+        if plotInfoDict["plotType"] != "plotColor":
             filterLabelStr = "[{}]".format(plotInfoDict["filter"])
             if "lsst" in plotInfoDict["camera"]:
                 filterLabelStr = "[{}-{}]".format(plotInfoDict["camera"], plotInfoDict["filter"])

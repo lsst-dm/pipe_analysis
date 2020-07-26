@@ -280,6 +280,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             ccdListPerTract = getDataExistsRefList(dataRefListTract, repoInfo.catDataset)
 
             plotInfoDict = getPlotInfo(repoInfo)
+            subdir = "ccd-" + str(ccdListPerTract[0]) if len(ccdListPerTract) == 1 else subdir
+            # Dict of all parameters common to plot* functions
+            plotInfoDict.update(dict(plotType="plotVisit", ccdList=ccdListPerTract,
+                                     hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo,
+                                     dataId=repoInfo.dataId))
 
             if not ccdListPerTract:
                 raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo.catDataset))
@@ -328,7 +333,6 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     self.log.warn(f"Did not find {repoInfo.skyWcsDataset} external calibrations for "
                                   f"all dataIds that do have {repoInfo.catDataset} catalogs.")
 
-            subdir = "ccd-" + str(ccdListPerTract[0]) if len(ccdListPerTract) == 1 else subdir
             # Create list of alias mappings for differing schema naming conventions (if any)
             aliasDictList = [self.config.flagsToAlias, ]
             if repoInfo.hscRun and self.config.srcSchemaMap is not None:
@@ -337,6 +341,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             # they do not get explicitly filtered out).
             highlightList = [
                 (self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0, "turquoise"), ]
+
+            # Dict of all parameters common to plot* functions
+            plotInfoDict.update(dict(cameraObj=repoInfo.camera, ccdList=ccdListPerTract,
+                                     hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo,
+                                     dataId=repoInfo.dataId))
 
             if any(doPlot for doPlot in [self.config.doPlotFootprintNpix, self.config.doPlotQuiver,
                                          self.config.doPlotMags, self.config.doPlotSizes,
@@ -393,8 +402,6 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 catalog = catalog[~bad].copy(deep=True)
                 commonZpCat = commonZpCat[~badCommonZp].copy(deep=True)
 
-                plotInfoDict["plotType"] = "plotVisit"
-
                 if self.config.hasFakes:
                     processedFakes = catalog.asAstropy().to_pandas()
                     inputFakes = addDegreePositions(inputFakes, self.config.inputFakesRaCol,
@@ -433,10 +440,6 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     plotList.append(fakesMagnitudePositionError(inputFakesMatched, processedFakesMatched,
                                                                 plotInfoDict, areaDict))
 
-                # Dict of all parameters common to plot* functions
-                plotInfoDict.update(dict(cameraObj=repoInfo.camera, ccdList=ccdListPerTract,
-                                         hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo,
-                                         dataId=repoInfo.dataId))
                 if self.config.doPlotSkyObjects and skySrcCat is not None:
                     self.plotSkyObjects(skySrcCat, "skySources", plotInfoDict, areaDict)
                 if self.config.doPlotPsfFluxSnHists:
@@ -513,7 +516,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         self.verifyJob = updateVerifyJob(self.verifyJob, metaDict=metaDict)
         verifyJobFilename = repoInfo.butler.get("visitAnalysis_verify_job_filename",
                                                 dataId=repoInfo.dataId)[0]
-        savePlots(plotList, "plotVisit", repoInfo.dataId, repoInfo.butler)
+        if plotList:
+            savePlots(plotList, "plotVisit", repoInfo.dataId, repoInfo.butler)
 
         self.verifyJob.write(verifyJobFilename)
 

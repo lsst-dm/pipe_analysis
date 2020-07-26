@@ -249,7 +249,11 @@ class CoaddAnalysisTask(CmdLineTask):
         patchList = [patchRef.dataId["patch"] for patchRef in patchRefList]
         self.log.info("patchList size: {:d}".format(len(patchList)))
         repoInfo = getRepoInfo(patchRefList[0], coaddName=self.config.coaddName, coaddDataset=dataset)
+        plotInfoDict = getPlotInfo(repoInfo)
         subdir = "patch-" + str(patchList[0]) if len(patchList) == 1 else subdir
+        plotInfoDict.update(dict(plotType="plotCoadd", patchList=patchList, hscRun=repoInfo.hscRun,
+                                 tractInfo=repoInfo.tractInfo, dataId=repoInfo.dataId,
+                                 ccdList=None))
         # Find a visit/ccd input so that you can check for meas_mosaic input (i.e. to set uberCalLabel)
         self.uberCalLabel = determineExternalCalLabel(repoInfo, patchList[0], coaddName=self.config.coaddName)
         self.log.info(f"External calibration(s) used: {self.uberCalLabel}")
@@ -325,10 +329,6 @@ class CoaddAnalysisTask(CmdLineTask):
                            & (unforced["deblend_nChild"] == 0) & ~unforced["base_PixelFlags_flag_edge"])
                 skyObjCat = unforced[goodSky].copy(deep=True)
 
-            plotInfoDict = getPlotInfo(repoInfo)
-            plotInfoDict.update(dict(cameraObj=repoInfo.camera, patchList=patchList, hscRun=repoInfo.hscRun,
-                                     tractInfo=repoInfo.tractInfo, dataId=repoInfo.dataId,
-                                     plotType="plotCoadd", ccdList=None))
             # Must do the overlaps before purging the catalogs of non-primary sources
             if self.config.doPlotOverlaps and not self.config.writeParquetOnly:
                 # Determine if any patches in the patchList actually overlap
