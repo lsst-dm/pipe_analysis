@@ -592,18 +592,17 @@ def plotCcdOutline(axes, areaDict, ccdList, tractInfo=None, zpLabel=None, fontSi
         # Use the precomputed corners to make lists of ra and dec to plot
         ccdCorners = areaDict["corners_{}".format(ccd)]
         ra0 = ccdCorners[0].getRa().asDegrees()
-        ra1 = ccdCorners[1].getRa().asDegrees()
+        ra1 = ccdCorners[2].getRa().asDegrees()
         dec0 = ccdCorners[0].getDec().asDegrees()
-        dec1 = ccdCorners[1].getDec().asDegrees()
-        ras = [ra0, ra1, ra1, ra0, ra0]
-        decs = [dec0, dec0, dec1, dec1, dec0]
+        dec1 = ccdCorners[2].getDec().asDegrees()
 
-        # Add the other two corners to the list of points to check if inside the tract
-        ccdCorners.extend([geom.SpherePoint(ra1, dec0, geom.degrees),
-                           geom.SpherePoint(ra0, dec1, geom.degrees)])
+        ras = [cx.asDegrees() for ic, (cx, cy) in enumerate(ccdCorners)]
+        decs = [cy.asDegrees() for ic, (cx, cy) in enumerate(ccdCorners)]
+        ras.append(ra0)
+        decs.append(dec0)
 
-        cenX = ra0 + (ra1 - ra0) / 2
-        cenY = dec0 + (dec1 - dec0) / 2
+        cenX = ra0 + (ra1 - ra0)/2
+        cenY = dec0 + (dec1 - dec0)/2
 
         # Only plot the ccds with any corner in the tract given in tractInfo, plot all if no tractInfo
         inTract = False

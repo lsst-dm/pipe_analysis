@@ -1057,15 +1057,15 @@ def focalPlaneBinnedValues(ras, decs, zs, title, colorBarLabel, areaDict, plotIn
         # Find the ccd corners and sizes
         corners = areaDict["corners_" + str(ccd)]
         xy = (corners[0].getRa().asDegrees(), corners[0].getDec().asDegrees())
-        width = corners[1].getRa().asDegrees() - corners[0].getRa().asDegrees()
-        height = corners[1].getDec().asDegrees() - corners[0].getDec().asDegrees()
+        width = corners[2].getRa().asDegrees() - corners[0].getRa().asDegrees()
+        height = corners[2].getDec().asDegrees() - corners[0].getDec().asDegrees()
 
         # Some of the ccds are rotated and some have xy0 as being on the right with negative width/height
         # this upsets the binning so find the min and max to calculate positive bin widths from.
-        minX = np.min([xy[0], corners[1].getRa().asDegrees()])
-        maxX = np.max([xy[0], corners[1].getRa().asDegrees()])
-        minY = np.min([xy[1], corners[1].getDec().asDegrees()])
-        maxY = np.max([xy[1], corners[1].getDec().asDegrees()])
+        minX = np.min([xy[0], corners[2].getRa().asDegrees()])
+        maxX = np.max([xy[0], corners[2].getRa().asDegrees()])
+        minY = np.min([xy[1], corners[2].getDec().asDegrees()])
+        maxY = np.max([xy[1], corners[2].getDec().asDegrees()])
 
         if np.fabs(width) > np.fabs(height):
             binWidth = (maxX - minX)/10

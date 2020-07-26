@@ -528,18 +528,17 @@ class ColorAnalysisTask(CmdLineTask):
 
                 fname = repoInfo.butler.getUri("deepCoadd_calexp", patchRef.dataId)
                 reader = afwImage.ExposureFitsReader(fname)
-                mask = reader.readMask()
                 wcs = reader.readWcs()
-                goodPix = np.where(~(mask.array.flatten() & mask.getPlaneBitMask("BAD")))[0]
-                numGoodPix = len(goodPix)
-                pixScale = wcs.getPixelScale().asArcseconds()
-                area = pixScale**2 * numGoodPix
+                mask = reader.readMask()
+                maskBad = mask.array & 2**mask.getMaskPlaneDict()["BAD"]
+                maskNoData = mask.array & 2**mask.getMaskPlaneDict()["NO_DATA"]
+                maskedPixels = maskBad + maskNoData
+                numGoodPix = np.count_nonzero(maskedPixels == 0)
+                pixScale = wcs.getPixelScale(reader.readBBox().getCenter()).asArcseconds()
+                area = numGoodPix*pixScale**2
                 areaDict[patchRef.dataId["patch"]] = area
 
-                patchWidth = mask.getWidth()
-                patchHeight = mask.getHeight()
-
-                patchCorners = wcs.pixelToSky([geom.Point2D(0, 0), geom.Point2D(patchWidth, patchHeight)])
+                patchCorners = wcs.pixelToSky(geom.Box2D(reader.readBBox()).getCorners())
                 areaDict["corners_" + str(patchRef.dataId["patch"])] = patchCorners
 
                 if self.config.doWriteParquetTables:

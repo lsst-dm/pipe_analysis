@@ -36,6 +36,7 @@ from .plotUtils import (CosmosLabeller, AllLabeller, StarGalaxyLabeller, Overlap
                         MatchesStarGalaxyLabeller, determineExternalCalLabel)
 
 from .fakesAnalysis import getPlotInfo
+import lsst.afw.cameraGeom as cameraGeom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 import lsst.geom as geom
@@ -276,15 +277,17 @@ class CoaddAnalysisTask(CmdLineTask):
                                       cosmos, self.config.externalCatalogs,
                                       self.config.doWriteParquetTables]):
             if haveForced:
-                catStruct = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_forced_src",
-                                              repoInfo)
-                forced = catStruct.catalog
-                areaDict = catStruct.areaDict
-
+                forcedCatStruct = self.readCatalogs(patchRefList, self.config.coaddName
+                                                    + "Coadd_forced_src", repoInfo)
+                forced = forcedCatStruct.catalog
+                areaDict = forcedCatStruct.areaDict
                 forced = self.calibrateCatalogs(forced, wcs=repoInfo.wcs)
 
-                unforced = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_meas",
-                                             repoInfo).catalog
+            unforcedCatStruct = self.readCatalogs(patchRefList, self.config.coaddName
+                                                  + "Coadd_meas", repoInfo)
+            unforced = unforcedCatStruct.catalog
+            if not haveForced:
+                areaDict = unforcedCatStruct.areaDict
             unforced = self.calibrateCatalogs(unforced, wcs=repoInfo.wcs)
             plotKwargs.update(dict(zpLabel=self.zpLabel))
             if haveForced:
@@ -474,27 +477,30 @@ class CoaddAnalysisTask(CmdLineTask):
             if cosmos:
                 plotList.append(self.plotCosmos(forced, plotInfoDict, areaDict, cosmos, repoInfo.dataId))
 
+        matchAreaDict = {}
         if self.config.doPlotMatches:
             if haveForced:
-                matches = self.readSrcMatches(patchRefList, self.config.coaddName + "Coadd_forced_src",
-                                              hscRun=repoInfo.hscRun, wcs=repoInfo.wcs,
-                                              aliasDictList=aliasDictList)
+                matches, matchAreaDict = self.readSrcMatches(patchRefList, self.config.coaddName
+                                                             + "Coadd_forced_src",
+                                                             hscRun=repoInfo.hscRun, wcs=repoInfo.wcs,
+                                                             aliasDictList=aliasDictList)
             else:
-                matches = self.readSrcMatches(patchRefList, self.config.coaddName + "Coadd_meas",
-                                              hscRun=repoInfo.hscRun, wcs=repoInfo.wcs,
-                                              aliasDictList=aliasDictList)
+                matches, matchAreaDict = self.readSrcMatches(patchRefList, self.config.coaddName
+                                                             + "Coadd_meas",
+                                                             hscRun=repoInfo.hscRun, wcs=repoInfo.wcs,
+                                                             aliasDictList=aliasDictList)
             plotKwargs.update(dict(zpLabel=self.zpLabel))
             matchHighlightList = [("src_" + self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0,
                                    "turquoise"), ]
             plotKwargs.update(dict(highlightList=matchHighlightList))
-            plotList.append(self.plotMatches(matches, plotInfoDict, areaDict, forcedStr=forcedStr,
+            plotList.append(self.plotMatches(matches, plotInfoDict, matchAreaDict, forcedStr=forcedStr,
                                              **plotKwargs))
 
         for cat in self.config.externalCatalogs:
             with andCatalog(cat):
                 matches = self.matchCatalog(forced, repoInfo.filterName, self.config.externalCatalogs[cat])
                 if matches is not None:
-                    plotList.append(self.plotMatches(matches, plotInfoDict, areaDict,
+                    plotList.append(self.plotMatches(matches, plotInfoDict, matchAreaDict,
                                                      forcedStr=forcedStr, matchRadius=self.matchRadius,
                                                      matchRadiusUnitStr=self.matchRadiusUnitStr,
                                                      **plotKwargs))
@@ -540,7 +546,21 @@ class CoaddAnalysisTask(CmdLineTask):
 
         Returns
         -------
-        `list` of concatenated `lsst.afw.table.source.source.SourceCatalog`s
+        result : `lsst.pipe.base.Struct`
+            A struct with attributes:
+            ``commonZpCatalog``
+                The concatenated common zeropoint calibrated catalog
+                (`lsst.afw.table.SourceCatalog`s).
+            ``catalog``
+                The concatenated SFM or external calibration calibrated catalog
+                (`lsst.afw.table.SourceCatalog`s).
+            ``areaDict``
+                Contains patch keys that index the patch corners in RA/Dec and
+                the effective patch area (i.e. neither the "BAD" nor "NO_DATA"
+                mask bit is set) (`dict`).
+            ``fakeCat``
+                The updated catalog of fake sources (None if the config
+                parameter hasFakes = `False` (`pandas.core.frame.DataFrame`).
         """
         catList = []
         areaDict = {}
@@ -556,27 +576,25 @@ class CoaddAnalysisTask(CmdLineTask):
                 reader = afwImage.ExposureFitsReader(fname)
                 wcs = reader.readWcs()
                 mask = reader.readMask()
-                numGoodPix = len(np.where(~(mask.array.flatten() & mask.getPlaneBitMask("BAD")))[0])
-                pixScale = wcs.getPixelScale().asArcseconds()
-                area = pixScale**2 * numGoodPix
+                maskBad = mask.array & 2**mask.getMaskPlaneDict()["BAD"]
+                maskNoData = mask.array & 2**mask.getMaskPlaneDict()["NO_DATA"]
+                maskedPixels = maskBad + maskNoData
+                numGoodPix = np.count_nonzero(maskedPixels == 0)
+                pixScale = wcs.getPixelScale(reader.readBBox().getCenter()).asArcseconds()
+                area = numGoodPix*pixScale**2
                 areaDict[patchRef.dataId["patch"]] = area
 
-                patchWidth = mask.getWidth()
-                patchHeight = mask.getHeight()
-
-                patchCorners = wcs.pixelToSky([geom.Point2D(0, 0), geom.Point2D(patchWidth, patchHeight)])
+                patchCorners = wcs.pixelToSky(geom.Box2D(reader.readBBox()).getCorners())
                 areaDict["corners_" + str(patchRef.dataId["patch"])] = patchCorners
 
                 if self.config.hasFakes:
                     # Check which fake sources fall in the patch
-                    minRa = np.min(cat["coord_ra"])
-                    maxRa = np.max(cat["coord_ra"])
-                    minDec = np.min(cat["coord_dec"])
-                    maxDec = np.max(cat["coord_dec"])
-                    possOnPatch = ((fakeCat[raFakesCol].values > minRa) &
-                                   (fakeCat[raFakesCol].values < maxRa) &
-                                   (fakeCat[decFakesCol].values > minDec) &
-                                   (fakeCat[decFakesCol].values < maxDec))
+                    cornerRas = [px.asRadians() for (px, py) in patchCorners]
+                    cornerDecs = [py.asRadians() for (px, py) in patchCorners]
+                    possOnPatch = ((fakeCat[raFakesCol].values > np.min(cornerRas)) &
+                                   (fakeCat[raFakesCol].values < np.max(cornerRas)) &
+                                   (fakeCat[decFakesCol].values > np.min(cornerDecs)) &
+                                   (fakeCat[decFakesCol].values < np.max(cornerDecs)))
 
                     validPatchPolygon = mask.getInfo().getValidPolygon()
 
@@ -592,13 +610,14 @@ class CoaddAnalysisTask(CmdLineTask):
         if not catList:
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
 
-        if self.config.hasFakes:
+        if not self.config.hasFakes:
             fakeCat = None
 
         return Struct(catalog=concatenateCatalogs(catList), areaDict=areaDict, fakeCat=fakeCat)
 
     def readSrcMatches(self, dataRefList, dataset, hscRun=None, wcs=None, aliasDictList=None):
         catList = []
+        matchAreaDict = {}
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
                 self.log.info("Dataset does not exist: {0:r}, {1:s}".format(dataRef.dataId, dataset))
@@ -643,6 +662,13 @@ class CoaddAnalysisTask(CmdLineTask):
             badFlagList = [transCentFlag, ] if transCentFlag in catalog.schema else ["slot_Centroid_flag", ]
             bad = makeBadArray(catalog, flagList=badFlagList, onlyReadStars=self.config.onlyReadStars)
             catalog = self.calibrateCatalogs(catalog, wcs=wcs)
+
+            fname = butler.getUri(self.config.coaddName + "Coadd_calexp", dataRef.dataId)
+            reader = afwImage.ExposureFitsReader(fname)
+            if wcs is None:
+                wcs = reader.readWcs()
+            patchCorners = wcs.pixelToSky(geom.Box2D(reader.readBBox()).getCorners())
+            matchAreaDict["corners_" + str(dataRef.dataId["patch"])] = patchCorners
 
             if dataset.startswith("deepCoadd_"):
                 packedMatches = butler.get("deepCoadd_measMatch", dataRef.dataId)
@@ -707,7 +733,7 @@ class CoaddAnalysisTask(CmdLineTask):
         if not catList:
             raise TaskError("No matches read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
 
-        return concatenateCatalogs(catList)
+        return concatenateCatalogs(catList), matchAreaDict
 
     def calibrateCatalogs(self, catalog, wcs=None):
         self.zpLabel = "common (" + str(self.config.analysis.coaddZp) + ")"
@@ -1578,17 +1604,20 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         self.log.info(f"External calibration(s) used: {self.uberCalLabel}")
 
         if haveForced:
-            catStruct1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_forced_src",
-                                           repoInfo1)
-            areaDict1 = catStruct1.areaDict
-            forced1 = self.calibrateCatalogs(catStruct1.catalog, wcs=repoInfo1.wcs)
-            catStruct2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_forced_src",
-                                           repoInfo2)
-            forced2 = self.calibrateCatalogs(catStruct2.catalog, wcs=repoInfo2.wcs)
-        unforced1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_meas", repoInfo1).catalog
+            forcedStruct1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_forced_src",
+                                              repoInfo1)
+            areaDict1 = forcedStruct1.areaDict
+            forced1 = self.calibrateCatalogs(forcedStruct1.catalog, wcs=repoInfo1.wcs)
+            forcedStruct2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_forced_src",
+                                              repoInfo2)
+            forced2 = self.calibrateCatalogs(forcedStruct2.catalog, wcs=repoInfo2.wcs)
+        unforcedStruct1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_meas", repoInfo1)
+        unforced1 = unforcedStruct1.catalog
+        if not haveForced:
+            areaDict1 = unforcedStruct1.areaDict
         unforced1 = self.calibrateCatalogs(unforced1, wcs=repoInfo1.wcs)
-        unforced2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_meas", repoInfo2).catalog
-        unforced2 = self.calibrateCatalogs(unforced2, wcs=repoInfo2.wcs)
+        unforcedStruct2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_meas", repoInfo2)
+        unforced2 = self.calibrateCatalogs(unforcedStruct2.catalog, wcs=repoInfo2.wcs)
 
         forcedStr = "forced" if haveForced else "unforced"
 
@@ -1712,24 +1741,22 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         for patchRef in patchRefList:
             if not patchRef.datasetExists(dataset):
                 continue
-            else:
-                patchCat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-                catList.append(patchCat)
-                fname = repoInfo.butler.getUri("deepCoadd_calexp", patchRef.dataId)
-                reader = afwImage.ExposureFitsReader(fname)
-                wcs = reader.readWcs()
-                mask = reader.readMask()
+            patchCat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+            catList.append(patchCat)
+            fname = repoInfo.butler.getUri("deepCoadd_calexp", patchRef.dataId)
+            reader = afwImage.ExposureFitsReader(fname)
+            wcs = reader.readWcs()
+            mask = reader.readMask()
+            maskBad = mask.array & 2**mask.getMaskPlaneDict()["BAD"]
+            maskNoData = mask.array & 2**mask.getMaskPlaneDict()["NO_DATA"]
+            maskedPixels = maskBad + maskNoData
+            numGoodPix = np.count_nonzero(maskedPixels == 0)
 
-            goodPix = np.where(~(mask.array.flatten() & mask.getPlaneBitMask("BAD")))[0]
-            numGoodPix = len(goodPix)
-            pixScale = wcs.getPixelScale().asArcseconds()
-            area = pixScale**2 * numGoodPix
+            pixScale = wcs.getPixelScale(reader.readBBox().getCenter()).asArcseconds()
+            area = numGoodPix*pixScale**2
             areaDict[patchRef.dataId["patch"]] = area
 
-            patchWidth = mask.getWidth()
-            patchHeight = mask.getHeight()
-
-            patchCorners = wcs.pixelToSky([geom.Point2D(0, 0), geom.Point2D(patchWidth, patchHeight)])
+            patchCorners = wcs.pixelToSky(geom.Box2D(reader.readBBox()).getCorners())
             areaDict["corners_" + str(patchRef.dataId["patch"])] = patchCorners
 
         catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS) for
