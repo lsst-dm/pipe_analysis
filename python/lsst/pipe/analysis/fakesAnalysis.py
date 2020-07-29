@@ -37,6 +37,8 @@ from scipy import stats
 
 import lsst.pipe.base as pipeBase
 
+from .utils import addMetricMeasurement
+
 __all__ = ["addDegreePositions", "matchCatalogs", "addNearestNeighbor", "getPlotInfo",
            "calcFakesAreaDepth", "plotFakesAreaDepth", "fakesPositionCompare", "fakesMagnitudeBlendedness",
            "fakesMagnitudeNearestNeighbor", "fakesMagnitudeCompare"]
@@ -291,7 +293,6 @@ def addProvenanceInfo(fig, plotInfoDict):
 def calcFakesAreaDepth(inputFakesMatched, processedFakesMatched, areaDict, measColType="base_PsfFlux_",
                        distNeighbor=2.0 / 3600.0, numSigmas=10):
     """Calculate the area vs depth for the given catalog
-
     Parameters
     ----------
     inputFakesMatched : `pandas.core.frame.DataFrame`
@@ -858,7 +859,7 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict, b
     fig = plt.gcf()
     fig = addProvenanceInfo(fig, plotInfoDict)
 
-    return fig
+    return fig, medDiff, statsSigmaMad
 
 
 def fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict,
@@ -1122,7 +1123,8 @@ def focalPlaneBinnedValues(ras, decs, zs, title, colorBarLabel, areaDict, plotIn
     return plt.gcf()
 
 
-def fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict, magCol="base_PsfFlux_mag"):
+def fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict, magCol="base_PsfFlux_mag",
+                          verifyJob=None):
     """Make a plot showing the comparison between the input and extracted magnitudes.
 
     Parameters
@@ -1175,14 +1177,16 @@ def fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict
         ``style``
             The style of the plot being made (`str`), set to ``fakes``.
 
-
     Notes
     -----
     The two input catalogs need to be pre matched and in the same order so that the entry for an object is
     in the same row in each catalog. The magnitude difference is given in milli mags. The plot is made
     using only objects that were stars in the input catalog of fakes. `plotInfoDict` needs to be a dict
     containing camera, filter, visit, tract and dataset (jointcal or not). plotInfoDict should also contain
-    the magnitude limit that the plot should go to (magLim).
+    the magnitude limit that the plot should go to (magLim). Adds two metrics to the fakesAnalysis metrics
+    file, fake_stars_magDiff and fake_stars_magDiffSigmaMad which can be used to track the evolution of the
+    median difference (and the sigma MAD of the distribution) between the input and extracted magnitudes for
+    fake stars brighter than the given magnitude limit.
     """
     yield
     band = plotInfoDict["filter"][-1].lower()
@@ -1199,8 +1203,15 @@ def fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict
     yLabel = "Output - Input Magnitude (mmag)"
     title = "Magnitude Difference For Fake Stars \n (" + magCol + ")"
 
-    fig = plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict)
-
+    fig, med, sigmaMad = plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict)
+    if verifyJob:
+        magName = magCol.replace("Flux", "")
+        if "Aperture" in magCol:
+            magName = magName.replace("Aperture", "Aper")
+        if "Circular" in magCol:
+            magName = magName.replace("Circular", "Circ")
+        addMetricMeasurement(verifyJob, "pipe_analysis.fake_stars_magDiff_" + magName, med*u.mmag)
+        addMetricMeasurement(verifyJob, "pipe_analysis.fake_stars_magDiffSigMad_" + magName, sigmaMad*u.mmag)
     # Don't have good mags for galaxies at this point.
     # To Do: coadd version of plot with cmodel mags.
 
@@ -1285,7 +1296,7 @@ def fakesMagnitudeNearestNeighbor(inputFakesMatched, processedFakesMatched, plot
     yLabel = "Output - Input Magnitude (mmag)"
     title = "Magnitude Difference For Fake Stars Against \nDistance to Nearest Neighbor (" + magCol + ")"
 
-    fig = plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict)
+    fig, _, _ = plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict)
 
     description = "magnitudeNearestNeighbor"
     stats = None
@@ -1365,7 +1376,7 @@ def fakesMagnitudeBlendedness(inputFakesMatched, processedFakesMatched, plotInfo
     yLabel = "Output - Input Magnitude (mmag)"
     title = "Magnitude Difference For Fake Stars \nAgainst Blendedness"
 
-    fig = plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict)
+    fig, _, _ = plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict)
 
     description = "magnitudeBlendedness"
     stats = None
@@ -1711,7 +1722,7 @@ def fakesMagnitudePositionError(inputFakesMatched, processedFakesMatched, plotIn
     xLabel = "Input Magnitude (mag)"
     title = "Position Differences Against Magnitude for Fake Stars\n(" + magCol + ")"
 
-    fig = plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict)
+    fig, _, _ = plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict)
 
     description = "magnitudePosErrs"
     stats = None
@@ -1723,7 +1734,7 @@ def fakesMagnitudePositionError(inputFakesMatched, processedFakesMatched, plotIn
     title = "Position Differences Against Output - Input Magnitudes\n for Fake Stars (" + magCol + ")"
     xLabel = r"log10($\sqrt{\delta RA^2 + \delta Dec^2}$ (mas))"
     yLabel = "Output - Input Magnitude (mmag)"
-    fig = plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict)
+    fig, _, _ = plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict)
 
     description = "magDiffsPosErrs"
     stats = None

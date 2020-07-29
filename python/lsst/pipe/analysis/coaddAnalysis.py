@@ -39,6 +39,7 @@ from .fakesAnalysis import getPlotInfo
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 import lsst.geom as geom
+import lsst.verify as verify
 
 __all__ = ["CoaddAnalysisConfig", "CoaddAnalysisRunner", "CoaddAnalysisTask", "CompareCoaddAnalysisConfig",
            "CompareCoaddAnalysisRunner", "CompareCoaddAnalysisTask"]
@@ -223,6 +224,8 @@ class CoaddAnalysisTask(CmdLineTask):
         self.matchControl = afwTable.MatchControl()
         self.matchControl.findOnlyClosest = True
         self.matchControl.symmetricMatch = False
+
+        self.verifyJob = verify.Job.load_metrics_package(subset="pipe_analysis")
 
     def runDataRef(self, patchRefList, subdir="", cosmos=None):
         plotList = []
