@@ -408,12 +408,13 @@ class CoaddAnalysisTask(CmdLineTask):
                 plotList.append(self.plotPsfFluxSnHists(unforced, "base_PsfFlux_cal", plotInfoDict, areaDict,
                                                         forcedStr="unforced " + self.catLabel, **plotKwargs))
             if self.config.doPlotSkyObjects:
-                plotList.append(self.plotSkyObjects(skyObjCat, plotInfoDict, areaDict, forcedStr="unforced"))
+                plotList.append(self.plotSkyObjects(skyObjCat, "skyObjects", plotInfoDict, areaDict,
+                                                    forcedStr="unforced"))
             if self.config.doPlotSkyObjectsSky:
-                plotList.append(self.plotSkyObjectsSky(skyObjCatAll, "skyObjects", forcedStr="unforced",
-                                                       alpha=0.7, doPlotTractImage=True,
-                                                       doPlotPatchOutline=True, sizeFactor=3.0,
-                                                       maxDiamPix=1000))
+                plotList.append(self.plotSkyObjectsSky(skyObjCatAll, "skyObjects", plotInfoDict,
+                                                       forcedStr="unforced", alpha=0.7,
+                                                       doPlotTractImage=True, doPlotPatchOutline=True,
+                                                       sizeFactor=3.0, maxDiamPix=1000))
 
             if self.config.doPlotFootprintNpix:
                 plotList.append(self.plotFootprintHist(forced, "footNpix", plotInfoDict, **plotKwargs))
@@ -1422,8 +1423,8 @@ class CoaddAnalysisTask(CmdLineTask):
                                                    stats=stats, zpLabel=zpLabel, forcedStr=forcedStr,
                                                    uberCalLabel=uberCalLabel, scale=scale)
 
-    def plotSkyObjects(self, catalog, plotInfoDict, areaDict, zpLabel=None, forcedStr=None, postFix="",
-                       flagsCat=None):
+    def plotSkyObjects(self, catalog, description, plotInfoDict, areaDict, zpLabel=None, forcedStr=None,
+                       postFix="", flagsCat=None):
         yield
         stats = None
         shortName = "skyObjects"
@@ -1444,8 +1445,8 @@ class CoaddAnalysisTask(CmdLineTask):
                                       ).plotSkyPosition(shortName, plotInfoDict, areaDict,
                                                         dataName="all", **skyplotKwargs)
 
-    def plotSkyObjectsSky(self, catalog, plotInfoDict, forcedStr=None, alpha=0.7, doPlotTractImage=True,
-                          doPlotPatchOutline=True, sizeFactor=3.0, maxDiamPix=1000,
+    def plotSkyObjectsSky(self, catalog, description, plotInfoDict, forcedStr=None, alpha=0.7,
+                          doPlotTractImage=True, doPlotPatchOutline=True, sizeFactor=3.0, maxDiamPix=1000,
                           columnName="base_CircularApertureFlux_9_0_instFlux"):
         yield
         shortName = "skyObjectsSky"

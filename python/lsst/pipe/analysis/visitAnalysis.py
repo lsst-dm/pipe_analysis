@@ -441,7 +441,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                                                 plotInfoDict, areaDict))
 
                 if self.config.doPlotSkyObjects and skySrcCat is not None:
-                    self.plotSkyObjects(skySrcCat, "skySources", plotInfoDict, areaDict)
+                    plotList.append(self.plotSkyObjects(skySrcCat, "skySources", plotInfoDict, areaDict))
                 if self.config.doPlotPsfFluxSnHists:
                     plotList.append(self.plotPsfFluxSnHists(commonZpCat, "base_PsfFlux_raw",
                                                             plotInfoDict, areaDict, zpLabel="raw"))

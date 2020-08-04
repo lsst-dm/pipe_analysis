@@ -346,16 +346,13 @@ class Analysis(object):
             ccdList = plotInfoDict["allCcdList"]
         elif plotInfoDict["plotType"] == "plotVisit":
             ccdList = plotInfoDict["ccdList"]
-        if "Visit" in plotInfoDict["plotType"] and plotInfoDict["camera"] is not None and ccdList is not None:
+        if ("Visit" in plotInfoDict["plotType"] and plotInfoDict["cameraObj"] is not None
+           and ccdList is not None):
             axTopRight = plt.axes(topRight)
             axTopRight.set_aspect("equal")
             plotCameraOutline(axTopRight, plotInfoDict["cameraObj"], ccdList)
 
-        if "Coadd" in plotInfoDict["plotType"] or "Color" in plotInfoDict["plotType"]:
-            tractLevelPlot = True
-        else:
-            tractLevelPlot = False
-
+        tractLevelPlot = "Coadd" in plotInfoDict["plotType"] or "Color" in plotInfoDict["plotType"]
         if self.config.doPlotTractOutline and tractLevelPlot:
             axTopRight = plt.axes(topRight)
             axTopRight.set_aspect("equal")
@@ -698,7 +695,7 @@ class Analysis(object):
             plotText(uberCalLabel, plt, axes, 0.10, -0.13, fontSize=7, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.90, -0.10, prefix="cat: ", fontSize=7, color="green")
-        if plotInfoDict["camera"] is not None and plotInfoDict["plotType"] == "plotVisit":
+        if plotInfoDict["cameraObj"] is not None and plotInfoDict["plotType"] == "plotVisit":
             axTopMiddle = plt.axes([0.42, 0.68, 0.2, 0.2])
             axTopMiddle.set_aspect("equal")
             if plotInfoDict["plotType"] == "plotCompareVisit":
@@ -1400,6 +1397,8 @@ class Analysis(object):
         yOff = 1.065
         legendLoc = "upper left"
         alpha = 0.35
+        nBins = None
+        nBinsChi = None
         for i, fluxStr in enumerate(fluxStrList):
             yOff -= 0.1
             flux = skyObjCat[fluxStr]*fluxScale
@@ -1510,17 +1509,19 @@ class Analysis(object):
                 metricPerUnitDict[str(iUnit)] = np.nan
                 log.info("No good sky objects for %s %s" % (unitStr, iUnit))
 
-        if plotInfoDict["camera"] is not None and plotInfoDict["ccdList"] is not None:
+        if plotInfoDict["cameraObj"] is not None and plotInfoDict["ccdList"] is not None:
             axTopRight = plt.axes(topRight)
             axTopRight.set_aspect("equal")
-            plotCameraOutline(axTopRight, plotInfoDict["camera"], plotInfoDict["ccdList"],
+            plotCameraOutline(axTopRight, plotInfoDict["cameraObj"], plotInfoDict["ccdList"],
                               metricPerCcdDict=metricPerUnitDict, metricStr=metricStr, fig=fig)
-        if (self.config.doPlotTractOutline and plotInfoDict["tractInfo"] is not None and
-                len(plotInfoDict["patchList"]) > 0):
-            axTopRight = plt.axes(topRight)
-            axTopRight.set_aspect("equal")
-            plotTractOutline(axTopRight, plotInfoDict["tractInfo"], plotInfoDict["patchList"],
-                             metricPerPatchDict=metricPerUnitDict, metricStr=metricStr, fig=fig)
+
+        tractLevelPlot = "Coadd" in plotInfoDict["plotType"] or "Color" in plotInfoDict["plotType"]
+        if self.config.doPlotTractOutline and tractLevelPlot:
+            if plotInfoDict["tractInfo"] is not None and len(plotInfoDict["patchList"]) > 0:
+                axTopRight = plt.axes(topRight)
+                axTopRight.set_aspect("equal")
+                plotTractOutline(axTopRight, plotInfoDict["tractInfo"], plotInfoDict["patchList"],
+                                 metricPerPatchDict=metricPerUnitDict, metricStr=metricStr, fig=fig)
 
         yield Struct(fig=fig, description=description, stats=None, statsHigh=None, dpi=120, style="hist")
 
