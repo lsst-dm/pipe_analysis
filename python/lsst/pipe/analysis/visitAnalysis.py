@@ -348,11 +348,12 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                      hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo,
                                      dataId=repoInfo.dataId))
 
-            if any(doPlot for doPlot in [self.config.doPlotFootprintNpix, self.config.doPlotQuiver,
-                                         self.config.doPlotMags, self.config.doPlotSizes,
-                                         self.config.doPlotCentroids, self.config.doPlotStarGalaxy,
-                                         self.config.doPlotSkyObjects, self.config.doPlotRhoStatistics,
-                                         self.config.doWriteParquetTables]):
+            if any(doPlot for doPlot in
+                   [self.config.doPlotPsfFluxSnHists, self.config.doPlotSkyObjects,
+                    self.config.doPlotFootprintNpix, self.config.doPlotRhoStatistics,
+                    self.config.doPlotQuiver, self.config.doPlotMags, self.config.doPlotStarGalaxy,
+                    self.config.doPlotSizes, self.config.doPlotCentroids, self.config.doPlotRhoStatistics,
+                    self.config.doWriteParquetTables]) and not self.config.plotMatchesOnly:
                 if self.config.hasFakes:
                     inputFakes = repoInfo.butler.get("deepCoadd_fakeSourceCat", dataId=repoInfo.dataId)
                     inputFakes = inputFakes.toDataFrame()

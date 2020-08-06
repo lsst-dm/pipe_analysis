@@ -153,16 +153,20 @@ class CoaddAnalysisConfig(Config):
             raise ValueError("Cannot writeParquetOnly if doWriteParquetTables is False")
         if self.plotMatchesOnly:
             self.doPlotMatches = True
-            self.doPlotMags = False
-            self.doPlotSizes = False
-            self.doPlotCentroids = False
-            self.doPlotStarGalaxy = False
+        if self.plotMatchesOnly or self.writeParquetOnly:
             self.doPlotOverlaps = False
             self.doPlotCompareUnforced = False
+            self.doPlotPsfFluxSnHists = False
+            self.doPlotSkyObjectsSky = False
+            self.doPlotSkyObjects = False
+            self.doPlotFootprintNpix = False
             self.doPlotRhoStatistics = False
             self.doPlotQuiver = False
-            self.doPlotFootprintNpix = False
             self.doPlotInputCounts = False
+            self.doPlotMags = False
+            self.doPlotStarGalaxy = False
+            self.doPlotSizes = False
+            self.doPlotCentroids = False
 
 
 class CoaddAnalysisRunner(TaskRunner):
@@ -270,12 +274,13 @@ class CoaddAnalysisTask(CmdLineTask):
         # Dict of all parameters common to plot* functions
         plotKwargs = dict(zpLabel=self.zpLabel, uberCalLabel=self.uberCalLabel)
 
-        if any (doPlot for doPlot in [self.config.doPlotMags, self.config.doPlotStarGalaxy,
-                                      self.config.doPlotOverlaps, self.config.doPlotCompareUnforced,
-                                      self.config.doPlotSkyObjects, self.config.doPlotSkyObjectsSky,
-                                      self.config.doPlotRhoStatistics,
-                                      cosmos, self.config.externalCatalogs,
-                                      self.config.doWriteParquetTables]):
+        if any(doPlot for doPlot in
+               [self.config.doPlotOverlaps, self.config.doPlotCompareUnforced,
+                self.config.doPlotPsfFluxSnHists, self.config.doPlotSkyObjects,
+                self.config.doPlotSkyObjectsSky, self.config.doPlotFootprintNpix,
+                self.config.doPlotMags, self.config.doPlotStarGalaxy,
+                self.config.doPlotRhoStatistics, cosmos, self.config.externalCatalogs,
+                self.config.doWriteParquetTables]) and not self.config.plotMatchesOnly:
             if haveForced:
                 forcedCatStruct = self.readCatalogs(patchRefList, self.config.coaddName
                                                     + "Coadd_forced_src", repoInfo)
