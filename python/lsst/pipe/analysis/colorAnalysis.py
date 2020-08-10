@@ -25,8 +25,7 @@ from .utils import (Enforcer, concatenateCatalogs, getFluxKeys, addColumnsToSche
                     makeEqnStr, catColors, addMetricMeasurement, updateVerifyJob, computeMeanOfFrac,
                     calcQuartileClippedStats, savePlots)
 from .plotUtils import (AllLabeller, OverlapsStarGalaxyLabeller, plotText, labelCamera, setPtSize,
-                        determineExternalCalLabel)
-from .fakesAnalysis import getPlotInfo
+                        determineExternalCalLabel, getPlotInfo)
 
 import lsst.afw.image as afwImage
 import lsst.geom as geom
@@ -431,9 +430,8 @@ class ColorAnalysisTask(CmdLineTask):
                 geLabel = "Per Field"
 
         plotInfoDict = getPlotInfo(repoInfo)
-        plotInfoDict.update(dict(cameraObj=repoInfo.camera, patchList=patchList, hscRun=repoInfo.hscRun,
-                                 tractInfo=repoInfo.tractInfo, dataId=repoInfo.dataId,
-                                 plotType="plotColor"))
+        plotInfoDict.update(dict(patchList=patchList, hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo,
+                                 dataId=repoInfo.dataId, plotType="plotColor"))
 
         geLabel = "GalExt: " + geLabel
         plotList = []
@@ -942,7 +940,7 @@ class ColorAnalysisTask(CmdLineTask):
                 axes.text(xLoc, yLoc, "NinPerpGood =", ha="left", color="red", **kwargs)
                 axes.text(xLoc + fdx*deltaX, yLoc, str(len(xColor[inPerpGood])), ha="right", color="red",
                           **kwargs)
-                if plotInfoDict["cameraObj"]:
+                if plotInfoDict["cameraName"]:
                     labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
                 if catLabel:
                     plotText(catLabel, fig, axes, 0.91, -0.09, color="green", fontSize=10)
@@ -1818,7 +1816,7 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
 
     axes[1].set_ylim(axes[1].get_ylim()[0], axes[1].get_ylim()[1]*2.5)
 
-    if plotInfoDict["camera"]:
+    if plotInfoDict["cameraName"]:
         labelCamera(plotInfoDict, fig, axes[0], 0.5, 1.04)
     if catLabel:
         plotText(catLabel, fig, axes[0], 0.88, -0.12, fontSize=7, color="green")
@@ -1879,7 +1877,7 @@ def colorColorPlot(plotInfoDict, description, log, xStars, yStars, xGalaxies, yG
     axes.text(xLoc, 0.94*yLoc, "Nstars =", ha="left", color="blue", **kwargs)
     axes.text(xLoc + fdx*deltaX, 0.94*yLoc, str(len(xStars[goodStars])) +
               " [" + filterStr + "$<$" + str(magThreshold) + "]", ha="right", color="blue", **kwargs)
-    if plotInfoDict["cameraObj"]:
+    if plotInfoDict["cameraName"]:
         labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
     if geLabel:
         plotText(geLabel, fig, axes, 0.13, -0.09, fontSize=7, color="green")
@@ -1973,7 +1971,7 @@ def colorColor4MagPlots(plotInfoDict, description, log, xStars, yStars, xGalaxie
     cbGalaxies.set_ticks([])
     cbGalaxies.set_label(filterStr + " [" + fluxColStr + "]: galaxies", rotation=270, labelpad=-6, fontsize=9)
 
-    if plotInfoDict["cameraObj"]:
+    if plotInfoDict["cameraName"]:
         labelCamera(plotInfoDict, fig, axes[0, 0], 1.05, 1.14)
     if geLabel:
         plotText(geLabel, fig, axes[0, 0], 0.12, -1.23, color="green")

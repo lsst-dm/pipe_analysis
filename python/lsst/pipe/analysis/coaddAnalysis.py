@@ -33,9 +33,8 @@ from .utils import (Enforcer, MagDiff, MagDiffMatches, MagDiffCompare,
                     fluxToPlotString, andCatalog, writeParquet, getRepoInfo, setAliasMaps,
                     addPreComputedColumns, computeMeanOfFrac, savePlots)
 from .plotUtils import (CosmosLabeller, AllLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
-                        MatchesStarGalaxyLabeller, determineExternalCalLabel)
+                        MatchesStarGalaxyLabeller, determineExternalCalLabel, getPlotInfo)
 
-from .fakesAnalysis import getPlotInfo
 import lsst.afw.cameraGeom as cameraGeom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
@@ -1085,8 +1084,8 @@ class CoaddAnalysisTask(CmdLineTask):
         psfUsedPsfFluxErr = psfUsedCat["base_PsfFlux_instFluxErr"]*factor
         psfUsedPsfSn = psfUsedPsfFlux/psfUsedPsfFluxErr
 
-        if "lsst" in plotInfoDict["camera"]:
-            filterStr = "[" + plotInfoDict["camera"] + "-" + plotInfoDict["filter"] + "]"
+        if "lsst" in plotInfoDict["cameraName"]:
+            filterStr = "[" + plotInfoDict["cameraName"] + "-" + plotInfoDict["filter"] + "]"
         else:
             filterStr = plotInfoDict["filter"]
 
@@ -1710,10 +1709,9 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         plotKwargs1 = dict(matchRadius=self.matchRadius, matchRadiusUnitStr=self.matchRadiusUnitStr,
                            zpLabel=self.zpLabel, highlightList=highlightList, uberCalLabel=self.uberCalLabel)
         plotInfoDict = getPlotInfo(repoInfo1)
-        plotInfoDict.update(dict(cameraObj=repoInfo1.camera, patchList=patchList1, hscRun=hscRun,
-                                 tractInfo=repoInfo1.tractInfo, dataId=repoInfo1.dataId,
-                                 plotType="plotCompareCoadd", hscRun1=repoInfo1.hscRun,
-                                 hscRun2=repoInfo2.hscRun))
+        plotInfoDict.update(dict(patchList=patchList1, hscRun=hscRun, tractInfo=repoInfo1.tractInfo,
+                                 dataId=repoInfo1.dataId, plotType="plotCompareCoadd",
+                                 hscRun1=repoInfo1.hscRun, hscRun2=repoInfo2.hscRun))
 
         if self.config.doPlotMags:
             plotList.append(self.plotMags(forced, plotInfoDict, areaDict1, forcedStr=forcedStr,

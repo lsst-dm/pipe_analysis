@@ -21,7 +21,7 @@ __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "M
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
            "plotCcdOutline", "rotatePixelCoords", "bboxToXyCoordLists", "getRaDecMinMaxPatchList",
            "percent", "setPtSize", "getQuiver", "makeAlphaCmap", "buildTractImage",
-           "determineExternalCalLabel"]
+           "determineExternalCalLabel", "getPlotInfo"]
 
 
 class AllLabeller(object):
@@ -331,7 +331,7 @@ def labelVisit(plotInfoDict, fig, axis, xLoc, yLoc, color="k", fontSize=9):
 
 
 def labelCamera(plotInfoDict, fig, axis, xLoc, yLoc, color="k", fontSize=10):
-    labelStr = "camera: " + plotInfoDict["camera"]
+    labelStr = "camera: " + plotInfoDict["cameraName"]
     fig.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=fontSize, transform=axis.transAxes,
              color=color)
 
@@ -959,3 +959,93 @@ def plotRhoStats(axes, rhoStats):
         ax.set_ylabel(r'$\rho(\theta)$')
         ax.set_xlabel(r'$\theta$ (arcmin)')
         ax.legend(loc='lower left')
+
+
+def getPlotInfo(repoInfo):
+    """Parse the repoInfo into a dict of useful info for plots.
+
+    Parameters
+    ----------
+    repoInfo : `lsst.pipe.base.Struct`
+        The struct has the following components:
+            ``butler``
+                The butler (`lsst.daf.persistence.butler`) associated with the
+                ``dataset`` to be plotted.
+            ``cameraName``
+                The name of the camera used to take the data (`str`).
+            ``dataId``
+                The dataId associated with the dataset
+                (`lsst.daf.persistence.DataId`).
+            ``filterName``
+                The name of the filter associated with the data (`str`).
+            ``genericFilterName``
+                A generic form of the ``filterName`` (`str`).
+            ``metadata``
+                The metadata associated with the data
+                (`lsst.daf.base.propertyContainer.PropertyList`).
+            ``hscRun``
+                A string representing "HSCPIPE_VERSION" fits header if the data
+                were processed with the (now obsolete, but old reruns still exist)
+                "HSC stack", `None` otherwise (`str` or `None`).
+            ``dataset``
+                The dataset name, ("src" if ``dataRef`` is visit level,
+                coaddName + coaddDataset if ``dataRef`` is a coadd (`str`).
+            ``skyMap``
+                The sky map associated with the data
+                (`lsst.skymap.SkyMap` or `None`).
+            ``wcs``
+                The wcs of the coadd image (`lsst.afw.geom.SkyWcs` or `None`).
+            ``tractInfo``
+                The tract information associated with the dataset
+                (`lsst.skymap.tractInfo.ExplicitTractInfo` or `None`).
+
+    Returns
+    -------
+    plotInfoDict : `dict`
+        A dictionary of information about the data being plotted.
+            ``camera``
+                The camera used to take the data
+                (`lsst.afw.cameraGeom.Camera`).
+            ``cameraName``
+                The name of the camera used to take the data (`str`).
+            ``filter``
+                The filter used for this data (`str`).
+            ``tract``
+                The tract that associated with the data (`str`).
+            ``visit``
+                The visit of the data; only included if the data is from a
+                single epoch dataset (`str`).
+            ``patch``
+                The patch that the data is from; only included if the data are
+                from a coadd dataset (`str`).
+            ``photoCalibDataset``
+                The dataset used for the calibration, e.g: jointcal or fgcm
+                (`str`).
+            ``skyWcsDataset``
+                The sky Wcs dataset used (`lsst.skymap.SkyMap`).
+            ``rerun``
+                The rerun the data is stored in (`str`).
+    """
+    camera = repoInfo.camera
+    cameraName = camera.getName()
+    dataId = repoInfo.dataId
+    filterName = dataId["filter"]
+    # Try to get the visit and patch id.  Set to None if not available.
+    try:
+        visit = str(dataId["visit"])
+    except KeyError:
+        visit = None
+    try:
+        patch = dataId["patch"]
+    except KeyError:
+        patch = None
+
+    tract = str(dataId["tract"])
+    photoCalibDataset = repoInfo.photoCalibDataset
+    skyWcsDataset = repoInfo.skyWcsDataset
+    rerun = list(repoInfo.butler.storage.repositoryCfgs)[0]
+
+    plotInfoDict = dict(camera=camera, cameraName=cameraName, filter=filterName, tract=tract, visit=visit,
+                        patch=patch, photoCalibDataset=photoCalibDataset, skyWcsDataset=skyWcsDataset,
+                        rerun=rerun)
+    return plotInfoDict

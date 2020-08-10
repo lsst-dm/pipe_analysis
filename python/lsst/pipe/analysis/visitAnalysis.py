@@ -22,9 +22,9 @@ from .utils import (AngularDistance, concatenateCatalogs, addApertureFluxesHSC, 
                     calibrateSourceCatalog, backoutApCorr, matchNanojanskyToAB, andCatalog, writeParquet,
                     getRepoInfo, getCcdNameRefList, getDataExistsRefList, setAliasMaps,
                     addPreComputedColumns, savePlots, updateVerifyJob)
-from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText
+from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText, getPlotInfo
 from .fakesAnalysis import (addDegreePositions, matchCatalogs, addNearestNeighbor, fakesPositionCompare,
-                            getPlotInfo, calcFakesAreaDepth, plotFakesAreaDepth, fakesMagnitudeCompare,
+                            calcFakesAreaDepth, plotFakesAreaDepth, fakesMagnitudeCompare,
                             fakesMagnitudeNearestNeighbor, fakesMagnitudeBlendedness, fakesCompletenessPlot,
                             fakesMagnitudePositionError)
 
@@ -344,9 +344,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 (self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0, "turquoise"), ]
 
             # Dict of all parameters common to plot* functions
-            plotInfoDict.update(dict(cameraObj=repoInfo.camera, ccdList=ccdListPerTract,
-                                     hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo,
-                                     dataId=repoInfo.dataId))
+            plotInfoDict.update(dict(ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
+                                     tractInfo=repoInfo.tractInfo, dataId=repoInfo.dataId))
 
             if any(doPlot for doPlot in
                    [self.config.doPlotPsfFluxSnHists, self.config.doPlotSkyObjects,
@@ -518,8 +517,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                                          **plotKwargs))
         metaDict = {"tract": plotInfoDict["tract"], "visit": plotInfoDict["visit"],
                     "filter": plotInfoDict["filter"]}
-        if plotInfoDict["camera"]:
-            metaDict.update({"camera": plotInfoDict["camera"]})
+        if plotInfoDict["cameraName"]:
+            metaDict.update({"camera": plotInfoDict["cameraName"]})
         self.verifyJob = updateVerifyJob(self.verifyJob, metaDict=metaDict)
         verifyJobFilename = repoInfo.butler.get("visitAnalysis_verify_job_filename",
                                                 dataId=repoInfo.dataId)[0]
@@ -1187,7 +1186,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             plotInfoDict.update({"ccdList": ccdIntersectList, "allCcdList": fullCameraCcdList1,
                                  "plotType": "plotCompareVisit", "hscRun1": repoInfo1.hscRun,
                                  "hscRun2": repoInfo2.hscRun, "hscRun": hscRun, "tractInfo": tractInfo1,
-                                 "dataId": repoInfo1.dataId, "cameraObj": repoInfo1.camera})
+                                 "dataId": repoInfo1.dataId})
             plotList = []
             if self.config.doPlotFootprintNpix:
                 plotList.append(self.plotFootprint(catalog, plotInfoDict, areaDict1, **plotKwargs1))
