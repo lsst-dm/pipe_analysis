@@ -1117,6 +1117,7 @@ class Analysis(object):
         rhoStatsFunc = RhoStatistics(compareCol, psfCompareCol, **treecorrParams)
         rhoStats = rhoStatsFunc(good_catalog)
         plotRhoStats(axes, rhoStats)
+        log.debug("Tract id in Rho Stats: {0}".format(plotInfoDict['tract']))
 
         for figId, figax in enumerate(figAxes):
             fig, ax = figax
@@ -1130,8 +1131,6 @@ class Analysis(object):
             plotText(shapeAlgorithm, fig, ax, 0.85, -0.08, prefix="Shape Alg: ", fontSize=8, color="green")
             if forcedStr is not None:
                 plotText(forcedStr, fig, ax, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
-
-            log.info("Tract id in Rho Stats: {0}".format(plotInfoDict['tract']))
 
             yield Struct(fig=fig, description=figDescription, stats=stats, statsHigh=None, dpi=120,
                          style="RhoStats")
@@ -1172,8 +1171,6 @@ class Analysis(object):
                          color="green")
                 if forcedStr is not None:
                     plotText(forcedStr, fig, ax, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
-
-                log.info("Tract id in Rho Stats: {0}".format(plotInfoDict['tract']))
 
                 yield Struct(fig=fig, description=figDescription, stats=stats, statsHigh=None, dpi=120,
                              style="RhoStats")
