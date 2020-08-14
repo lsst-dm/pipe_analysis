@@ -338,7 +338,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 skyObjCat = unforced[goodSky].copy(deep=True)
 
             # Must do the overlaps before purging the catalogs of non-primary sources
-            if self.config.doPlotOverlaps and not self.config.writeParquetOnly:
+            if self.config.doPlotOverlaps:
                 # Determine if any patches in the patchList actually overlap
                 overlappingPatches = checkPatchOverlap(plotInfoDict["patchList"], plotInfoDict["tractInfo"])
                 if not overlappingPatches:
@@ -394,23 +394,24 @@ class CoaddAnalysisTask(CmdLineTask):
                 unforced = addPreComputedColumns(unforced, fluxToPlotList=self.config.fluxToPlotList,
                                                  toMilli=self.config.toMilli)
                 writeParquet(dataRef_unforced, unforced, badArray=badUnforced)
-                if self.config.writeParquetOnly:
+                if self.config.writeParquetOnly and not self.config.doPlotMatches:
                     self.log.info("Exiting after writing Parquet tables.  No plots generated.")
                     return
 
-            # Purge the catalogs of flagged sources
-            unforced = unforced[~badUnforced].copy(deep=True)
-            if haveForced:
-                forced = forced[~badForced].copy(deep=True)
-            else:
-                forced = unforced
-            self.catLabel = "nChild = 0"
-            forcedStr = forcedStr + " " + self.catLabel
-            if haveForced:
-                self.log.info("\nNumber of sources in catalogs: unforced = {0:d} and forced = {1:d}".format(
-                    len(unforced), len(forced)))
-            else:
-                self.log.info("\nNumber of sources in catalog: unforced = {0:d}".format(len(unforced)))
+            if not self.config.writeParquetOnly:
+                # Purge the catalogs of flagged sources
+                unforced = unforced[~badUnforced].copy(deep=True)
+                if haveForced:
+                    forced = forced[~badForced].copy(deep=True)
+                else:
+                    forced = unforced
+                self.catLabel = "nChild = 0"
+                forcedStr = forcedStr + " " + self.catLabel
+                if haveForced:
+                    self.log.info("\nNumber of sources in catalogs: unforced = {0:d} and forced = {1:d}".
+                                  format(len(unforced), len(forced)))
+                else:
+                    self.log.info("\nNumber of sources in catalog: unforced = {0:d}".format(len(unforced)))
 
             if self.config.doPlotPsfFluxSnHists:
                 plotList.append(self.plotPsfFluxSnHists(unforced, "base_PsfFlux_cal", plotInfoDict, areaDict,
@@ -483,17 +484,31 @@ class CoaddAnalysisTask(CmdLineTask):
                 plotList.append(self.plotCosmos(forced, plotInfoDict, areaDict, cosmos, repoInfo.dataId))
 
         matchAreaDict = {}
-        if self.config.doPlotMatches:
+        if self.config.doPlotMatches or self.config.doWriteParquetTables:
             if haveForced:
                 matches, matchAreaDict = self.readSrcMatches(patchRefList, self.config.coaddName
                                                              + "Coadd_forced_src",
                                                              hscRun=repoInfo.hscRun, wcs=repoInfo.wcs,
                                                              aliasDictList=aliasDictList)
-            else:
-                matches, matchAreaDict = self.readSrcMatches(patchRefList, self.config.coaddName
-                                                             + "Coadd_meas",
-                                                             hscRun=repoInfo.hscRun, wcs=repoInfo.wcs,
-                                                             aliasDictList=aliasDictList)
+                qaTableSuffix = "_forced"
+                if self.config.doWriteParquetTables:
+                    matchesDataRef = repoInfo.butler.dataRef("analysisMatchFullRefCoaddTable" + qaTableSuffix,
+                                                             dataId=repoInfo.dataId)
+                    writeParquet(matchesDataRef, matches, badArray=None, prefix="src_")
+
+            matches, matchAreaDict = self.readSrcMatches(patchRefList, self.config.coaddName + "Coadd_meas",
+                                                         hscRun=repoInfo.hscRun, wcs=repoInfo.wcs,
+                                                         aliasDictList=aliasDictList)
+            qaTableSuffix = "_unforced"
+
+            if self.config.doWriteParquetTables:
+                matchesDataRef = repoInfo.butler.dataRef("analysisMatchFullRefCoaddTable" + qaTableSuffix,
+                                                         dataId=repoInfo.dataId)
+                writeParquet(matchesDataRef, matches, badArray=None, prefix="src_")
+                if self.config.writeParquetOnly:
+                    self.log.info("Exiting after writing Parquet tables.  No plots generated.")
+                    return
+
             plotKwargs.update(dict(zpLabel=self.zpLabel))
             matchHighlightList = [("src_" + self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0,
                                    "turquoise"), ]
@@ -520,9 +535,9 @@ class CoaddAnalysisTask(CmdLineTask):
                      decFakesCol="decJ2000"):
         """Read in and concatenate catalogs of type dataset in lists of data references
 
-        If self.config.doWriteParquetTables is True, before appending each catalog to a single
-        list, an extra column indicating the patch is added to the catalog.  This is useful for
-        the subsequent interactive QA analysis.
+        An extra column indicating the patch ID is added to each catalog before
+        appending them all to a single list.  This is useful for any subsequent
+        QA analysis using the persisted parquet files.
 
         Parameters
         ----------
@@ -633,6 +648,8 @@ class CoaddAnalysisTask(CmdLineTask):
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+            catalog = addIntFloatOrStrColumn(catalog, dataRef.dataId["patch"], "patchId",
+                                             "Patch on which source was detected")
             # Set some aliases for differing schema naming conventions
             if aliasDictList:
                 catalog = setAliasMaps(catalog, aliasDictList)

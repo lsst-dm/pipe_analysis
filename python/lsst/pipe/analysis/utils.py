@@ -90,7 +90,7 @@ def savePlots(plotList, plotType, dataId, butler, subdir=""):
     return allStats, allStatsHigh
 
 
-def writeParquet(dataRef, table, badArray=None):
+def writeParquet(dataRef, table, badArray=None, prefix=""):
     """Write an afwTable to a desired ParquetTable butler dataset
 
     Parameters
@@ -102,6 +102,8 @@ def writeParquet(dataRef, table, badArray=None):
     badArray : `numpy.ndarray`, optional
        Boolean array with same length as catalog whose values indicate whether the source was deemed
        inappropriate for qa analyses (`None` by default).
+    prefix : `str`, optional
+       A string to be prepended to the column id name.
 
     Returns
     -------
@@ -127,7 +129,7 @@ def writeParquet(dataRef, table, badArray=None):
         # being written to disk for subsequent interactive QA analysis.
         table = addFlag(table, badArray, "qaBad_flag", "Set to True for any source deemed bad for qa")
     df = table.asAstropy().to_pandas()
-    df = df.set_index('id', drop=True)
+    df = df.set_index(prefix + "id", drop=False)
 
     dataRef.put(ParquetTable(dataFrame=df))
 
