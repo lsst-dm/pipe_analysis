@@ -12,6 +12,7 @@ import scipy.stats as scipyStats
 from contextlib import contextmanager
 
 from lsst.pipe.base import Struct, TaskError
+from lsst.pipe.tasks.parquetTable import ParquetTable
 
 import lsst.afw.cameraGeom as cameraGeom
 import lsst.geom as geom
@@ -113,17 +114,8 @@ def writeParquet(dataRef, table, badArray=None, prefix=""):
     -----
     This function first converts the afwTable to an astropy table,
     then to a pandas DataFrame, which is then written to parquet
-    format using the butler.  If qa_explorer is not
-    available, then it will do nothing.
+    format using the butler.
     """
-
-    try:
-        from lsst.pipe.tasks.parquetTable import ParquetTable
-    except ImportError:
-        import logging
-        logging.warning('Parquet files will not be written (qa_explorer is not setup).')
-        return
-
     if badArray is not None:
         # Add flag indicating source "badness" for qa analyses for the benefit of the Parquet files
         # being written to disk for subsequent interactive QA analysis.
