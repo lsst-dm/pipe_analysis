@@ -294,6 +294,7 @@ class ColorAnalysisConfig(Config):
 class ColorAnalysisRunner(TaskRunner):
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
+        kwargs["subdir"] = parsedCmd.subdir
         FilterRefsDict = functools.partial(defaultdict, list)  # Dict for filter-->dataRefs
         tractFilterRefs = defaultdict(FilterRefsDict)  # tract-->filter-->dataRefs
         for patchRef in sum(parsedCmd.id.refList, []):
@@ -356,6 +357,10 @@ class ColorAnalysisTask(CmdLineTask):
         parser.add_id_argument("--id", "deepCoadd_forced_src",
                                help="data ID, e.g. --id tract=12345 patch=1,2 filter=HSC-X",
                                ContainerClass=TractDataIdContainer)
+        parser.add_argument("--subdir", type=str, default="",
+                            help=("Subdirectory below plots/color/tract-NNNN/ (useful for, "
+                                  "e.g., subgrouping of Patches.  Ignored if only one Patch is "
+                                  "specified, in which case the subdir is set to patch-NNN"))
         return parser
 
     def __init__(self, *args, **kwargs):
@@ -364,7 +369,7 @@ class ColorAnalysisTask(CmdLineTask):
 
         self.verifyJob = verify.Job.load_metrics_package(subset="pipe_analysis")
 
-    def runDataRef(self, patchRefsByFilter):
+    def runDataRef(self, patchRefsByFilter, subdir=""):
         patchList = []
         repoInfo = None
         self.fluxFilter = None
@@ -391,6 +396,8 @@ class ColorAnalysisTask(CmdLineTask):
         self.log.info("Size of patchList with full color coverage: {:d}".format(len(patchList)))
         uberCalLabel = determineExternalCalLabel(repoInfo, patchList[0], coaddName=self.config.coaddName)
         self.log.info(f"External calibration(s) used: {uberCalLabel}")
+        subdir = "patch-" + str(patchList[0]) if len(patchList) == 1 else subdir
+        repoInfo.dataId["subdir"] = "/" + subdir
 
         # Only adjust the schema names necessary here (rather than attaching the full alias schema map)
         self.fluxColumn = self.config.analysis.fluxColumn
@@ -430,8 +437,9 @@ class ColorAnalysisTask(CmdLineTask):
                 geLabel = "Per Field"
 
         plotInfoDict = getPlotInfo(repoInfo)
-        plotInfoDict.update(dict(patchList=patchList, hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo,
-                                 dataId=repoInfo.dataId, plotType="plotColor"))
+        plotInfoDict.update(dict(patchList=patchList, plotType="plotColor", subdir=subdir,
+                                 hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo,
+                                 dataId=repoInfo.dataId))
 
         geLabel = "GalExt: " + geLabel
         plotList = []
@@ -471,7 +479,8 @@ class ColorAnalysisTask(CmdLineTask):
                                                     areaDictAll, fluxColumn, forcedStr=self.forcedStr,
                                                     geLabel=geLabel, uberCalLabel=uberCalLabel))
 
-        self.allStats, self.allStatsHigh = savePlots(plotList, "plotColor", repoInfo.dataId, repoInfo.butler)
+        self.allStats, self.allStatsHigh = savePlots(plotList, "plotColor", repoInfo.dataId,
+                                                     repoInfo.butler, subdir=subdir)
 
         # Update the verifyJob with relevant metadata
         metaDict = {"tract": int(plotInfoDict["tract"])}

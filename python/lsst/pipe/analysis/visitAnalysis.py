@@ -282,8 +282,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
             plotInfoDict = getPlotInfo(repoInfo)
             subdir = "ccd-" + str(ccdListPerTract[0]) if len(ccdListPerTract) == 1 else subdir
+            repoInfo.dataId["subdir"] = "/" + subdir
             # Dict of all parameters common to plot* functions
-            plotInfoDict.update(dict(plotType="plotVisit", ccdList=ccdListPerTract,
+            plotInfoDict.update(dict(plotType="plotVisit", subdir=subdir, ccdList=ccdListPerTract,
                                      hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo,
                                      dataId=repoInfo.dataId))
 
@@ -523,7 +524,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         verifyJobFilename = repoInfo.butler.get("visitAnalysis_verify_job_filename",
                                                 dataId=repoInfo.dataId)[0]
         if plotList:
-            savePlots(plotList, "plotVisit", repoInfo.dataId, repoInfo.butler)
+            savePlots(plotList, "plotVisit", repoInfo.dataId, repoInfo.butler, subdir=subdir)
 
         self.verifyJob.write(verifyJobFilename)
 
@@ -1182,11 +1183,10 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                zpLabel=self.zpLabel, highlightList=highlightList)
 
             plotInfoDict = getPlotInfo(repoInfo1)
-
             plotInfoDict.update({"ccdList": ccdIntersectList, "allCcdList": fullCameraCcdList1,
-                                 "plotType": "plotCompareVisit", "hscRun1": repoInfo1.hscRun,
-                                 "hscRun2": repoInfo2.hscRun, "hscRun": hscRun, "tractInfo": tractInfo1,
-                                 "dataId": repoInfo1.dataId})
+                                 "plotType": "plotCompareVisit", "subdir": subdir,
+                                 "hscRun1": repoInfo1.hscRun, "hscRun2": repoInfo2.hscRun,
+                                 "hscRun": hscRun, "tractInfo": tractInfo1, "dataId": repoInfo1.dataId})
             plotList = []
             if self.config.doPlotFootprintNpix:
                 plotList.append(self.plotFootprint(catalog, plotInfoDict, areaDict1, **plotKwargs1))
@@ -1222,7 +1222,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 plotList.append(self.plotStarGal(catalog, plotInfoDict, areaDict1, **plotKwargs1))
 
             self.allStats, self.allStatsHigh = savePlots(plotList, "plotCompareVisit", repoInfo1.dataId,
-                                                         repoInfo1.butler)
+                                                         repoInfo1.butler, subdir=subdir)
 
     def readCatalogs(self, dataRefList1, dataRefList2, dataset, repoInfo1, repoInfo2,
                      doReadFootprints=None, aliasDictList=None):

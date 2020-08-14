@@ -255,9 +255,10 @@ class CoaddAnalysisTask(CmdLineTask):
         repoInfo = getRepoInfo(patchRefList[0], coaddName=self.config.coaddName, coaddDataset=dataset)
         plotInfoDict = getPlotInfo(repoInfo)
         subdir = "patch-" + str(patchList[0]) if len(patchList) == 1 else subdir
-        plotInfoDict.update(dict(plotType="plotCoadd", patchList=patchList, hscRun=repoInfo.hscRun,
-                                 tractInfo=repoInfo.tractInfo, dataId=repoInfo.dataId,
-                                 ccdList=None))
+        repoInfo.dataId["subdir"] = "/" + subdir
+        plotInfoDict.update(dict(plotType="plotCoadd", subdir=subdir, patchList=patchList,
+                                 hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo,
+                                 dataId=repoInfo.dataId, ccdList=None))
         # Find a visit/ccd input so that you can check for meas_mosaic input (i.e. to set uberCalLabel)
         self.uberCalLabel = determineExternalCalLabel(repoInfo, patchList[0], coaddName=self.config.coaddName)
         self.log.info(f"External calibration(s) used: {self.uberCalLabel}")
@@ -512,7 +513,8 @@ class CoaddAnalysisTask(CmdLineTask):
                     self.log.warn("Could not create match catalog for {:}.  Is "
                                   "lsst.meas.extensions.astrometryNet setup?".format(cat))
 
-        self.allStats, self.allStatsHigh = savePlots(plotList, "plotCoadd", repoInfo.dataId, repoInfo.butler)
+        self.allStats, self.allStatsHigh = savePlots(plotList, "plotCoadd", repoInfo.dataId,
+                                                     repoInfo.butler, subdir=subdir)
 
     def readCatalogs(self, patchRefList, dataset, repoInfo, fakeCat=None, raFakesCol="raJ2000",
                      decFakesCol="decJ2000"):
@@ -1710,7 +1712,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                            zpLabel=self.zpLabel, highlightList=highlightList, uberCalLabel=self.uberCalLabel)
         plotInfoDict = getPlotInfo(repoInfo1)
         plotInfoDict.update(dict(patchList=patchList1, hscRun=hscRun, tractInfo=repoInfo1.tractInfo,
-                                 dataId=repoInfo1.dataId, plotType="plotCompareCoadd",
+                                 dataId=repoInfo1.dataId, plotType="plotCompareCoadd", subdir=subdir,
                                  hscRun1=repoInfo1.hscRun, hscRun2=repoInfo2.hscRun))
 
         if self.config.doPlotMags:
@@ -1736,7 +1738,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                              **plotKwargs1))
 
         self.allStats, self.allStatsHigh = savePlots(plotList, "plotCompareCoadd", repoInfo1.dataId,
-                                                     repoInfo1.butler)
+                                                     repoInfo1.butler, subdir=subdir)
 
     def readCatalogs(self, patchRefList, dataset, repoInfo):
         catList = []
