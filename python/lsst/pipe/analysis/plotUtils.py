@@ -955,22 +955,23 @@ def plotRhoStats(axes, rhoStats):
     Parameters
     ----------
     axes : `list`
-        A list containing two `matplotlib.figure.ax` handles.
+        A list containing three `matplotlib.figure.ax` handles.
     rhoStats : `dict`
         A Python dictionary object with keys 1..5, each containing a
-        `treecorr.GGCorrelation object`.
+        `treecorr.GGCorrelation` object and key 0 containing a
+        `treecorr.KKCorrelation` object.
     """
-    for rhoIndex in range(1, 6):
+    for rhoIndex in range(6):
         rho = rhoStats[rhoIndex]
 
-        # The mapping creates plots as in DES papers:
-        # ax = axes[1] if rhoIndex in [2,5] else axes[0].
-        ax = axes[1 if rhoIndex in (2, 5) else 0]
+        # The mapping creates plots as in DES papers
+        ax = axes[1 if rhoIndex in (2, 5) else 2 if rhoIndex == 0 else 0]
         colorStr = "C{}".format(rhoIndex)
-        isPositive = rho.xip > 0
-        ax.errorbar(rho.meanr[isPositive], rho.xip[isPositive], yerr=np.sqrt(rho.varxi)[isPositive],
+        xi = rho.xip if rhoIndex > 0 else rho.xi
+        isPositive = xi > 0
+        ax.errorbar(rho.meanr[isPositive], xi[isPositive], yerr=np.sqrt(rho.varxi)[isPositive],
                     color=colorStr, fmt="o", label=r"$\rho_{0}(\theta)$".format(rhoIndex))
-        ax.errorbar(rho.meanr[~isPositive], -rho.xip[~isPositive], yerr=np.sqrt(rho.varxi)[~isPositive],
+        ax.errorbar(rho.meanr[~isPositive], -xi[~isPositive], yerr=np.sqrt(rho.varxi)[~isPositive],
                     color=colorStr, fillstyle="none", fmt="o", label=None)
 
     for ax in axes:

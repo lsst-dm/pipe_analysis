@@ -1136,7 +1136,9 @@ class Analysis(object):
                           zpLabel=None, forcedStr=None, postFix="", flagsCat=None, uberCalLabel=None):
         """Plot Rho Statistics.
         """
-        figAxes = [plt.subplots(), plt.subplots()]  # first plot for Rho 1, 3, 4 and second for Rho 2, 5
+
+        figAxes = [plt.subplots(), plt.subplots(), plt.subplots()]
+        # first plot for Rho 1, 3, 4, second for Rho 2, 5 and third for Rho 0
         figs, axes = list(zip(*figAxes))
 
         compareCol = "base_SdssShape"
@@ -1173,7 +1175,9 @@ class Analysis(object):
                          style="RhoStats")
 
         if "ext_shapeHSM_HsmSourceMoments_xx" in self.catalog.schema:
-            figAxes = [plt.subplots(), plt.subplots()]  # first plot for Rho 1, 3, 4 and second for Rho 2, 5
+            figAxes = [plt.subplots(), plt.subplots(), plt.subplots()]
+            # first plot for Rho 1, 3, 4, second for Rho 2, 5
+            # and third for Rho 0.
             figs, axes = list(zip(*figAxes))
 
             description = description.replace("Rho", "hsmRho")

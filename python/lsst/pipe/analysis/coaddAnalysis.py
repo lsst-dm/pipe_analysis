@@ -1479,7 +1479,7 @@ class CoaddAnalysisTask(CmdLineTask):
         psfUsed = catalog[catalog["calib_psf_used"]].copy(deep=True)
         self.log.info("shortName = {:s}".format(shortName))
         yield from self.AnalysisClass(psfUsed, None,
-                                      ("        Sdss Rho Statistics (calib_psf_used): "),
+                                      ("        Rho Statistics (calib_psf_used): "),
                                       shortName, self.config.analysis,
                                       goodKeys=["calib_psf_used"], labeller=None
                                       ).plotRhoStatistics(shortName, plotInfoDict, self.log,
@@ -1492,7 +1492,7 @@ class CoaddAnalysisTask(CmdLineTask):
         starsOnly = catalog[catalog["base_ClassificationExtendedness_value"] < 0.5].copy(deep=True)
         self.log.info("shortName = {:s}".format(shortName))
         yield from self.AnalysisClass(starsOnly, None,
-                                      ("        Sdss Rho Statistics: "),
+                                      ("        Rho Statistics: "),
                                       shortName, self.config.analysis, flags=[], labeller=None
                                       ).plotRhoStatistics(shortName, plotInfoDict, self.log,
                                                           treecorrParams=self.config.treecorrParams,

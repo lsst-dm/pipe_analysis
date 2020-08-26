@@ -541,8 +541,10 @@ class E2ResidsHsmRegauss(object):
 
 
 class RhoStatistics(object):
-    """Functor to compute Rho statistics (Rowe (2010), Jarvis et al., (2016))
-    from a given star catalog and PSF model.
+    """Functor to compute Rho statistics given star catalog and PSF model.
+
+    For detailed description of Rho statistics, refer to
+    Rowe (2010) and Jarvis et al., (2016).
 
     Parameters
     ----------
@@ -557,9 +559,12 @@ class RhoStatistics(object):
 
     Returns
     -------
-    rhoStats : `dict` [`int`, `treecorr.GGCorrelation`]
-        A dictionary with keys 1..5, containing `treecorr.GGCorrelation`
-        objects corresponding to Rho statistic index.
+    rhoStats : `dict` [`int`, `treecorr.KKCorrelation` or
+                              `treecorr.GGCorrelation`]
+        A dictionary with keys 0..5, containing one `treecorr.KKCorrelation`
+        object (key 0) and five `treecorr.GGCorrelation` objects corresponding
+        to Rho statistic indices. rho0 corresponds to autocorrelation function
+        of PSF size residuals.
     """
     def __init__(self, column, psfColumn, **kwargs):
         self.column = column
@@ -594,7 +599,8 @@ class RhoStatistics(object):
 
         # Package the arguments to capture auto-/cross-correlations for the
         # Rho statistics.
-        args = {1: (e1Res, e2Res, None, None),
+        args = {0: (SizeRes, None),
+                1: (e1Res, e2Res, None, None),
                 2: (e1, e2, e1Res, e2Res),
                 3: (e1SizeRes, e2SizeRes, None, None),
                 4: (e1Res, e2Res, e1SizeRes, e2SizeRes),
@@ -604,8 +610,9 @@ class RhoStatistics(object):
         dec = np.rad2deg(catalog["coord_dec"][isFinite])*60.  # arcmin
 
         # Pass the appropriate arguments to the correlator and build a dict
-        rhoStats = {rhoIndex: corr2(ra, dec, *(args[rhoIndex]), raUnits="arcmin", decUnits="arcmin",
-                                    **self.kwargs) for rhoIndex in range(1, 6)}
+        rhoStats = {rhoIndex: corrSpin2(ra, dec, *(args[rhoIndex]), raUnits="arcmin", decUnits="arcmin",
+                                        **self.kwargs) for rhoIndex in range(1, 6)}
+        rhoStats[0] = corrSpin0(ra, dec, *(args[0]), raUnits="arcmin", decUnits="arcmin", **self.kwargs)
 
         return rhoStats
 
@@ -2262,34 +2269,83 @@ def calcQuartileClippedStats(dataArray, nSigmaToClip=3.0):
     )
 
 
-def corr2(ra, dec, g1a, g2a, g1b=None, g2b=None, raUnits="degrees", decUnits="degrees", **treecorrKwargs):
-    """Function to compute correlations between atmost two shear-like fields.
+def corrSpin0(ra, dec, k1, k2=None, raUnits="degrees", decUnits="degrees", **treecorrKwargs):
+    """Function to compute correlations between at most two scalar fields.
 
-    This is used to compute Rho statistics, given the appropriate shear-like
-    fields.
+    This is used to compute Rho0 statistics, given the appropriate spin-0
+    (scalar) fields, usually fractional size residuals.
 
     Parameters
     ----------
     ra : `numpy.array`
         The right ascension values of entries in the catalog.
     dec : `numpy.array`
-        The declination values of entres in the catalog.
+        The declination values of entries in the catalog.
+    k1 : `numpy.array`
+        The primary scalar field.
+    k2 : `numpy.array`, optional
+        The secondary scalar field.
+        Autocorrelation of the primary field is computed if `None` (default).
+    raUnits : `str`, optional
+        Unit of the right ascension values.
+        Valid options are "degrees", "arcmin", "arcsec", "hours" or "radians".
+    decUnits : `str`, optional
+        Unit of the declination values.
+        Valid options are "degrees", "arcmin", "arcsec", "hours" or "radians".
+    **treecorrKwargs
+        Keyword arguments to be passed to `treecorr.KKCorrelation`.
+
+    Returns
+    -------
+    xy : `treecorr.KKCorrelation`
+        A `treecorr.KKCorrelation` object containing the correlation function.
+    """
+
+    xy = treecorr.KKCorrelation(**treecorrKwargs)
+    catA = treecorr.Catalog(ra=ra, dec=dec, k=k1, ra_units=raUnits,
+                            dec_units=decUnits)
+    if k2 is None:
+        # Calculate the auto-correlation
+        xy.process(catA)
+    else:
+        catB = treecorr.Catalog(ra=ra, dec=dec, k=k2, ra_units=raUnits,
+                                dec_units=decUnits)
+        # Calculate the cross-correlation
+        xy.process(catA, catB)
+
+    return xy
+
+
+def corrSpin2(ra, dec, g1a, g2a, g1b=None, g2b=None, raUnits="degrees", decUnits="degrees", **treecorrKwargs):
+    """Function to compute correlations between at most two shear-like fields.
+
+    This is used to compute Rho statistics, given the appropriate spin-2
+    (shear-like) fields.
+
+    Parameters
+    ----------
+    ra : `numpy.array`
+        The right ascension values of entries in the catalog.
+    dec : `numpy.array`
+        The declination values of entries in the catalog.
     g1a : `numpy.array`
         The first component of the primary shear-like field.
     g2a : `numpy.array`
         The second component of the primary shear-like field.
     g1b : `numpy.array`, optional
         The first component of the secondary shear-like field.
-        Autocorrelation of the primary field is computed if `None`.
+        Autocorrelation of the primary field is computed if `None` (default).
     g2b : `numpy.array`, optional
         The second component of the secondary shear-like field.
-        Autocorrelation of the primary field is computed if `None`.
+        Autocorrelation of the primary field is computed if `None` (default).
     raUnits : `str`, optional
         Unit of the right ascension values.
+        Valid options are "degrees", "arcmin", "arcsec", "hours" or "radians".
     decUnits : `str`, optional
         Unit of the declination values.
-
-    Additionally, keyword arguments to `treecorr.GGCorrelation` may be passed.
+        Valid options are "degrees", "arcmin", "arcsec", "hours" or "radians".
+    **treecorrKwargs
+        Keyword arguments to be passed to `treecorr.GGCorrelation`.
 
     Returns
     -------
