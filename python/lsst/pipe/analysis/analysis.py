@@ -631,6 +631,8 @@ class Analysis(object):
         numMax = 1
         alpha = 0.4
         ic = 1
+        axes2 = None
+        numGood = None
         for name, data in self.data.items():
             if not data.mag.any():
                 continue
@@ -642,30 +644,34 @@ class Analysis(object):
             nValid = np.abs(data.quantity[good]) <= self.qMax  # need to have datapoints lying within range
             if good.sum() == 0 or nValid.sum() == 0:
                 continue
-            num, fluxBins, _ = axes.hist(data.quantity[good], bins=numBins, range=(self.qMin, self.qMax),
-                                         density=density, log=logPlot, color=color, alpha=alpha,
-                                         label=name, histtype="stepfilled")
+            numGood, fluxBins, _ = axes.hist(data.quantity[good], bins=numBins, range=(self.qMin, self.qMax),
+                                             density=density, log=logPlot, color=color, alpha=alpha,
+                                             label=name, histtype="stepfilled")
+            numBins = fluxBins if type(numBins) is str else numBins
             if cumulative:
                 axes2 = axes.twinx()  # instantiate a second axes that shares the same x-axis
-                axes2.hist(data.quantity[good], bins=fluxBins, density=True, log=False, color=data.color,
+                axes2.hist(data.quantity[good], bins=numBins, density=True, log=False, color=data.color,
                            label=name + "_cum", histtype="step", cumulative=cumulative)
+            else:
+                axes2 = None
             # yaxis limit for non-normalized histograms
-            numMax = max(numMax, num.max()*1.1) if not density else numMax
-        if cumulative:
+            numMax = max(numMax, numGood.max()*1.1) if not density else numMax
+        if cumulative and axes2 is not None:
             axes2.set_ylim(0, 1.05)
             axes2.tick_params(axis="y", which="both", direction="in")
             axes2.set_ylabel("Cumulative Fraction", rotation=270, labelpad=12, color=color, fontsize=9)
             axes2.legend(loc="right", fontsize=8)
             axes2.grid(True, "both", color="black", alpha=0.3)
-        if addDataList is not None:
+        if addDataList is not None and numGood is not None:
             hatches = ["\\\\", "//", "*", "+"]
             cmap = plt.cm.Spectral
             addColors = [cmap(i) for i in np.linspace(0, 1, len(addDataList))]
             if addDataLabelList is None:
                 addDataLabelList = ["" for i in len(addDataList)]
             for i, extraData in enumerate(addDataList):
-                axes.hist(extraData, bins=fluxBins, density=density, log=logPlot, color=addColors[i],
-                          alpha=0.65, label=addDataLabelList[i], histtype="step", hatch=hatches[i%4])
+                axes.hist(extraData, bins=numBins, range=(self.qMin, self.qMax), density=density,
+                          log=logPlot, color=addColors[i], alpha=0.65, label=addDataLabelList[i],
+                          histtype="step", hatch=hatches[i%4])
 
         axes.tick_params(axis="both", which="both", direction="in", labelsize=8)
         axes.set_xlim(self.qMin, self.qMax)
