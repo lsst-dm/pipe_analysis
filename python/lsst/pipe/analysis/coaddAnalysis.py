@@ -1060,12 +1060,18 @@ class CoaddAnalysisTask(CmdLineTask):
         factor = 10.0**(0.4*self.config.analysis.commonZp) if zpLabel == "raw" else NANOJANSKYS_PER_AB_FLUX
         psfFlux = catalog["base_PsfFlux_instFlux"]*factor
         psfFluxErr = catalog["base_PsfFlux_instFluxErr"]*factor
+        # Cull here so that all subsets get the same culling
+        bad = makeBadArray(catalog, flagList=self.config.analysis.flags)
+        psfFlux = psfFlux[~bad]
+        psfFluxErr = psfFluxErr[~bad]
         psfSn = psfFlux/psfFluxErr
 
         # Scale S/N threshold by ~sqrt(#exposures) if catalog is coadd data
         if "base_InputCount_value" in catalog.schema:
             inputCounts = catalog["base_InputCount_value"]
             scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=10)
+            if scaleFactor == 0.0:
+                scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=1)
             highSn = np.floor(
                 np.sqrt(scaleFactor)*self.config.analysis.signalToNoiseThreshold/100 + 0.49)*100
         else:
@@ -1090,8 +1096,7 @@ class CoaddAnalysisTask(CmdLineTask):
             filterStr = "[" + plotInfoDict["cameraName"] + "-" + plotInfoDict["filter"] + "]"
         else:
             filterStr = plotInfoDict["filter"]
-
-        yield from self.AnalysisClass(catalog, psfFlux, "%s" % shortName, shortName,
+        yield from self.AnalysisClass(catalog[~bad], psfFlux, "%s" % shortName, shortName,
                                       self.config.analysis, qMin=0,
                                       qMax=int(min(99999, max(4.0*np.median(psfFlux), 0.25*np.max(psfFlux)))),
                                       labeller=AllLabeller()
@@ -1109,9 +1114,8 @@ class CoaddAnalysisTask(CmdLineTask):
         shortName = "psfInstFlux/psfInstFluxErr" if zpLabel == "raw" else "psfCalFlux/psfCalFluxErr"
         description = description.replace("Flux", "FluxSn")
         self.log.info("shortName = {:s}".format(shortName))
-        yield from self.AnalysisClass(catalog, psfSn, "%s" % "S/N = " + shortName, shortName,
-                                      self.config.analysis, flags=["base_PsfFlux_flag"], qMin=0,
-                                      qMax=4*highSn, labeller=AllLabeller()
+        yield from self.AnalysisClass(catalog[~bad], psfSn, "%s" % "S/N = " + shortName, shortName,
+                                      self.config.analysis, qMin=0, qMax=4*highSn, labeller=AllLabeller()
                                       ).plotHistogram(description, plotInfoDict, numBins="sqrt", stats=stats,
                                                       zpLabel=zpLabel, forcedStr=forcedStr,
                                                       filterStr=filterStr,
@@ -1125,7 +1129,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
         skyplotKwargs = dict(stats=stats, matchRadius=matchRadius, matchRadiusUnitStr=None, zpLabel=zpLabel)
 
-        yield from self.AnalysisClass(catalog, psfSn, "%s" % "S/N = " + shortName, shortName,
+        yield from self.AnalysisClass(catalog[~bad], psfSn, "%s" % "S/N = " + shortName, shortName,
                                       self.config.analysis, qMin=0, qMax=1.25*highSn, labeller=AllLabeller(),
                                       ).plotSkyPosition(description, plotInfoDict, areaDict,
                                                         dataName="all", **skyplotKwargs)

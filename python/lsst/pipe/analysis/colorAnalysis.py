@@ -873,6 +873,9 @@ class ColorAnalysisTask(CmdLineTask):
                         inputCounts = byFilterCats[self.fluxFilter]["base_InputCount_value"]
                         scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1,
                                                         floorFactor=10)
+                        if scaleFactor == 0.0:
+                            scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1,
+                                                            floorFactor=1)
                         signalToNoiseThreshold = np.floor(
                             np.sqrt(scaleFactor)*self.config.analysis.signalToNoiseThreshold/100 + 0.49)*100
                         configSNThresh = self.config.analysis.signalToNoiseHighThreshold
@@ -985,6 +988,8 @@ class ColorAnalysisTask(CmdLineTask):
             if "base_InputCount_value" in byFilterCats[self.fluxFilter].schema:
                 inputCounts = byFilterCats[self.fluxFilter]["base_InputCount_value"]
                 scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=10)
+                if scaleFactor == 0.0:
+                    scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=1)
                 signalToNoiseThreshold = np.floor(
                     np.sqrt(scaleFactor)*self.config.analysis.signalToNoiseThreshold/100 + 0.49)*100
                 signalToNoiseHighThreshold = (np.floor(

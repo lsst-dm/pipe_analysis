@@ -160,6 +160,8 @@ class Analysis(object):
         if prefix + "base_InputCount_value" in catalog.schema:
             inputCounts = catalog[prefix + "base_InputCount_value"]
             scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=10)
+            if scaleFactor == 0.0:
+                scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=1)
             self.signalToNoiseThreshold = np.floor(
                 np.sqrt(scaleFactor)*self.config.signalToNoiseThreshold/100 + 0.49)*100
             self.signalToNoiseHighThreshold = np.floor(
