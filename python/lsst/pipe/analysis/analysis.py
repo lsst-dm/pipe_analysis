@@ -312,10 +312,10 @@ class Analysis(object):
                               highlightList=None, extraLabels=None, uberCalLabel=None, doPrintMedian=False):
         """Plot quantity against magnitude with side histogram"""
 
-        if plotInfoDict["plotType"] == "plotVisit" or plotInfoDict["plotType"] == "plotCoadd":
+        if plotInfoDict["plotType"] != "plotColor":
             filterLabelStr = "[{}]".format(plotInfoDict["filter"])
-            if "lsst" in plotInfoDict["camera"]:
-                filterLabelStr = "[{}-{}]".format(plotInfoDict["camera"], plotInfoDict["filter"])
+            if "lsst" in plotInfoDict["cameraName"]:
+                filterLabelStr = "[{}-{}]".format(plotInfoDict["cameraName"], plotInfoDict["filter"])
         else:
             filterLabelStr = ""
 
@@ -346,16 +346,13 @@ class Analysis(object):
             ccdList = plotInfoDict["allCcdList"]
         elif plotInfoDict["plotType"] == "plotVisit":
             ccdList = plotInfoDict["ccdList"]
-        if "Visit" in plotInfoDict["plotType"] and plotInfoDict["camera"] is not None and ccdList is not None:
+        if ("Visit" in plotInfoDict["plotType"] and plotInfoDict["camera"] is not None
+           and ccdList is not None):
             axTopRight = plt.axes(topRight)
             axTopRight.set_aspect("equal")
-            plotCameraOutline(axTopRight, plotInfoDict["cameraObj"], ccdList)
+            plotCameraOutline(axTopRight, plotInfoDict["camera"], ccdList)
 
-        if "Coadd" in plotInfoDict["plotType"] or "Color" in plotInfoDict["plotType"]:
-            tractLevelPlot = True
-        else:
-            tractLevelPlot = False
-
+        tractLevelPlot = "Coadd" in plotInfoDict["plotType"] or "Color" in plotInfoDict["plotType"]
         if self.config.doPlotTractOutline and tractLevelPlot:
             axTopRight = plt.axes(topRight)
             axTopRight.set_aspect("equal")
@@ -688,7 +685,7 @@ class Analysis(object):
                          matchRadiusUnitStr=matchRadiusUnitStr, unitScale=self.unitScale,
                          doPrintMedian=doPrintMedian)
         axes.legend(loc="upper right", fontsize=8)
-        if plotInfoDict["camera"] is not None:
+        if plotInfoDict["cameraName"] is not None:
             labelCamera(plotInfoDict, plt.gcf(), axes, 0.5, 1.09)
         labelVisit(plotInfoDict, plt.gcf(), axes, 0.5, 1.04)
         if zpLabel is not None:
@@ -702,9 +699,9 @@ class Analysis(object):
             axTopMiddle = plt.axes([0.42, 0.68, 0.2, 0.2])
             axTopMiddle.set_aspect("equal")
             if plotInfoDict["plotType"] == "plotCompareVisit":
-                plotCameraOutline(axTopMiddle, plotInfoDict["cameraObj"], plotInfoDict["allCcdList"])
+                plotCameraOutline(axTopMiddle, plotInfoDict["camera"], plotInfoDict["allCcdList"])
             else:
-                plotCameraOutline(axTopMiddle, plotInfoDict["cameraObj"], plotInfoDict["ccdList"])
+                plotCameraOutline(axTopMiddle, plotInfoDict["camera"], plotInfoDict["ccdList"])
         if self.config.doPlotTractOutline and "Coadd" in plotInfoDict["plotType"]:
             axTopMiddle = plt.axes([0.42, 0.68, 0.2, 0.2])
             axTopMiddle.set_aspect("equal")
@@ -848,8 +845,8 @@ class Analysis(object):
             return
         filterStr = plotInfoDict["filter"]
         filterLabelStr = "[" + filterStr + "]" if ("color" not in plotInfoDict["plotType"]) else ""
-        if "lsst" in plotInfoDict["camera"]:
-            filterLabelStr = "[" + plotInfoDict["camera"] + "-" + plotInfoDict["filter"] + "]"
+        if "lsst" in plotInfoDict["cameraName"]:
+            filterLabelStr = "[" + plotInfoDict["cameraName"] + "-" + plotInfoDict["filter"] + "]"
         axes.set_xlabel("RA (deg) {0:s}".format(filterLabelStr))
         axes.set_ylabel("Dec (deg) {0:s}".format(filterLabelStr))
 
@@ -1055,8 +1052,8 @@ class Analysis(object):
         getQuiver(ra, dec, e1, e2, axes, color=plt.cm.jet(nz(e)), scale=scale, width=0.002, label=catStr)
 
         filterLabelStr = "[" + plotInfoDict["filter"] + "]"
-        if "lsst" in plotInfoDict["camera"]:
-            filterLabelStr = "[" + plotInfoDict["camera"] + "-" + plotInfoDict["filter"] + "]"
+        if "lsst" in plotInfoDict["cameraName"]:
+            filterLabelStr = "[" + plotInfoDict["cameraName"] + "-" + plotInfoDict["filter"] + "]"
         axes.set_xlabel("RA (deg) {0:s}".format(filterLabelStr))
         axes.set_ylabel("Dec (deg) {0:s}".format(filterLabelStr))
 
@@ -1120,6 +1117,7 @@ class Analysis(object):
         rhoStatsFunc = RhoStatistics(compareCol, psfCompareCol, **treecorrParams)
         rhoStats = rhoStatsFunc(good_catalog)
         plotRhoStats(axes, rhoStats)
+        log.debug("Tract id in Rho Stats: {0}".format(plotInfoDict['tract']))
 
         for figId, figax in enumerate(figAxes):
             fig, ax = figax
@@ -1133,8 +1131,6 @@ class Analysis(object):
             plotText(shapeAlgorithm, fig, ax, 0.85, -0.08, prefix="Shape Alg: ", fontSize=8, color="green")
             if forcedStr is not None:
                 plotText(forcedStr, fig, ax, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
-
-            log.info("Tract id in Rho Stats: {0}".format(plotInfoDict['tract']))
 
             yield Struct(fig=fig, description=figDescription, stats=stats, statsHigh=None, dpi=120,
                          style="RhoStats")
@@ -1175,8 +1171,6 @@ class Analysis(object):
                          color="green")
                 if forcedStr is not None:
                     plotText(forcedStr, fig, ax, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
-
-                log.info("Tract id in Rho Stats: {0}".format(plotInfoDict['tract']))
 
                 yield Struct(fig=fig, description=figDescription, stats=stats, statsHigh=None, dpi=120,
                              style="RhoStats")
@@ -1315,8 +1309,8 @@ class Analysis(object):
 
         filterStr = plotInfoDict["filter"]
         filterLabelStr = "[" + filterStr + "]"
-        if "lsst" in plotInfoDict["camera"]:
-            filterLabelStr = "[" + plotInfoDict["camera"] + "-" + plotInfoDict["filter"] + "]"
+        if "lsst" in plotInfoDict["cameraName"]:
+            filterLabelStr = "[" + plotInfoDict["cameraName"] + "-" + plotInfoDict["filter"] + "]"
         axes.set_xlabel("xTract (pixels) {0:s}".format(filterLabelStr), size=9)
         axes.set_ylabel("yTract (pixels) {0:s}".format(filterLabelStr), size=9)
 
@@ -1340,7 +1334,7 @@ class Analysis(object):
         if doPlotPatchOutline:
             plotPatchOutline(axes, plotInfoDict["tractInfo"], plotInfoDict["patchList"], plotUnits="pixel",
                              idFontSize=5)
-        if plotInfoDict["camera"] is not None:
+        if plotInfoDict["cameraName"] is not None:
             labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
         labelVisit(plotInfoDict, fig, axes, 0.5, 1.04)
         if forcedStr is not None:
@@ -1387,8 +1381,8 @@ class Analysis(object):
         axes[1].yaxis.set_major_formatter(FormatStrFormatter('%.3f'))
         prop_cycle = plt.rcParams["axes.prop_cycle"]
         colors = prop_cycle.by_key()["color"]
-        if "lsst" in plotInfoDict["camera"]:
-            filterStr = plotInfoDict["camera"] + "-" + plotInfoDict["filter"]
+        if "lsst" in plotInfoDict["cameraName"]:
+            filterStr = plotInfoDict["cameraName"] + "-" + plotInfoDict["filter"]
         else:
             filterStr = plotInfoDict["filter"]
         fluxStrList = ["base_PsfFlux_instFlux", "base_CircularApertureFlux_9_0_instFlux",
@@ -1400,6 +1394,8 @@ class Analysis(object):
         yOff = 1.065
         legendLoc = "upper left"
         alpha = 0.35
+        nBins = None
+        nBinsChi = None
         for i, fluxStr in enumerate(fluxStrList):
             yOff -= 0.1
             flux = skyObjCat[fluxStr]*fluxScale
@@ -1476,7 +1472,7 @@ class Analysis(object):
         axes[1].axvline(x=0.0, color="black", linestyle="--")
         axes[1].legend(loc=legendLoc, fontsize=6)
 
-        if plotInfoDict["camera"] is not None:
+        if plotInfoDict["cameraName"] is not None:
             labelCamera(plotInfoDict, fig, axes[0], 0.5, 1.04)
         labelVisit(plotInfoDict, fig, axes[1], 0.5, 1.04)
         if forcedStr is not None:
@@ -1515,12 +1511,14 @@ class Analysis(object):
             axTopRight.set_aspect("equal")
             plotCameraOutline(axTopRight, plotInfoDict["camera"], plotInfoDict["ccdList"],
                               metricPerCcdDict=metricPerUnitDict, metricStr=metricStr, fig=fig)
-        if (self.config.doPlotTractOutline and plotInfoDict["tractInfo"] is not None and
-                len(plotInfoDict["patchList"]) > 0):
-            axTopRight = plt.axes(topRight)
-            axTopRight.set_aspect("equal")
-            plotTractOutline(axTopRight, plotInfoDict["tractInfo"], plotInfoDict["patchList"],
-                             metricPerPatchDict=metricPerUnitDict, metricStr=metricStr, fig=fig)
+
+        tractLevelPlot = "Coadd" in plotInfoDict["plotType"] or "Color" in plotInfoDict["plotType"]
+        if self.config.doPlotTractOutline and tractLevelPlot:
+            if plotInfoDict["tractInfo"] is not None and len(plotInfoDict["patchList"]) > 0:
+                axTopRight = plt.axes(topRight)
+                axTopRight.set_aspect("equal")
+                plotTractOutline(axTopRight, plotInfoDict["tractInfo"], plotInfoDict["patchList"],
+                                 metricPerPatchDict=metricPerUnitDict, metricStr=metricStr, fig=fig)
 
         yield Struct(fig=fig, description=description, stats=None, statsHigh=None, dpi=120, style="hist")
 

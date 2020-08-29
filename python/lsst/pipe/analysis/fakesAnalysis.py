@@ -39,8 +39,8 @@ import lsst.pipe.base as pipeBase
 
 from .utils import addMetricMeasurement
 
-__all__ = ["addDegreePositions", "matchCatalogs", "addNearestNeighbor", "getPlotInfo",
-           "calcFakesAreaDepth", "plotFakesAreaDepth", "fakesPositionCompare", "fakesMagnitudeBlendedness",
+__all__ = ["addDegreePositions", "matchCatalogs", "addNearestNeighbor", "calcFakesAreaDepth",
+           "plotFakesAreaDepth", "fakesPositionCompare", "fakesMagnitudeBlendedness",
            "fakesMagnitudeNearestNeighbor", "fakesMagnitudeCompare"]
 
 
@@ -165,87 +165,6 @@ def addNearestNeighbor(catalog, raCol, decCol, units=u.degree):
     return catalog
 
 
-def getPlotInfo(repoInfo):
-    """Parse the repoInfo into a dict of useful info for plots.
-
-    Parameters
-    ----------
-    repoInfo : `lsst.pipe.base.struct.Struct`
-        The struct has the following components:
-            ``"butler"``
-                The butler (`lsst.daf.persistence.butler`) associated with the dataset to be plotted.
-            ``"camera"``
-                The camera (`lsst.afw.cameraGeom.Camera`)) used to take the data.
-            ``"dataId"``
-                The dataId (`lsst.daf.persistence.DataId`) associated with the dataset.
-            ``"filterName"``
-                The name of the filter (`str`) associated with the data.
-            ``"genericFilterName"``
-                A generic form of the ``filterName``, (`str`)
-            ``"metadata"``
-                The metadata (`lsst.daf.base.propertyContainer.PropertyList`) associated with the data.
-            ``"hscRun"``
-                A string representing "HSCPIPE_VERSION" fits header if the data associated with
-                ``dataRef``'s ``dataset`` were processed with the (now obsolete, but old reruns
-                still exist) "HSC stack", None otherwise (`str` or `None`).
-            ``"dataset"``
-                The dataset name, ("src" if ``dataRef`` is visit level, coaddName + coaddDataset
-                if ``dataRef`` is a coadd (`str`)
-            ``"skyMap"``
-                The sky map (`lsst.skymap.SkyMap` or `None`) associated with this data.
-            ``"wcs"``
-                The wcs (`lsst.afw.geom.SkyWcs` or `None`) of the coadd image, only needed as a
-                workaround for some old coadd catalogs that were persisted with all nan for ra and dec.
-            ``"tractInfo"``
-                The tract information (`lsst.skymap.tractInfo.ExplicitTractInfo` or `None`)
-                associated with the dataset.
-
-    Returns
-    -------
-    plotInfoDict : `dict`
-        A dictionary of information about the data being plotted.
-            ``"camera"``
-                The camera used to take the data
-            ``"filter"``
-                The filter used for this data
-            ``"visit"``
-                The visit of the data; only included if the data is from a single epoch dataset
-            ``"tract"``
-                The tract that the data comes from
-            ``"calibDataset"``
-                The dataset used for the calibration, for example; jointCal
-            ``"rerun"``
-                The rerun the data is stored in
-            ``"skyDataset"``
-                The sky Wcs dataset used
-            ``"patch"``
-                The patch that the data is from; only included if the data is from a coadd dataset
-    """
-
-    camera = repoInfo.camera.getName()
-    dataId = repoInfo.dataId
-    filterName = dataId["filter"]
-    # Try and get the visit info and patch info but the data might not have them so just set to None
-    try:
-        visit = str(dataId["visit"])
-    except KeyError:
-        visit = None
-
-    try:
-        patch = dataId["patch"]
-    except KeyError:
-        patch = None
-
-    tract = str(dataId["tract"])
-    photoCalibDataset = repoInfo.photoCalibDataset
-    skyDataset = repoInfo.skyWcsDataset
-    rerun = list(repoInfo.butler.storage.repositoryCfgs)[0]
-    plotInfoDict = dict(camera=camera, filter=filterName, visit=visit, tract=tract,
-                        calibDataset=photoCalibDataset, rerun=rerun, skyDataset=skyDataset, patch=patch)
-
-    return plotInfoDict
-
-
 def addProvenanceInfo(fig, plotInfoDict):
     """Add some useful provenance information to the plot
 
@@ -255,25 +174,24 @@ def addProvenanceInfo(fig, plotInfoDict):
         The figure that the information should be added to
     plotInfoDict : `dict`
         A dictionary of information about the data being plotted.
-            ``"camera"``
-                The camera used to take the data
+            ``"cameraName"``
+                The name of camera used to take the data
             ``"filter"``
                 The filter used for this data
             ``"visit"``
                 The visit of the data; only included if the data is from a single epoch dataset
             ``"tract"``
                 The tract that the data comes from
-            ``"calibDataset"``
-                The dataset used for the calibration, for example; jointCal
+            ``"photoCalibDataset"``
+                The dataset used for the calibration, for example; jointcal
             ``"rerun"``
                 The rerun the data is stored in
-            ``"skyDataset"``
+            ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
                 The patch that the data is from; only included if the data is from a coadd dataset
     """
-
-    plt.text(0.85, 0.98, "Camera: " + plotInfoDict["camera"], fontsize=8, alpha=0.8,
+    plt.text(0.85, 0.98, "Camera: " + plotInfoDict["cameraName"], fontsize=8, alpha=0.8,
              transform=fig.transFigure)
     plt.text(0.85, 0.96, "Filter: " + plotInfoDict["filter"], fontsize=8, alpha=0.8,
              transform=fig.transFigure)
@@ -282,7 +200,7 @@ def addProvenanceInfo(fig, plotInfoDict):
 
     plt.text(0.02, 0.98, "rerun: " + plotInfoDict["rerun"], fontsize=8, alpha=0.8, transform=fig.transFigure)
 
-    if "jointcal" in plotInfoDict["calibDataset"]:
+    if "jointcal" in plotInfoDict["photoCalibDataset"]:
         plt.text(0.02, 0.02, "JointCal Used? Yes", fontsize=8, alpha=0.8, transform=fig.transFigure)
     else:
         plt.text(0.02, 0.02, "JointCal Used? No", fontsize=8, alpha=0.8, transform=fig.transFigure)
@@ -420,11 +338,11 @@ def plotFakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict, a
                 The visit of the data; only included if the data is from a single epoch dataset
             ``"tract"``
                 The tract that the data comes from
-            ``"calibDataset"``
-                The dataset used for the calibration, for example; jointCal
+            ``"photoCalibDataset"``
+                The dataset used for the calibration, for example; jointcal
             ``"rerun"``
                 The rerun the data is stored in
-            ``"skyDataset"``
+            ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
                 The patch that the data is from; only included if the data is from a coadd dataset
@@ -512,19 +430,19 @@ def plotWithTwoHists(xs, ys, xName, yName, xLabel, yLabel, title, plotInfoDict, 
          The text to be displayed as the plot title.
     plotInfoDict : `dict`
         A dictionary of information about the data being plotted.
-            ``"camera"``
-                The camera used to take the data
+            ``"cameraName"``
+                The name of the camera used to take the data
             ``"filter"``
                 The filter used for this data
             ``"visit"``
                 The visit of the data; only included if the data is from a single epoch dataset
             ``"tract"``
                 The tract that the data comes from
-            ``"calibDataset"``
-                The dataset used for the calibration, for example; jointCal
+            ``"photoCalibDataset"``
+                The dataset used for the calibration, for example; jointcal
             ``"rerun"``
                 The rerun the data is stored in
-            ``"skyDataset"``
+            ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
                 The patch that the data is from; only included if the data is from a coadd dataset
@@ -660,19 +578,19 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict, b
          The text to be displayed as the plot title.
     plotInfoDict : `dict`
         A dictionary of information about the data being plotted.
-            ``"camera"``
-                The camera used to take the data
+            ``"cameraName"``
+                The name of the camera used to take the data
             ``"filter"``
                 The filter used for this data
             ``"visit"``
                 The visit of the data; only included if the data is from a single epoch dataset
             ``"tract"``
                 The tract that the data comes from
-            ``"calibDataset"``
-                The dataset used for the calibration, for example; jointCal
+            ``"photoCalibDataset"``
+                The dataset used for the calibration, for example; jointcal
             ``"rerun"``
                 The rerun the data is stored in
-            ``"skyDataset"``
+            ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
                 The patch that the data is from; only included if the data is from a coadd dataset
@@ -875,19 +793,19 @@ def fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict,
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
         A dictionary of information about the data being plotted.
-            ``"camera"``
-                The camera used to take the data
+            ``"cameraName"``
+                The name of the camera used to take the data
             ``"filter"``
                 The filter used for this data
             ``"visit"``
                 The visit of the data; only included if the data is from a single epoch dataset
             ``"tract"``
                 The tract that the data comes from
-            ``"calibDataset"``
-                The dataset used for the calibration, for example; jointCal
+            ``"photoCalibDataset"``
+                The dataset used for the calibration, for example; jointcal
             ``"rerun"``
                 The rerun the data is stored in
-            ``"skyDataset"``
+            ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
                 The patch that the data is from; only included if the data is from a coadd dataset
@@ -992,19 +910,19 @@ def focalPlaneBinnedValues(ras, decs, zs, title, colorBarLabel, areaDict, plotIn
                 The corners of the ccd, `list` of `lsst.geom.SpherePoint`s, in degrees.
     plotInfoDict : `dict`
         A dictionary of information about the data being plotted.
-            ``"camera"``
-                The camera used to take the data
+            ``"cameraName"``
+                The name of the camera used to take the data
             ``"filter"``
                 The filter used for this data
             ``"visit"``
                 The visit of the data; only included if the data is from a single epoch dataset
             ``"tract"``
                 The tract that the data comes from
-            ``"calibDataset"``
-                The dataset used for the calibration, for example; jointCal
+            ``"photoCalibDataset"``
+                The dataset used for the calibration, for example; jointcal
             ``"rerun"``
                 The rerun the data is stored in
-            ``"skyDataset"``
+            ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
                 The patch that the data is from; only included if the data is from a coadd dataset
@@ -1057,15 +975,15 @@ def focalPlaneBinnedValues(ras, decs, zs, title, colorBarLabel, areaDict, plotIn
         # Find the ccd corners and sizes
         corners = areaDict["corners_" + str(ccd)]
         xy = (corners[0].getRa().asDegrees(), corners[0].getDec().asDegrees())
-        width = corners[1].getRa().asDegrees() - corners[0].getRa().asDegrees()
-        height = corners[1].getDec().asDegrees() - corners[0].getDec().asDegrees()
+        width = corners[2].getRa().asDegrees() - corners[0].getRa().asDegrees()
+        height = corners[2].getDec().asDegrees() - corners[0].getDec().asDegrees()
 
         # Some of the ccds are rotated and some have xy0 as being on the right with negative width/height
         # this upsets the binning so find the min and max to calculate positive bin widths from.
-        minX = np.min([xy[0], corners[1].getRa().asDegrees()])
-        maxX = np.max([xy[0], corners[1].getRa().asDegrees()])
-        minY = np.min([xy[1], corners[1].getDec().asDegrees()])
-        maxY = np.max([xy[1], corners[1].getDec().asDegrees()])
+        minX = np.min([xy[0], corners[2].getRa().asDegrees()])
+        maxX = np.max([xy[0], corners[2].getRa().asDegrees()])
+        minY = np.min([xy[1], corners[2].getDec().asDegrees()])
+        maxY = np.max([xy[1], corners[2].getDec().asDegrees()])
 
         if np.fabs(width) > np.fabs(height):
             binWidth = (maxX - minX)/10
@@ -1135,19 +1053,19 @@ def fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
         A dictionary of information about the data being plotted.
-            ``"camera"``
-                The camera used to take the data
+            ``"cameraName"``
+                The name of the camera used to take the data
             ``"filter"``
                 The filter used for this data
             ``"visit"``
                 The visit of the data; only included if the data is from a single epoch dataset
             ``"tract"``
                 The tract that the data comes from
-            ``"calibDataset"``
-                The dataset used for the calibration, for example; jointCal
+            ``"photoCalibDataset"``
+                The dataset used for the calibration, for example; jointcal
             ``"rerun"``
                 The rerun the data is stored in
-            ``"skyDataset"``
+            ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
                 The patch that the data is from; only included if the data is from a coadd dataset
@@ -1234,19 +1152,19 @@ def fakesMagnitudeNearestNeighbor(inputFakesMatched, processedFakesMatched, plot
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
         A dictionary of information about the data being plotted.
-            ``"camera"``
-                The camera used to take the data
+            ``"cameraName"``
+                The name of the camera used to take the data
             ``"filter"``
                 The filter used for this data
             ``"visit"``
                 The visit of the data; only included if the data is from a single epoch dataset
             ``"tract"``
                 The tract that the data comes from
-            ``"calibDataset"``
-                The dataset used for the calibration, for example; jointCal
+            ``"photoCalibDataset"``
+                The dataset used for the calibration, for example; jointcal
             ``"rerun"``
                 The rerun the data is stored in
-            ``"skyDataset"``
+            ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
                 The patch that the data is from; only included if the data is from a coadd dataset
@@ -1316,19 +1234,19 @@ def fakesMagnitudeBlendedness(inputFakesMatched, processedFakesMatched, plotInfo
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
         A dictionary of information about the data being plotted.
-            ``"camera"``
-                The camera used to take the data
+            ``"cameraName"``
+                The name of the camera used to take the data
             ``"filter"``
                 The filter used for this data
             ``"visit"``
                 The visit of the data; only included if the data is from a single epoch dataset
             ``"tract"``
                 The tract that the data comes from
-            ``"calibDataset"``
-                The dataset used for the calibration, for example; jointCal
+            ``"photoCalibDataset"``
+                The dataset used for the calibration, for example; jointcal
             ``"rerun"``
                 The rerun the data is stored in
-            ``"skyDataset"``
+            ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
                 The patch that the data is from; only included if the data is from a coadd dataset
@@ -1401,19 +1319,19 @@ def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, 
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
         A dictionary of information about the data being plotted.
-            ``"camera"``
-                The camera used to take the data
+            ``"cameraName"``
+                The name of the camera used to take the data
             ``"filter"``
                 The filter used for this data
             ``"visit"``
                 The visit of the data; only included if the data is from a single epoch dataset
             ``"tract"``
                 The tract that the data comes from
-            ``"calibDataset"``
-                The dataset used for the calibration, for example; jointCal
+            ``"photoCalibDataset"``
+                The dataset used for the calibration, for example; jointcal
             ``"rerun"``
                 The rerun the data is stored in
-            ``"skyDataset"``
+            ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
                 The patch that the data is from; only included if the data is from a coadd dataset
@@ -1615,21 +1533,21 @@ def fakesMagnitudePositionError(inputFakesMatched, processedFakesMatched, plotIn
         The catalog used to add the fakes originally matched to the processed catalog.
     processedFakesMatched : `pandas.core.frame.DataFrame`
         The catalog produced by the stack from the images with fakes in.
-     plotInfoDict : `dict`
+    plotInfoDict : `dict`
         A dictionary of information about the data being plotted.
-            ``"camera"``
-                The camera used to take the data
+            ``"cameraName"``
+                The name of the camera used to take the data
             ``"filter"``
                 The filter used for this data
             ``"visit"``
                 The visit of the data; only included if the data is from a single epoch dataset
             ``"tract"``
                 The tract that the data comes from
-            ``"calibDataset"``
-                The dataset used for the calibration, for example; jointCal
+            ``"photoCalibDataset"``
+                The dataset used for the calibration, for example; jointcal
             ``"rerun"``
                 The rerun the data is stored in
-            ``"skyDataset"``
+            ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
                 The patch that the data is from; only included if the data is from a coadd dataset

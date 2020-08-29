@@ -25,8 +25,7 @@ from .utils import (Enforcer, concatenateCatalogs, getFluxKeys, addColumnsToSche
                     makeEqnStr, catColors, addMetricMeasurement, updateVerifyJob, computeMeanOfFrac,
                     calcQuartileClippedStats, savePlots)
 from .plotUtils import (AllLabeller, OverlapsStarGalaxyLabeller, plotText, labelCamera, setPtSize,
-                        determineExternalCalLabel)
-from .fakesAnalysis import getPlotInfo
+                        determineExternalCalLabel, getPlotInfo)
 
 import lsst.afw.image as afwImage
 import lsst.geom as geom
@@ -295,6 +294,7 @@ class ColorAnalysisConfig(Config):
 class ColorAnalysisRunner(TaskRunner):
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
+        kwargs["subdir"] = parsedCmd.subdir
         FilterRefsDict = functools.partial(defaultdict, list)  # Dict for filter-->dataRefs
         tractFilterRefs = defaultdict(FilterRefsDict)  # tract-->filter-->dataRefs
         for patchRef in sum(parsedCmd.id.refList, []):
@@ -357,6 +357,10 @@ class ColorAnalysisTask(CmdLineTask):
         parser.add_id_argument("--id", "deepCoadd_forced_src",
                                help="data ID, e.g. --id tract=12345 patch=1,2 filter=HSC-X",
                                ContainerClass=TractDataIdContainer)
+        parser.add_argument("--subdir", type=str, default="",
+                            help=("Subdirectory below plots/color/tract-NNNN/ (useful for, "
+                                  "e.g., subgrouping of Patches.  Ignored if only one Patch is "
+                                  "specified, in which case the subdir is set to patch-NNN"))
         return parser
 
     def __init__(self, *args, **kwargs):
@@ -365,7 +369,7 @@ class ColorAnalysisTask(CmdLineTask):
 
         self.verifyJob = verify.Job.load_metrics_package(subset="pipe_analysis")
 
-    def runDataRef(self, patchRefsByFilter):
+    def runDataRef(self, patchRefsByFilter, subdir=""):
         patchList = []
         repoInfo = None
         self.fluxFilter = None
@@ -392,6 +396,8 @@ class ColorAnalysisTask(CmdLineTask):
         self.log.info("Size of patchList with full color coverage: {:d}".format(len(patchList)))
         uberCalLabel = determineExternalCalLabel(repoInfo, patchList[0], coaddName=self.config.coaddName)
         self.log.info(f"External calibration(s) used: {uberCalLabel}")
+        subdir = "patch-" + str(patchList[0]) if len(patchList) == 1 else subdir
+        repoInfo.dataId["subdir"] = "/" + subdir
 
         # Only adjust the schema names necessary here (rather than attaching the full alias schema map)
         self.fluxColumn = self.config.analysis.fluxColumn
@@ -431,9 +437,9 @@ class ColorAnalysisTask(CmdLineTask):
                 geLabel = "Per Field"
 
         plotInfoDict = getPlotInfo(repoInfo)
-        plotInfoDict.update(dict(cameraObj=repoInfo.camera, patchList=patchList, hscRun=repoInfo.hscRun,
-                                 tractInfo=repoInfo.tractInfo, dataId=repoInfo.dataId,
-                                 plotType="plotColor"))
+        plotInfoDict.update(dict(patchList=patchList, plotType="plotColor", subdir=subdir,
+                                 hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo,
+                                 dataId=repoInfo.dataId))
 
         geLabel = "GalExt: " + geLabel
         plotList = []
@@ -473,7 +479,8 @@ class ColorAnalysisTask(CmdLineTask):
                                                     areaDictAll, fluxColumn, forcedStr=self.forcedStr,
                                                     geLabel=geLabel, uberCalLabel=uberCalLabel))
 
-        self.allStats, self.allStatsHigh = savePlots(plotList, "plotColor", repoInfo.dataId, repoInfo.butler)
+        self.allStats, self.allStatsHigh = savePlots(plotList, "plotColor", repoInfo.dataId,
+                                                     repoInfo.butler, subdir=subdir)
 
         # Update the verifyJob with relevant metadata
         metaDict = {"tract": int(plotInfoDict["tract"])}
@@ -528,18 +535,17 @@ class ColorAnalysisTask(CmdLineTask):
 
                 fname = repoInfo.butler.getUri("deepCoadd_calexp", patchRef.dataId)
                 reader = afwImage.ExposureFitsReader(fname)
-                mask = reader.readMask()
                 wcs = reader.readWcs()
-                goodPix = np.where(~(mask.array.flatten() & mask.getPlaneBitMask("BAD")))[0]
-                numGoodPix = len(goodPix)
-                pixScale = wcs.getPixelScale().asArcseconds()
-                area = pixScale**2 * numGoodPix
+                mask = reader.readMask()
+                maskBad = mask.array & 2**mask.getMaskPlaneDict()["BAD"]
+                maskNoData = mask.array & 2**mask.getMaskPlaneDict()["NO_DATA"]
+                maskedPixels = maskBad + maskNoData
+                numGoodPix = np.count_nonzero(maskedPixels == 0)
+                pixScale = wcs.getPixelScale(reader.readBBox().getCenter()).asArcseconds()
+                area = numGoodPix*pixScale**2
                 areaDict[patchRef.dataId["patch"]] = area
 
-                patchWidth = mask.getWidth()
-                patchHeight = mask.getHeight()
-
-                patchCorners = wcs.pixelToSky([geom.Point2D(0, 0), geom.Point2D(patchWidth, patchHeight)])
+                patchCorners = wcs.pixelToSky(geom.Box2D(reader.readBBox()).getCorners())
                 areaDict["corners_" + str(patchRef.dataId["patch"])] = patchCorners
 
                 if self.config.doWriteParquetTables:
@@ -943,7 +949,7 @@ class ColorAnalysisTask(CmdLineTask):
                 axes.text(xLoc, yLoc, "NinPerpGood =", ha="left", color="red", **kwargs)
                 axes.text(xLoc + fdx*deltaX, yLoc, str(len(xColor[inPerpGood])), ha="right", color="red",
                           **kwargs)
-                if plotInfoDict["cameraObj"]:
+                if plotInfoDict["cameraName"]:
                     labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
                 if catLabel:
                     plotText(catLabel, fig, axes, 0.91, -0.09, color="green", fontSize=10)
@@ -1819,7 +1825,7 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
 
     axes[1].set_ylim(axes[1].get_ylim()[0], axes[1].get_ylim()[1]*2.5)
 
-    if plotInfoDict["camera"]:
+    if plotInfoDict["cameraName"]:
         labelCamera(plotInfoDict, fig, axes[0], 0.5, 1.04)
     if catLabel:
         plotText(catLabel, fig, axes[0], 0.88, -0.12, fontSize=7, color="green")
@@ -1880,7 +1886,7 @@ def colorColorPlot(plotInfoDict, description, log, xStars, yStars, xGalaxies, yG
     axes.text(xLoc, 0.94*yLoc, "Nstars =", ha="left", color="blue", **kwargs)
     axes.text(xLoc + fdx*deltaX, 0.94*yLoc, str(len(xStars[goodStars])) +
               " [" + filterStr + "$<$" + str(magThreshold) + "]", ha="right", color="blue", **kwargs)
-    if plotInfoDict["cameraObj"]:
+    if plotInfoDict["cameraName"]:
         labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
     if geLabel:
         plotText(geLabel, fig, axes, 0.13, -0.09, fontSize=7, color="green")
@@ -1974,7 +1980,7 @@ def colorColor4MagPlots(plotInfoDict, description, log, xStars, yStars, xGalaxie
     cbGalaxies.set_ticks([])
     cbGalaxies.set_label(filterStr + " [" + fluxColStr + "]: galaxies", rotation=270, labelpad=-6, fontsize=9)
 
-    if plotInfoDict["cameraObj"]:
+    if plotInfoDict["cameraName"]:
         labelCamera(plotInfoDict, fig, axes[0, 0], 1.05, 1.14)
     if geLabel:
         plotText(geLabel, fig, axes[0, 0], 0.12, -1.23, color="green")

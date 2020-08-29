@@ -47,7 +47,7 @@ __all__ = ["Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCom
 NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
 
 
-def savePlots(plotList, plotType, dataId, butler):
+def savePlots(plotList, plotType, dataId, butler, subdir=""):
     """Persist plots and parse stats yielded by the supplied generator
 
     Parameters
@@ -76,6 +76,7 @@ def savePlots(plotList, plotType, dataId, butler):
                 plot.fig.set_dpi(dpi)
             if hasattr(plot, 'description'):
                 dataId['description'] = plot.description
+                dataId["subdir"] = "/" + subdir
                 dataId['style'] = plot.style
                 key = plot.description
                 butler.put(plot.fig, plotType, dataId)
