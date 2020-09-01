@@ -873,6 +873,9 @@ class ColorAnalysisTask(CmdLineTask):
                         inputCounts = byFilterCats[self.fluxFilter]["base_InputCount_value"]
                         scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1,
                                                         floorFactor=10)
+                        if scaleFactor == 0.0:
+                            scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1,
+                                                            floorFactor=1)
                         signalToNoiseThreshold = np.floor(
                             np.sqrt(scaleFactor)*self.config.analysis.signalToNoiseThreshold/100 + 0.49)*100
                         configSNThresh = self.config.analysis.signalToNoiseHighThreshold
@@ -885,7 +888,7 @@ class ColorAnalysisTask(CmdLineTask):
                     ptFrac = max(2, int(0.05*len(mags[self.fluxFilter][qaGood])))
                     magThreshold = np.floor(mags[self.fluxFilter][qaGood][
                         mags[self.fluxFilter][qaGood].argsort()[-ptFrac:]].mean()*10 + 0.5)/10
-                    thresholdStr = [r" [S/N$\geqslant$" + str(signalToNoiseHighThreshold) + "]",
+                    thresholdStr = [r" [S/N$\geqslant$" + str(signalToNoiseThreshold) + "]",
                                     " [" + self.fluxFilter + r"$\lesssim$" + str(magThreshold) + "]"]
                 else:
                     qaGood = np.logical_and(qaGood, mags[self.fluxFilter] < self.config.analysis.magThreshold)
@@ -985,6 +988,8 @@ class ColorAnalysisTask(CmdLineTask):
             if "base_InputCount_value" in byFilterCats[self.fluxFilter].schema:
                 inputCounts = byFilterCats[self.fluxFilter]["base_InputCount_value"]
                 scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=10)
+                if scaleFactor == 0.0:
+                    scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=1)
                 signalToNoiseThreshold = np.floor(
                     np.sqrt(scaleFactor)*self.config.analysis.signalToNoiseThreshold/100 + 0.49)*100
                 signalToNoiseHighThreshold = (np.floor(
@@ -996,7 +1001,7 @@ class ColorAnalysisTask(CmdLineTask):
             # S/N > signalToNoiseThreshold subsample
             magThreshold = np.floor(mags[self.fluxFilter][bright][
                 mags[self.fluxFilter][bright].argsort()[-ptFrac:]].mean()*10 + 0.5)/10
-            thresholdStr = [r" [S/N$\geqslant$" + str(signalToNoiseHighThreshold) + "]",
+            thresholdStr = [r" [S/N$\geqslant$" + str(signalToNoiseThreshold) + "]",
                             " [" + self.fluxFilter + r"$\lesssim$" + str(magThreshold) + "]"]
         else:
             magThreshold = self.config.analysis.magThreshold
@@ -1419,6 +1424,10 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
     else:
         for ii in range(iterations):
             keep &= select
+            nKeep = np.sum(keep)
+            if nKeep < order:
+                raise RuntimeError("Not enough good data points ({0:d}) for polynomial fit of order {1:d}".
+                                   format(nKeep, order))
             poly = np.polyfit(xx[keep], yy[keep], order)
             dy = yy - np.polyval(poly, xx)
             clippedStats = calcQuartileClippedStats(dy[keep], nSigmaToClip=rej)
