@@ -48,7 +48,7 @@ from .utils import (Enforcer, MagDiff, MagDiffMatches, MagDiffCompare,
                     addFootprintNPix, makeBadArray, addIntFloatOrStrColumn,
                     calibrateCoaddSourceCatalog, backoutApCorr, matchNanojanskyToAB,
                     fluxToPlotString, andCatalog, writeParquet, getRepoInfo, setAliasMaps,
-                    addPreComputedColumns, computeMeanOfFrac, savePlots)
+                    addPreComputedColumns, computeMeanOfFrac, savePlots, updateVerifyJob)
 from .plotUtils import (CosmosLabeller, AllLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
                         MatchesStarGalaxyLabeller, determineExternalCalLabel, getPlotInfo)
 
@@ -554,6 +554,16 @@ class CoaddAnalysisTask(CmdLineTask):
 
         self.allStats, self.allStatsHigh = savePlots(plotList, "plotCoadd", repoInfo.dataId,
                                                      repoInfo.butler, subdir=subdir)
+        metaDict = {kk: plotInfoDict[kk] for kk in ("filter", "tract", "rerun")
+                    if plotInfoDict[kk] is not None}
+        if plotInfoDict["cameraName"]:
+            metaDict["camera"] = plotInfoDict["cameraName"]
+        self.verifyJob = updateVerifyJob(self.verifyJob, metaDict=metaDict, specsList=None)
+        # TODO: DM-26758 (or DM-14768) should make the following lines a proper
+        # butler.put by directly persisting json files.
+        verifyJobFilename = repoInfo.butler.get("coaddAnalysis_verify_job_filename",
+                                                dataId=repoInfo.dataId)[0]
+        self.verifyJob.write(verifyJobFilename)
 
     def readCatalogs(self, patchRefList, dataset, repoInfo, fakeCat=None, raFakesCol="raJ2000",
                      decFakesCol="decJ2000"):
@@ -1485,7 +1495,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                       ).plotRhoStatistics(shortName, plotInfoDict, self.log,
                                                           treecorrParams=self.config.treecorrParams,
                                                           stats=stats, zpLabel=zpLabel, forcedStr=forcedStr,
-                                                          uberCalLabel=uberCalLabel)
+                                                          uberCalLabel=uberCalLabel, verifyJob=self.verifyJob)
 
         # Now for all stars.
         shortName = "Rho" + postFix + "_all_stars"
@@ -1497,7 +1507,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                       ).plotRhoStatistics(shortName, plotInfoDict, self.log,
                                                           treecorrParams=self.config.treecorrParams,
                                                           stats=stats, zpLabel=zpLabel, forcedStr=forcedStr,
-                                                          uberCalLabel=uberCalLabel)
+                                                          uberCalLabel=uberCalLabel, verifyJob=self.verifyJob)
 
     def plotQuiver(self, catalog, description, plotInfoDict, areaDict, matchRadius=None,
                    zpLabel=None, forcedStr=None, postFix="", flagsCat=None, uberCalLabel=None, scale=1):

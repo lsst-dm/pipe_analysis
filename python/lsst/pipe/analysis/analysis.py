@@ -33,7 +33,8 @@ from lsst.pex.config import Config, Field, ListField, DictField
 from lsst.pipe.base import Struct
 
 from .utils import (Data, Stats, E1Resids, E2Resids, fluxToPlotString, computeMeanOfFrac,
-                    calcQuartileClippedStats, RhoStatistics)
+                    calcQuartileClippedStats, RhoStatistics, measureRhoMetrics, addMetricMeasurement,
+                    updateVerifyJob)
 from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotText, plotCameraOutline,
                         plotTractOutline, plotPatchOutline, plotCcdOutline, labelCamera, getQuiver,
                         plotRhoStats, getRaDecMinMaxPatchList, bboxToXyCoordLists, makeAlphaCmap)
@@ -1133,7 +1134,8 @@ class Analysis(object):
         yield Struct(fig=fig, description=description, stats=stats, statsHigh=None, dpi=150, style="quiver")
 
     def plotRhoStatistics(self, description, plotInfoDict, log, treecorrParams, stats,
-                          zpLabel=None, forcedStr=None, postFix="", flagsCat=None, uberCalLabel=None):
+                          zpLabel=None, forcedStr=None, postFix="", flagsCat=None, uberCalLabel=None,
+                          verifyJob=None):
         """Plot Rho Statistics.
         """
 
@@ -1197,6 +1199,34 @@ class Analysis(object):
             rhoStatsFunc = RhoStatistics(compareCol, psfCompareCol, **treecorrParams)
             rhoStats = rhoStatsFunc(good_catalog)
             plotRhoStats(axes, rhoStats)
+
+            if verifyJob is not None:
+                metaDict = {"shapeAlgorithm": "HSM"}
+                verifyJob = updateVerifyJob(verifyJob, metaDict=metaDict)
+                measExtrasDictList = [{"name": kk, "value": vv, "label": None,
+                                       "description": "keyword arguments relevant to treecorr"}
+                                      for kk, vv in treecorrParams.items()]
+                measExtrasDictList.append(None)
+                catalogName = "calibPsfUsed" if self.calibUsedOnly else "allStars"
+
+                for rhoId in range(6):
+                    xi = rhoStats[rhoId].xip if rhoId > 0 else rhoStats[rhoId].xi
+                    measExtrasDictList[-1] = {"name": f"rhoStatistics{rhoId}Function", "value": xi,
+                                              "label": f"Rho{rhoId}",
+                                              "description": f"Measured Rho Statistics {rhoId} using "
+                                              f"{shapeAlgorithm} method"}
+
+                    verifyMetricName = (f"pipe_analysis.rhoStatistics{rhoId}_{shapeAlgorithm}_smallScale"
+                                        f"_{catalogName}")
+                    verifyJob = addMetricMeasurement(verifyJob, verifyMetricName,
+                                                     measureRhoMetrics(rhoStats[rhoId], 1, "<="),
+                                                     measExtrasDictList=measExtrasDictList)
+
+                    verifyMetricName = (f"pipe_analysis.rhoStatistics{rhoId}_{shapeAlgorithm}_largeScale"
+                                        f"_{catalogName}")
+                    verifyJob = addMetricMeasurement(verifyJob, verifyMetricName,
+                                                     measureRhoMetrics(rhoStats[rhoId], 1, ">"),
+                                                     measExtrasDictList=measExtrasDictList)
 
             for figId, figax in enumerate(figAxes):
                 fig, ax = figax
