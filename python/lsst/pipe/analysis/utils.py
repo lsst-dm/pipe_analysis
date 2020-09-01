@@ -2114,7 +2114,7 @@ def addMetricMeasurement(job, metricName, metricValue, measExtrasDictList=None):
     if measExtrasDictList:
         for extra in measExtrasDictList:
             meas.extras[extra["name"]] = verify.Datum(extra["value"], label=extra["label"],
-                                                      description=extra["description"])
+                                                      description=extra["description"], unit="")
     job.measurements.insert(meas)
     return job
 
