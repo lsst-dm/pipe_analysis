@@ -20,6 +20,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import re
+import operator
 
 import astropy.units as units
 import numpy as np
@@ -2365,3 +2366,49 @@ def corrSpin2(ra, dec, g1a, g2a, g1b=None, g2b=None, raUnits="degrees", decUnits
         xy.process(catA, catB)
 
     return xy
+
+
+def measureRhoMetrics(rhoStat, thetaExtremum=1.0, operatorStr="<="):
+    """Convert Rho Statistics into a scalar metric.
+
+    Parameters
+    ----------
+    rhoStat : `treecorr.GGCorrelation` or `treecorr.KKCorrelation` object
+        A correlation function corresponding to a Rho statistic.
+    thetaExtremum : `float`, optional
+        Extremum value of angular scale (in units of arcmin) to consider
+        for averaging ``rhoStat``.
+    operatorStr : `str`, optional
+        An optional comparison operator to specify angular scales smaller than
+        or larger than ``thetaExtremum``.
+        Allowed values are "<=", ">=", "<" or ">".
+
+    Raises
+    ------
+    ValueError
+        Raised if parameter ``operatorStr`` is not one of the allowed values.
+
+    Returns
+    -------
+    avgRho : `float`
+        The metric to track, defined as the mean values of the data points from
+        ``rhoStat`` in the angular range specified by ``thetaExtremum`` and
+        ``operatorStr``.
+    """
+    operations = {"<=": operator.le,
+                  ">=": operator.ge,
+                  "<": operator.lt,
+                  ">": operator.gt}
+    try:
+        operation = operations[operatorStr]
+    except KeyError:
+        message = "{0!r} is not a supported operator".format(operatorStr)
+        raise ValueError(message)
+
+    w, = np.where(operation(rhoStat.meanr, thetaExtremum))
+    try:
+        xi = rhoStat.xip  # for Rho 1-5
+    except AttributeError:
+        xi = rhoStat.xi  # for Rho 0
+    avgRho = abs(np.average(xi[w]))
+    return avgRho
