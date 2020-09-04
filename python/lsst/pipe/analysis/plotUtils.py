@@ -107,18 +107,22 @@ def plotText(textStr, fig, axis, xLoc, yLoc, prefix="", fontSize=None, color="k"
     axis : `matplotlib.axes._axes.Axes`
        Particular matplotlib axes of ``plt`` on which to plot ``testStr``.
     xLoc, yLoc : `float`
-       x and y coordinates, in corrdinate system set by ``coordSys``, at which to plot the ``textStr``.
-       The string will be centered both horizontally and vertically at this position.
+       x and y coordinates, in corrdinate system set by ``coordSys``, at which
+       to plot the ``textStr``.  The string will be centered both horizontally
+       and vertically at this position.
     prefix : `str`, optional
        Optional prefix to add to ``textStr``.
     fontSize : `int` or `str` or `None`, optional
-       Size of font for plotting of ``textStr``.  May be either an absolute font size in points, or a
-       size string, relative to the default font size.  Default is `None`, in which case an automatic
-       scaling based on the length of ``textStr`` will be used.
+       Size of font for plotting of ``textStr``.  May be either an absolute
+       font size in points, or a size string, relative to the default font
+       size.  Default is `None`, in which case an automatic scaling based
+       on the length of ``textStr`` will be used.
     color : `str`, optional
-       Color to plot ``textStr``.  Can be any matplotlib color str.  Default is k (for black).
+       Color to plot ``textStr``.  Can be any matplotlib color str.  Default is
+       k (for black).
     coordSys : `str`, optional
-       Coordinate system for ``xLoc``, ``yLoc``.  Choices and matplotlib mappings are:
+       Coordinate system for ``xLoc``, ``yLoc``.  Choices and matplotlib
+       mappings are:
        axes => axis.transAxes [the default]
        data => axis.transData
        figure => axis.transFigure
@@ -136,7 +140,8 @@ def plotText(textStr, fig, axis, xLoc, yLoc, prefix="", fontSize=None, color="k"
     Raises
     ------
     `ValueError`
-       If unrecognized ``coordSys`` is requested (i.e. something other than axes, data, or figure)
+       If unrecognized ``coordSys`` is requested (i.e. something other than
+       axes, data, or figure).
     """
     if coordSys == "axes":
         transform = axis.transAxes
@@ -455,9 +460,9 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
     """Plot the outline of the tract and patches highlighting those with data.
 
     As some skyMap settings can define tracts with a large number of patches,
-    this can become very crowded.  So, if only a subset of patches are included,
-    find the outer boudary of all patches in ``patchList`` and only plot to
-    ``maxDegBeyondPatch`` degrees beyond those boundaries (in all four
+    this can become very crowded.  So, if only a subset of patches are
+    included, find the outer boudary of all patches in ``patchList`` and only
+    plot to ``maxDegBeyondPatch`` degrees beyond those boundaries (in all four
     directions).
 
     Parameters
@@ -540,13 +545,13 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
         pBuff = 0.5*max(deltaRa, deltaDec)
         centerRa = min(ra) + 0.5*deltaRa
         centerDec = min(dec) + 0.5*deltaDec
-        if (centerRa < xMin + pBuff and centerRa > xMax - pBuff and
-                centerDec > yMin - pBuff and centerDec < yMax + pBuff):
+        if (centerRa < xMin + pBuff and centerRa > xMax - pBuff
+                and centerDec > yMin - pBuff and centerDec < yMax + pBuff):
             axes.fill(ra, dec, fill=True, color=color, lw=0.5, linestyle="solid", alpha=alpha)
-            if patchIndexStr in patchList or (centerRa < xMin - 0.2*pBuff and
-                                              centerRa > xMax + 0.2*pBuff and
-                                              centerDec > yMin + 0.2*pBuff and
-                                              centerDec < yMax - 0.2*pBuff):
+            if patchIndexStr in patchList or (centerRa < xMin - 0.2*pBuff
+                                              and centerRa > xMax + 0.2*pBuff
+                                              and centerDec > yMin + 0.2*pBuff
+                                              and centerDec < yMax - 0.2*pBuff):
                 axes.text(percent(ra), percent(dec, 0.5), str(patchIndexStr),
                           fontsize=fontSize - 1, horizontalalignment="center", verticalalignment="center")
     axes.text(percent((xMin, xMax), 1.065), percent((yMin, yMax), -0.08), "RA",
@@ -575,7 +580,8 @@ def plotCcdOutline(axes, areaDict, ccdList, tractInfo=None, zpLabel=None, fontSi
     axes : `matplotlib.axes._subplots.AxesSubplot`
         The axes to draw the ccds on.
     areaDict : `dict`
-        A dictionary containing information about the ccds and their corners using the wcs of the visit
+        A dictionary containing information about the ccds and their corners
+        using the wcs of the visit.
     ccdList : `list`
         A list of the ccds used in this analysis.
     tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
@@ -604,7 +610,8 @@ def plotCcdOutline(axes, areaDict, ccdList, tractInfo=None, zpLabel=None, fontSi
         cenX = ra0 + (ra1 - ra0)/2
         cenY = dec0 + (dec1 - dec0)/2
 
-        # Only plot the ccds with any corner in the tract given in tractInfo, plot all if no tractInfo
+        # Only plot the ccds with any corner in the tract given in tractInfo,
+        # plot all if no tractInfo.
         inTract = False
         if tractInfo is not None:
             for coord in ccdCorners:
@@ -646,7 +653,8 @@ def plotPatchOutline(axes, tractInfo, patchList, plotUnits="deg", idFontSize=Non
 
 
 def rotatePixelCoords(sources, width, height, nQuarter):
-    """Rotate catalog (x, y) pixel coordinates such that LLC of detector in FP is (0, 0)
+    """Rotate catalog (x, y) pixel coordinates such that LLC of detector in FP
+    is (0, 0).
     """
     xKey = sources.schema.find("slot_Centroid_x").key
     yKey = sources.schema.find("slot_Centroid_y").key
@@ -710,7 +718,8 @@ def bboxToXyCoordLists(bbox, wcs=None, wcsUnits="deg"):
 
 def getRaDecMinMaxPatchList(patchList, tractInfo, pad=0.0, nDecimals=4, raMin=360.0, raMax=0.0,
                             decMin=90.0, decMax=-90.0):
-    """Find the max and min RA and DEC (deg) boundaries encompased in the patchList
+    """Find the max and min RA and DEC (deg) boundaries encompased in the
+    patchList.
 
     Parameters
     ----------
@@ -748,7 +757,8 @@ def getRaDecMinMaxPatchList(patchList, tractInfo, pad=0.0, nDecimals=4, raMin=36
 
 
 def percent(values, p=0.5):
-    """Return a value a faction of the way between the min and max values in a list."""
+    """Return a value a faction of the way between the min and max values in a
+    list."""
     m = min(values)
     interval = max(values) - m
     return m + p*interval
@@ -858,10 +868,10 @@ def determineExternalCalLabel(repoInfo, patch, coaddName="deep"):
     Make a string representing the external calibrations used in assembling the
     coadd to serve as a label for the plots.  Note that this is really a "best
     guess" based on the datasets that exist in the repo.  The prioritized
-    assigment is based on the assumption that a particular calibration type will
-    have been applied in coaddition if it does indeed exist in the repo (most
-    notably, it is assumed that any fgcm photoCalib would have been used for
-    photometric calibration even if the jointcal equivalent exists).
+    assigment is based on the assumption that a particular calibration type
+    will have been applied in coaddition if it does indeed exist in the repo
+    (most notably, it is assumed that any fgcm photoCalib would have been used
+    for photometric calibration even if the jointcal equivalent exists).
 
     External photometric calibration:
     fcr_md                dataset exists: label as MEAS_MOSAIC
@@ -889,7 +899,8 @@ def determineExternalCalLabel(repoInfo, patch, coaddName="deep"):
     uberCalLabel : `str`
        The label to be used for the external calibration used.
     """
-    # Find a visit/ccd input so that you can check for meas_mosaic input (i.e. to set uberCalLabel)
+    # Find a visit/ccd input so that you can check for meas_mosaic input (i.e.
+    # to set uberCalLabel).
     coaddDataId = {"tract": repoInfo.tractInfo.getId(), "patch": patch, "filter": repoInfo.filterName}
     fname = repoInfo.butler.getUri(coaddName + "Coadd_calexp", coaddDataId)
     coaddInputs = afwImage.ExposureFitsReader(fname).readExposureInfo().getCoaddInputs()
@@ -985,8 +996,8 @@ def getPlotInfo(repoInfo):
                 (`lsst.daf.base.propertyContainer.PropertyList`).
             ``hscRun``
                 A string representing "HSCPIPE_VERSION" fits header if the data
-                were processed with the (now obsolete, but old reruns still exist)
-                "HSC stack", `None` otherwise (`str` or `None`).
+                were processed with the (now obsolete, but old reruns still
+                exist) "HSC stack", `None` otherwise (`str` or `None`).
             ``dataset``
                 The dataset name, ("src" if ``dataRef`` is visit level,
                 coaddName + coaddDataset if ``dataRef`` is a coadd (`str`).

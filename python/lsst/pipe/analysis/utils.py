@@ -99,12 +99,12 @@ def writeParquet(dataRef, table, badArray=None, prefix=""):
     dataRef : `lsst.daf.persistence.butlerSubset.ButlerDataRef`
         Reference to butler dataset.
     table : `lsst.afw.table.SourceCatalog`
-       Table to be written to parquet.
+        Table to be written to parquet.
     badArray : `numpy.ndarray`, optional
-       Boolean array with same length as catalog whose values indicate whether the source was deemed
-       inappropriate for qa analyses (`None` by default).
+        Boolean array with same length as catalog whose values indicate whether
+        the source was deemed inappropriate for qa analyses (`None` by default).
     prefix : `str`, optional
-       A string to be prepended to the column id name.
+        A string to be prepended to the column id name.
 
     Returns
     -------
@@ -117,8 +117,9 @@ def writeParquet(dataRef, table, badArray=None, prefix=""):
     format using the butler.
     """
     if badArray is not None:
-        # Add flag indicating source "badness" for qa analyses for the benefit of the Parquet files
-        # being written to disk for subsequent interactive QA analysis.
+        # Add flag indicating source "badness" for qa analyses for the benefit
+        # of the Parquet files being written to disk for subsequent interactive
+        # QA analysis.
         table = addFlag(table, badArray, "qaBad_flag", "Set to True for any source deemed bad for qa")
     df = table.asAstropy().to_pandas()
     df = df.set_index(prefix + "id", drop=False)
@@ -216,7 +217,8 @@ class MagDiffMatches(object):
 
 
 class MagDiffCompare(object):
-    """Functor to calculate magnitude difference between two entries in comparison catalogs
+    """Functor to calculate magnitude difference between two entries in
+    comparison catalogs.
 
     Note that the column entries are in flux units and converted to mags here.
     """
@@ -255,7 +257,8 @@ class AngularDistance(object):
     given by:
 
     distance =
-    2arcsin(sqrt(sin**2((dec2-dec1)/2) + cos(del1)cos(del2)sin**2((ra1-ra2)/2)))
+    2*arcsin(
+       sqrt(sin**2((dec2-dec1)/2) + cos(del1)cos(del2)sin**2((ra1-ra2)/2)))
 
     Parameters
     ----------
@@ -311,7 +314,8 @@ class TraceSize(object):
 
 
 class PsfTraceSizeDiff(object):
-    """Functor to calculate trace radius size difference (%) between object and PSF model"""
+    """Functor to calculate trace radius size difference (%) between object and
+    PSF model."""
     def __init__(self, column, psfColumn):
         self.column = column
         self.psfColumn = psfColumn
@@ -324,21 +328,23 @@ class PsfTraceSizeDiff(object):
 
 
 class TraceSizeCompare(object):
-    """Functor to calculate trace radius size difference (%) between objects in matched catalog"""
+    """Functor to calculate trace radius size difference (%) between objects in
+    matched catalog."""
     def __init__(self, column):
         self.column = column
 
     def __call__(self, catalog):
-        srcSize1 = np.sqrt(0.5*(catalog["first_" + self.column + "_xx"] +
-                                catalog["first_" + self.column + "_yy"]))
-        srcSize2 = np.sqrt(0.5*(catalog["second_" + self.column + "_xx"] +
-                                catalog["second_" + self.column + "_yy"]))
+        srcSize1 = np.sqrt(0.5*(catalog["first_" + self.column + "_xx"]
+                                + catalog["first_" + self.column + "_yy"]))
+        srcSize2 = np.sqrt(0.5*(catalog["second_" + self.column + "_xx"]
+                                + catalog["second_" + self.column + "_yy"]))
         sizeDiff = 100.0*(srcSize1 - srcSize2)/(0.5*(srcSize1 + srcSize2))
         return np.array(sizeDiff)
 
 
 class PercentDiff(object):
-    """Functor to calculate the percent difference between a given column entry in matched catalog"""
+    """Functor to calculate the percent difference between a given column entry
+    in matched catalog."""
     def __init__(self, column):
         self.column = column
 
@@ -370,8 +376,9 @@ class E1(object):
         self.unitScale = unitScale
 
     def __call__(self, catalog):
-        e1 = ((catalog[self.column + "_xx"] - catalog[self.column + "_yy"])
-              /(catalog[self.column + "_xx"] + catalog[self.column + "_yy"]))
+        e1 = ((catalog[self.column + "_xx"]
+               - catalog[self.column + "_yy"])/(catalog[self.column + "_xx"]
+                                                + catalog[self.column + "_yy"]))
         return np.array(e1)*self.unitScale
 
 
@@ -396,8 +403,7 @@ class E2(object):
         self.unitScale = unitScale
 
     def __call__(self, catalog):
-        e2 = (2.0*catalog[self.column + "_xy"]
-              /(catalog[self.column + "_xx"] + catalog[self.column + "_yy"]))
+        e2 = (2.0*catalog[self.column + "_xy"]/(catalog[self.column + "_xx"] + catalog[self.column + "_yy"]))
         return np.array(e2)*self.unitScale
 
 
@@ -482,8 +488,9 @@ class E1ResidsHsmRegauss(object):
 
     def __call__(self, catalog):
         srcE1 = catalog["ext_shapeHSM_HsmShapeRegauss_e1"]
-        psfE1 = ((catalog["ext_shapeHSM_HsmPsfMoments_xx"] - catalog["ext_shapeHSM_HsmPsfMoments_yy"])
-                 /(catalog["ext_shapeHSM_HsmPsfMoments_xx"] + catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
+        psfE1 = ((catalog["ext_shapeHSM_HsmPsfMoments_xx"]
+                  - catalog["ext_shapeHSM_HsmPsfMoments_yy"])/(catalog["ext_shapeHSM_HsmPsfMoments_xx"]
+                                                               + catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
         e1Resids = srcE1 - psfE1
         return np.array(e1Resids)*self.unitScale
 
@@ -497,8 +504,8 @@ class E2ResidsHsmRegauss(object):
 
     def __call__(self, catalog):
         srcE2 = catalog["ext_shapeHSM_HsmShapeRegauss_e2"]
-        psfE2 = (2.0*catalog["ext_shapeHSM_HsmPsfMoments_xy"]
-                 /(catalog["ext_shapeHSM_HsmPsfMoments_xx"] + catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
+        psfE2 = (2.0*catalog["ext_shapeHSM_HsmPsfMoments_xy"]/(catalog["ext_shapeHSM_HsmPsfMoments_xx"]
+                                                               + catalog["ext_shapeHSM_HsmPsfMoments_yy"]))
         e2Resids = srcE2 - psfE2
         return np.array(e2Resids)*self.unitScale
 
@@ -574,7 +581,8 @@ class RhoStatistics(object):
 
 
 class FootNpixDiffCompare(object):
-    """Functor to calculate footprint nPix difference between two entries in comparison catalogs
+    """Functor to calculate footprint nPix difference between two entries in
+    comparison catalogs.
     """
     def __init__(self, column):
         self.column = column
@@ -665,10 +673,10 @@ def deconvMomStarGal(catalog):
     """Calculate P(star) from deconvolved moments"""
     rTrace = deconvMom(catalog)
     snr = catalog["base_PsfFlux_instFlux"]/catalog["base_PsfFlux_instFluxErr"]
-    poly = (-4.2759879274 + 0.0713088756641*snr + 0.16352932561*rTrace - 4.54656639596e-05*snr*snr -
-            0.0482134274008*snr*rTrace + 4.41366874902e-13*rTrace*rTrace + 7.58973714641e-09*snr*snr*snr +
-            1.51008430135e-05*snr*snr*rTrace + 4.38493363998e-14*snr*rTrace*rTrace +
-            1.83899834142e-20*rTrace*rTrace*rTrace)
+    poly = (-4.2759879274 + 0.0713088756641*snr + 0.16352932561*rTrace - 4.54656639596e-05*snr*snr
+            - 0.0482134274008*snr*rTrace + 4.41366874902e-13*rTrace*rTrace + 7.58973714641e-09*snr*snr*snr
+            + 1.51008430135e-05*snr*snr*rTrace + 4.38493363998e-14*snr*rTrace*rTrace
+            + 1.83899834142e-20*rTrace*rTrace*rTrace)
     return 1.0/(1.0 + np.exp(-poly))
 
 
@@ -722,14 +730,15 @@ def checkIdLists(catalog1, catalog2, prefix=""):
         elif prefix + "objectId" in cat.schema:
             idStrList[i] = prefix + "objectId"
         else:
-            raise RuntimeError("Cannot identify object id field (tried id, objectId, " + prefix + "id, and " +
-                               prefix + "objectId)")
+            raise RuntimeError("Cannot identify object id field (tried id, objectId, " + prefix + "id, and "
+                               + prefix + "objectId)")
 
     return np.all(catalog1[idStrList[0]] == catalog2[idStrList[1]])
 
 
 def checkPatchOverlap(patchList, tractInfo):
-    # Given a list of patch dataIds along with the associated tractInfo, check if any of the patches overlap
+    # Given a list of patch dataIds along with the associated tractInfo, check
+    # if any of the patches overlap.
     for i, patch0 in enumerate(patchList):
         overlappingPatches = False
         patchIndex = [int(val) for val in patch0.split(",")]
@@ -769,17 +778,18 @@ def joinCatalogs(catalog1, catalog2, prefix1="cat1_", prefix2="cat2_"):
 def getFluxKeys(schema):
     """Retrieve the flux and flux error keys from a schema
 
-    Both are returned as dicts indexed on the flux name (e.g. "base_PsfFlux_instFlux" or
-    "modelfit_CModel_instFlux").
+    Both are returned as dicts indexed on the flux name (e.g.
+    "base_PsfFlux_instFlux" or "modelfit_CModel_instFlux").
     """
 
     fluxTypeStr = "_instFlux"
     fluxSchemaItems = schema.extract("*" + fluxTypeStr)
-    # Do not include any flag fields (as determined by their type).  Also exclude
-    # slot fields, as these would effectively duplicate whatever they point to.
+    # Do not include any flag fields (as determined by their type).  Also
+    # exclude slot fields, as these would effectively duplicate whatever they
+    # point to.
     fluxKeys = dict((name, schemaItem.key) for name, schemaItem in list(fluxSchemaItems.items()) if
-                    schemaItem.field.getTypeString() != "Flag" and
-                    not name.startswith("slot"))
+                    schemaItem.field.getTypeString() != "Flag"
+                    and not name.startswith("slot"))
     errSchemaItems = schema.extract("*" + fluxTypeStr + "Err")
     errKeys = dict((name, schemaItem.key) for name, schemaItem in list(errSchemaItems.items()) if
                    name[:-len("Err")] in fluxKeys)
@@ -787,9 +797,9 @@ def getFluxKeys(schema):
     # Also check for any in HSC format
     schemaKeys = dict((s.field.getName(), s.key) for s in schema)
     fluxKeysHSC = dict((name, key) for name, key in schemaKeys.items() if
-                       (re.search(r"^(flux\_\w+|\w+\_flux)$", name) or
-                        re.search(r"^(\w+flux\_\w+|\w+\_flux)$", name)) and not
-                       re.search(r"^(\w+\_apcorr)$", name) and name + "_err" in schemaKeys)
+                       (re.search(r"^(flux\_\w+|\w+\_flux)$", name)
+                        or re.search(r"^(\w+flux\_\w+|\w+\_flux)$", name))
+                       and not re.search(r"^(\w+\_apcorr)$", name) and name + "_err" in schemaKeys)
     errKeysHSC = dict((name + "_err", schemaKeys[name + "_err"]) for name in fluxKeysHSC.keys() if
                       name + "_err" in schemaKeys)
     if fluxKeysHSC:
@@ -864,7 +874,8 @@ def addApertureFluxesHSC(catalog, prefix=""):
 
 
 def addFpPoint(det, catalog, prefix=""):
-    # Compute Focal Plane coordinates for SdssCentroid of each source and add to schema
+    # Compute Focal Plane coordinates for SdssCentroid of each source and add
+    # to schema.
     mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
     schema = mapper.getOutputSchema()
@@ -921,7 +932,8 @@ def addFootprintNPix(catalog, fromCat=None, prefix=""):
 
 
 def rotatePixelCoord(s, width, height, nQuarter):
-    """Rotate single (x, y) pixel coordinate such that LLC of detector in FP is (0, 0)
+    """Rotate single (x, y) pixel coordinate such that LLC of detector in FP
+    is (0, 0).
     """
     xKey = s.schema.find("slot_Centroid_x").key
     yKey = s.schema.find("slot_Centroid_y").key
@@ -966,42 +978,50 @@ def addRotPoint(catalog, width, height, nQuarter, prefix=""):
 
 
 def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True, tractInnerOnly=False):
-    """Create a boolean array indicating sources deemed unsuitable for qa analyses
+    """Create a boolean array indicating sources deemed unsuitable for qa
+    analyses.
 
-    Sets value to True for unisolated objects (deblend_nChild > 0), "sky" objects (merge_peak_sky),
-    and any of the flags listed in self.config.analysis.flags.  If onlyReadStars is True, sets boolean
-    as True for all galaxies classified as extended (base_ClassificationExtendedness_value > 0.5).  If
-    patchInnerOnly is True (the default), sets the bad boolean array value to True for any sources
-    for which detect_isPatchInner is False (to avoid duplicates in overlapping patches).  If
-    tractInnerOnly is True, sets the bad boolean value to True for any sources for which
-    detect_isTractInner is False (to avoid duplicates in overlapping patches).  Note, however, that
-    the default for tractInnerOnly is False as we are currently only running these scripts at the
-    per-tract level, so there are no tract duplicates (and omitting the "outer" ones would just leave
-    an empty band around the tract edges).
+    Sets value to True for unisolated objects (deblend_nChild > 0), "sky"
+    objects (merge_peak_sky), and any of the flags listed in
+    config.analysis.flags.  If onlyReadStars is True, sets boolean as True for
+    all galaxies classified as extended (base_ClassificationExtendedness_value
+    > 0.5).  If patchInnerOnly is True (the default), sets the bad boolean
+    array value to True for any sources for which detect_isPatchInner is False
+    (to avoid duplicates in overlapping patches).  If tractInnerOnly is True,
+    sets the bad boolean value to True for any sources for which
+    detect_isTractInner is False (to avoid duplicates in overlapping patches).
+    Note, however, that the default for tractInnerOnly is False as we are
+    currently only running these scripts at the per-tract level, so there are
+    no tract duplicates (and omitting the "outer" ones would just leave an
+    empty band around the tract edges).
 
     Parameters
     ----------
     catalog : `lsst.afw.table.SourceCatalog`
        The source catalog under consideration.
     flagList : `list`
-       The list of flags for which, if any is set for a given source, set bad entry to `True` for
-       that source.
+       The list of flags for which, if any is set for a given source, set bad
+       entry to `True` for that source.
     onlyReadStars : `bool`, optional
-       Boolean indicating if you want to select objects classified as stars only (based on
-       base_ClassificationExtendedness_value > 0.5, `False` by default).
+       Boolean indicating if you want to select objects classified as stars
+       only (based on base_ClassificationExtendedness_value > 0.5, `False` by
+       default).
     patchInnerOnly : `bool`, optional
-       Whether to select only sources for which detect_isPatchInner is `True` (`True` by default).
+       Whether to select only sources for which detect_isPatchInner is `True`
+       (`True` by default).
     tractInnerOnly : `bool`, optional
-       Whether to select only sources for which detect_isTractInner is `True` (`False` by default).
-       Note that these scripts currently only ever run at the per-tract level, so we do not need
-       to filter out sources for which detect_isTractInner is `False` as, with only one tract, there
-       are no duplicated tract inner/outer sources.
+       Whether to select only sources for which detect_isTractInner is `True`
+       (`False` by default).
+       Note that these scripts currently only ever run at the per-tract level,
+       so we do not need to filter out sources for which detect_isTractInner
+       is `False` as, with only one tract, there are no duplicated tract
+       inner/outer sources.
 
     Returns
     -------
     badArray : `numpy.ndarray`
-       Boolean array with same length as catalog whose values indicate whether the source was deemed
-       inappropriate for qa analyses.
+       Boolean array with same length as catalog whose values indicate whether
+       the source was deemed inappropriate for qa analyses.
     """
     bad = np.zeros(len(catalog), dtype=bool)
     if "detect_isPatchInner" in catalog.schema and patchInnerOnly:
@@ -1026,8 +1046,8 @@ def addFlag(catalog, badArray, flagName, doc="General failure flag"):
     catalog : `lsst.afw.table.SourceCatalog`
        Source catalog to which the flag will be added.
     badArray : `numpy.ndarray`
-       Boolean array with same length as catalog whose values indicate whether the flag flagName
-       should be set for a given oject.
+       Boolean array with same length as catalog whose values indicate whether
+       the flag flagName should be set for a given oject.
     flagName : `str`
        Name of flag to be set
     doc : `str`, optional
@@ -1060,15 +1080,18 @@ def addFlag(catalog, badArray, flagName, doc="General failure flag"):
 
 
 def addIntFloatOrStrColumn(catalog, values, fieldName, fieldDoc, fieldUnits=""):
-    """Add a column of values with name fieldName and doc fieldDoc to the catalog schema
+    """Add a column of values with name fieldName and doc fieldDoc to the
+    catalog schema.
 
     Parameters
     ----------
     catalog : `lsst.afw.table.SourceCatalog`
        Source catalog to which the column will be added.
-    values : `list`, `numpy.ndarray`, or scalar of type `int`, `float`, or `str`
-       The list of values to be added.  This list must have the same length as ``catalog`` or
-       length 1 (to add a column with the same value for all objects).
+    values : `list`, `numpy.ndarray`, or scalar of type `int`, `float`, or
+             `str`
+       The list of values to be added.  This list must have the same length as
+       ``catalog`` or length 1 (to add a column with the same value for all
+       objects).
     fieldName : `str`
        Name of the field to be added to the schema.
     fieldDoc : `str`
@@ -1081,7 +1104,8 @@ def addIntFloatOrStrColumn(catalog, values, fieldName, fieldDoc, fieldUnits=""):
     `RuntimeError`
        If type of all ``values`` is not one of `int`, `float`, or `str`.
     `RuntimeError`
-       If length of ``values`` list is neither 1 nor equal to the ``catalog`` length.
+       If length of ``values`` list is neither 1 nor equal to the ``catalog``
+       length.
 
     Returns
     -------
@@ -1223,8 +1247,8 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, photoCalibDataset, fluxKe
                 for src in catalog:
                     if np.isfinite(src[fluxSlotName]):
                         baseSlotName = fluxSlotName.replace("_instFlux", "")
-                        photoCalibFactor = (photoCalib.instFluxToNanojansky(src, baseSlotName).value /
-                                            src[fluxSlotName])
+                        photoCalibFactor = (
+                            photoCalib.instFluxToNanojansky(src, baseSlotName).value/src[fluxSlotName])
                         break
                 if photoCalibFactor:
                     catalog[fluxKey] *= photoCalibFactor
@@ -1245,7 +1269,8 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, photoCalibDataset, fluxKe
 
 
 def calibrateSourceCatalog(catalog, zp):
-    """Calibrate catalog in the case of no meas_mosaic results using FLUXMAG0 as zp
+    """Calibrate catalog in the case of no meas_mosaic results using FLUXMAG0
+    as zp.
 
     Requires a SourceCatalog and zeropoint as input.
     """
@@ -1559,14 +1584,15 @@ def orthogonalRegression(x, y, order, initialGuess=None):
     order : `int`, optional
        Order of the polynomial to fit
     initialGuess : `list` of `float`, optional
-       List of the polynomial coefficients (highest power first) of an initial guess to feed to
-       the ODR fit.  If no initialGuess is provided, a simple linear fit is performed and used
-       as the guess (`None` by default).
+       List of the polynomial coefficients (highest power first) of an initial
+       guess to feed to the ODR fit.  If no initialGuess is provided, a simple
+       linear fit is performed and used as the guess (`None` by default).
 
     Returns
     -------
     result : `list` of `float`
-       List of the fit coefficients (highest power first to mimic `numpy.polyfit` return).
+       List of the fit coefficients (highest power first to mimic
+       `numpy.polyfit` return).
     """
     if initialGuess is None:
         linReg = scipyStats.linregress(x, y)
@@ -1590,7 +1616,8 @@ def orthogonalRegression(x, y, order, initialGuess=None):
 
 
 def distanceSquaredToPoly(x1, y1, x2, poly):
-    """Calculate the square of the distance between point (x1, y1) and poly at x2
+    """Calculate the square of the distance between point (x1, y1) and poly
+    at x2.
 
     Parameters
     ----------
@@ -1619,9 +1646,12 @@ def p1CoeffsFromP2x0y0(p2Coeffs, x0, y0):
     Reference: Ivezic et al. 2004 (2004AN....325..583I)
 
     theta = arctan(mP1), where mP1 is the slope of the equivalent straight
-                         line (the P1 line) from the P2 coeffs in the (x, y)
-                         coordinate system and x = c1 - c2, y = c2 - c3
-    P1 = cos(theta)*c1 + ((sin(theta) - cos(theta))*c2 - sin(theta)*c3 + deltaP1
+                         line (the P1 line) from the P2 coeffs in the
+                         (x, y) coordinate system and
+                         x = c1 - c2, y = c2 - c3
+    P1 = cos(theta)*c1
+         + ((sin(theta) - cos(theta))*c2 - sin(theta)*c3
+         + deltaP1
     P1 = 0 at x0, y0 ==> deltaP1 = -cos(theta)*x0 - sin(theta)*y0
 
     Parameters
@@ -1658,7 +1688,8 @@ def p2p1CoeffsFromLinearFit(m, b, x0, y0):
 
     P1 = cos(theta)*x + sin(theta)*y + deltaP1, theta = arctan(m)
     P1 = cos(theta)*(c1 - c2) + sin(theta)*(c2 - c3) + deltaP1
-    P1 = cos(theta)*c1 + ((sin(theta) - cos(theta))*c2 - sin(theta)*c3 + deltaP1
+    P1 = cos(theta)*c1
+         + ((sin(theta) - cos(theta))*c2 - sin(theta)*c3 + deltaP1
     P1 = 0 at x0, y0 ==> deltaP1 = -cos(theta)*x0 - sin(theta)*y0
 
     Parameters
@@ -1712,7 +1743,8 @@ def lineFromP2Coeffs(p2Coeffs):
     result : `lsst.pipe.base.Struct`
        Result struct with components:
 
-       - ``mP1`` : associated slope for P1 in color-color coordinates (`float`).
+       - ``mP1`` : associated slope for P1 in color-color coordinates
+                   (`float`).
        - ``bP1`` : associated intercept for P1 in color-color coordinates
                    (`float`).
     """
@@ -1780,9 +1812,11 @@ def makeEqnStr(varName, coeffList, exponentList):
     varName : `str`
        Name of the equation to be stringified.
     coeffList : `list` of `float`
-       List of equation coefficients (matched to exponenets in ``exponentList`` list).
+       List of equation coefficients (matched to coefficients in
+       `exponentList``).
     exponentList : `list` of `str`
-       List of equation exponents (matched to coefficients in ``coeffList`` list).
+       List of equation exponents (matched to coefficients in
+       ``coeffList``).
 
     Raises
     ------
@@ -1812,18 +1846,20 @@ def makeEqnStr(varName, coeffList, exponentList):
 
 
 def catColors(c1, c2, magsCat, goodArray=None):
-    """Compute color for a set of filters given a catalog of magnitudes by filter
+    """Compute color for a set of filters given a catalog of magnitudes by
+    filter.
 
     Parameters
     ----------
     c1, c2 : `str`
        String representation of the filters from which to compute the color.
     magsCat : `dict` of `numpy.ndarray`
-       Dict of arrays of magnitude values.  Dict keys are the string representation of the filters.
+       Dict of arrays of magnitude values.  Dict keys are the string
+       representation of the filters.
     goodArray : `numpy.ndarray`, optional
-       Boolean array with same length as the magsCat arrays whose values indicate whether the
-       source was deemed "good" for intended use.  If `None`, all entries are considered "good"
-       (`None` by default).
+       Boolean array with same length as the magsCat arrays whose values
+       indicate whether the source was deemed "good" for intended use.  If
+       `None`, all entries are considered "good" (`None` by default).
 
     Raises
     ------
@@ -2072,14 +2108,16 @@ def computeMeanOfFrac(valueArray, tailStr="upper", fraction=0.1, floorFactor=1):
 
     In other words, sort ``valueArray`` by value and compute the mean values of
     the highest[lowest] ``fraction`` of points for ``tailStr`` = upper[lower]
-    and round this mean to a number of significant digits given by ``floorFactor``.
-    e.g.
-     ``floorFactor`` = 0.001, round to nearest thousandth (657.14727 -> 657.147)
-     ``floorFactor`` = 0.01,  round to nearest hundredth (657.14727 -> 657.15)
-     ``floorFactor`` = 0.1,   round to nearest tenth     (657.14727 -> 657.1)
-     ``floorFactor`` = 1,     round to nearest integer   (657.14727 -> 657.0)
-     ``floorFactor`` = 10,    round to nearest ten       (657.14727 -> 660.0)
-     ``floorFactor`` = 100,   round to nearest hundred   (657.14727 -> 700.0)
+    and round this mean to a number of significant digits given by
+    ``floorFactor``.
+
+    E.g.
+    ``floorFactor`` = 0.001, round to nearest thousandth (657.14727 -> 657.147)
+    ``floorFactor`` = 0.01,  round to nearest hundredth (657.14727 -> 657.15)
+    ``floorFactor`` = 0.1,   round to nearest tenth     (657.14727 -> 657.1)
+    ``floorFactor`` = 1,     round to nearest integer   (657.14727 -> 657.0)
+    ``floorFactor`` = 10,    round to nearest ten       (657.14727 -> 660.0)
+    ``floorFactor`` = 100,   round to nearest hundred   (657.14727 -> 700.0)
 
     Parameters
     ----------
@@ -2115,8 +2153,8 @@ def computeMeanOfFrac(valueArray, tailStr="upper", fraction=0.1, floorFactor=1):
         meanOfFrac = np.floor(
             valueArray[valueArray.argsort()[0:ptFrac]].mean()/floorFactor - pad)*floorFactor
     else:
-        raise RuntimeError("tailStr must be either \"upper\" or \"lower\" (" + tailStr +
-                           "was provided")
+        raise RuntimeError("tailStr must be either \"upper\" or \"lower\" (" + tailStr
+                           + "was provided")
 
     return meanOfFrac
 

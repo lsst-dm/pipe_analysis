@@ -113,16 +113,17 @@ ivezicTransformsHSC = {
                                        x0=1.2219, y0=0.5183,
                                        requireGreater={"yPara": 0.1}, requireLess={"yPara": 1.2},
                                        fitLineSlope=-1/0.40, fitLineUpperIncpt=5.5, fitLineLowerIncpt=2.6),
-    # The following still default to the SDSS values.  HSC coeffs will be derived on a subsequent
-    # commit
+    # The following still default to the SDSS values.  HSC coeffs will be
+    # derived on a subsequent commit.
     "wPara": ColorTransform.fromValues("Ivezic w parallel", " (griBlue)", False,
                                        {"HSC-G": 0.888, "HSC-R": -0.427, "HSC-I": -0.461, "": -0.478}),
     "xPara": ColorTransform.fromValues("Ivezic x parallel", " (griRed)", False,
                                        {"HSC-G": 0.075, "HSC-R": 0.922, "HSC-I": -0.997, "": -1.442}),
     "yPara": ColorTransform.fromValues("Ivezic y parallel", " (rizRed)", False,
                                        {"HSC-R": 0.928, "HSC-I": -0.557, "HSC-Z": -0.372, "": -1.332}),
-    # The following three entries were derived in the process of calibrating the above coeffs (all three
-    # RC2 tracts gave effectively the same fits).  May remove later if deemed no longer useful.
+    # The following three entries were derived in the process of calibrating
+    # the above coeffs (all three RC2 tracts gave effectively the same fits).
+    # May remove later if deemed no longer useful.
     "wFit": ColorTransform.fromValues("Straight line fit for wPerp range", " (griBlue)", False,
                                       {"HSC-G": 0.52, "HSC-R": -0.52, "": -0.08}),
     "xFit": ColorTransform.fromValues("Straight line fit for xperp range", " (griRed)", False,
@@ -156,11 +157,11 @@ class ColorValueInFitRange(object):
     """Functor to produce color value if in the appropriate range
 
     Here the range is set by upper and lower lines roughly perpendicular to the
-    fit where those lines cross the fit.  These numbers were previously determined
-    and are (currently) hard-wired in the fitLineSlope, fitLineUpperIncpt, and
-    fitLineLowerIncpt parameters in the ivezicTransformsHSC dict.
+    fit where those lines cross the fit.  These numbers were previously
+    determined and are (currently) hard-wired in the fitLineSlope,
+    fitLineUpperIncpt, and fitLineLowerIncpt parameters in the
+    ivezicTransformsHSC dict.
     """
-
     def __init__(self, column, xColor, yColor, fitLineSlope=None, fitLineUpperIncpt=None,
                  fitLineLowerIncpt=None, unitScale=1.0):
         self.column = column
@@ -180,8 +181,8 @@ class ColorValueInFitRange(object):
 class ColorValueInPerpRange(object):
     """Functor to produce color value if in the appropriate range
 
-    Here the range is set by the Ivezic etal. P1 limits provided in the requireGreater
-    and requireLess parameters in the ivezicTransforms dict.
+    Here the range is set by the Ivezic etal. P1 limits provided in the
+    requireGreater and requireLess parameters in the ivezicTransforms dict.
     """
     def __init__(self, column, requireGreater, requireLess, unitScale=1.0):
         self.column = column
@@ -199,7 +200,9 @@ class ColorValueInPerpRange(object):
 
 
 class GalaxyColor(object):
-    """Functor to produce difference between galaxy color calculated by different algorithms"""
+    """Functor to produce difference between galaxy color calculated by
+    different algorithms.
+    """
     def __init__(self, alg1, alg2, prefix1, prefix2):
         self.alg1 = alg1
         self.alg2 = alg2
@@ -275,7 +278,7 @@ class ColorAnalysisConfig(Config):
 
         # If a wired origin was included in the config, check that it actually
         # lies on the wired P1 line (allowing for round-off error for precision
-        # of coefficients specified)
+        # of coefficients specified).
         if self.transforms:
             for col, transform in self.transforms.items():
                 if transform.plot and transform.x0 and transform.y0:
@@ -283,9 +286,10 @@ class ColorAnalysisConfig(Config):
                     transformPara = self.transforms[col[0] + "Para"]
                     p1p2Lines = linesFromP2P1Coeffs(list(transformPerp.coeffs.values()),
                                                     list(transformPara.coeffs.values()))
-                    # Threshold of 2e-2 provides sufficient allowance for round-off error
-                    if (np.abs((p1p2Lines.mP1 - p1p2Lines.mP2)*transformPerp.x0 +
-                               (p1p2Lines.bP1 - p1p2Lines.bP2)) > 2e-2):
+                    # Threshold of 2e-2 provides sufficient allowance for
+                    # round-off error.
+                    if (np.abs((p1p2Lines.mP1 - p1p2Lines.mP2)*transformPerp.x0
+                               + (p1p2Lines.bP1 - p1p2Lines.bP2)) > 2e-2):
                         raise ValueError(("Wired origin for {} does not lie on line associated with wired "
                                           "PCA coefficients.  Check that the wired values are correct.").
                                          format(col))
@@ -298,7 +302,8 @@ class ColorAnalysisRunner(TaskRunner):
         FilterRefsDict = functools.partial(defaultdict, list)  # Dict for filter-->dataRefs
         tractFilterRefs = defaultdict(FilterRefsDict)  # tract-->filter-->dataRefs
         for patchRef in sum(parsedCmd.id.refList, []):
-            # Make sure the actual input file requested exists (i.e. do not follow the parent chain)
+            # Make sure the actual input file requested exists (i.e. do not
+            # follow the parent chain).
             inputDataFile = patchRef.get("deepCoadd_forced_src_filename")[0]
             if parsedCmd.input not in parsedCmd.output:
                 inputDataFile = inputDataFile.replace(parsedCmd.output, parsedCmd.input)
@@ -307,7 +312,8 @@ class ColorAnalysisRunner(TaskRunner):
                 filterName = patchRef.dataId["filter"]
                 tractFilterRefs[tract][filterName].append(patchRef)
 
-        # Find tract,patch with full colour coverage (makes combining catalogs easier)
+        # Find tract,patch with full colour coverage (makes combining catalogs
+        # easier).
         bad = []
         for tract in tractFilterRefs:
             filterRefs = tractFilterRefs[tract]
@@ -399,7 +405,8 @@ class ColorAnalysisTask(CmdLineTask):
         subdir = "patch-" + str(patchList[0]) if len(patchList) == 1 else subdir
         repoInfo.dataId["subdir"] = "/" + subdir
 
-        # Only adjust the schema names necessary here (rather than attaching the full alias schema map)
+        # Only adjust the schema names necessary here (rather than attaching
+        # the full alias schema map).
         self.fluxColumn = self.config.analysis.fluxColumn
         self.classificationColumn = "base_ClassificationExtendedness_value"
         self.flags = self.config.flags
@@ -423,10 +430,11 @@ class ColorAnalysisTask(CmdLineTask):
         geLabel = "None"
         doPlotGalacticExtinction = False
         if self.correctForGalacticExtinction:
-            # The per-object Galactic Extinction correction currently requires sims_catUtils to be setup
-            # as it uses the EBVbase class to obtain E(B-V).  Putting this in a try/except to fall back
-            # to the per-field correction until we can access the EBVbase class from an lsst_distrib
-            # installation.
+            # The per-object Galactic Extinction correction currently requires
+            # sims_catUtils to be setup as it uses the EBVbase class to obtain
+            # E(B-V).  Putting this in a try/except to fall back to the
+            # per-field correction until we can access the EBVbase class from
+            # an lsst_distrib installation.
             try:
                 byFilterForcedCats = self.correctForGalacticExtinction(byFilterForcedCats, repoInfo.tractInfo)
                 doPlotGalacticExtinction = True
@@ -489,22 +497,27 @@ class ColorAnalysisTask(CmdLineTask):
         if repoInfo.camera:
             metaDict.update({"camera": repoInfo.camera.getName()})
         self.verifyJob = updateVerifyJob(self.verifyJob, metaDict=metaDict)
-        # TODO: this should become a proper butler.put once we can persist the json files
+        # TODO: this should become a proper butler.put once we can persist the
+        # json files.
         verifyJobFilename = repoInfo.butler.get("colorAnalysis_verify_job_filename",
                                                 dataId=repoInfo.dataId)[0]
         self.verifyJob.write(verifyJobFilename)
 
     def readCatalogs(self, patchRefList, dataset, repoInfo):
-        """Read in and concatenate catalogs of type dataset in lists of data references
+        """Read in and concatenate catalogs of type dataset in lists of data
+        references.
 
-        If self.config.doWriteParquetTables is True, before appending each catalog to a single
-        list, an extra column indicating the patch is added to the catalog.  This is useful for
-        the subsequent interactive QA analysis.
+        If self.config.doWriteParquetTables is `True`, before appending each
+        catalog to a single `list`, an extra column indicating the patch is
+        added to the catalog.  This is useful for the subsequent interactive
+        QA analysis.
 
         Parameters
         ----------
-        patchRefList : `list` of `lsst.daf.persistence.butlerSubset.ButlerDataRef`
-           A list of butler data references whose catalogs of dataset type are to be read in
+        patchRefList : `list` of
+                       `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+           A list of butler data references whose catalogs of dataset type are
+           to be read in.
         dataset : `str`
            Name of the catalog dataset to be read in
 
@@ -517,7 +530,8 @@ class ColorAnalysisTask(CmdLineTask):
         -------
         `list` of concatenated `lsst.afw.table.source.source.SourceCatalog`s
         `areaDict` : `dict`
-            A dict containing the area of each ccd and the locations of their corners.
+            A dict containing the area of each ccd and the locations of their
+            corners.
         """
         catList = []
         areaDict = {}
@@ -530,8 +544,8 @@ class ColorAnalysisTask(CmdLineTask):
                     refColList = [s for s in refCat.schema.getNames() if
                                   s.startswith(tuple(self.config.columnsToCopyFromRef))]
                     cat = addColumnsToSchema(refCat, cat,
-                                             [col for col in refColList if col not in cat.schema and
-                                              col in refCat.schema])
+                                             [col for col in refColList if col not in cat.schema
+                                              and col in refCat.schema])
 
                 fname = repoInfo.butler.getUri("deepCoadd_calexp", patchRef.dataId)
                 reader = afwImage.ExposureFitsReader(fname)
@@ -559,14 +573,15 @@ class ColorAnalysisTask(CmdLineTask):
     def correctForGalacticExtinction(self, catalog, tractInfo):
         """Correct all fluxes for each object for Galactic Extinction
 
-        This function uses the EBVbase class from lsst.sims.catUtils.dust.EBV, so lsst.sims.catUtils must
-        be setup and accessible for use.
+        This function uses the EBVbase class from lsst.sims.catUtils.dust.EBV,
+        so lsst.sims.catUtils must be setup and accessible for use.
 
         Parameters
         ----------
         catalog : `lsst.afw.table.SourceCatalog`
-           The source catalog for which to apply the per-object Galactic Extinction correction to all fluxes.
-           Catalog is corrected in place and a Galactic Extinction applied and flag columns are added.
+           The source catalog for which to apply the per-object Galactic
+           Extinction correction to all fluxes.  Catalog is corrected in place
+           and a Galactic Extinction applied and flag columns are added.
         tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
            TractInfo object associated with catalog
 
@@ -577,9 +592,10 @@ class ColorAnalysisTask(CmdLineTask):
 
         Returns
         -------
-        Updated `lsst.afw.table.source.source.SourceCatalog` catalog with fluxes corrected for
-        Galactic Extinction with a column added indicating correction applied and a flag indicating
-        if the correction failed (in the context having a non-np.isfinite value).
+        Updated `lsst.afw.table.source.source.SourceCatalog` catalog with
+        fluxes corrected for Galactic Extinction with a column added
+        indicating correction applied and a flag indicating if the
+        correction failed (in the context having a non-np.isfinite value).
         """
         try:
             from lsst.sims.catUtils.dust.EBV import EBVbase as ebv
@@ -611,8 +627,8 @@ class ColorAnalysisTask(CmdLineTask):
                               "No Galactic Extinction correction applied for that filter.  "
                               "Flag will be set".format(filterName))
                 bad = np.ones(len(catalog[list(catalog.keys())[0]]), dtype=bool)
-            # Add column of Galactic Extinction value applied to the catalog and a flag for the sources
-            # for which it could not be computed
+            # Add column of Galactic Extinction value applied to the catalog
+            # and a flag for the sources for which it could not be computed.
             catalog[filterName] = addIntFloatOrStrColumn(catalog[filterName], galacticExtinction,
                                                          "A_" + str(filterName),
                                                          "Galactic Extinction (in mags) applied "
@@ -623,14 +639,16 @@ class ColorAnalysisTask(CmdLineTask):
         return catalog
 
     def correctFieldForGalacticExtinction(self, catalog, tractInfo):
-        """Apply a per-field correction for Galactic Extinction using hard-wired values
+        """Apply a per-field correction for Galactic Extinction using
+        hard-wired values.
 
-        These numbers for E(B-V) are based on the Schlegel et al. 1998 (ApJ 500, 525, SFD98)
-        dust maps and were obtained from:
+        These numbers for E(B-V) are based on the Schlegel et al. 1998
+        (ApJ 500, 525, SFD98) dust maps and were obtained from:
         http://irsa.ipac.caltech.edu/applications/DUST/
 
-        Note that the only fields included are the 5 tracts in the RC + RC2 datasets.
-        This is just a placeholder until a per-object implementation is added in DM-13519
+        Note that the only fields included are the 5 tracts in the RC + RC2
+        datasets.  This is just a placeholder until a per-object implementation
+        is added in DM-13519.
         """
         ebvValues = {"UD_COSMOS_9813": {"centerCoord": geom.SpherePoint(150.25, 2.23, geom.degrees),
                                         "EBmV": 0.0165},
@@ -659,7 +677,8 @@ class ColorAnalysisTask(CmdLineTask):
                     factor = 10.0**(0.4*galacticExtinction)
                     for name, key in list(fluxKeys.items()) + list(errKeys.items()):
                         catalog[filterName][key] *= factor
-                    # Add column of Galactic Extinction value applied to the catalog
+                    # Add column of Galactic Extinction value applied to the
+                    # catalog.
                     catalog[filterName] = addIntFloatOrStrColumn(catalog[filterName], galacticExtinction,
                                                                  "A_" + str(filterName),
                                                                  "Galactic Extinction applied "
@@ -688,11 +707,13 @@ class ColorAnalysisTask(CmdLineTask):
         ----------
         catalogs : `dict` of `lsst.afw.table.source.source.SourceCatalog`s
            One dict entry per filter
-        transforms : `dict` of `lsst.pipe.analysis.colorAnalysis.ColorTransform`s
+        transforms : `dict` of
+                     `lsst.pipe.analysis.colorAnalysis.ColorTransform`s
            One dict entry per filter-dependent transform definition
         hscRun : `str` or `NoneType`
-           A string representing "HSCPIPE_VERSION" fits header if the data were processed with
-           the (now obsolete, but old reruns still exist) "HSC stack", None otherwise
+           A string representing "HSCPIPE_VERSION" fits header if the data were
+           processed with the (now obsolete, but old reruns still exist) "HSC
+           stack", None otherwise.
         """
         template = list(catalogs.values())[0]
         num = len(template)
@@ -712,8 +733,8 @@ class ColorAnalysisTask(CmdLineTask):
         schema.addField("numStarFlags", type=np.int32, doc="Number of times source was flagged as star")
         badKey = schema.addField("qaBad_flag", type="Flag", doc="Is this a bad source for color qa analyses?")
         schema.addField(fluxColumn, type=np.float64, doc="Flux from filter " + self.fluxFilter)
-        schema.addField(fluxColumn + "Err", type=np.float64, doc="Flux error for flux from filter " +
-                        self.fluxFilter)
+        schema.addField(fluxColumn + "Err", type=np.float64, doc="Flux error for flux from filter "
+                        + self.fluxFilter)
         schema.addField("base_InputCount_value", type=np.int32,
                         doc="Input visit count for " + self.fluxFilter)
 
@@ -758,10 +779,10 @@ class ColorAnalysisTask(CmdLineTask):
     def plotGalacticExtinction(self, byFilterCats, plotInfoDict, areaDict, geLabel=None):
         yield
         for filterName in byFilterCats:
-            qMin = (np.nanmean(byFilterCats[filterName]["A_" + filterName]) -
-                    6.0*np.nanstd(byFilterCats[filterName]["A_" + filterName]))
-            qMax = (np.nanmean(byFilterCats[filterName]["A_" + filterName]) +
-                    6.0*np.nanstd(byFilterCats[filterName]["A_" + filterName]))
+            qMin = (np.nanmean(byFilterCats[filterName]["A_" + filterName])
+                    - 6.0*np.nanstd(byFilterCats[filterName]["A_" + filterName]))
+            qMax = (np.nanmean(byFilterCats[filterName]["A_" + filterName])
+                    + 6.0*np.nanstd(byFilterCats[filterName]["A_" + filterName]))
             shortName = "galacticExtinction_" + filterName
             self.log.info("shortName = {:s}".format(shortName))
             yield from self.AnalysisClass(byFilterCats[filterName],
@@ -878,13 +899,11 @@ class ColorAnalysisTask(CmdLineTask):
                                                             floorFactor=1)
                         signalToNoiseThreshold = np.floor(
                             np.sqrt(scaleFactor)*self.config.analysis.signalToNoiseThreshold/100 + 0.49)*100
-                        configSNThresh = self.config.analysis.signalToNoiseHighThreshold
-                        signalToNoiseHighThreshold = (np.floor(
-                            np.sqrt(scaleFactor)*configSNThresh/100 + 0.49)*100)
                     qaGood = np.logical_and(qaGood, signalToNoise[self.fluxFilter] >= signalToNoiseThreshold)
-                    # Set self.magThreshold to represent approximately that which corresponds to the
-                    # S/N threshold.  Computed as the mean magnitude of the lower 5% of the
-                    # S/N > signalToNoiseThreshold subsample
+                    # Set self.magThreshold to represent approximately that
+                    # which corresponds to the S/N threshold.  Computed as the
+                    # mean magnitude of the lower 5% of the
+                    # S/N > signalToNoiseThreshold subsample.
                     ptFrac = max(2, int(0.05*len(mags[self.fluxFilter][qaGood])))
                     magThreshold = np.floor(mags[self.fluxFilter][qaGood][
                         mags[self.fluxFilter][qaGood].argsort()[-ptFrac:]].mean()*10 + 0.5)/10
@@ -892,8 +911,8 @@ class ColorAnalysisTask(CmdLineTask):
                                     " [" + self.fluxFilter + r"$\lesssim$" + str(magThreshold) + "]"]
                 else:
                     qaGood = np.logical_and(qaGood, mags[self.fluxFilter] < self.config.analysis.magThreshold)
-                    thresholdStr = [" [" + self.fluxFilter + " < " +
-                                    str(self.config.analysis.magThreshold) + "]", ]
+                    thresholdStr = [" [" + self.fluxFilter + " < "
+                                    + str(self.config.analysis.magThreshold) + "]", ]
                 inFitGood = np.logical_and(np.isfinite(colorsInFitRange(principalColCats)), qaGood)
                 inPerpGood = np.logical_and(np.isfinite(colorsInPerpRange(principalColCats)), qaGood)
                 xColor = catColors(colStr1, colStr2, mags)
@@ -992,13 +1011,11 @@ class ColorAnalysisTask(CmdLineTask):
                     scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=1)
                 signalToNoiseThreshold = np.floor(
                     np.sqrt(scaleFactor)*self.config.analysis.signalToNoiseThreshold/100 + 0.49)*100
-                signalToNoiseHighThreshold = (np.floor(
-                    np.sqrt(scaleFactor)*self.config.analysis.signalToNoiseHighThreshold/100 + 0.49)*100)
             bright = signalToNoise[self.fluxFilter] >= signalToNoiseThreshold
             ptFrac = max(2, int(0.05*len(mags[self.fluxFilter][bright])))
-            # Set self.magThreshold to represent approximately that which corresponds to the
-            # S/N threshold.  Computed as the mean magnitude of the lower 5% of the
-            # S/N > signalToNoiseThreshold subsample
+            # Set self.magThreshold to represent approximately that which
+            # corresponds to the S/N threshold.  Computed as the mean magnitude
+            # of the lower 5% of the  S/N > signalToNoiseThreshold subsample.
             magThreshold = np.floor(mags[self.fluxFilter][bright][
                 mags[self.fluxFilter][bright].argsort()[-ptFrac:]].mean()*10 + 0.5)/10
             thresholdStr = [r" [S/N$\geqslant$" + str(signalToNoiseThreshold) + "]",
@@ -1017,13 +1034,15 @@ class ColorAnalysisTask(CmdLineTask):
 
         # Select as a star if classified as such in self.config.fluxFilter
         isStarFlag = byFilterCats[self.fluxFilter][self.classificationColumn] < 0.5
-        # Require stellar classification in self.fluxFilter and at least one other filter for fits
+        # Require stellar classification in self.fluxFilter and at least one
+        # other filter for fits.
         good = isStarFlag & (numStarFlags >= 2) & ~bad & bright
         goodCombined = isStarFlag & (numStarFlags >= 2) & ~bad
         decentStars = isStarFlag & ~bad & prettyBright
         decentGalaxies = ~isStarFlag & ~bad & prettyBright
 
-        # The combined catalog is only used in the Distance (from the poly fit) AnalysisClass plots
+        # The combined catalog is only used in the Distance (from the poly fit)
+        # AnalysisClass plots.
         combined = (self.transformCatalogs(byFilterCats, straightTransforms, "base_PsfFlux_instFlux",
                                            hscRun=plotInfoDict["hscRun"])[goodCombined].copy(True))
         filters = set(byFilterCats.keys())
@@ -1087,7 +1106,7 @@ class ColorAnalysisTask(CmdLineTask):
             self.log.info("nameStr = {:s}".format(nameStr))
             fitLineUpper = [2.0, -1.31]
             fitLineLower = [0.61, -1.78]
-            # TO DO: The return needs to change
+            # TODO: The return needs to change
             poly = yield from colorColorPolyFitPlot(plotInfoDict, nameStr,
                                                     self.log, catColors("HSC-G", "HSC-R", mags, good),
                                                     catColors("HSC-R", "HSC-I", mags, good),
@@ -1097,7 +1116,8 @@ class ColorAnalysisTask(CmdLineTask):
                                                     xFitRange=(0.23, 1.2), yFitRange=(0.05, 0.6),
                                                     fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                                     **polyFitKwargs)
-            # Make a color-color plot with both stars and galaxies, less pruning, and no fit
+            # Make a color-color plot with both stars and galaxies, less
+            # pruning, and no fit.
             if fluxColumn != "base_PsfFlux_instFlux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 yield from colorColorPlot(plotInfoDict, nameStr,
@@ -1167,7 +1187,7 @@ class ColorAnalysisTask(CmdLineTask):
             fitLineUpper = [5.9, -3.05]
             fitLineLower = [0.11, -2.07]
             self.log.info("nameStr = {:s}".format(nameStr))
-            # TO DO: also change this
+            # TODO: also change this
             poly = yield from colorColorPolyFitPlot(plotInfoDict, nameStr,
                                                     self.log, catColors("HSC-R", "HSC-I", mags, good),
                                                     catColors("HSC-I", "HSC-Z", mags, good),
@@ -1177,7 +1197,8 @@ class ColorAnalysisTask(CmdLineTask):
                                                     xFitRange=(-0.01, 1.75), yFitRange=(-0.01, 0.72),
                                                     fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                                     **polyFitKwargs)
-            # Make a color-color plot with both stars and galaxies, less pruning, and no fit
+            # Make a color-color plot with both stars and galaxies, less
+            # pruning, and no fit.
             if fluxColumn != "base_PsfFlux_instFlux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 yield from colorColorPlot(plotInfoDict, nameStr,
@@ -1239,7 +1260,8 @@ class ColorAnalysisTask(CmdLineTask):
                                                     xFitRange=(-0.05, 0.8), yFitRange=(-0.03, 0.32),
                                                     fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                                     **polyFitKwargs)
-            # Make a color-color plot with both stars and galaxies, less pruning, and no fit
+            # Make a color-color plot with both stars and galaxies, less
+            # pruning, and no fit.
             if fluxColumn != "base_PsfFlux_instFlux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 yield from colorColorPlot(plotInfoDict, nameStr, self.log,
@@ -1302,7 +1324,8 @@ class ColorAnalysisTask(CmdLineTask):
                                                     order=2, xFitRange=(-0.08, 0.2), yFitRange=(0.006, 0.19),
                                                     fitLineUpper=fitLineUpper, fitLineLower=fitLineLower,
                                                     **polyFitKwargs)
-            # Make a color-color plot with both stars and galaxies, less pruning, and no fit
+            # Make a color-color plot with both stars and galaxies, less
+            # pruning, and no fit.
             if fluxColumn != "base_PsfFlux_instFlux":
                 self.log.info("nameStr: noFit ({1:s}) = {0:s}".format(nameStr, fluxColumn))
                 yield from colorColorPlot(plotInfoDict, nameStr,
@@ -1393,17 +1416,20 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
         yLineLower = fitLineLower[0] + fitLineLower[1]*xLine
 
     # Include vertical xFitRange for clipping points in the first iteration
-    selectXRange = np.ones_like(xx, dtype=bool) if not xFitRange else ((xx > xFitRange[0]) &
-                                                                       (xx < xFitRange[1]))
+    selectXRange = np.ones_like(xx, dtype=bool) if not xFitRange else ((xx > xFitRange[0])
+                                                                       & (xx < xFitRange[1]))
     # Include horizontal yFitRange for clipping points in the first iteration
-    selectYRange = np.ones_like(xx, dtype=bool) if not yFitRange else ((yy > yFitRange[0]) &
-                                                                       (yy < yFitRange[1]))
-    selectUpper = np.ones_like(xx, dtype=bool) if not fitLineUpper else (yy <
-                                                                         fitLineUpper[0] + fitLineUpper[1]*xx)
-    selectLower = np.ones_like(xx, dtype=bool) if not fitLineLower else (yy >
-                                                                         fitLineLower[0] + fitLineLower[1]*xx)
+    selectYRange = np.ones_like(xx, dtype=bool) if not yFitRange else ((yy > yFitRange[0])
+                                                                       & (yy < yFitRange[1]))
+    selectUpper = np.ones_like(xx, dtype=bool) if not fitLineUpper else (yy
+                                                                         < fitLineUpper[0]
+                                                                         + fitLineUpper[1]*xx)
+    selectLower = np.ones_like(xx, dtype=bool) if not fitLineLower else (yy
+                                                                         > fitLineLower[0]
+                                                                         + fitLineLower[1]*xx)
 
-    # Pad vertical and horizontal fit ranges for use after the first fit iteration
+    # Pad vertical and horizontal fit ranges for use after the first fit
+    # iteration.
     if xFitRange:
         xMinPad = xFitRange[0] - 0.07*(xFitRange[1] - xFitRange[0])
         xMaxPad = xFitRange[1] + 0.07*(xFitRange[1] - xFitRange[0])
@@ -1416,9 +1442,11 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
         select &= sel
 
     keep = np.ones_like(xx, dtype=bool)
-    # Perform a polynomial fit using np.polyfit to use as an initial guess for the Orthoganl Regression
+    # Perform a polynomial fit using np.polyfit to use as an initial guess for
+    # the Orthogonal Regression.
     if closeToVertical:
-        # Force the initial guess for near-vertical distributions (np.polyfit cannot handle vertical fits)
+        # Force the initial guess for near-vertical distributions (np.polyfit
+        # cannot handle vertical fits).
         keep &= select
         poly = [10.0, -10.0*(xFitRange[0] + (xFitRange[1]-xFitRange[0])/3.0)]
     else:
@@ -1432,7 +1460,8 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
             dy = yy - np.polyval(poly, xx)
             clippedStats = calcQuartileClippedStats(dy[keep], nSigmaToClip=rej)
             keep = np.logical_not(np.abs(dy) > clippedStats.clipValue)
-            # After the first iteration, reset the vertical and horizontal clipping to be less restrictive
+            # After the first iteration, reset the vertical and horizontal
+            # clipping to be less restrictive.
             if ii == 0:
                 selectXRange = selectXRange if not xFitRange else ((xx > xMinPad) & (xx < xMaxPad))
                 selectYRange = selectYRange if not yFitRange else ((yy > yMinPad) & (yy < yMaxPad))
@@ -1466,7 +1495,8 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
         dy = yy - np.polyval(orthRegCoeffs, xx)
         clippedStats = calcQuartileClippedStats(dy[keepOdr], nSigmaToClip=rej)
         keepOdr = np.logical_not(np.abs(dy) > clippedStats.clipValue) & np.isfinite(xx) & np.isfinite(yy)
-        # After the first iteration, reset the vertical and horizontal clipping to be less restrictive
+        # After the first iteration, reset the vertical and horizontal clipping
+        # to be less restrictive.
         if ii == 0:
             selectXRange = selectXRange if not xFitRange else ((xx > xMinPad) & (xx < xMaxPad))
             selectYRange = selectYRange if not yFitRange else ((yy > yMinPad) & (yy < yMaxPad))
@@ -1480,8 +1510,9 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
         orthRegCoeffs = orthogonalRegression(xx[keepOdr], yy[keepOdr], order, initialGuess)
     yOrthLine = np.polyval(orthRegCoeffs, xLine)
 
-    # Find index where poly and fit range intersect -- to calculate the local slopes of the fit to make
-    # sure it is close to the fitLines (log a warning if they are not within 5%)
+    # Find index where poly and fit range intersect -- to calculate the local
+    # slopes of the fit to make sure it is close to the fitLines (log a warning
+    # if they are not within 5%).
     message = ("{0:s} branch of the hard-coded lines for object selection does not cross the "
                "current polynomial fit.\nUsing the xFitRange {1:} to compute the local slope")
     try:
@@ -1495,12 +1526,15 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
         log.warnf(message, "Lower", xFitRange[0])
         crossIdxLower = (np.abs(xLine - xFitRange[0])).argmin()
 
-    # Compute the slope of the two pixels +/-1% of line length from crossing point
+    # Compute the slope of the two pixels +/-1% of line length from crossing
+    # point.
     yOffset = int(0.01*len(yOrthLine))
-    mUpper = ((yOrthLine[crossIdxUpper + yOffset] - yOrthLine[crossIdxUpper - yOffset])
-              /(xLine[crossIdxUpper + yOffset] - xLine[crossIdxUpper - yOffset]))
-    mLower = ((yOrthLine[crossIdxLower + yOffset] - yOrthLine[crossIdxLower - yOffset])
-              /(xLine[crossIdxLower + yOffset] - xLine[crossIdxLower - yOffset]))
+    mUpper = ((yOrthLine[crossIdxUpper + yOffset]
+               - yOrthLine[crossIdxUpper - yOffset])/(xLine[crossIdxUpper + yOffset]
+                                                      - xLine[crossIdxUpper - yOffset]))
+    mLower = ((yOrthLine[crossIdxLower + yOffset]
+               - yOrthLine[crossIdxLower - yOffset])/(xLine[crossIdxLower + yOffset]
+                                                      - xLine[crossIdxLower - yOffset]))
     bUpper = -yOrthLine[crossIdxUpper] - mUpper*xLine[crossIdxUpper]
     bLower = -yOrthLine[crossIdxLower] - mLower*xLine[crossIdxLower]
     # Rotate slope by 90 degrees for source selection lines
@@ -1511,11 +1545,11 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
     message = ("{0:s} branch of the hard-coded lines for object selection does not match the local\nslope of "
                "the current polynomial fit.\n  --> Consider replacing {1:} with [{2:.3f}, {3:.3f}] "
                "(Line crosses fit at x = {4:.2f})")
-    if (abs(200*(fitLineUpper[0] - bUpper)/(fitLineUpper[0] + bUpper)) > 5.0 or
-            abs(200*(fitLineUpper[1] - mUpper)/(fitLineUpper[1] + mUpper)) > 5.0):
+    if (abs(200*(fitLineUpper[0] - bUpper)/(fitLineUpper[0] + bUpper)) > 5.0
+            or abs(200*(fitLineUpper[1] - mUpper)/(fitLineUpper[1] + mUpper)) > 5.0):
         log.warn(message.format("Upper", fitLineUpper, bUpper, mUpper, xLine[crossIdxUpper]))
-    if (abs(200*(fitLineLower[0] - bLower)/(fitLineLower[0] + bLower)) > 5.0 or
-            abs(200*(fitLineLower[1] - mLower)/(fitLineLower[1] + mLower)) > 5.0):
+    if (abs(200*(fitLineLower[0] - bLower)/(fitLineLower[0] + bLower)) > 5.0
+            or abs(200*(fitLineLower[1] - mLower)/(fitLineLower[1] + mLower)) > 5.0):
         log.warn(message.format("Lower", fitLineLower, bLower, mLower, xLine[crossIdxLower]))
     deltaX = abs(xRange[1] - xRange[0])
     deltaY = abs(yRange[1] - yRange[0])
@@ -1540,7 +1574,7 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
     axes[0].set_ylabel(yLabel, labelpad=-1)
 
     mappableKeep = plt.cm.ScalarMappable(cmap="jet", norm=plt.Normalize(vmin=zKeep.min(), vmax=zKeep.max()))
-    mappableKeep._A = []        # fake up the array of the scalar mappable. Urgh...
+    mappableKeep._A = []  # fake up the array of the scalar mappable. Urgh...
     caxKeep = plt.axes([0.46, 0.15, 0.022, 0.75])
     caxKeep.yaxis.set_major_formatter(FormatStrFormatter("%.0f"))
     cbKeep = plt.colorbar(mappableKeep, cax=caxKeep)
@@ -1679,7 +1713,8 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
         plotText("$_{wired}$", plt, axes[0], xP1Line[0] - 0.02*deltaX, yP1Line[0] + 0.02*deltaY,
                  fontSize=8, color="blue", coordSys="data", alpha=0.6)
 
-        # Derive Ivezic P2 and P1 equations based on linear fit and highest density position (where P1 = 0)
+        # Derive Ivezic P2 and P1 equations based on linear fit and highest
+        # density position (where P1 = 0).
         pColCoeffs = p2p1CoeffsFromLinearFit(m, b, xHighDensity0, yHighDensity0)
 
         perpIndex = description.find("Fit")
@@ -1746,10 +1781,10 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
     good = clippedStats.goodArray
     # Get rid of LaTeX-specific characters for log message printing
     log.info("Polynomial fit: {:2}".format("".join(x for x in polyStr if x not in "{}$")))
-    log.info(("Statistics from {0:} of Distance to polynomial ({9:s}): {7:s}\'star\': " +
-              "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; median={5:.4f}; clip={6:.4f})" +
-              "{8:s}").format(plotInfoDict["dataId"], clippedStats.mean, clippedStats.stdDev, len(xx[keep]),
-                              len(xx), clippedStats.median, clippedStats.clipValue, "{", "}", unitStr))
+    log.info(("Statistics from {0:} of Distance to polynomial ({9:s}): {7:s}\'star\': "
+              + "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; median={5:.4f}; clip={6:.4f})"
+              + "{8:s}").format(plotInfoDict["dataId"], clippedStats.mean, clippedStats.stdDev, len(xx[keep]),
+                                len(xx), clippedStats.median, clippedStats.clipValue, "{", "}", unitStr))
     meanStr = "mean = {0:5.2f}".format(clippedStats.mean)
     stdStr = "  std = {0:5.2f}".format(clippedStats.stdDev)
     rmsStr = "  rms = {0:5.2f}".format(clippedStats.rms)
@@ -1757,8 +1792,9 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
     count, bins, ignored = axes[1].hist(distance[good], bins=numBins,
                                         range=(-4.0*clippedStats.stdDev, 4.0*clippedStats.stdDev),
                                         density=True, color=polyColor, alpha=0.6)
-    axes[1].plot(bins, (1/(clippedStats.stdDev*np.sqrt(2*np.pi))*np.exp(-(bins - clippedStats.mean)**2
-                                                                        /(2*clippedStats.stdDev**2))),
+    axes[1].plot(bins,
+                 (1/(clippedStats.stdDev*np.sqrt(2*np.pi))*(
+                     np.exp(-(bins - clippedStats.mean)**2/(2*clippedStats.stdDev**2)))),
                  color=polyColor)
     axes[1].axvline(x=clippedStats.mean, color=polyColor, linestyle=":")
     kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=7, color=polyColor)
@@ -1780,7 +1816,7 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
         count, nBins, ignored = axes[1].hist(pCkept[good], bins=bins,
                                              range=(-4.0*clippedStats.stdDev, 4.0*clippedStats.stdDev),
                                              density=True, color="blue", alpha=0.6)
-        axes[1].plot(bins, 1/(pCstdDev*np.sqrt(2*np.pi))*np.exp(-(bins-pCmean)**2/(2*pCstdDev**2)),
+        axes[1].plot(bins, 1/(pCstdDev*np.sqrt(2*np.pi))*np.exp(-(bins - pCmean)**2/(2*pCstdDev**2)),
                      color="blue")
         axes[1].axvline(x=pCmean, color="blue", linestyle=":")
         pCmeanStr = "{0:s}{1:s} = {2:5.2f}".format(perpStr[0:5], "$_{wired}$", pCmean)
@@ -1788,10 +1824,10 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
         kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=7, color="blue")
         axes[1].annotate(pCmeanStr, xy=(0.97, 0.965), **kwargs)
         axes[1].annotate(pCstdStr, xy=(0.97, 0.93), **kwargs)
-        log.info(("Statistics from {0:} of {9:s}Perp_wired ({8:s}): {6:s}\'star\': " +
-                  "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; median={5:.4f})" +
-                  "{7:s}").format(plotInfoDict["dataId"], pCmean, pCstdDev, len(pCkept[good]), len(pCkept),
-                                  np.median(pCkept[good]), "{", "}", unitStr, perpIndexStr))
+        log.info(("Statistics from {0:} of {9:s}Perp_wired ({8:s}): {6:s}\'star\': "
+                  + "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; median={5:.4f})"
+                  + "{7:s}").format(plotInfoDict["dataId"], pCmean, pCstdDev, len(pCkept[good]), len(pCkept),
+                                    np.median(pCkept[good]), "{", "}", unitStr, perpIndexStr))
     # Plot fitted principal color distributions
     if fitP2 is not None:
         fitP2kept = fitP2[kept].copy()
@@ -1808,11 +1844,11 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
         kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=7, color="green")
         axes[1].annotate(fitP2meanStr, xy=(0.97, 0.895), **kwargs)
         axes[1].annotate(fitP2stdStr, xy=(0.97, 0.86), **kwargs)
-        log.info(("Statistics from {0:} of {9:s}Perp_fit ({8:s}): {6:s}\'star\': " +
-                  "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; median={5:.4f})" +
-                  "{7:s}").format(plotInfoDict["dataId"], fitP2mean, fitP2stdDev, len(fitP2kept[good]),
-                                  len(fitP2kept), np.median(fitP2kept[good]), "{", "}", unitStr,
-                                  perpIndexStr))
+        log.info(("Statistics from {0:} of {9:s}Perp_fit ({8:s}): {6:s}\'star\': "
+                  + "Stats(mean={1:.4f}; stdev={2:.4f}; num={3:d}; total={4:d}; median={5:.4f})"
+                  + "{7:s}").format(plotInfoDict["dataId"], fitP2mean, fitP2stdDev, len(fitP2kept[good]),
+                                    len(fitP2kept), np.median(fitP2kept[good]), "{", "}", unitStr,
+                                    perpIndexStr))
         if verifyJob:
             if not verifyMetricName:
                 log.warn("A verifyJob was specified, but the metric name was not...skipping metric job")
@@ -1890,11 +1926,11 @@ def colorColorPlot(plotInfoDict, description, log, xStars, yStars, xGalaxies, yG
     xLoc, yLoc = xRange[0] + 0.03*deltaX, yRange[1] - 0.038*deltaY
     kwargs = dict(va="center", fontsize=8)
     axes.text(xLoc, yLoc, "Ngals  =", ha="left", color="red", **kwargs)
-    axes.text(xLoc + fdx*deltaX, yLoc, str(len(xGalaxies[goodGalaxies])) +
-              " [" + filterStr + "$<$" + str(magThreshold) + "]", ha="right", color="red", **kwargs)
+    axes.text(xLoc + fdx*deltaX, yLoc, str(len(xGalaxies[goodGalaxies]))
+              + " [" + filterStr + "$<$" + str(magThreshold) + "]", ha="right", color="red", **kwargs)
     axes.text(xLoc, 0.94*yLoc, "Nstars =", ha="left", color="blue", **kwargs)
-    axes.text(xLoc + fdx*deltaX, 0.94*yLoc, str(len(xStars[goodStars])) +
-              " [" + filterStr + "$<$" + str(magThreshold) + "]", ha="right", color="blue", **kwargs)
+    axes.text(xLoc + fdx*deltaX, 0.94*yLoc, str(len(xStars[goodStars]))
+              + " [" + filterStr + "$<$" + str(magThreshold) + "]", ha="right", color="blue", **kwargs)
     if plotInfoDict["cameraName"]:
         labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
     if geLabel:
@@ -1909,12 +1945,12 @@ def colorColorPlot(plotInfoDict, description, log, xStars, yStars, xGalaxies, yG
                   fontsize=10, color="green")
 
     mappableStars = plt.cm.ScalarMappable(cmap="winter", norm=plt.Normalize(vmin=vMin, vmax=vMax))
-    mappableStars._A = []        # fake up the array of the scalar mappable. Urgh...
+    mappableStars._A = []  # fake up the array of the scalar mappable. Urgh...
     cbStars = plt.colorbar(mappableStars, aspect=14, pad=-0.09)
     cbStars.ax.tick_params(labelsize=8)
     cbStars.set_label(filterStr + " [" + fluxColStr + "]: stars", rotation=270, labelpad=-24, fontsize=9)
     mappableGalaxies = plt.cm.ScalarMappable(cmap="autumn", norm=plt.Normalize(vmin=vMin, vmax=vMax))
-    mappableGalaxies._A = []      # fake up the array of the scalar mappable. Urgh...
+    mappableGalaxies._A = []  # fake up the array of the scalar mappable. Urgh...
     cbGalaxies = plt.colorbar(mappableGalaxies, aspect=14)
     cbGalaxies.set_ticks([])
     cbGalaxies.set_label(filterStr + " [" + fluxColStr + "]: galaxies", rotation=270, labelpad=-6, fontsize=9)
@@ -1944,7 +1980,8 @@ def colorColor4MagPlots(plotInfoDict, description, log, xStars, yStars, xGalaxie
     binEdges = np.hstack((vMin, np.arange(magThreshold - 3, magThreshold, 1)))
     binIdxStars = np.digitize(magStars, binEdges)
     binIdxGalaxies = np.digitize(magGalaxies, binEdges)
-    # The following is for ease of printing the bin ranges in the following loop
+    # The following is for ease of printing the bin ranges in the following
+    # loop.
     binEdges = [bin for bin in binEdges]
     binEdges.append(magThreshold)
 
@@ -1968,23 +2005,23 @@ def colorColor4MagPlots(plotInfoDict, description, log, xStars, yStars, xGalaxie
         xLoc, yLoc = xRange[0] + 0.05*deltaX, yRange[1] - 0.06*deltaY
         kwargs = dict(va="center", fontsize=7)
         ax.text(xLoc, yLoc, "Ngals  =", ha="left", color="red", **kwargs)
-        ax.text(xRange[1] - 0.03*deltaX, yLoc, str(len(xGalaxies[binIdxGalaxies == index])) +
-                " [" + str(binEdges[index - 1]) + " <= " + filterStr + " < " + str(binEdges[index]) + "]",
+        ax.text(xRange[1] - 0.03*deltaX, yLoc, str(len(xGalaxies[binIdxGalaxies == index]))
+                + " [" + str(binEdges[index - 1]) + " <= " + filterStr + " < " + str(binEdges[index]) + "]",
                 ha="right", color="red", **kwargs)
         ax.text(xLoc, 0.92*yLoc, "Nstars =", ha="left", va="center", fontsize=7, color="blue")
-        ax.text(xRange[1] - 0.03*deltaX, 0.92*yLoc, str(len(xStars[binIdxStars == index])) +
-                " [" + str(binEdges[index - 1]) + " <= " + filterStr + " < " + str(binEdges[index]) + "]",
+        ax.text(xRange[1] - 0.03*deltaX, 0.92*yLoc, str(len(xStars[binIdxStars == index]))
+                + " [" + str(binEdges[index - 1]) + " <= " + filterStr + " < " + str(binEdges[index]) + "]",
                 ha="right", color="blue", **kwargs)
 
     mappableStars = plt.cm.ScalarMappable(cmap="winter_r", norm=plt.Normalize(vmin=vMin, vmax=vMax))
-    mappableStars._A = []        # fake up the array of the scalar mappable. Urgh...
+    mappableStars._A = []  # fake up the array of the scalar mappable. Urgh...
     caxStars = plt.axes([0.88, 0.11, 0.04, 0.8])
     caxGalaxies = plt.axes([0.84, 0.11, 0.04, 0.8])
     cbStars = plt.colorbar(mappableStars, cax=caxStars)
     cbStars.ax.tick_params(labelsize=8)
     cbStars.set_label(filterStr + "[" + fluxColStr + "] :stars", rotation=270, labelpad=-24, fontsize=9)
     mappableGalaxies = plt.cm.ScalarMappable(cmap="autumn_r", norm=plt.Normalize(vmin=vMin, vmax=vMax))
-    mappableGalaxies._A = []      # fake up the array of the scalar mappable. Urgh...
+    mappableGalaxies._A = []  # fake up the array of the scalar mappable. Urgh...
     cbGalaxies = plt.colorbar(mappableGalaxies, cax=caxGalaxies)
     cbGalaxies.set_ticks([])
     cbGalaxies.set_label(filterStr + " [" + fluxColStr + "]: galaxies", rotation=270, labelpad=-6, fontsize=9)
@@ -2028,10 +2065,10 @@ class ColorColorDistance(object):
         polyDeriv = np.polyder(self.poly)
         distance2 = np.ones_like(xx)*np.nan
         for i, (x, y) in enumerate(zip(xx, yy)):
-            if (not np.isfinite(x) or not np.isfinite(y) or (self.xMin and x < self.xMin) or
-                (self.xMax and x > self.xMax) or
-                (self.fitLineUpper and y > self.fitLineUpper[0] + self.fitLineUpper[1]*x) or
-                    (self.fitLineLower and y < self.fitLineLower[0] + self.fitLineLower[1]*x)):
+            if (not np.isfinite(x) or not np.isfinite(y) or (self.xMin and x < self.xMin)
+                or (self.xMax and x > self.xMax)
+                or (self.fitLineUpper and y > self.fitLineUpper[0] + self.fitLineUpper[1]*x)
+                    or (self.fitLineLower and y < self.fitLineLower[0] + self.fitLineLower[1]*x)):
                 distance2[i] = np.nan
                 continue
             roots = np.roots(np.poly1d((1, -x)) + (self.poly - y)*polyDeriv)

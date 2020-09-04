@@ -1,5 +1,3 @@
-from __future__ import print_function
-
 import matplotlib
 matplotlib.use("Agg")  # noqa E402
 import matplotlib.pyplot as plt
@@ -138,13 +136,13 @@ class Analysis(object):
         # Skip flag culling on the macth and overlap catalogs: we want to look
         # at any/all matches found (objects with any notable flags set will be
         # highlighted in the plot), and the latter are already culled.  Also,
-        # if sub-selecting a calib_*_used sample, we want to look at all objects
-        # used in the visit-level calibrations, so do not cull on the standard
-        # self.config.flags.  Rather, only cull on flags explicitly set in the
-        # flags variable for calib_*_used subsamples.
-        if ("matches" not in self.shortName and "overlap" not in self.shortName and "quiver" not in
-                self.shortName and "inputCounts" not in self.shortName and
-                "skyObjects" not in self.shortName):
+        # if sub-selecting a calib_*_used sample, we want to look at all
+        # objects used in the visit-level calibrations, so do not cull on the
+        # standard self.config.flags.  Rather, only cull on flags explicitly
+        # set in the flags variable for calib_*_used subsamples.
+        if ("matches" not in self.shortName and "overlap" not in self.shortName
+                and "quiver" not in self.shortName and "inputCounts" not in self.shortName
+                and "skyObjects" not in self.shortName):
 
             flagsList = flags.copy()
             flagsList = flagsList + list(self.config.flags) if self.calibUsedOnly == 0 else flagsList
@@ -156,7 +154,7 @@ class Analysis(object):
 
         # If the input catalog is a coadd, scale the S/N threshold by roughly
         # the sqrt of the number of input visits (actually the mean of the
-        # upper 10% of the base_InputCount_value distribution)
+        # upper 10% of the base_InputCount_value distribution).
         if prefix + "base_InputCount_value" in catalog.schema:
             inputCounts = catalog[prefix + "base_InputCount_value"]
             scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=10)
@@ -169,8 +167,8 @@ class Analysis(object):
         else:
             self.signalToNoiseThreshold = self.config.signalToNoiseThreshold
             self.signalToNoiseHighThreshold = self.config.signalToNoiseHighThreshold
-        if (("galacticExtinction" in self.shortName and self.magThreshold > 90.0) or
-                any(ss in self.shortName for ss in ["skySources", "skyObjects"])):
+        if (("galacticExtinction" in self.shortName and self.magThreshold > 90.0)
+                or any(ss in self.shortName for ss in ["skySources", "skyObjects"])):
             self.signalToNoiseThreshold = 0.0
             self.signalToNoiseHighThreshold = 0.0
 
@@ -190,13 +188,15 @@ class Analysis(object):
                 goodSn = np.logical_and(goodSn0, self.signalToNoise >= self.signalToNoiseThreshold)
                 # Set self.magThreshold to represent approximately that which
                 # corresponds to the S/N threshold.  Computed as the mean mag
-                # of the lower 5% of the S/N > signalToNoiseThreshold subsample
+                # of the lower 5% of the S/N > signalToNoiseThreshold
+                # subsample.
                 self.magThreshold = computeMeanOfFrac(self.mag[goodSn], tailStr="upper", fraction=0.05,
                                                       floorFactor=0.1)
 
-        # Always compute stats for S/N > self.config.signalToNoiseHighThreshold.  If too few
-        # objects classified as stars exist with the configured value, decrease the S/N threshold
-        # by 10 until a sample with N > self.config.minHighSampleN is achieved.
+        # Always compute stats for S/N > config.signalToNoiseHighThreshold.
+        # If too few objects classified as stars exist with the configured
+        # value, decrease the S/N threshold by 10 until a sample with
+        # N > self.config.minHighSampleN is achieved.
         goodSnHigh = np.logical_and(goodSn0, self.signalToNoise >= self.signalToNoiseHighThreshold)
         if prefix + "base_ClassificationExtendedness_value" in catalog.schema:
             isStar = catalog[prefix + "base_ClassificationExtendedness_value"] < 0.5
@@ -206,8 +206,8 @@ class Analysis(object):
             isStar = np.ones(len(self.mag), dtype=bool)
             print("Warning: No star/gal flag found")
         goodSnHighStars = np.logical_and(goodSnHigh, isStar)
-        while(len(self.mag[goodSnHighStars]) < self.config.minHighSampleN and
-              self.signalToNoiseHighThreshold > 0.0):
+        while(len(self.mag[goodSnHighStars]) < self.config.minHighSampleN
+              and self.signalToNoiseHighThreshold > 0.0):
             self.signalToNoiseHighThreshold -= 10.0
             goodSnHigh = np.logical_and(goodSn0, self.signalToNoise >= self.signalToNoiseHighThreshold)
             goodSnHighStars = np.logical_and(goodSnHigh, isStar)
@@ -215,13 +215,14 @@ class Analysis(object):
                                                   floorFactor=0.1)
         self.signalToNoiseHighStr = r"[S/N$\geqslant${0:}]".format(int(self.signalToNoiseHighThreshold))
 
-        # Select a sample for setting plot limits: "good" based on flags, S/N is finite and >= 2.0
-        # Limits are the means of the bottom 1% and top 5% of this sample with a 0.5 mag buffer on either side
+        # Select a sample for setting plot limits: "good" based on flags, S/N
+        # is finite and >= 2.0.  Limits are the means of the bottom 1% and top
+        # 5% of this sample with a 0.5 mag buffer on either side.
         goodSn0 &= self.signalToNoise >= 2.0
-        self.magMin = (computeMeanOfFrac(self.mag[goodSn0], tailStr="lower", fraction=0.005, floorFactor=1) -
-                       1.5)
-        self.magMax = (computeMeanOfFrac(self.mag[goodSn0], tailStr="upper", fraction=0.05, floorFactor=1) +
-                       0.5)
+        self.magMin = (computeMeanOfFrac(self.mag[goodSn0], tailStr="lower", fraction=0.005, floorFactor=1)
+                       - 1.5)
+        self.magMax = (computeMeanOfFrac(self.mag[goodSn0], tailStr="upper", fraction=0.05, floorFactor=1)
+                       + 0.5)
 
         if labeller is not None:
             labels = labeller(catalog, compareCat) if compareCat else labeller(catalog)
@@ -239,8 +240,8 @@ class Analysis(object):
                 self.stats = self.statistics(magThreshold=self.magThreshold, forcedMean=forcedMean)
             self.statsHigh = self.statistics(signalToNoiseThreshold=self.signalToNoiseHighThreshold,
                                              forcedMean=forcedMean)
-            # Ensure plot limits always encompass at least mean +/- 6.0*stdev, at most mean +/- 20.0*stddev,
-            # and clipped stats range + 25%
+            # Ensure plot limits always encompass at least mean +/- 6.0*stdev,
+            # at most mean +/- 20.0*stddev, and clipped stats range + 25%.
             dataType = "all" if "all" in self.data else "star"
             if self.stats[dataType].num > 0:
                 if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar", "resolution",
@@ -251,8 +252,8 @@ class Analysis(object):
                                         self.stats[dataType].median - 1.25*self.stats[dataType].clip),
                                     min(self.stats[dataType].mean - 20.0*self.stats[dataType].stdev,
                                         -0.005*self.unitScale))
-                    if (abs(self.stats[dataType].mean) < 0.0005*self.unitScale and
-                            abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
+                    if (abs(self.stats[dataType].mean) < 0.0005*self.unitScale
+                            and abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
                         minmax = 2.0*max(abs(min(self.quantity[self.good])),
                                          abs(max(self.quantity[self.good])))
                         self.qMin = -minmax if minmax > 0 else self.qMin
@@ -264,8 +265,8 @@ class Analysis(object):
                                         self.stats[dataType].median + 1.25*self.stats[dataType].clip),
                                     max(self.stats[dataType].mean + 20.0*self.stats[dataType].stdev,
                                         0.005*self.unitScale))
-                    if (abs(self.stats[dataType].mean) < 0.0005*self.unitScale and
-                            abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
+                    if (abs(self.stats[dataType].mean) < 0.0005*self.unitScale
+                            and abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
                         minmax = 2.0*max(abs(min(self.quantity[self.good])),
                                          abs(max(self.quantity[self.good])))
                         self.qMax = minmax if minmax > 0 else self.qMax
@@ -349,7 +350,7 @@ class Analysis(object):
         elif plotInfoDict["plotType"] == "plotVisit":
             ccdList = plotInfoDict["ccdList"]
         if ("Visit" in plotInfoDict["plotType"] and plotInfoDict["camera"] is not None
-           and ccdList is not None):
+                and ccdList is not None):
             axTopRight = plt.axes(topRight)
             axTopRight.set_aspect("equal")
             plotCameraOutline(axTopRight, plotInfoDict["camera"], ccdList)
@@ -366,15 +367,16 @@ class Analysis(object):
         if self.data[dataType].quantity.any():
             if len(self.data[dataType].quantity[inLimits]) < max(1.0, 0.35*len(self.data[dataType].quantity)):
                 log.info("plotAgainstMagAndHist: No data within limits...decreasing/increasing qMin/qMax")
-            while (len(self.data[dataType].quantity[inLimits]) <
-                   max(1.0, 0.35*len(self.data[dataType].quantity))):
+            while (len(self.data[dataType].quantity[inLimits])
+                   < max(1.0, 0.35*len(self.data[dataType].quantity))):
                 self.qMin -= 0.1*np.abs(self.qMin)
                 self.qMax += 0.1*self.qMax
                 inLimits = self.data[dataType].quantity < self.qMax
                 inLimits &= self.data[dataType].quantity > self.qMin
 
-        # Make sure plot limit extends low enough to show well below the star/galaxy separation line.
-        # Add delta as opposed to directly changing self.qMin to not affect other plots
+        # Make sure plot limit extends low enough to show well below the
+        # star/galaxy separation line.  Add delta as opposed to directly
+        # changing self.qMin to not affect other plots.
         deltaMin = 0.0
         if "galaxy" in self.data and len(self.data["galaxy"].quantity) > 0 and "-mag_" in description:
             if "GaussianFlux" in description:
@@ -486,7 +488,8 @@ class Analysis(object):
                                         label="Running\nstats (all\nstars)"))
 
             if highlightList is not None:
-                # Make highlight as a background ring of larger size than the data point size
+                # Make highlight as a background ring of larger size than the
+                # data point size.
                 sizeFactor = 1.3
                 for flag, threshValue, color in highlightList:
                     if flag in data.catalog.schema:
@@ -571,7 +574,7 @@ class Analysis(object):
         axScatter.legend(handles=dataPoints, loc=1, fontsize=legendFontSize, labelspacing=0.3)
         axHistx.legend(fontsize=7, loc=2, edgecolor="w", labelspacing=0.2)
         axHisty.legend(fontsize=7, labelspacing=0.2)
-        # Add an axis with units of FWHM = 2*sqrt(2*ln(2))*Trace for Trace plots
+        # Add axis with units of FWHM = 2*sqrt(2*ln(2))*Trace for Trace plots
         if "race" in self.shortName and "iff" not in self.shortName:
             axHisty2 = axHisty.twinx()  # instantiate a second axes that shares the same x-axis
             sigmaToFwhm = 2.0*np.sqrt(2.0*np.log(2.0))
@@ -743,9 +746,9 @@ class Analysis(object):
         if dataName == "star" and "matches" in description and magThreshold < 99.0:
             magThreshold += 1.0  # plot to fainter mags for matching against ref cat
         good = (self.mag < magThreshold if magThreshold > 0 else np.ones(len(self.mag), dtype=bool))
-        if ((dataName == "star" or "matches" in description or "Compare" in plotInfoDict["plotType"]) and
-                ("pStar" not in description and "race" not in description and "resolution" not in description)
-                or ("compareUnforced" in description)):
+        if ((dataName == "star" or "matches" in description or "Compare" in plotInfoDict["plotType"])
+                and ("pStar" not in description and "race" not in description and "resolution"
+                     not in description) or ("compareUnforced" in description)):
 
             vMin, vMax = 0.4*self.qMin, 0.4*self.qMax
             if "mag_" in description or any(ss in description for ss in
@@ -775,14 +778,14 @@ class Analysis(object):
                 vMin, vMax = -0.1, 3.0*self.qMax
             if dataName == "galaxy" and "resolution" in description:
                 vMin, vMax = 0.0, 1.0
-        if (dataName == "galaxy" and "mag_" in description and
-                ("matches" not in description or plotInfoDict["plotType"] == "plotColor")):
+        if (dataName == "galaxy" and "mag_" in description
+                and ("matches" not in description or plotInfoDict["plotType"] == "plotColor")):
             vMin = 3.0*self.qMin
             if "GaussianFlux" in description:
                 vMin, vMax = 5.0*self.qMin, 0.0
-        if (dataName == "galaxy" and ("CircularApertureFlux" in description or "KronFlux" in description) and
-                "Compare" not in plotInfoDict["plotType"] and "overlap" not in description and
-                "compareUnforced" not in description):
+        if (dataName == "galaxy" and ("CircularApertureFlux" in description or "KronFlux" in description)
+                and "Compare" not in plotInfoDict["plotType"] and "overlap" not in description
+                and "compareUnforced" not in description):
             vMin, vMax = 4.0*self.qMin, 1.0*self.qMax
 
         fig, axes = plt.subplots(1, 1, subplot_kw=dict(facecolor="0.35"))
@@ -827,12 +830,13 @@ class Analysis(object):
             stats0 = self.calculateStats(data.quantity, good[data.selection])
             selection = data.selection & good
             if highlightList is not None:
-                # Make highlight as a background ring of larger size than the data point size
+                # Make highlight as a background ring of larger size than the
+                # data point size.
                 i = -1
                 sizeFactor = 1.4
                 for flag, threshValue, color in highlightList:
                     if flag in data.catalog.schema:
-                        # Only a white "halo" really shows up here, so ignore color
+                        # Only a white "halo" really shows up, so ignore color
                         highlightSelection = (self.catalog[flag] > threshValue) & selection
                         if sum(highlightSelection) > 0:
                             i += 1
@@ -862,7 +866,7 @@ class Analysis(object):
         axes.set_ylim(decMin, decMax)
 
         mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vMin, vmax=vMax))
-        mappable._A = []        # fake up the array of the scalar mappable. Urgh...
+        mappable._A = []  # fake up the array of the scalar mappable. Urgh...
         cb = plt.colorbar(mappable)
         colorbarLabel = self.quantityName + " " + filterLabelStr
         fontSize = min(10, max(6, 10 - int(np.log(max(1, len(colorbarLabel) - 50)))))
@@ -995,7 +999,8 @@ class Analysis(object):
         bad |= catalog["deblend_nChild"] > 0
         for flag in flags:
             bad |= catalog[flag]
-        # Cull the catalog down to calibration candidates (or stars if calibration flags not available)
+        # Cull the catalog down to calibration candidates (or stars if
+        # calibration flags not available).
         if "calib_psf_used" in catalog.schema:
             bad |= ~catalog["calib_psf_used"]
             catStr = "psf_used"
@@ -1186,7 +1191,9 @@ class Analysis(object):
     def plotInputCounts(self, catalog, description, plotInfoDict, log, forcedStr=None, uberCalLabel=None,
                         cmap=plt.cm.viridis, alpha=0.5, doPlotPatchOutline=True, sizeFactor=5.0,
                         maxDiamPix=1000, columnName="base_InputCount_value", fluxScale=1e12):
-        """Plot grayscale image of tract with base_InputCounts_value overplotted
+        """Plot visit input counts of tract.
+
+        Can optionally plot with a background that is a grayscale of the image.
 
         Parameters
         ----------
@@ -1209,8 +1216,8 @@ class Analysis(object):
            The matplotlib colormap to use.  It will be given transparency level
            set by ``alpha``.  Default is `None`.
         alpha : `float`, optional
-           The matplotlib blending value, between 0 (transparent) and 1 (opaque)
-           Default is 0.5.
+           The matplotlib blending value, between 0 (transparent) and 1
+           (opaque).
         doPlotPatchOutline : `bool`, optional
            A boolean indicating whether to overplot the patch outlines and
            index labels.  Default is `True`.
@@ -1253,7 +1260,8 @@ class Analysis(object):
                 srcEllip = afwGeom.ellipses.Axes(srcQuad)
                 diamA = srcEllip.getA()*2.0*sizeFactor
                 diamB = srcEllip.getB()*2.0*sizeFactor
-                # Truncate ellipse size to a maximum width or height of maxDiamPix
+                # Truncate ellipse size to a maximum width or height of
+                # maxDiamPix.
                 if diamA > maxDiamPix or diamB > maxDiamPix:
                     edgeColor = "blue"
                     if diamA >= diamB:
@@ -1426,13 +1434,14 @@ class Analysis(object):
             countMax = count.max() if count.max() and count.max() > countMax else countMax
             if i == 0:
                 xLim = 5.0*clippedStats.stdDev
-                # Put labels on left if typically over subtracted (so the mean lines
-                # don't cover the text).
+                # Put labels on left if typically over subtracted (so the mean
+                # lines don't cover the text).
                 if clippedStats.mean > 0:
                     xOff -= 0.62
                     legendLoc = "upper right"
-            axes[0].plot(binsFlux, (1/(clippedStats.stdDev*np.sqrt(2*np.pi))
-                                    *np.exp(-(binsFlux - clippedStats.mean)**2/(2*clippedStats.stdDev**2))),
+            axes[0].plot(binsFlux,
+                         (1/((clippedStats.stdDev*np.sqrt(2*np.pi))*(
+                             np.exp((binsFlux - clippedStats.mean)**2/(2*clippedStats.stdDev**2))))),
                          color=colors[i])
             axes[0].axvline(x=clippedStats.mean, color=colors[i], linestyle=":")
             kwargs = dict(xycoords="axes fraction", ha="right", va="center", fontsize=6, color=colors[i])
@@ -1603,7 +1612,8 @@ class Analysis(object):
         log.info("Statistics from %s of %s: %s" % (plotInfoDict["dataId"], self.quantityName, stats))
         if enforcer:
             enforcer(stats, plotInfoDict["dataId"], log, self.quantityName)
-        # TO DO: DM-24795, Should this be returned? Is it vanishing into the ether?
+        # TODO: DM-24795, Should this be returned? Is it vanishing into the
+        # ether?
         return stats
 
     def statistics(self, magThreshold=None, signalToNoiseThreshold=None, forcedMean=None):
@@ -1625,8 +1635,8 @@ class Analysis(object):
            are not -- `None`.
         """
         thresholdList = [magThreshold, signalToNoiseThreshold]
-        if (all(threshold is not None for threshold in thresholdList) or
-                all(threshold is None for threshold in thresholdList)):
+        if (all(threshold is not None for threshold in thresholdList)
+                or all(threshold is None for threshold in thresholdList)):
             raise RuntimeError("Must specify one AND ONLY one of magThreshold and signalToNoiseThreshold. "
                                "They are currently set to {0:} and {1:}, respectively".
                                format(magThreshold, signalToNoiseThreshold))
@@ -1668,9 +1678,9 @@ class Analysis(object):
            the subset of ``quantity`` to be used in the statistics computation:
            "S/N" and "mag" indicate a threshold based on signal-to-noise or
            magnitude, respectively.  A flag name, e.g. "calib_psf_used",
-           indicates that the sample was culled based on the value of this flag.
-           Provided here simply for inclusion in the returned ``Stats`` object.
-           Default is an empty `str`.
+           indicates that the sample was culled based on the value of this
+           flag.  Provided here simply for inclusion in the returned ``Stats``
+           object. Default is an empty `str`.
         thresholdValue : `float`, `int`, or `None`, optional
            The threshold value used in culling ``quantity`` to the subset to be
            included in the statistics computation.  Provided here simply for
@@ -1710,8 +1720,8 @@ class Analysis(object):
               - i.e. clip x if abs(x - ``mean``) > ``clip``
               - this parameter is controlled by the config parameter
                 ``analysis.config.clip`` which is in units of number of
-                standard deviations (defined here as 0.74*interQuartileDistance)
-                (`float`).
+                standard deviations, defined here as
+                0.74*interQuartileDistance (`float`).
            ``thresholdType``
               String provided in input variable ``thresholdType`` representing
               the type of threshold used for culling data (`str`).
@@ -1788,7 +1798,7 @@ class Analysis(object):
             The name and key of the dataset for consideration in the ``stats``
             object.
         stats : `dict` of `lsst.pipe.analysis.utils.Stats`
-            A dictionary containing the statistics information per ``dataName``.
+            A dictionary containing the statistics info per ``dataName``.
         log : `lsst.log.Log`
             Logger object for logging messages.
 

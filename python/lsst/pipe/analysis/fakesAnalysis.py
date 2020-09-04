@@ -59,7 +59,8 @@ def addDegreePositions(catalog, raCol, decCol):
     Returns
     -------
     catalog : `pandas.core.frame.DataFrame`
-        The original catalog but with a column for the posistion in degrees added.
+        The original catalog but with a column for the posistion in degrees
+        added.
     """
 
     assert np.max(catalog[raCol].values) <= np.pi*2.0, "Input not in radians"
@@ -92,10 +93,12 @@ def matchCatalogs(catalog1, raCol1, decCol1, catalog2, raCol2, decCol2, units=u.
     decCol2 : `string`
         The column name for the Dec. column in catalog2.
     matchRadius : `astropy.coordinates.angles.Angle`
-        Radius within which to match the nearest source, can be in any units supported by astropy.
+        Radius within which to match the nearest source, can be in any units
+        supported by astropy.
         default is coord.Angle(0.1, unit=u.arcsecond), 0.1 arseconds.
     units : `astropy.units.core.Unit`
-        Units of the RA and Dec. given, defaults to degrees, can be anything supported by astropy.
+        Units of the RA and Dec. given, defaults to degrees, can be anything
+        supported by astropy.
 
     Returns
     -------
@@ -106,10 +109,12 @@ def matchCatalogs(catalog1, raCol1, decCol1, catalog2, raCol2, decCol2, units=u.
 
     Notes
     -----
-    Returns two shortened catalogs, with the matched rows in the same order and objects without a match
-    removed. Matches the first catalog to the second, multiple objects from the first catalog can match
-    the same object in the second. Uses astropy's match_coordinates_sky and their units framework. Adds a new
-    column to the catalogs, matchDistance, that contains the distance to the matched source in degrees.
+    Returns two shortened catalogs, with the matched rows in the same order and
+    objects without a match removed. Matches the first catalog to the second,
+    multiple objects from the first catalog can match the same object in the
+    second. Uses astropy's match_coordinates_sky and their units framework.
+    Adds a new column to the catalogs, matchDistance, that contains the
+    distance to the matched source in degrees.
     """
 
     skyCoords1 = coord.SkyCoord(catalog1[raCol1], catalog1[decCol1], unit=units)
@@ -145,12 +150,14 @@ def addNearestNeighbor(catalog, raCol, decCol, units=u.degree):
     decCol : `string`
         Column name for the Declination column to be used.
     units : `astropy.units.core.Unit`
-        Units of the RA and Dec. given, defaults to degrees, can be anything supported by astropy.
+        Units of the RA and Dec. given, defaults to degrees, can be anything
+        supported by astropy.
 
     Returns
     -------
     catalog : `pandas.core.frame.DataFrame`
-        Catalog with a column 'nearestNeighbor' containing the distance to the neareast neighbor.
+        Catalog with a column 'nearestNeighbor' containing the distance to the
+        neareast neighbor.
 
     Notes
     -----
@@ -179,7 +186,8 @@ def addProvenanceInfo(fig, plotInfoDict):
             ``"filter"``
                 The filter used for this data
             ``"visit"``
-                The visit of the data; only included if the data is from a single epoch dataset
+                The visit of the data; only included if the data is from a
+                single epoch dataset.
             ``"tract"``
                 The tract that the data comes from
             ``"photoCalibDataset"``
@@ -189,7 +197,8 @@ def addProvenanceInfo(fig, plotInfoDict):
             ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
-                The patch that the data is from; only included if the data is from a coadd dataset
+                The patch that the data is from; only included if the data is
+                from a coadd dataset.
     """
     plt.text(0.85, 0.98, "Camera: " + plotInfoDict["cameraName"], fontsize=8, alpha=0.8,
              transform=fig.transFigure)
@@ -214,22 +223,26 @@ def calcFakesAreaDepth(inputFakesMatched, processedFakesMatched, areaDict, measC
     Parameters
     ----------
     inputFakesMatched : `pandas.core.frame.DataFrame`
-        The catalog used to add the fakes originally, matched to the processed catalog.
+        The catalog used to add the fakes originally, matched to the processed
+        catalog.
     processedFakesMatched : `pandas.core.frame.DataFrame`
         The catalog produced by the stack from the images with fakes in.
     areaDict : `dict`
         A dict containing the area of each ccd.
-        Examples of keys, there is one of these for every ccd number specified when the code is called.
+        Examples of keys, there is one of these for every ccd number specified
+        when the code is called.
             ``"1"``
-                The area of the the ccd not covered by the `bad` mask, in arcseconds
+                The area of the the ccd not covered by the `bad` mask, in
+                arcseconds.
             ``"corners_1"``
-                The corners of the ccd, `list` of `lsst.geom.SpherePoint`s, in degrees.
+                The corners of the ccd, `list` of `lsst.geom.SpherePoint`s, in
+                degrees.
     measColType : `string`
         default : 'base_CircularApertureFlux_25_0_'
         Which type of flux/magnitude column to use for calculating the depth.
     distNeighbor : `float`
-        The smallest distance to the nearest other source allowed to use the object for
-        calculations.
+        The smallest distance to the nearest other source allowed to use the
+        object for calculations.
     numSigmas : `float`
         default : '10'
         How many sigmas to calculate the median depth for.
@@ -260,10 +273,10 @@ def calcFakesAreaDepth(inputFakesMatched, processedFakesMatched, areaDict, measC
     areas = []
 
     for (i, ccd) in enumerate(ccds):
-        onCcd = ((processedFakesMatched["ccdId"].values == ccd) &
-                 (np.isfinite(processedFakesMatched[measColType + "mag"].values)) &
-                 (processedFakesMatched["nearestNeighbor"].values >= distNeighbor) &
-                 (inputFakesMatched["sourceType"].values == "star"))
+        onCcd = ((processedFakesMatched["ccdId"].values == ccd)
+                 & (np.isfinite(processedFakesMatched[measColType + "mag"].values))
+                 & (processedFakesMatched["nearestNeighbor"].values >= distNeighbor)
+                 & (inputFakesMatched["sourceType"].values == "star"))
 
         mags = processedFakesMatched[measColType + "mag"].values[onCcd]
         fluxes = processedFakesMatched[measColType + "instFlux"].values[onCcd]
@@ -275,8 +288,8 @@ def calcFakesAreaDepth(inputFakesMatched, processedFakesMatched, areaDict, measC
         [fluxDivFluxErrsSorted, magsSorted] = [list(unzippedTuple) for unzippedTuple in zip(*magsSNRatio)]
 
         if len(fluxDivFluxErrsSorted) > 1:
-            # Use a spline to interpolate the data and use it to give an estimate of the
-            # magnitude limit at signal to noise of 10 and 100
+            # Use a spline to interpolate the data and use it to give an
+            # estimate of the magnitude limit at signal to noise of 10 and 100.
             if len(list(set(fluxDivFluxErrsSorted))) < len(fluxDivFluxErrsSorted):
                 # The spline will complain if there is a duplicate in the list.
                 # Find the indices of the duplicated point and remove it
@@ -325,7 +338,8 @@ def plotFakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict, a
     Parameters
     ----------
     inputFakesMatched : `pandas.core.frame.DataFrame`
-        The catalog used to add the fakes originally, matched to the processed catalog.
+        The catalog used to add the fakes originally, matched to the processed
+        catalog.
     processedFakesMatched : `pandas.core.frame.DataFrame`
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
@@ -335,7 +349,8 @@ def plotFakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict, a
             ``"filter"``
                 The filter used for this data
             ``"visit"``
-                The visit of the data; only included if the data is from a single epoch dataset
+                The visit of the data; only included if the data is from a
+                single epoch dataset.
             ``"tract"``
                 The tract that the data comes from
             ``"photoCalibDataset"``
@@ -345,20 +360,24 @@ def plotFakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict, a
             ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
-                The patch that the data is from; only included if the data is from a coadd dataset
+                The patch that the data is from; only included if the data is
+                from a coadd dataset.
     areaDict : `dict`
         A dict containing the area of each ccd.
-        Examples of keys, there is one of these for every ccd number specified when the code is called.
+        Examples of keys, there is one of these for every ccd number specified
+        when the code is called.
             ``"1"``
-                The area of the the ccd not covered by the `bad` mask, in arcseconds
+                The area of the the ccd not covered by the `bad` mask, in
+                arcseconds.
             ``"corners_1"``
-                The corners of the ccd, `list` of `lsst.geom.SpherePoint`s, in degrees.
+                The corners of the ccd, `list` of `lsst.geom.SpherePoint`s, in
+                degrees.
     measColType : `string`
         default : 'base_CircularApertureFlux_25_0_'
         Which type of flux/magnitude column to use for calculating the depth.
     distNeighbor : `float`
-        The smallest distance to the nearest other source allowed to use the object for
-        calculations.
+        The smallest distance to the nearest other source allowed to use the
+        object for calculations.
     numSigmas : `float`
         default : '10'
         How many sigmas to calculate the median depth for.
@@ -372,9 +391,11 @@ def plotFakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict, a
         ``stats``
             The statistics calculated for the plot (`dict`), the dict contains:
                 MedDepth : `float`
-                    The median of the magnitudes at flux/flux error of ``numSigmas`` from all the ccds.
+                    The median of the magnitudes at flux/flux error of
+                    ``numSigmas`` from all the ccds.
         ``description``
-            The name the plot is saved under (`str`), for this plot ``areaDepth<numGigmas>``
+            The name the plot is saved under (`str`), for this plot
+            ``areaDepth<numGigmas>``.
         ``style``
             The style of the plot being made (`str`), set to ``fakes``.
 
@@ -384,7 +405,7 @@ def plotFakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict, a
     """
     yield
     areaDepthStruct = calcFakesAreaDepth(inputFakesMatched, processedFakesMatched, areaDict,
-                                         measColType="base_PsfFlux_", distNeighbor=2.0 / 3600.0,
+                                         measColType="base_PsfFlux_", distNeighbor=2.0/3600.0,
                                          numSigmas=numSigmas)
 
     plt.plot(areaDepthStruct.depthsToPlot, areaDepthStruct.cumAreas)
@@ -410,7 +431,8 @@ def plotFakesAreaDepth(inputFakesMatched, processedFakesMatched, plotInfoDict, a
 
 def plotWithTwoHists(xs, ys, xName, yName, xLabel, yLabel, title, plotInfoDict, statsUnit, yLims=False,
                      xLims=False):
-    """Makes a generic plot with a 2D histogram and collapsed histograms of each axis.
+    """Makes a generic plot with a 2D histogram and collapsed histograms of
+    each axis.
 
     Parameters
     ----------
@@ -435,7 +457,8 @@ def plotWithTwoHists(xs, ys, xName, yName, xLabel, yLabel, title, plotInfoDict, 
             ``"filter"``
                 The filter used for this data
             ``"visit"``
-                The visit of the data; only included if the data is from a single epoch dataset
+                The visit of the data; only included if the data is from a
+                single epoch dataset.
             ``"tract"``
                 The tract that the data comes from
             ``"photoCalibDataset"``
@@ -445,15 +468,16 @@ def plotWithTwoHists(xs, ys, xName, yName, xLabel, yLabel, title, plotInfoDict, 
             ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
-                The patch that the data is from; only included if the data is from a coadd dataset
+                The patch that the data is from; only included if the data is
+                from a coadd dataset.
     statsUnit : `string`
         The text used to describe the units of the statistics calculated.
     yLims : `Bool` or `tuple`
-        The y axis limits to use for the plot, default is False and they are calculated from the data.
-        If being given a tuple of (yMin, yMax).
+        The y axis limits to use for the plot, default is False and they are
+        calculated from the data.  If being given a tuple of (yMin, yMax).
     xLims : `Bool` or `tuple`
-        The x axis limits to use for the plot, default is False and they are calculated from the data.
-        If being given a tuple of (xMin, xMax).
+        The x axis limits to use for the plot, default is False and they are
+        calculated from the data.  If being given a tuple of (xMin, xMax).
 
     Returns
     -------
@@ -470,9 +494,9 @@ def plotWithTwoHists(xs, ys, xName, yName, xLabel, yLabel, title, plotInfoDict, 
 
     Notes
     -----
-    The `plotInfoDict` needs to be a dict containing camera, filter, visit, tract and
-    dataset (jointcal or not), it is used to add information to the plot. Returns the median and sigma MAD
-    for the x and y values.
+    The `plotInfoDict` needs to be a dict containing camera, filter, visit,
+    tract and dataset (jointcal or not), it is used to add information to the
+    plot. Returns the median and sigma MAD for the x and y values.
     """
 
     xsMed = np.median(xs)
@@ -559,8 +583,8 @@ def plotWithTwoHists(xs, ys, xName, yName, xLabel, yLabel, title, plotInfoDict, 
 
 def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict, binThresh=50.0, yLims=False,
                     xLims=False):
-    """Makes a generic plot with a scatter plot/2D histogram in the dense areas and a collapsed histogram of
-       the y axis.
+    """Makes a generic plot with a scatter plot/2D histogram in the dense areas
+    and a collapsed histogram of the y axis.
 
     Parameters
     ----------
@@ -569,7 +593,8 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict, b
     ys : `numpy.ndarray`
          The array to be plotted on the y axis.
     maskForStats : `numpy.ndarray`
-         An array of the ids of the objects to be used in calculating the printed stats.
+         An array of the ids of the objects to be used in calculating the
+         printed stats.
     xLabel : `string`
          The text to go on the xLabel of the plot.
     yLabel : `string`
@@ -583,7 +608,8 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict, b
             ``"filter"``
                 The filter used for this data
             ``"visit"``
-                The visit of the data; only included if the data is from a single epoch dataset
+                The visit of the data; only included if the data is from a
+                single epoch dataset.
             ``"tract"``
                 The tract that the data comes from
             ``"photoCalibDataset"``
@@ -593,16 +619,17 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict, b
             ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
-                The patch that the data is from; only included if the data is from a coadd dataset
+                The patch that the data is from; only included if the data is
+                from a coadd dataset.
     binThresh : `float`
-        The number of points there needs to be (in a vertical bin) to trigger binning the data rather
-        than plotting points.
+        The number of points there needs to be (in a vertical bin) to trigger
+        binning the data rather than plotting points.
     yLims : `Bool` or `tuple`
-        The y axis limits to use for the plot, default is False and they are calculated from the data.
-        If being given a tuple of (yMin, yMax).
+        The y axis limits to use for the plot, default is False and they are
+        calculated from the data.  If being given a tuple of (yMin, yMax).
     xLims : `Bool` or `tuple`
-        The x axis limits to use for the plot, default is False and they are calculated from the data.
-        If being given a tuple of (xMin, xMax).
+        The x axis limits to use for the plot, default is False and they are
+        calculated from the data.  If being given a tuple of (xMin, xMax).
 
     Returns
     -------
@@ -629,7 +656,8 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict, b
     yEdges = np.arange(fiveSigmaLow, fiveSigmaHigh, binSize)
     [xs1, xs25, xs50, xs75, xs95, xs97] = np.percentile(xs, [1, 25, 50, 75, 95, 97])
     xScale = (xs97 - xs1)/20.0  # This is ~5% of the data range
-    # 40 was used as the number of bins because it looked good, might need to be changed in the future
+    # 40 was used as the number of bins because it looked good, might need to
+    # be changed in the future.
     xEdges = np.arange(xs1 - xScale, xs95, (xs95 - (xs1 - xScale))/40.0)
 
     counts, xBins, yBins = np.histogram2d(xs, ys, bins=(xEdges, yEdges))
@@ -639,8 +667,8 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict, b
     xEdgesPlot = xEdges[ids][1:]
     xEdges = xEdges[ids]
 
-    # Create the codes needed to turn the sigmaMad lines into a path to speed up checking which points are
-    # inside the area
+    # Create the codes needed to turn the sigmaMad lines into a path to speed
+    # up checking which points are inside the area.
     codes = np.ones(len(xEdgesPlot)*2)*Path.LINETO
     codes[0] = Path.MOVETO
     codes[-1] = Path.CLOSEPOLY
@@ -679,7 +707,8 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict, b
     twoSigmaMadLine, = ax.plot(xEdgesPlot, meds + 2.0*sigmaMads, "k", alpha=0.4, label=r"2 $\sigma_{MAD}$")
     ax.plot(xEdgesPlot, meds - 2.0*sigmaMads, "k", alpha=0.4)
 
-    # Check which points are outside 1 sigmaMad of the median and plot these as points, histogram the rest
+    # Check which points are outside 1 sigmaMad of the median and plot these as
+    # points, histogram the rest.
     inside = sigmaMadPath.contains_points(np.array([xs, ys]).T)
     _, _, _, histIm = ax.hist2d(xs[inside], ys[inside], bins=(xEdgesPlot, yEdges), cmap=newBlues, zorder=-2,
                                 cmin=1)
@@ -729,7 +758,8 @@ def plotWithOneHist(xs, ys, maskForStats, xLabel, yLabel, title, plotInfoDict, b
     ax.set_ylabel(yLabel, fontsize=10)
     ax.axhline(0.0, color="grey", ls="--", zorder=-11)
 
-    # Make the plot limits median + 3 sigmaMad from all the points (not just those < the mag lim)
+    # Make the plot limits median + 3 sigmaMad from all the points (not just
+    # those < the mag lim).
     if yLims:
         ax.set_ylim(yLims[0], yLims[1])
     else:
@@ -788,7 +818,8 @@ def fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict,
     Parameters
     ----------
     inputFakesMatched : `pandas.core.frame.DataFrame`
-        The catalog used to add the fakes originally, matched to the processed catalog.
+        The catalog used to add the fakes originally, matched to the processed
+        catalog.
     processedFakesMatched : `pandas.core.frame.DataFrame`
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
@@ -798,7 +829,8 @@ def fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict,
             ``"filter"``
                 The filter used for this data
             ``"visit"``
-                The visit of the data; only included if the data is from a single epoch dataset
+                The visit of the data; only included if the data is from a
+                single epoch dataset.
             ``"tract"``
                 The tract that the data comes from
             ``"photoCalibDataset"``
@@ -808,7 +840,8 @@ def fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict,
             ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
-                The patch that the data is from; only included if the data is from a coadd dataset
+                The patch that the data is from; only included if the data is
+                from a coadd dataset.
     raFakesCol : `string`
         default : 'raJ2000_deg'
         The RA column to use from the fakes catalog.
@@ -843,18 +876,22 @@ def fakesPositionCompare(inputFakesMatched, processedFakesMatched, plotInfoDict,
                     The sigma MAD from the Dec. difference.
 
         ``description``
-            The name the plot is saved under (`str`), for this plot ``positionCompare``.
+            The name the plot is saved under (`str`), for this plot
+            ``positionCompare``.
         ``style``
             The style of the plot being made (`str`), set to ``fakes``.
 
     Notes
     -----
-    The two input catalogs need to be pre matched and in the same order so that the entry for an object is
-    in the same row in each catalog. The delta RA and Dec is given in milli arcseconds. The plot is made
-    using only objects that were stars in the input catalog of fakes. `plotInfoDict` needs to be a dict
-    containing camera, filter, visit, tract and dataset (jointcal or not). Returns the median and sigma MAD
-    for the RA and Dec offsets. plotInfoDict should also contain the magnitude limit that the plot should go
-    to (magLim) and the path and filename that the figure should be written to (outputName).
+    The two input catalogs need to be pre matched and in the same order so that
+    the entry for an object is in the same row in each catalog. The delta RA
+    and Dec is given in milli arcseconds. The plot is made using only objects
+    that were stars in the input catalog of fakes. `plotInfoDict` needs to be a
+    dict containing camera, filter, visit, tract and dataset (jointcal or not).
+    Returns the median and sigma MAD for the RA and Dec offsets. plotInfoDict
+    should also contain the magnitude limit that the plot should go to
+    (magLim) and the path and filename that the figure should be written to
+    (outputName).
     """
     yield
     pointsToUse = (processedFakesMatched[magCol].values < plotInfoDict["magLim"])
@@ -903,11 +940,14 @@ def focalPlaneBinnedValues(ras, decs, zs, title, colorBarLabel, areaDict, plotIn
         The text to be displayed as the color bar label.
     areaDict : `dict`
         A dict containing the area of each ccd.
-        Examples of keys, there is one of these for every ccd number specified when the code is called.
+        Examples of keys, there is one of these for every ccd number specified
+        when the code is called.
             ``"1"``
-                The area of the the ccd not covered by the `bad` mask, in arcseconds
+                The area of the the ccd not covered by the `bad` mask, in
+                arcseconds.
             ``"corners_1"``
-                The corners of the ccd, `list` of `lsst.geom.SpherePoint`s, in degrees.
+                The corners of the ccd, `list` of `lsst.geom.SpherePoint`s, in
+                degrees.
     plotInfoDict : `dict`
         A dictionary of information about the data being plotted.
             ``"cameraName"``
@@ -915,7 +955,8 @@ def focalPlaneBinnedValues(ras, decs, zs, title, colorBarLabel, areaDict, plotIn
             ``"filter"``
                 The filter used for this data
             ``"visit"``
-                The visit of the data; only included if the data is from a single epoch dataset
+                The visit of the data; only included if the data is from a
+                single epoch dataset.
             ``"tract"``
                 The tract that the data comes from
             ``"photoCalibDataset"``
@@ -925,16 +966,18 @@ def focalPlaneBinnedValues(ras, decs, zs, title, colorBarLabel, areaDict, plotIn
             ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
-                The patch that the data is from; only included if the data is from a coadd dataset
+                The patch that the data is from; only included if the data is
+                from a coadd dataset.
     statistic : `str` or `function`
         default : 'median'
-        Either a string that can be used by scipy.stats.binned_statistic_2d to determine
-        the function (see the docs for scipy.stats.binned_statistic_2d) or a user defined
-        function that returns the value to be displayed in each bin.
+        Either a string that can be used by scipy.stats.binned_statistic_2d to
+        determine the function (see the docs for
+        scipy.stats.binned_statistic_2d) or a user defined function that
+        returns the value to be displayed in each bin.
     plotLims : `bool` or `tuple`
         default : 'False'
-        If the plot should have specified plot limits rather than calculating them from the data
-        this should be a tuple of (vmin, vmax).
+        If the plot should have specified plot limits rather than calculating
+        them from the data this should be a tuple of (vmin, vmax).
 
     Returns
     -------
@@ -978,8 +1021,9 @@ def focalPlaneBinnedValues(ras, decs, zs, title, colorBarLabel, areaDict, plotIn
         width = corners[2].getRa().asDegrees() - corners[0].getRa().asDegrees()
         height = corners[2].getDec().asDegrees() - corners[0].getDec().asDegrees()
 
-        # Some of the ccds are rotated and some have xy0 as being on the right with negative width/height
-        # this upsets the binning so find the min and max to calculate positive bin widths from.
+        # Some of the ccds are rotated and some have xy0 as being on the right
+        # with negative width/height this upsets the binning so find the min
+        # and max to calculate positive bin widths from.
         minX = np.min([xy[0], corners[2].getRa().asDegrees()])
         maxX = np.max([xy[0], corners[2].getRa().asDegrees()])
         minY = np.min([xy[1], corners[2].getDec().asDegrees()])
@@ -1007,8 +1051,8 @@ def focalPlaneBinnedValues(ras, decs, zs, title, colorBarLabel, areaDict, plotIn
         ccdPatch = patches.Rectangle(xy, width, height, fill=False, edgecolor="k", alpha=0.7)
         ax.add_patch(ccdPatch)
 
-        # Check which points are on the ccd, the ccd patch is in different coordinates to the data, hence
-        # the transform being required
+        # Check which points are on the ccd, the ccd patch is in different
+        # coordinates to the data, hence the transform being required.
         trans = ccdPatch.get_patch_transform()
         pointsOnCcd = ccdPatch.get_path().contains_points(list(zip(ras, decs)), transform=trans)
 
@@ -1043,12 +1087,14 @@ def focalPlaneBinnedValues(ras, decs, zs, title, colorBarLabel, areaDict, plotIn
 
 def fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict, magCol="base_PsfFlux_mag",
                           verifyJob=None):
-    """Make a plot showing the comparison between the input and extracted magnitudes.
+    """Make a plot showing the comparison between the input and extracted
+    magnitudes.
 
     Parameters
     ----------
     inputFakesMatched : `pandas.core.frame.DataFrame`
-        The catalog used to add the fakes originally, matched to the processed catalog.
+        The catalog used to add the fakes originally, matched to the processed
+        catalog.
     processedFakesMatched : `pandas.core.frame.DataFrame`
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
@@ -1058,7 +1104,8 @@ def fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict
             ``"filter"``
                 The filter used for this data
             ``"visit"``
-                The visit of the data; only included if the data is from a single epoch dataset
+                The visit of the data; only included if the data is from a
+                single epoch dataset.
             ``"tract"``
                 The tract that the data comes from
             ``"photoCalibDataset"``
@@ -1068,7 +1115,8 @@ def fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict
             ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
-                The patch that the data is from; only included if the data is from a coadd dataset
+                The patch that the data is from; only included if the data is
+                from a coadd dataset.
     magCol : `string`
         default : 'base_PsfFlux_mag'
         The magnitude column to use from the catalog.
@@ -1091,20 +1139,24 @@ def fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict
                     The sigma MAD from the Dec. difference.
 
         ``description``
-            The name the plot is saved under (`str`), for this plot ``magnitudeCompare_<mag col used>``
+            The name the plot is saved under (`str`), for this plot
+            ``magnitudeCompare_<mag col used>``.
         ``style``
             The style of the plot being made (`str`), set to ``fakes``.
 
     Notes
     -----
-    The two input catalogs need to be pre matched and in the same order so that the entry for an object is
-    in the same row in each catalog. The magnitude difference is given in milli mags. The plot is made
-    using only objects that were stars in the input catalog of fakes. `plotInfoDict` needs to be a dict
-    containing camera, filter, visit, tract and dataset (jointcal or not). plotInfoDict should also contain
-    the magnitude limit that the plot should go to (magLim). Adds two metrics to the fakesAnalysis metrics
-    file, fake_stars_magDiff and fake_stars_magDiffSigmaMad which can be used to track the evolution of the
-    median difference (and the sigma MAD of the distribution) between the input and extracted magnitudes for
-    fake stars brighter than the given magnitude limit.
+    The two input catalogs need to be pre matched and in the same order so that
+    the entry for an object is in the same row in each catalog. The magnitude
+    difference is given in milli mags. The plot is made using only objects that
+    were stars in the input catalog of fakes. `plotInfoDict` needs to be a dict
+    containing camera, filter, visit, tract and dataset (jointcal or not).
+    plotInfoDict should also contain the magnitude limit that the plot should
+    go to (magLim). Adds two metrics to the fakesAnalysis metrics file,
+    fake_stars_magDiff and fake_stars_magDiffSigmaMad which can be used to
+    track the evolution of the median difference (and the sigma MAD of the
+    distribution) between the input and extracted magnitudes for fake stars
+    brighter than the given magnitude limit.
     """
     yield
     band = plotInfoDict["filter"][-1].lower()
@@ -1141,13 +1193,14 @@ def fakesMagnitudeCompare(inputFakesMatched, processedFakesMatched, plotInfoDict
 
 def fakesMagnitudeNearestNeighbor(inputFakesMatched, processedFakesMatched, plotInfoDict,
                                   magCol="base_PsfFlux_mag"):
-    """Make a plot showing the comparison between the input and extracted magnitudes against the distance
-       to the neareast neighbor.
+    """Make a plot showing the comparison between the input and extracted
+    magnitudes against the distance to the neareast neighbor.
 
     Parameters
     ----------
     inputFakesMatched : `pandas.core.frame.DataFrame`
-        The catalog used to add the fakes originally, matched to the processed catalog.
+        The catalog used to add the fakes originally, matched to the processed
+        catalog.
     processedFakesMatched : `pandas.core.frame.DataFrame`
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
@@ -1157,7 +1210,8 @@ def fakesMagnitudeNearestNeighbor(inputFakesMatched, processedFakesMatched, plot
             ``"filter"``
                 The filter used for this data
             ``"visit"``
-                The visit of the data; only included if the data is from a single epoch dataset
+                The visit of the data; only included if the data is from a
+                single epoch dataset.
             ``"tract"``
                 The tract that the data comes from
             ``"photoCalibDataset"``
@@ -1167,7 +1221,8 @@ def fakesMagnitudeNearestNeighbor(inputFakesMatched, processedFakesMatched, plot
             ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
-                The patch that the data is from; only included if the data is from a coadd dataset
+                The patch that the data is from; only included if the data is
+                from a coadd dataset.
     magCol : `string`
         default : 'base_PsfFlux_mag'
         The magnitude column to use from the catalog.
@@ -1179,19 +1234,23 @@ def fakesMagnitudeNearestNeighbor(inputFakesMatched, processedFakesMatched, plot
         ``fig``
             The figure to be saved (`matplotlib.figure.Figure`)
         ``stats``
-           The statistics calculated for the plot, here no stats are calculated so it is None
+           The statistics calculated for the plot, here no stats are calculated
+           so it is None.
         ``description``
-            The name the plot is saved under (`str`), for this plot ``magnitudeNearestNeighbour``
+            The name the plot is saved under (`str`), for this plot
+            ``magnitudeNearestNeighbour``.
         ``style``
             The style of the plot being made (`str`), set to ``fakes``.
 
     Notes
     -----
-    The two input catalogs need to be pre matched and in the same order so that the entry for an object is
-    in the same row in each catalog. The magnitude difference is given in milli mags. The plot is made
-    using only objects that were stars in the input catalog of fakes. `plotInfoDict` needs to be a dict
-    containing camera, filter, visit, tract and dataset (jointcal or not). plotInfoDict should also contain
-    the magnitude limit that the plot should go to (magLim).
+    The two input catalogs need to be pre matched and in the same order so that
+    the entry for an object is in the same row in each catalog. The magnitude
+    difference is given in milli mags. The plot is made using only objects that
+    were stars in the input catalog of fakes. `plotInfoDict` needs to be a dict
+    containing camera, filter, visit, tract and dataset (jointcal or not).
+    plotInfoDict should also contain the magnitude limit that the plot should
+    go to (magLim).
     """
     yield
     band = plotInfoDict["filter"][-1].lower()
@@ -1224,12 +1283,14 @@ def fakesMagnitudeNearestNeighbor(inputFakesMatched, processedFakesMatched, plot
 
 def fakesMagnitudeBlendedness(inputFakesMatched, processedFakesMatched, plotInfoDict,
                               magCol="base_PsfFlux_mag"):
-    """Make a plot showing the comparison between the input and extracted magnitudes against blendedness.
+    """Make a plot showing the comparison between the input and extracted
+    magnitudes against blendedness.
 
     Parameters
     ----------
     inputFakesMatched : `pandas.core.frame.DataFrame`
-        The catalog used to add the fakes originally, matched to the processed catalog.
+        The catalog used to add the fakes originally, matched to the processed
+        catalog.
     processedFakesMatched : `pandas.core.frame.DataFrame`
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
@@ -1239,7 +1300,8 @@ def fakesMagnitudeBlendedness(inputFakesMatched, processedFakesMatched, plotInfo
             ``"filter"``
                 The filter used for this data
             ``"visit"``
-                The visit of the data; only included if the data is from a single epoch dataset
+                The visit of the data; only included if the data is from a
+                single epoch dataset.
             ``"tract"``
                 The tract that the data comes from
             ``"photoCalibDataset"``
@@ -1249,7 +1311,8 @@ def fakesMagnitudeBlendedness(inputFakesMatched, processedFakesMatched, plotInfo
             ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
-                The patch that the data is from; only included if the data is from a coadd dataset
+                The patch that the data is from; only included if the data is
+                from a coadd dataset.
     magCol : `string`
         default : 'base_PsfFlux_mag'
         The magnitude column to use from the catalog.
@@ -1261,20 +1324,24 @@ def fakesMagnitudeBlendedness(inputFakesMatched, processedFakesMatched, plotInfo
         ``fig``
             The figure to be saved (`matplotlib.figure.Figure`)
         ``stats``
-           The statistics calculated for the plot, here no stats are calculated so it is None
+           The statistics calculated for the plot, here no stats are calculated
+           so it is None.
         ``description``
-            The name the plot is saved under (`str`), for this plot ``magnitudeBlendedness``
+            The name the plot is saved under (`str`), for this plot
+            ``magnitudeBlendedness``.
         ``style``
             The style of the plot being made (`str`), set to ``fakes``.
 
 
     Notes
     -----
-    The two input catalogs need to be pre matched and in the same order so that the entry for an object is
-    in the same row in each catalog. The magnitude difference is given in milli mags. The plot is made
-    using only objects that were stars in the input catalog of fakes. `plotInfoDict` needs to be a dict
-    containing camera, filter, visit, tract and dataset (jointcal or not). plotInfoDict should also contain
-    the magnitude limit that the plot should go to (magLim).
+    The two input catalogs need to be pre matched and in the same order so that
+    the entry for an object is in the same row in each catalog. The magnitude
+    difference is given in milli mags. The plot is made using only objects that
+    were stars in the input catalog of fakes. `plotInfoDict` needs to be a dict
+    containing camera, filter, visit, tract and dataset (jointcal or not).
+    plotInfoDict should also contain the magnitude limit that the plot should
+    go to (magLim).
     """
     yield
     band = plotInfoDict["filter"][-1].lower()
@@ -1305,16 +1372,18 @@ def fakesMagnitudeBlendedness(inputFakesMatched, processedFakesMatched, plotInfo
 def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, plotInfoDict, areaDict,
                           raFakesCol="raJ2000_deg", decFakesCol="decJ2000_deg",
                           raCatCol="coord_ra_deg", decCatCol="coord_dec_deg", distNeighbor=2.0/3600.0):
-    """Makes three plots, one showing a two dimensional histogram of the fraction of fakes recovered,
-    one a 1D histogram showing the area against the depth and one showing the fraction of input fakes
-    recovered by magnitude.
+    """Makes three plots, one showing a two dimensional histogram of the
+    fraction of fakes recovered, one a 1D histogram showing the area against
+    the depth and one showing the fraction of input fakes recovered by
+    magnitude.
 
     Parameters
     ----------
     inputFakes : `pandas.core.frame.DataFrame`
         The catalog used to add the fakes originally.
     inputFakesMatched : `pandas.core.frame.DataFrame`
-        The catalog used to add the fakes originally, matched to the processed catalog.
+        The catalog used to add the fakes originally, matched to the processed
+        catalog.
     processedFakesMatched : `pandas.core.frame.DataFrame`
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
@@ -1324,7 +1393,8 @@ def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, 
             ``"filter"``
                 The filter used for this data
             ``"visit"``
-                The visit of the data; only included if the data is from a single epoch dataset
+                The visit of the data; only included if the data is from a
+                single epoch dataset.
             ``"tract"``
                 The tract that the data comes from
             ``"photoCalibDataset"``
@@ -1334,14 +1404,18 @@ def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, 
             ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
-                The patch that the data is from; only included if the data is from a coadd dataset
+                The patch that the data is from; only included if the data is
+                from a coadd dataset.
     areaDict : `dict`
         A dict containing the area of each ccd.
-        Examples of keys, there is one of these for every ccd number specified when the code is called.
+        Examples of keys, there is one of these for every ccd number specified
+        when the code is called.
             ``"1"``
-                The area of the the ccd not covered by the `bad` mask, in arcseconds
+                The area of the the ccd not covered by the `bad` mask, in
+                arcseconds.
             ``"corners_1"``
-                The corners of the ccd, `list` of `lsst.geom.SpherePoint`s, in degrees.
+                The corners of the ccd, `list` of `lsst.geom.SpherePoint`s, in
+                degrees.
     raFakesCol : `string`
         default : 'raJ2000_deg'
         The RA column to use from the fakes catalog.
@@ -1362,9 +1436,11 @@ def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, 
         ``fig``
             The figure to be saved (`matplotlib.figure.Figure`)
         ``stats``
-           The statistics calculated for the plot, here no stats are calculated so it is None
+           The statistics calculated for the plot, here no stats are calculated
+           so it is None.
         ``description``
-            The name the plot is saved under (`str`), for this plot ``completenessHist2D``
+            The name the plot is saved under (`str`), for this plot
+            ``completenessHist2D``.
         ``style``
             The style of the plot being made (`str`), set to ``fakes``.
 
@@ -1373,9 +1449,11 @@ def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, 
         ``fig``
             The figure to be saved (`matplotlib.figure.Figure`)
         ``stats``
-           The statistics calculated for the plot, here no stats are calculated so it is None
+           The statistics calculated for the plot, here no stats are calculated
+           so it is None.
         ``description``
-            The name the plot is saved under (`str`), for this plot ``completenessAreaDepth``
+            The name the plot is saved under (`str`), for this plot
+            ``completenessAreaDepth``.
         ``style``
             The style of the plot being made (`str`), set to ``fakes``.
 
@@ -1384,9 +1462,11 @@ def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, 
         ``fig``
             The figure to be saved (`matplotlib.figure.Figure`)
         ``stats``
-           The statistics calculated for the plot, here no stats are calculated so it is None
+           The statistics calculated for the plot, here no stats are calculated
+           so it is None.
         ``description``
-            The name the plot is saved under (`str`), for this plot ``completenessHist``
+            The name the plot is saved under (`str`), for this plot
+            ``completenessHist``.
         ``style``
             The style of the plot being made (`str`), set to ``fakes``.
 
@@ -1394,9 +1474,10 @@ def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, 
     -----
     Makes 3 plots to study the completeness of the data.
     The first is a 2D histogram of the fraction of fakes recovered.
-    The second is a cumulative plot of the area which has fainter sources recovered than a given magnitude.
-    The third is a histogram showing the fraction recovered in each magnitude bin with the number input and
-    recovered overplotted.
+    The second is a cumulative plot of the area which has fainter sources
+    recovered than a given magnitude.
+    The third is a histogram showing the fraction recovered in each magnitude
+    bin with the number input and recovered overplotted.
     """
     yield
 
@@ -1430,14 +1511,15 @@ def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, 
 
     # Find the faintest recovered isolated star on each ccd
     for (i, ccd) in enumerate(ccds):
-        onCcd = ((processedFakesMatched["ccdId"].values == ccd) &
-                 (processedFakesMatched["nearestNeighbor"].values >= distNeighbor) &
-                 (inputFakesMatched["sourceType"].values == "star"))
+        onCcd = ((processedFakesMatched["ccdId"].values == ccd)
+                 & (processedFakesMatched["nearestNeighbor"].values >= distNeighbor)
+                 & (inputFakesMatched["sourceType"].values == "star"))
 
         depths.append(np.max(inputFakesMatched[band + "magVar"].values[onCcd]))
         areas[i] = areaDict[ccd]/(3600.0**2)
 
-    # Make a cumulative histogram of the area vs magnitude of the faintest source for each ccd
+    # Make a cumulative histogram of the area vs magnitude of the faintest
+    # source for each ccd.
     bins = np.linspace(min(depths), max(depths), 101)
     areasOut = np.zeros(100)
     n = 0
@@ -1522,15 +1604,17 @@ def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, 
 def fakesMagnitudePositionError(inputFakesMatched, processedFakesMatched, plotInfoDict, areaDict,
                                 raFakesCol="raJ2000_deg", decFakesCol="decJ2000_deg", raCatCol="coord_ra_deg",
                                 decCatCol="coord_dec_deg", magCol="base_PsfFlux_mag"):
-    """Make plots showing the comparison between the input minus the extracted magnitudes and the
-       difference in the input and extracted positions, one showing the position difference locations
-       in R.A. and Dec., one showing position differences against output - input magnitude difference
-       and one showing position errors against input magnitude.
+    """Make plots showing the comparison between the input minus the extracted
+    magnitudes and the difference in the input and extracted positions, one
+    showing the position difference locations in R.A. and Dec., one showing
+    position differences against output - input magnitude difference and one
+    showing position errors against input magnitude.
 
     Parameters
     ----------
     inputFakesMatched : `pandas.core.frame.DataFrame`
-        The catalog used to add the fakes originally matched to the processed catalog.
+        The catalog used to add the fakes originally matched to the processed
+        catalog.
     processedFakesMatched : `pandas.core.frame.DataFrame`
         The catalog produced by the stack from the images with fakes in.
     plotInfoDict : `dict`
@@ -1540,7 +1624,8 @@ def fakesMagnitudePositionError(inputFakesMatched, processedFakesMatched, plotIn
             ``"filter"``
                 The filter used for this data
             ``"visit"``
-                The visit of the data; only included if the data is from a single epoch dataset
+                The visit of the data; only included if the data is from a
+                single epoch dataset.
             ``"tract"``
                 The tract that the data comes from
             ``"photoCalibDataset"``
@@ -1550,14 +1635,18 @@ def fakesMagnitudePositionError(inputFakesMatched, processedFakesMatched, plotIn
             ``"skyWcsDataset"``
                 The sky Wcs dataset used
             ``"patch"``
-                The patch that the data is from; only included if the data is from a coadd dataset
+                The patch that the data is from; only included if the data is
+                from a coadd dataset.
     areaDict : `dict`
         A dict containing the area of each ccd.
-        Examples of keys, there is one of these for every ccd number specified when the code is called.
+        Examples of keys, there is one of these for every ccd number specified
+        when the code is called.
             ``"1"``
-                The area of the the ccd not covered by the `bad` mask, in arcseconds
+                The area of the the ccd not covered by the `bad` mask, in
+                arcseconds.
             ``"corners_1"``
-                The corners of the ccd, `list` of `lsst.geom.SpherePoint`s, in degrees.
+                The corners of the ccd, `list` of `lsst.geom.SpherePoint`s, in
+                degrees.
    raFakesCol : `string`
         default : 'raJ2000_deg'
         The RA column to use from the fakes catalog.
@@ -1581,9 +1670,11 @@ def fakesMagnitudePositionError(inputFakesMatched, processedFakesMatched, plotIn
         ``fig``
             The figure to be saved (`matplotlib.figure.Figure`)
         ``stats``
-           The statistics calculated for the plot, here no stats are calculated so it is None
+           The statistics calculated for the plot, here no stats are calculated
+           so it is None.
         ``description``
-            The name the plot is saved under (`str`), for this plot ``magnitudePosErrs``
+            The name the plot is saved under (`str`), for this plot
+            ``magnitudePosErrs``.
         ``style``
             The style of the plot being made (`str`), set to ``fakes``.
 
@@ -1592,9 +1683,11 @@ def fakesMagnitudePositionError(inputFakesMatched, processedFakesMatched, plotIn
         ``fig``
             The figure to be saved (`matplotlib.figure.Figure`)
         ``stats``
-           The statistics calculated for the plot, here no stats are calculated so it is None
+           The statistics calculated for the plot, here no stats are calculated
+           so it is None.
         ``description``
-            The name the plot is saved under (`str`), for this plot ``magDiffPosErrs``
+            The name the plot is saved under (`str`), for this plot
+            ``magDiffPosErrs``.
         ``style``
             The style of the plot being made (`str`), set to ``fakes``.
 
@@ -1603,19 +1696,23 @@ def fakesMagnitudePositionError(inputFakesMatched, processedFakesMatched, plotIn
         ``fig``
             The figure to be saved (`matplotlib.figure.Figure`)
         ``stats``
-           The statistics calculated for the plot, here no stats are calculated so it is None
+           The statistics calculated for the plot, here no stats are calculated
+           so it is None.
         ``description``
-            The name the plot is saved under (`str`), for this plot ``PosErrsCcd``
+            The name the plot is saved under (`str`), for this plot
+            ``PosErrsCcd``.
         ``style``
             The style of the plot being made (`str`), set to ``fakes``.
 
     Notes
     -----
-    The two input catalogs need to be pre matched and in the same order so that the entry for an object is
-    in the same row in each catalog. The magnitude difference is given in milli mags. The plot is made
-    using only objects that were stars in the input catalog of fakes. `plotInfoDict` needs to be a dict
-    containing camera, filter, visit, tract and dataset (jointcal or not). plotInfoDict should also contain
-    the magnitude limit that the plot should go to (magLim).
+    The two input catalogs need to be pre matched and in the same order so that
+    the entry for an object is in the same row in each catalog. The magnitude
+    difference is given in milli mags. The plot is made using only objects that
+    were stars in the input catalog of fakes. `plotInfoDict` needs to be a dict
+    containing camera, filter, visit, tract and dataset (jointcal or not).
+    plotInfoDict should also contain the magnitude limit that the plot should
+    go to (magLim).
     """
     yield
     band = plotInfoDict["filter"][-1].lower()
@@ -1631,8 +1728,8 @@ def fakesMagnitudePositionError(inputFakesMatched, processedFakesMatched, plotIn
     dDec *= (3600*1000)
 
     positionErrors = np.log10(np.sqrt(dDec**2.0 + dRA**2.0))
-    finiteValues = np.where((np.isfinite(fakeMagStars)) & (np.isfinite(positionErrors)) &
-                            (np.isfinite(catMagStars)))[0]
+    finiteValues = np.where((np.isfinite(fakeMagStars)) & (np.isfinite(positionErrors))
+                            & (np.isfinite(catMagStars)))[0]
     xs = fakeMagStars[finiteValues]
     ys = positionErrors[finiteValues]
     maskForStats = (xs < plotInfoDict["magLim"])
