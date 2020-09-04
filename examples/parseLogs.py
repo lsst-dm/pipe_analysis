@@ -17,8 +17,8 @@ class VisitEntry(object):
 
 
 def insertNullEntry(insertFromEntry, insertToList, insertAtIndex):
-    '''Insert a null entry for any missing entries in a given entry list
-    '''
+    """Insert a null entry for any missing entries in a given entry list.
+    """
     insertToEntry = copy.deepcopy(insertFromEntry)
     for k in insertToEntry.starStatsDict.iterkeys():
         if k == "num" or k == "total":

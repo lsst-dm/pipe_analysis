@@ -83,8 +83,8 @@ class CoaddAnalysisConfig(Config):
                                                                  "? (ignored if plotMatchesOnly is True)"))
     doPlotRhoStatistics = Field(dtype=bool, default=True, doc=("Plot Rho statistics?"))
     treecorrParams = DictField(keytype=str, itemtype=None, optional=True,
-                               default={'nbins': 11, 'min_sep': 0.5, 'max_sep': 20,
-                                        'sep_units': "arcmin", 'verbose': 0},
+                               default={"nbins": 11, "min_sep": 0.5, "max_sep": 20,
+                                        "sep_units": "arcmin", "verbose": 0},
                                doc=("keyword arguments to be passed to treecorr,"
                                     "if doPlotRhoStatistics is True"))
     doPlotQuiver = Field(dtype=bool, default=True, doc=("Plot ellipticity residuals quiver plot? "
@@ -131,7 +131,7 @@ class CoaddAnalysisConfig(Config):
     hasFakes = Field(dtype=bool, default=False, doc="Include the analysis of the added fake sources?")
 
     def saveToStream(self, outfile, root="root"):
-        """Required for loading colorterms from a Config outside the 'lsst'
+        """Required for loading colorterms from a Config outside the "lsst"
         namespace.
         """
         print("import lsst.meas.photocal.colorterms", file=outfile)
@@ -388,10 +388,10 @@ class CoaddAnalysisTask(CmdLineTask):
                     # Add pre-computed columns for parquet tables
                     forced = addPreComputedColumns(forced, fluxToPlotList=self.config.fluxToPlotList,
                                                    toMilli=self.config.toMilli, unforcedCat=unforced)
-                    dataRef_forced = repoInfo.butler.dataRef('analysisCoaddTable_forced',
+                    dataRef_forced = repoInfo.butler.dataRef("analysisCoaddTable_forced",
                                                              dataId=repoInfo.dataId)
                     writeParquet(dataRef_forced, forced, badArray=badForced)
-                dataRef_unforced = repoInfo.butler.dataRef('analysisCoaddTable_unforced',
+                dataRef_unforced = repoInfo.butler.dataRef("analysisCoaddTable_unforced",
                                                            dataId=repoInfo.dataId)
                 # Add pre-computed columns for parquet tables
                 unforced = addPreComputedColumns(unforced, fluxToPlotList=self.config.fluxToPlotList,
@@ -550,26 +550,23 @@ class CoaddAnalysisTask(CmdLineTask):
             A list of butler data references whose catalogs of dataset type are
             to be read in.
         dataset : `str`
-            Name of the catalog dataset to be read in
+            Name of the catalog dataset to be read in.
         repoInfo : `lsst.pipe.base.Struct`
             A struct containing relevant information about the repository under
             study.  Elements used here include the dataset names for any
             external calibrations to be applied.
-        fakeCat : `pandas.core.frame.DataFrame`
-            Default : None
+        fakeCat : `pandas.core.frame.DataFrame`, optional
             Catalog of fake sources, used if hasFakes is `True` in which case a
             column (onPatch) is added with the patch number if the fake source
             overlaps a ccd and `np.nan` if it does not.
-        raFakesCol : `str`
-            The name of the R.A. column to use from the fakes catalogue.
-            Default : `raJ2000`
-        decFakesCol : `str`
-            The name of the Dec, column to use from the fakes catalogue.
-            Default : `decFakesCol`
+        raFakesCol : `str`, optional
+            The name of the RA column to use from the fakes catalogue.
+        decFakesCol : `str`, optional
+            The name of the Dec column to use from the fakes catalogue.
 
         Raises
         ------
-        `TaskError`
+        TaskError
             If no data is read in for the dataRefList.
 
         Returns
@@ -578,10 +575,10 @@ class CoaddAnalysisTask(CmdLineTask):
             A struct with attributes:
             ``commonZpCatalog``
                 The concatenated common zeropoint calibrated catalog
-                (`lsst.afw.table.SourceCatalog`s).
+                (`lsst.afw.table.SourceCatalog`).
             ``catalog``
                 The concatenated SFM or external calibration calibrated catalog
-                (`lsst.afw.table.SourceCatalog`s).
+                (`lsst.afw.table.SourceCatalog`).
             ``areaDict``
                 Contains patch keys that index the patch corners in RA/Dec and
                 the effective patch area (i.e. neither the "BAD" nor "NO_DATA"
@@ -774,11 +771,11 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def calibrateCatalogs(self, catalog, wcs=None):
         self.zpLabel = "common (" + str(self.config.analysis.coaddZp) + ")"
-        # My persisted catalogs in lauren/LSST/DM-6816new all have nan for ra
-        # dec (see DM-9556).
+        # My persisted catalogs in lauren/LSST/DM-6816new all have nan for RA
+        # and Dec (see DM-9556).
         if np.all(np.isnan(catalog["coord_ra"])):
             if wcs is None:
-                self.log.warn("Bad ra, dec entries but can't update because wcs is None")
+                self.log.warn("Bad RA, Dec entries but can't update because wcs is None")
             else:
                 for src in catalog:
                     src.updateCoord(wcs)
@@ -1222,7 +1219,8 @@ class CoaddAnalysisTask(CmdLineTask):
                                                         zpLabel=zpLabel, uberCalLabel=uberCalLabel)
 
     def isBad(self, source):
-        """Return True if any of config.badFlags are set for this source."""
+        """Return True if any of config.badFlags are set for this source.
+        """
         for flag in self.config.analysis.flags:
             if source.get(flag):
                 return True
@@ -1372,7 +1370,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 matches,
                 AstrometryDiff("src_coord_ra", "ref_coord_ra", declination1="src_coord_dec",
                                declination2="ref_coord_dec", unitScale=self.unitScale),
-                r"      $\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s) (calib_astrom_used)" % unitStr,
+                r"      $\delta_{RA}$ = $\Delta$RA*cos(Dec) (%s) (calib_astrom_used)" % unitStr,
                 shortName, self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
                 qMin=-0.2*qMatchScale, qMax=0.2*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
                 unitScale=self.unitScale).plotAll(shortName, plotInfoDict, areaDict, self.log,
@@ -1384,7 +1382,7 @@ class CoaddAnalysisTask(CmdLineTask):
             matches,
             AstrometryDiff("src_coord_ra", "ref_coord_ra", declination1="src_coord_dec",
                            declination2="ref_coord_dec", unitScale=self.unitScale),
-            r"$\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr, shortName, self.config.analysisMatches,
+            r"$\delta_{RA}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr, shortName, self.config.analysisMatches,
             prefix="src_", qMin=-0.2*qMatchScale, qMax=0.2*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
             unitScale=self.unitScale).plotAll(shortName, plotInfoDict, areaDict, self.log,
                                               enforcer=stdevEnforcer, **plotAllKwargs)
@@ -1449,8 +1447,8 @@ class CoaddAnalysisTask(CmdLineTask):
 
     def plotRhoStatistics(self, catalog, plotInfoDict, zpLabel=None,
                           forcedStr=None, postFix="", uberCalLabel=None):
-        """ Plot Rho Statistics with stars used for PSF modelling and
-        non-PSF stars.
+        """Plot Rho Statistics with stars used for PSF modelling and non-PSF
+        stars.
         """
         yield
         stats = None
@@ -1825,10 +1823,10 @@ class CompareCoaddAnalysisTask(CmdLineTask):
     def calibrateCatalogs(self, catalog, wcs=None):
         self.zpLabel = "common (" + str(self.config.analysis.coaddZp) + ")"
         # For some reason my persisted catalogs in lauren/LSST/DM-6816new all
-        # have nan for ra dec.
+        # have nan for RA and Dec.
         if np.all(np.isnan(catalog["coord_ra"])):
             if wcs is None:
-                self.log.warn("Bad ra, dec entries but can't update because wcs is None")
+                self.log.warn("Bad RA, Dec entries but can't update because wcs is None")
             else:
                 for src in catalog:
                     src.updateCoord(wcs)
@@ -1904,7 +1902,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                                     declination1="first_coord_dec",
                                                     declination2="second_coord_dec",
                                                     unitScale=self.unitScale),
-                            r"   Run Comparison: $\delta_{Ra}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr,
+                            r"   Run Comparison: $\delta_{RA}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr,
                             shortName, self.config.analysisMatches, prefix="first_", qMin=-0.2*matchRadius,
                             qMax=0.2*matchRadius, labeller=OverlapsStarGalaxyLabeller(),
                             unitScale=self.unitScale,

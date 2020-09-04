@@ -1,5 +1,3 @@
-#!/usr/bin/env python
-
 import matplotlib
 matplotlib.use("Agg")  # noqa #402
 import matplotlib.pyplot as plt
@@ -154,7 +152,7 @@ class NumStarLabeller(object):
 
 
 class ColorValueInFitRange(object):
-    """Functor to produce color value if in the appropriate range
+    """Functor to produce color value if in the appropriate range.
 
     Here the range is set by upper and lower lines roughly perpendicular to the
     fit where those lines cross the fit.  These numbers were previously
@@ -179,7 +177,7 @@ class ColorValueInFitRange(object):
 
 
 class ColorValueInPerpRange(object):
-    """Functor to produce color value if in the appropriate range
+    """Functor to produce color value if in the appropriate range.
 
     Here the range is set by the Ivezic etal. P1 limits provided in the
     requireGreater and requireLess parameters in the ivezicTransforms dict.
@@ -462,7 +460,7 @@ class ColorAnalysisTask(CmdLineTask):
                                                         "modelfit_CModel_instFlux", hscRun=repoInfo.hscRun)
         # Create and write parquet tables
         if self.config.doWriteParquetTables:
-            dataRef_color = repoInfo.butler.dataRef('analysisColorTable', dataId=repoInfo.dataId)
+            dataRef_color = repoInfo.butler.dataRef("analysisColorTable", dataId=repoInfo.dataId)
             writeParquet(dataRef_color, principalColCatsPsf)
             if self.config.writeParquetOnly:
                 self.log.info("Exiting after writing Parquet tables.  No plots generated.")
@@ -498,7 +496,7 @@ class ColorAnalysisTask(CmdLineTask):
             metaDict.update({"camera": repoInfo.camera.getName()})
         self.verifyJob = updateVerifyJob(self.verifyJob, metaDict=metaDict)
         # TODO: this should become a proper butler.put once we can persist the
-        # json files.
+        # json files (possibly DM-14768).
         verifyJobFilename = repoInfo.butler.get("colorAnalysis_verify_job_filename",
                                                 dataId=repoInfo.dataId)[0]
         self.verifyJob.write(verifyJobFilename)
@@ -516,21 +514,23 @@ class ColorAnalysisTask(CmdLineTask):
         ----------
         patchRefList : `list` of
                        `lsst.daf.persistence.butlerSubset.ButlerDataRef`
-           A list of butler data references whose catalogs of dataset type are
-           to be read in.
+            A `list` of butler data references whose catalogs of ``dataset``
+            type are to be read in.
         dataset : `str`
-           Name of the catalog dataset to be read in
+            Name of the catalog ``dataset`` to be read in.
 
         Raises
         ------
-        `TaskError`
-           If no data is read in for the dataRefList
+        TaskError
+            If no data is read in for ``patchRefList``.
 
         Returns
         -------
-        `list` of concatenated `lsst.afw.table.source.source.SourceCatalog`s
-        `areaDict` : `dict`
-            A dict containing the area of each ccd and the locations of their
+        concatenatedCatalogs : `lsst.afw.table.SourceCatalog`
+            The concatenated catalog of all existing ``dataset``s in
+            ``patchRefList``.
+        areaDict : `dict`
+            A `dict` containing the area of each ccd and the locations of their
             corners.
         """
         catList = []
@@ -571,7 +571,7 @@ class ColorAnalysisTask(CmdLineTask):
         return concatenateCatalogs(catList), areaDict
 
     def correctForGalacticExtinction(self, catalog, tractInfo):
-        """Correct all fluxes for each object for Galactic Extinction
+        """Correct all fluxes for each object for Galactic Extinction.
 
         This function uses the EBVbase class from lsst.sims.catUtils.dust.EBV,
         so lsst.sims.catUtils must be setup and accessible for use.
@@ -579,23 +579,25 @@ class ColorAnalysisTask(CmdLineTask):
         Parameters
         ----------
         catalog : `lsst.afw.table.SourceCatalog`
-           The source catalog for which to apply the per-object Galactic
-           Extinction correction to all fluxes.  Catalog is corrected in place
-           and a Galactic Extinction applied and flag columns are added.
+            The source ``catalog`` for which to apply the per-object Galactic
+            Extinction correction to all fluxes.  The ``catalog`` is corrected
+            in place and a Galactic Extinction applied and flag columns are
+            added.
         tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
-           TractInfo object associated with catalog
+            TractInfo object associated with ``catalog``.
 
         Raises
         ------
-        `ImportError`
-           If lsst.sims.catUtils.dust.EBV could not be imported.
+        ImportError
+            If `lsst.sims.catUtils.dust.EBV` could not be imported.
 
         Returns
         -------
-        Updated `lsst.afw.table.source.source.SourceCatalog` catalog with
-        fluxes corrected for Galactic Extinction with a column added
-        indicating correction applied and a flag indicating if the
-        correction failed (in the context having a non-np.isfinite value).
+        catalog : `lsst.afw.table.SourceCatalog`
+            The updated ``catalog`` with fluxes corrected for Galactic
+            Extinction with a column added indicating correction applied and a
+            flag indicating if the correction failed (in the context having a
+            non-`numpy.isfinite` value).
         """
         try:
             from lsst.sims.catUtils.dust.EBV import EBVbase as ebv
@@ -700,20 +702,19 @@ class ColorAnalysisTask(CmdLineTask):
         return catalog
 
     def transformCatalogs(self, catalogs, transforms, fluxColumn, hscRun=None):
-        """
-        Transform catalog entries according to the color transform given
+        """Transform catalog entries according to the color transform given.
 
         Parameters
         ----------
-        catalogs : `dict` of `lsst.afw.table.source.source.SourceCatalog`s
-           One dict entry per filter
+        catalogs : `dict` of `lsst.afw.table.SourceCatalog`
+            One `dict` entry per filter.
         transforms : `dict` of
-                     `lsst.pipe.analysis.colorAnalysis.ColorTransform`s
-           One dict entry per filter-dependent transform definition
-        hscRun : `str` or `NoneType`
-           A string representing "HSCPIPE_VERSION" fits header if the data were
-           processed with the (now obsolete, but old reruns still exist) "HSC
-           stack", None otherwise.
+                     `lsst.pipe.analysis.colorAnalysis.ColorTransform`
+            One `dict` entry per filter-dependent transform definition.
+        hscRun : `str` or `NoneType`, optional
+            A string representing "HSCPIPE_VERSION" fits header if the data
+            were processed with the (now obsolete, but old reruns still exist)
+            "HSC stack", `None` otherwise.
         """
         template = list(catalogs.values())[0]
         num = len(template)
@@ -1961,7 +1962,6 @@ def colorColorPlot(plotInfoDict, description, log, xStars, yStars, xGalaxies, yG
 def colorColor4MagPlots(plotInfoDict, description, log, xStars, yStars, xGalaxies, yGalaxies, magStars,
                         magGalaxies, xLabel, yLabel, filterStr, fluxColStr, xRange=None, yRange=None,
                         geLabel=None, uberCalLabel=None, logger=None, magThreshold=99.9, unitScale=1.0):
-
     fig, axes = plt.subplots(nrows=2, ncols=2, sharex=True, sharey=True)
     fig.subplots_adjust(hspace=0, wspace=0, bottom=0.11, right=0.82, top=0.91)
 
@@ -2043,7 +2043,8 @@ def colorColor4MagPlots(plotInfoDict, description, log, xStars, yStars, xGalaxie
 
 
 class ColorColorDistance(object):
-    """Functor to calculate distance from stellar locus in color-color plot"""
+    """Functor to calculate distance from stellar locus in color-color plot.
+    """
     def __init__(self, band1, band2, band3, poly, unitScale=1.0, xMin=None, xMax=None,
                  fitLineUpper=None, fitLineLower=None):
         self.band1 = band1
@@ -2093,7 +2094,7 @@ class SkyAnalysisRunner(TaskRunner):
 
 
 class SkyAnalysisTask(CoaddAnalysisTask):
-    """Version of CoaddAnalysisTask that runs on all inputs simultaneously
+    """Version of CoaddAnalysisTask that runs on all inputs simultaneously.
 
     This is most useful for utilising overlaps between tracts.
     """

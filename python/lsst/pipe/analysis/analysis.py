@@ -73,7 +73,7 @@ class AnalysisConfig(Config):
     coaddZp = Field(dtype=float, default=27.0, doc="Magnitude zero point to apply for coadds")
     commonZp = Field(dtype=float, default=33.0, doc="Magnitude zero point to apply for common ZP plots")
     doPlotOldMagsHist = Field(dtype=bool, default=False, doc="Make older, separated, mag and hist plots?")
-    doPlotRaDec = Field(dtype=bool, default=False, doc="Make delta vs. Ra and Dec plots?")
+    doPlotRaDec = Field(dtype=bool, default=False, doc="Make delta vs. RA and Dec plots?")
     doPlotFP = Field(dtype=bool, default=False, doc="Make FocalPlane plots?")
     doPlotCcdXy = Field(dtype=bool, default=False, doc="Make plots as a function of CCD x and y?")
     doPlotTractOutline = Field(dtype=bool, default=True, doc="Plot tract outline (may be a bit slow)?")
@@ -84,8 +84,8 @@ class AnalysisConfig(Config):
 
 
 class Analysis(object):
-    """Centralised base for plotting"""
-
+    """Centralised base for plotting.
+    """
     def __init__(self, catalog, func, quantityName, shortName, config, qMin=-0.2, qMax=0.2,
                  prefix="", flags=[], goodKeys=[], errFunc=None, labeller=AllLabeller(),
                  magThreshold=None, forcedMean=None, unitScale=1.0, compareCat=None, fluxColumn=None):
@@ -273,7 +273,8 @@ class Analysis(object):
 
     def plotAgainstMag(self, description, plotInfoDict, stats=None, matchRadius=None, matchRadiusUnitStr=None,
                        zpLabel=None, forcedStr=None, doPrintMedian=False):
-        """Plot quantity against magnitude"""
+        """Plot quantity against magnitude.
+        """
         fig, axes = plt.subplots(1, 1)
         plt.axhline(0, linestyle="--", color="0.4")
         if self.magThreshold > 90.0:
@@ -313,8 +314,8 @@ class Analysis(object):
     def plotAgainstMagAndHist(self, log, description, plotInfoDict, stats=None, matchRadius=None,
                               matchRadiusUnitStr=None, zpLabel=None, forcedStr=None, plotRunStats=True,
                               highlightList=None, extraLabels=None, uberCalLabel=None, doPrintMedian=False):
-        """Plot quantity against magnitude with side histogram"""
-
+        """Plot quantity against magnitude with side histogram.
+        """
         if plotInfoDict["plotType"] != "plotColor":
             filterLabelStr = "[{}]".format(plotInfoDict["filter"])
             if "lsst" in plotInfoDict["cameraName"]:
@@ -626,7 +627,8 @@ class Analysis(object):
                       forcedStr=None, filterStr=None, magThreshold=None, matchRadius=None,
                       matchRadiusUnitStr=None, uberCalLabel=None, doPrintMedian=False, vertLineList=None,
                       logPlot=True, density=False, cumulative=False, addDataList=None, addDataLabelList=None):
-        """Plot histogram of quantity"""
+        """Plot histogram of quantity.
+        """
         fig, axes = plt.subplots(1, 1)
         axes.axvline(0, linestyle="--", color="0.6")
         if vertLineList:
@@ -725,7 +727,8 @@ class Analysis(object):
                         matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, highlightList=None,
                         forcedStr=None, dataName="star", uberCalLabel=None, doPrintMedian=False,
                         style="sky-all"):
-        """Plot quantity as a function of position"""
+        """Plot quantity as a function of position.
+        """
         pad = 0.02  # Number of degrees to pad the axis ranges
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
         dec = np.rad2deg(self.catalog[self.prefix + "coord_dec"])
@@ -883,7 +886,7 @@ class Analysis(object):
             plotText(uberCalLabel, plt, axes, 0.14, -0.11, fontSize=7, color="green")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
-        strKwargs = dict(loc='upper left', fancybox=True, markerscale=1.2, scatterpoints=3, framealpha=0.35,
+        strKwargs = dict(loc="upper left", fancybox=True, markerscale=1.2, scatterpoints=3, framealpha=0.35,
                          facecolor="k")
         if highlightList is not None:
             axes.legend(bbox_to_anchor=(-0.05, 1.15), fontsize=7, **strKwargs)
@@ -928,8 +931,8 @@ class Analysis(object):
 
     def plotRaDec(self, description, plotInfoDict, stats=None, matchRadius=None, matchRadiusUnitStr=None,
                   zpLabel=None, forcedStr=None, uberCalLabel=None, doPrintMedian=False, style="radec"):
-        """Plot quantity as a function of RA, Dec"""
-
+        """Plot quantity as a function of RA, Dec.
+        """
         ra = np.rad2deg(self.catalog[self.prefix + "coord_ra"])
         dec = np.rad2deg(self.catalog[self.prefix + "coord_dec"])
         good = (self.mag < self.magThreshold if self.magThreshold is not None else
@@ -980,8 +983,8 @@ class Analysis(object):
     def plotQuiver(self, catalog, description, plotInfoDict, areaDict, log, cmap=plt.cm.Spectral, stats=None,
                    matchRadius=None, zpLabel=None, forcedStr=None, dataName="star", uberCalLabel=None,
                    scale=1):
-        """Plot ellipticity residuals quiver plot"""
-
+        """Plot ellipticity residuals quiver plot.
+        """
         # Use HSM algorithm results if present, if not, use SDSS Shape
         if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
             compareCol = "ext_shapeHSM_HsmSourceMoments"
@@ -1104,14 +1107,14 @@ class Analysis(object):
         plotText(shapeAlgorithm, fig, axes, 0.85, -0.08, prefix="Shape Alg: ", fontSize=8, color="green")
         if forcedStr is not None:
             plotText(forcedStr, fig, axes, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
-        axes.legend(loc='upper left', bbox_to_anchor=(0.0, 1.1), fancybox=True, shadow=True, fontsize=8)
+        axes.legend(loc="upper left", bbox_to_anchor=(0.0, 1.1), fancybox=True, shadow=True, fontsize=8)
 
         yield Struct(fig=fig, description=description, stats=stats, statsHigh=None, dpi=150, style="quiver")
 
     def plotRhoStatistics(self, description, plotInfoDict, log, treecorrParams, stats,
                           zpLabel=None, forcedStr=None, postFix="", flagsCat=None, uberCalLabel=None):
-        """ Plot Rho Statistics """
-
+        """Plot Rho Statistics.
+        """
         figAxes = [plt.subplots(), plt.subplots()]  # first plot for Rho 1, 3, 4 and second for Rho 2, 5
         figs, axes = list(zip(*figAxes))
 
@@ -1130,7 +1133,7 @@ class Analysis(object):
         rhoStatsFunc = RhoStatistics(compareCol, psfCompareCol, **treecorrParams)
         rhoStats = rhoStatsFunc(good_catalog)
         plotRhoStats(axes, rhoStats)
-        log.debug("Tract id in Rho Stats: {0}".format(plotInfoDict['tract']))
+        log.debug("Tract id in Rho Stats: {0}".format(plotInfoDict["tract"]))
 
         for figId, figax in enumerate(figAxes):
             fig, ax = figax
@@ -1152,7 +1155,7 @@ class Analysis(object):
             figAxes = [plt.subplots(), plt.subplots()]  # first plot for Rho 1, 3, 4 and second for Rho 2, 5
             figs, axes = list(zip(*figAxes))
 
-            description = description.replace('Rho', 'hsmRho')
+            description = description.replace("Rho", "hsmRho")
             compareCol = "ext_shapeHSM_HsmSourceMoments"
             psfCompareCol = "ext_shapeHSM_HsmPsfMoments"
             shapeAlgorithm = "HSM"
@@ -1198,39 +1201,40 @@ class Analysis(object):
         Parameters
         ----------
         catalog : `lsst.afw.table.SourceCatalog`
-           The source catalog whose objects will be plotted as ellipses (scaled
-           by a factor of ``sizeFactor`` but truncated to a maximum diameter
-           of ``maxDiamPix``) and color-mapped by their base_InputCount_value.
+            The source catalog whose objects will be plotted as ellipses
+            (scaled by a factor of ``sizeFactor`` but truncated to a maximum
+            diameter of ``maxDiamPix``) and color-mapped by their
+            base_InputCount_value.
         description : `str`
-           The type of plot being made, used by the butler to save the figure.
+            The type of plot being made, used by the butler to save the figure.
         plotInfoDict : `dict`
             A dictionary of useful plot information.
         log : `lsst.log.Log`
-           Logger object for logging messages.
+            Logger object for logging messages.
         camera : `lsst.afw.cameraGeom.Camera`, optional
-           The camera associated with the dataset (used to label the plot with
-           the camera's name).
+            The camera associated with the dataset (used to label the plot with
+            the camera's name).
         forcedStr : `str`, optional
-           String to label the catalog type (forced vs. unforced) on the plot.
+            String to label the catalog type (forced vs. unforced) on the plot.
         cmap : `matplotlib.colors.ListedColormap`, optional
-           The matplotlib colormap to use.  It will be given transparency level
-           set by ``alpha``.  Default is `None`.
+            The matplotlib colormap to use.  It will be given transparency
+            level set by ``alpha``.
         alpha : `float`, optional
-           The matplotlib blending value, between 0 (transparent) and 1
-           (opaque).
+            The matplotlib blending value, between 0 (transparent) and 1
+            (opaque).
         doPlotPatchOutline : `bool`, optional
-           A boolean indicating whether to overplot the patch outlines and
-           index labels.  Default is `True`.
+            A boolean indicating whether to overplot the patch outlines and
+            index labels.
         sizeFactor : `float`, optional
-          Factor by which to multiply the source ellipse sizes for plotting
-          (the nominal size is quite small).  Default is 5.0.
+            Factor by which to multiply the source ellipse sizes for plotting
+            (the nominal size is quite small).
         maxDiamPix : `int`, optional
-           A maximum diameter to be plotted for any source's ellipse (such that
-           a single ellipse cannot overwhelm the plot and noting that this will
-           not be indicative of the true input counts for the outer pixels as
-           that number strictly applies to the objects centroid pixel).  If a
-           given object gets truncated to this size, an opaque blue outline
-           will be plotted around its ellipse.  Default is 1000.
+            A maximum diameter to be plotted for any source's ellipse (such
+            that a single ellipse cannot overwhelm the plot and noting that
+            this will not be indicative of the true input counts for the outer
+            pixels as that number strictly applies to the objects centroid
+            pixel).  If a given object gets truncated to this size, an opaque
+            blue outline will be plotted around its ellipse.
         """
         tractBbox = plotInfoDict["tractInfo"].getBBox()
         tractWcs = plotInfoDict["tractInfo"].getWcs()
@@ -1246,7 +1250,7 @@ class Analysis(object):
         thetas = []
         edgeColors = []  # to outline any ellipses truncated at maxDiamPix
         if "CircularApertureFlux" in columnName:
-            m = re.search(r'CircularApertureFlux_(\d+)_(\d+)_', columnName)
+            m = re.search(r"CircularApertureFlux_(\d+)_(\d+)_", columnName)
             apertureRadius = float(m.groups()[0]) + float(m.groups()[1])/10.0
             diamAs = [min(sizeFactor*2.0*apertureRadius, maxDiamPix)]*len(catalog)
             diamBs = diamAs
@@ -1330,7 +1334,7 @@ class Analysis(object):
         axes.set_xlabel("xTract (pixels) {0:s}".format(filterLabelStr), size=9)
         axes.set_ylabel("yTract (pixels) {0:s}".format(filterLabelStr), size=9)
 
-        # Get Ra and DEC tract limits to add to plot axis labels
+        # Get RA and Dec tract limits to add to plot axis labels
         tract00 = tractWcs.pixelToSky(tractBbox.getMinX(),
                                       tractBbox.getMinY()).getPosition(units=geom.degrees)
         tract0N = tractWcs.pixelToSky(tractBbox.getMinX(),
@@ -1345,7 +1349,7 @@ class Analysis(object):
         plt.text(-0.17, 0.97, str("{:.2f}".format(tract0N.getY())), **textKwargs)
         textKwargs["fontsize"] = 8
         plt.text(0.45, -0.11, "RA (deg)", **textKwargs)
-        plt.text(-0.17, 0.5, "DEC (deg)", rotation=90, **textKwargs)
+        plt.text(-0.17, 0.5, "Dec (deg)", rotation=90, **textKwargs)
 
         if doPlotPatchOutline:
             plotPatchOutline(axes, plotInfoDict["tractInfo"], plotInfoDict["patchList"], plotUnits="pixel",
@@ -1381,8 +1385,8 @@ class Analysis(object):
             Logger object for logging messages.
         zpLabel : `str`, optional
             A label indicating the external calibration applied (currently
-            either jointcal, fgcm, fgcm_tract, or meas_mosaic, but the latter
-            is effectively retired).
+            either "jointcal", "fgcm", "fgcm_tract", or "meas_mosaic", but the
+            latter is effectively retired).
         forcedStr : `str`, optional
             String to label the catalog type (forced vs. unforced) on the plot.
         """
@@ -1393,8 +1397,8 @@ class Analysis(object):
         axes[1].tick_params(axis="x", which="both", direction="in", labelsize=7)
         axes[0].tick_params(axis="y", which="both", direction="in", labelsize=6)
         axes[1].tick_params(axis="y", which="both", direction="in", labelsize=6)
-        axes[0].yaxis.set_major_formatter(FormatStrFormatter('%.3f'))
-        axes[1].yaxis.set_major_formatter(FormatStrFormatter('%.3f'))
+        axes[0].yaxis.set_major_formatter(FormatStrFormatter("%.3f"))
+        axes[1].yaxis.set_major_formatter(FormatStrFormatter("%.3f"))
         prop_cycle = plt.rcParams["axes.prop_cycle"]
         colors = prop_cycle.by_key()["color"]
         if "lsst" in plotInfoDict["cameraName"]:
@@ -1542,7 +1546,8 @@ class Analysis(object):
     def plotAll(self, description, plotInfoDict, areaDict, log, enforcer=None, matchRadius=None,
                 matchRadiusUnitStr=None, zpLabel=None, forcedStr=None, postFix="", plotRunStats=True,
                 highlightList=None, extraLabels=None, uberCalLabel=None, doPrintMedian=False):
-        """Make all plots"""
+        """Make all plots.
+        """
         stats = self.stats
         # Make sure you have some good data to plot
         if all(stats[stat].num == 0 for stat in stats):
@@ -1617,22 +1622,22 @@ class Analysis(object):
         return stats
 
     def statistics(self, magThreshold=None, signalToNoiseThreshold=None, forcedMean=None):
-        """Calculate statistics on quantity
+        """Calculate statistics on quantity.
 
         Parameters
         ----------
         magThreshold : `float` or `None`
-           Subsample for computing stats only includes objects brighter than
-           ``magThreshold``.
+            Subsample for computing stats only includes objects brighter than
+            ``magThreshold``.
         signalToNoiseThreshold : `float` or `None`
-           Subsample for computing stats only includes objects with S/N greater
-           than ``signalToNoiseThreshold``.
+            Subsample for computing stats only includes objects with S/N
+            greater than ``signalToNoiseThreshold``.
 
         Raises
         ------
-        `RuntimeError`
-           If both ``magThreshold`` and ``signalToNoiseThreshold`` are -- or
-           are not -- `None`.
+        RuntimeError
+            If both ``magThreshold`` and ``signalToNoiseThreshold`` are -- or
+            are not -- `None`.
         """
         thresholdList = [magThreshold, signalToNoiseThreshold]
         if (all(threshold is not None for threshold in thresholdList)
@@ -1659,75 +1664,77 @@ class Analysis(object):
         return stats
 
     def calculateStats(self, quantity, selection, forcedMean=None, thresholdType="", thresholdValue=None):
-        """Calculate some basic statistics for a (sub-selection of a) quanatity
+        """Calculate basic statistics for a (sub-selection of a) quanatity.
 
         Parameters
         ----------
         quantity : `numpy.ndarray` of `float`
-           Array containing the values of the quantity on which the statistics
-           are to be computed.
+            Array containing the values of the quantity on which the statistics
+            are to be computed.
         selection : `numpy.ndarray` of `bool`
-           Boolean array indicating the sub-selection of data points in
-           ``quantity`` to be considered for the statistics computation.
+            Boolean array indicating the sub-selection of data points in
+            ``quantity`` to be considered for the statistics computation.
         forcedMean : `float`, `int`, or `None`, optional
-           If provided, the value at which to force the mean (i.e. the other
-           stats will be calculated based on an assumed mean of this value).
-           Default is `None`.
+            If provided, the value at which to force the mean (i.e. the other
+            stats will be calculated based on an assumed mean of this value).
         thresholdType : `str`, optional
-           String representing the type of threshold to be used in culling to
-           the subset of ``quantity`` to be used in the statistics computation:
-           "S/N" and "mag" indicate a threshold based on signal-to-noise or
-           magnitude, respectively.  A flag name, e.g. "calib_psf_used",
-           indicates that the sample was culled based on the value of this
-           flag.  Provided here simply for inclusion in the returned ``Stats``
-           object. Default is an empty `str`.
+            String representing the type of threshold to be used in culling to
+            the subset of ``quantity`` to be used in the statistics
+            computation: "S/N" and "mag" indicate a threshold based on
+            signal-to-noise or magnitude, respectively.  A flag name, e.g.
+            "calib_psf_used", indicates that the sample was culled based on the
+            value of this flag.  Provided here simply for inclusion in the
+            returned ``Stats`` object.
         thresholdValue : `float`, `int`, or `None`, optional
-           The threshold value used in culling ``quantity`` to the subset to be
-           included in the statistics computation.  Provided here simply for
-           inclusion in the returned ``Stats`` object.  Default is `None`.
+            The threshold value used in culling ``quantity`` to the subset to
+            be included in the statistics computation.  Provided here simply
+            for inclusion in the returned ``Stats`` object.
 
         Returns
         -------
         Stats : `lsst.pipe.analysis.utils.Stats`
-           Instance of the `lsst.pipe.analysis.utils.Stats` class (a
-           sub-class of `lsst.pipe.base.Struct`) containing the results of
-           the statistics calculation.  Attributes are:
+            Instance of the `lsst.pipe.analysis.utils.Stats` class (a
+            sub-class of `lsst.pipe.base.Struct`) containing the results of
+            the statistics calculation.  Attributes are:
 
-           ``dataUsed``
-              Boolean array indicating the subset of ``quantity`` that was
-              used in the statistics computation (`numpy.ndarray` of `bool`).
-           ``num``
-              Number of data points used in calculation after culling based on
-             ``selection`` and sigma clipping during the computation (`int`).
-           ``total``
-              Number of data points considered for use in calculation after
-              cut based on ``selection`` (`int`).
-           ``mean``
-              Mean of the data points used in the calculation (`float`).
-           ``stddev``
-              Standard deviation of the data points used in the calculation
-              (`float`).
-           ``forcedMean``
-              Value provided in ``forcedMean`` indicating (if not `None`) the
-              value the mean was forced to be for computation of the other
-              statistics.  A value of `None` indicates the mean was computed
-              from the data themselves (`float` or `None`).
-           ``median``
-              Median of the data points used in the calculation (`float`).
-           ``clip``
-              Value used for clipping outliers from the data points used in
-              statistics calculation (`float`).
-              - i.e. clip x if abs(x - ``mean``) > ``clip``
-              - this parameter is controlled by the config parameter
-                ``analysis.config.clip`` which is in units of number of
-                standard deviations, defined here as
-                0.74*interQuartileDistance (`float`).
-           ``thresholdType``
-              String provided in input variable ``thresholdType`` representing
-              the type of threshold used for culling data (`str`).
-           ``thresholdValue``
-              Value provided in input variable ``thresholdValue`` representing
-              the value used for the threshold culling of the data (`float`).
+            ``dataUsed``
+                Boolean array indicating the subset of ``quantity`` that was
+                used in the statistics computation (`numpy.ndarray` of `bool`).
+            ``num``
+                Number of data points used in calculation after culling based
+                on ``selection`` and sigma clipping during the computation
+                (`int`).
+            ``total``
+                Number of data points considered for use in calculation after
+                cut based on ``selection`` (`int`).
+            ``mean``
+                Mean of the data points used in the calculation (`float`).
+            ``stddev``
+                Standard deviation of the data points used in the calculation
+                (`float`).
+            ``forcedMean``
+                Value provided in ``forcedMean`` indicating (if not `None`) the
+                value the mean was forced to be for computation of the other
+                statistics.  A value of `None` indicates the mean was computed
+                from the data themselves (`float` or `None`).
+            ``median``
+                Median of the data points used in the calculation (`float`).
+            ``clip``
+                Value used for clipping outliers from the data points used in
+                statistics calculation (`float`).
+                - i.e. clip x if abs(x - ``mean``) > ``clip``
+                - this parameter is controlled by the config parameter
+                  ``analysis.config.clip`` which is in units of number of
+                  standard deviations, defined here as
+                  0.74*interQuartileDistance (`float`).
+            ``thresholdType``
+                String provided in input variable ``thresholdType``
+                representing the type of threshold used for culling the data
+                (`str`).
+            ``thresholdValue``
+                Value provided in input variable ``thresholdValue``
+                representing the value used for the threshold culling of the
+                data (`float`).
         """
         total = selection.sum()  # Total number we're considering
         if total == 0:
@@ -1742,26 +1749,25 @@ class Analysis(object):
                      thresholdType=thresholdType, thresholdValue=thresholdValue)
 
     def calculateSysError(self, quantity, error, selection, forcedMean=None, tol=1.0e-3):
-        """Calculate the systematic error of a (sub-selection of a) quantity
+        """Calculate the systematic error of a (sub-selection of a) quantity.
 
         Parameters
         ----------
         quantity : `numpy.ndarray` of `float`
-           Array containing the values of the quantity on which the statistics
-           are to be computed.
+            Array containing the values of the quantity on which the statistics
+            are to be computed.
         error : `numpy.ndarray` of `float`
-           Array containing the errors on the data in ``quantity``.
+            Array containing the errors on the data in ``quantity``.
         selection : `numpy.ndarray` of `bool`
-           Boolean array indicating the sub-selection of data points in
-           ``quantity`` to be considered for the statistics computation.
+            Boolean array indicating the sub-selection of data points in
+            ``quantity`` to be considered for the statistics computation.
         forcedMean : `float`, `int`, or `None`, optional
-           If provided, the value at which to forced the mean (i.e. the other
-           stats will be calculated based on an assumed mean of this value).
-           Otherwise, a value of `None` indicates the mean is to be computed
-           from the data themselves.  Default is `None`.
+            If provided, the value at which to forced the mean (i.e. the other
+            stats will be calculated based on an assumed mean of this value).
+            Otherwise, a value of `None` indicates the mean is to be computed
+            from the data themselves.
         tol : `float`, optional
            Stopping tolerance for the `scipy.optimize.root` routine.
-           Default is 1.0e-3.
 
         Returns
         -------
@@ -1790,7 +1796,7 @@ class Analysis(object):
         return answer
 
     def checkGoodDataExists(self, dataName, stats, log, styleStr):
-        """Check if good data points exist in stats object for given data type
+        """Check if good data points exist in stats object for given data type.
 
         Parameters
         ----------
@@ -1805,8 +1811,8 @@ class Analysis(object):
         Returns
         -------
         answer : `bool`
-           Returns `True` if data points were included in ``stats`` for
-           ``dataName``, else `False`.
+            Returns `True` if data points were included in ``stats`` for
+            ``dataName``, else `False`.
         """
         if stats[dataName].num == 0:
             log.warn("No good data points to plot for: {:} {:}.  Skipping {:} plot.".
