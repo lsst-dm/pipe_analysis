@@ -398,7 +398,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     dataRef_commonZp = repoInfo.butler.dataRef('analysisVisitTable_commonZp',
                                                                dataId=repoInfo.dataId)
                     writeParquet(dataRef_commonZp, commonZpCat, badArray=badCommonZp)
-                    if self.config.writeParquetOnly:
+                    if self.config.writeParquetOnly and not self.config.doPlotMatches:
                         self.log.info("Exiting after writing Parquet tables.  No plots generated.")
                         return
 
@@ -501,6 +501,14 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if self.config.doPlotMatches:
                 matches, matchAreaDict = self.readSrcMatches(dataRefListTract, "src", repoInfo,
                                                              aliasDictList=aliasDictList)
+                if self.config.doWriteParquetTables:
+                    matchesDataRef = repoInfo.butler.dataRef("analysisMatchFullRefVisitTable",
+                                                             dataId=repoInfo.dataId)
+                    writeParquet(matchesDataRef, matches, badArray=None, prefix="src_")
+                if self.config.writeParquetOnly:
+                    self.log.info("Exiting after writing Parquet tables.  No plots generated.")
+                    return
+
                 # Dict of all parameters common to plot* functions
                 matchHighlightList = [("src_" + self.config.analysis.fluxColumn.replace("_instFlux", "_flag"),
                                        0, "turquoise"), ]
@@ -732,6 +740,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             # Generate unnormalized match list (from normalized persisted one) with joinMatchListWithCatalog
             # (which requires a refObjLoader to be initialized).
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+            catalog = addIntFloatOrStrColumn(catalog, dataRef.dataId[repoInfo.ccdKey], "ccdId",
+                                             "Id of CCD on which source was detected")
             # Set some aliases for differing schema naming conventions
             if aliasDictList:
                 catalog = setAliasMaps(catalog, aliasDictList)
