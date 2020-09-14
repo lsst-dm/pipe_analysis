@@ -40,9 +40,8 @@ except ImportError:
 __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "MatchesStarGalaxyLabeller",
            "CosmosLabeller", "plotText", "annotateAxes", "labelVisit", "labelCamera",
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
-           "plotCcdOutline", "rotatePixelCoords", "bboxToXyCoordLists", "getRaDecMinMaxPatchList",
-           "percent", "setPtSize", "getQuiver", "makeAlphaCmap", "buildTractImage",
-           "determineExternalCalLabel", "getPlotInfo"]
+           "plotCcdOutline", "bboxToXyCoordLists", "getRaDecMinMaxPatchList", "percent", "setPtSize",
+           "getQuiver", "makeAlphaCmap", "buildTractImage", "determineExternalCalLabel", "getPlotInfo"]
 
 
 class AllLabeller(object):
@@ -662,27 +661,6 @@ def plotPatchOutline(axes, tractInfo, patchList, plotUnits="deg", idFontSize=Non
             axes.plot(xCoords, yCoords, color="black", lw=0.8, linestyle="dashed")
             axes.text(percent(xCoords), percent(yCoords, 0.5), str(patch.getIndex()),
                       fontsize=idFontSize, horizontalalignment="center", verticalalignment="center")
-
-
-def rotatePixelCoords(sources, width, height, nQuarter):
-    """Rotate catalog (x, y) pixel coordinates such that LLC of detector in FP
-    is (0, 0).
-    """
-    xKey = sources.schema.find("slot_Centroid_x").key
-    yKey = sources.schema.find("slot_Centroid_y").key
-    for s in sources:
-        x0 = s[xKey]
-        y0 = s[yKey]
-        if nQuarter == 1:
-            s.set(xKey, height - y0 - 1.0)
-            s.set(yKey, x0)
-        if nQuarter == 2:
-            s.set(xKey, width - x0 - 1.0)
-            s.set(yKey, height - y0 - 1.0)
-        if nQuarter == 3:
-            s.set(xKey, y0)
-            s.set(yKey, width - x0 - 1.0)
-    return sources
 
 
 def bboxToXyCoordLists(bbox, wcs=None, wcsUnits="deg"):
