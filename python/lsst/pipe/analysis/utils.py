@@ -23,8 +23,9 @@ import re
 import operator
 
 import astropy.units as units
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import scipy.odr as scipyOdr
 import scipy.optimize as scipyOptimize
 import scipy.stats as scipyStats
@@ -62,7 +63,7 @@ __all__ = ["Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCom
            "orthogonalRegression", "distanceSquaredToPoly", "p1CoeffsFromP2x0y0", "p2p1CoeffsFromLinearFit",
            "lineFromP2Coeffs", "linesFromP2P1Coeffs", "makeEqnStr", "catColors", "setAliasMaps",
            "addPreComputedColumns", "addMetricMeasurement", "updateVerifyJob", "computeMeanOfFrac",
-           "calcQuartileClippedStats", "savePlots"]
+           "calcQuartileClippedStats", "savePlots", "getSchema"]
 
 
 NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
@@ -679,13 +680,14 @@ class CentroidDiffErr(CentroidDiff):
     """Functor to calculate difference error for astrometry.
     """
     def __call__(self, catalog):
+        schema = getSchema(catalog)
         firstx = self.first + self.centroid + "_xErr"
         firsty = self.first + self.centroid + "_yErr"
         secondx = self.second + self.centroid + "_xErr"
         secondy = self.second + self.centroid + "_yErr"
 
-        subkeys1 = [catalog.schema[firstx].asKey(), catalog.schema[firsty].asKey()]
-        subkeys2 = [catalog.schema[secondx].asKey(), catalog.schema[secondy].asKey()]
+        subkeys1 = [schema[firstx].asKey(), schema[firsty].asKey()]
+        subkeys2 = [schema[secondx].asKey(), schema[secondy].asKey()]
         menu = {"x": 0, "y": 1}
 
         return np.hypot(catalog[subkeys1[menu[self.component]]],
@@ -695,15 +697,16 @@ class CentroidDiffErr(CentroidDiff):
 def deconvMom(catalog):
     """Calculate deconvolved moments.
     """
-    if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+    schema = getSchema(catalog)
+    if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
         hsm = catalog["ext_shapeHSM_HsmSourceMoments_xx"] + catalog["ext_shapeHSM_HsmSourceMoments_yy"]
     else:
         hsm = np.ones(len(catalog))*np.nan
     sdss = catalog["base_SdssShape_xx"] + catalog["base_SdssShape_yy"]
-    if "ext_shapeHSM_HsmPsfMoments_xx" in catalog.schema:
+    if "ext_shapeHSM_HsmPsfMoments_xx" in schema:
         psfXxName = "ext_shapeHSM_HsmPsfMoments_xx"
         psfYyName = "ext_shapeHSM_HsmPsfMoments_yy"
-    elif "base_SdssShape_psf_xx" in catalog.schema:
+    elif "base_SdssShape_psf_xx" in schema:
         psfXxName = "base_SdssShape_psf_xx"
         psfYyName = "base_SdssShape_psf_yy"
     else:
@@ -727,7 +730,8 @@ def deconvMomStarGal(catalog):
 def concatenateCatalogs(catalogList):
     assert len(catalogList) > 0, "No catalogs to concatenate"
     template = catalogList[0]
-    catalog = type(template)(template.schema)
+    schema = getSchema(template)
+    catalog = type(template)(schema)
     catalog.reserve(sum(len(cat) for cat in catalogList))
     for cat in catalogList:
         catalog.extend(cat, True)
@@ -746,7 +750,7 @@ def joinMatches(matches, first="first_", second="second_"):
     distanceKey = schema.addField("distance", type="Angle",
                                   doc="Distance between {0:s} and {1:s}".format(first, second))
     catalog = afwTable.BaseCatalog(schema)
-    aliases = catalog.schema.getAliasMap()
+    aliases = schema.getAliasMap()
     catalog.reserve(len(matches))
     for mm in matches:
         row = catalog.addNew()
@@ -763,15 +767,17 @@ def joinMatches(matches, first="first_", second="second_"):
 
 def checkIdLists(catalog1, catalog2, prefix=""):
     # Check to see if two catalogs have an identical list of objects by id
+    schema1 = getSchema(catalog1)
+    schema2 = getSchema(catalog2)
     idStrList = ["", ""]
-    for i, cat in enumerate((catalog1, catalog2)):
-        if "id" in cat.schema:
+    for i, schema in enumerate([schema1, schema2]):
+        if "id" in schema:
             idStrList[i] = "id"
-        elif "objectId" in cat.schema:
+        elif "objectId" in schema:
             idStrList[i] = "objectId"
-        elif prefix + "id" in cat.schema:
+        elif prefix + "id" in schema:
             idStrList[i] = prefix + "id"
-        elif prefix + "objectId" in cat.schema:
+        elif prefix + "objectId" in schema:
             idStrList[i] = prefix + "objectId"
         else:
             raise RuntimeError("Cannot identify object id field (tried id, objectId, " + prefix + "id, and "
@@ -1002,8 +1008,9 @@ def rotatePixelCoord(s, width, height, nQuarter):
 
 def addRotPoint(catalog, width, height, nQuarter, prefix=""):
     # Compute rotated CCD pixel coords for comparing LSST vs HSC run centroids
-    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
-    mapper.addMinimalSchema(catalog[0].schema)
+    schema = getSchema(catalog[0])
+    mapper = afwTable.SchemaMapper(schema, shareAliasMap=True)
+    mapper.addMinimalSchema(schema)
     schema = mapper.getOutputSchema()
     rotName = prefix + "base_SdssCentroid_Rot"
     rotxKey = schema.addField(rotName + "_x", type="D", doc="Centroid x (in rotated pixels)")
@@ -1070,17 +1077,18 @@ def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True,
        Boolean array with same length as catalog whose values indicate whether
        the source was deemed inappropriate for qa analyses.
     """
+    schema = getSchema(catalog)
     bad = np.zeros(len(catalog), dtype=bool)
-    if "detect_isPatchInner" in catalog.schema and patchInnerOnly:
+    if "detect_isPatchInner" in schema and patchInnerOnly:
         bad |= ~catalog["detect_isPatchInner"]
-    if "detect_isTractInner" in catalog.schema and tractInnerOnly:
+    if "detect_isTractInner" in schema and tractInnerOnly:
         bad |= ~catalog["detect_isTractInner"]
     bad |= catalog["deblend_nChild"] > 0  # Exclude non-deblended (i.e. parents)
-    if "merge_peak_sky" in catalog.schema:
+    if "merge_peak_sky" in schema:
         bad |= catalog["merge_peak_sky"]  # Exclude "sky" objects (currently only inserted in coadds)
     for flag in flagList:
         bad |= catalog[flag]
-    if onlyReadStars and "base_ClassificationExtendedness_value" in catalog.schema:
+    if onlyReadStars and "base_ClassificationExtendedness_value" in schema:
         bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
     return bad
 
@@ -1261,17 +1269,18 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, photoCalibDataset, fluxKe
     respectively.
     """
     photoCalib = dataRef.get(photoCalibDataset)
+    schema = getSchema(catalog)
     # Scale to AB and convert to constant zero point, as for the coadds
     factor = NANOJANSKYS_PER_AB_FLUX/10.0**(0.4*zp)
     if fluxKeys is None:
-        fluxKeys, errKeys = getFluxKeys(catalog.schema)
+        fluxKeys, errKeys = getFluxKeys(schema)
 
     magColsToAdd = []
     for fluxName, fluxKey in list(fluxKeys.items()):
         if len(catalog[fluxKey].shape) > 1:
             continue
         try:  # photoCalib.instFluxToNanojansky() requires an error for each flux
-            fluxErrKey = catalog.schema.find(fluxName + "Err").key
+            fluxErrKey = schema.find(fluxName + "Err").key
         except KeyError:
             fluxErrKey = None
         baseName = fluxName.replace("_instFlux", "")
@@ -1289,7 +1298,7 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, photoCalibDataset, fluxKe
             # correction factor from any slot flux (it only depends on
             # position, so any slot with a successful measurement will do)
             # and apply that to any flux entries that do not have errors.
-            for fluxSlotName in catalog.schema.extract("slot*instFlux"):
+            for fluxSlotName in schema.extract("slot*instFlux"):
                 photoCalibFactor = None
                 for src in catalog:
                     if np.isfinite(src[fluxSlotName]):
@@ -1322,7 +1331,8 @@ def calibrateSourceCatalog(catalog, zp):
     Requires a SourceCatalog and zeropoint as input.
     """
     # Convert to constant zero point, as for the coadds
-    fluxKeys, errKeys = getFluxKeys(catalog.schema)
+    schema = getSchema(catalog)
+    fluxKeys, errKeys = getFluxKeys(schema)
     factor = 10.0**(0.4*zp)
     for name, key in list(fluxKeys.items()) + list(errKeys.items()):
         catalog[key] /= factor
@@ -1335,7 +1345,8 @@ def calibrateCoaddSourceCatalog(catalog, zp):
     Requires a SourceCatalog and zeropoint as input.
     """
     # Convert to constant zero point, as for the coadds
-    fluxKeys, errKeys = getFluxKeys(catalog.schema)
+    schema = getSchema(catalog)
+    fluxKeys, errKeys = getFluxKeys(schema)
     factor = 10.0**(0.4*zp)
     for name, key in list(fluxKeys.items()) + list(errKeys.items()):
         catalog[key] /= factor
@@ -1346,8 +1357,9 @@ def backoutApCorr(catalog):
     """Back out the aperture correction to all fluxes.
     """
     ii = 0
-    for k in catalog.schema.getNames():
-        if "_instFlux" in k and k[:-5] + "_apCorr" in catalog.schema.getNames() and "_apCorr" not in k:
+    schema = getSchema(catalog)
+    for k in schema.getNames():
+        if "_instFlux" in k and k[:-5] + "_apCorr" in schema.getNames() and "_apCorr" not in k:
             if ii == 0:
                 print("Backing out aperture corrections to fluxes")
                 ii += 1
@@ -1967,10 +1979,11 @@ def setAliasMaps(catalog, aliasDictList, prefix=""):
         aliasDictList = [aliasDictList, ]
     if not all(isinstance(aliasDict, (dict, pexConfig.dictField.Dict)) for aliasDict in aliasDictList):
         raise RuntimeError("All elements in aliasDictList must be instances of type dict")
-    aliasMap = catalog.schema.getAliasMap()
+    schema = getSchema(catalog)
+    aliasMap = schema.getAliasMap()
     for aliasDict in aliasDictList:
         for newName, oldName in aliasDict.items():
-            if prefix + oldName in catalog.schema:
+            if prefix + oldName in schema:
                 aliasMap.set(prefix + newName, prefix + oldName)
     return catalog
 
@@ -2000,9 +2013,10 @@ def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=No
     """
     unitScale = 1000.0 if toMilli else 1.0
     fieldUnits = " (mmag)" if toMilli else " (mag)"
+    schema = getSchema(catalog)
     for col in fluxToPlotList:
         colStr = fluxToPlotString(col)
-        if col + "_instFlux" in catalog.schema:
+        if col + "_instFlux" in schema:
             compCol = "base_PsfFlux"
             compColStr = fluxToPlotString(compCol)
             fieldName = colStr + "-" + compColStr + "_magDiff_" + fieldUnits.strip(" ()")
@@ -2021,7 +2035,7 @@ def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=No
     for compareCol, psfCompareCol, compareStr in [["base_SdssShape", "base_SdssShape_psf", "Sdss"],
                                                   ["ext_shapeHSM_HsmSourceMoments",
                                                    "ext_shapeHSM_HsmPsfMoments", "Hsm"]]:
-        if compareCol + "_xx" in catalog.schema:
+        if compareCol + "_xx" in schema:
             # Source Trace
             fieldUnits = " (pixel)"
             fieldName = "trace" + compareStr + "_" + fieldUnits.strip(" ()")
@@ -2060,20 +2074,20 @@ def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=No
 
     # HSM Regauss E1/E2 resids
     fieldUnits = " (milli)" if toMilli else ""
-    if "ext_shapeHSM_HsmShapeRegauss_e1" in catalog.schema:
+    if "ext_shapeHSM_HsmShapeRegauss_e1" in schema:
         fieldName = "e1ResidsHsmRegauss_" + fieldUnits.strip(" ()")
         fieldDoc = fieldName + " = src(e1) - hsmPsfMoments(e1), e1 = (Ixx - Iyy)/(Ixx + Iyy)" + fieldUnits
         parameterFunc = E1ResidsHsmRegauss(unitScale=unitScale)
         e1ResidsHsmRegauss = parameterFunc(catalog)
         catalog = addIntFloatOrStrColumn(catalog, e1ResidsHsmRegauss, fieldName, fieldDoc)
-    if "ext_shapeHSM_HsmShapeRegauss_e2" in catalog.schema:
+    if "ext_shapeHSM_HsmShapeRegauss_e2" in schema:
         fieldName = "e2ResidsHsmRegauss_" + fieldUnits.strip(" ()")
         fieldDoc = fieldName + " = src(e2) - hsmPsfMoments(e2), e2 = (Ixx - Iyy)/(Ixx + Iyy)" + fieldUnits
         parameterFunc = E2ResidsHsmRegauss(unitScale=unitScale)
         e2ResidsHsmRegauss = parameterFunc(catalog)
         catalog = addIntFloatOrStrColumn(catalog, e2ResidsHsmRegauss, fieldName, fieldDoc)
 
-    if "base_SdssShape_xx" in catalog.schema:
+    if "base_SdssShape_xx" in schema:
         fieldName = "deconvMoments"
         fieldDoc = "Deconvolved moments"
         deconvMoments = deconvMom(catalog)
@@ -2412,3 +2426,30 @@ def measureRhoMetrics(rhoStat, thetaExtremum=1.0, operatorStr="<="):
         xi = rhoStat.xi  # for Rho 0
     avgRho = abs(np.average(xi[w]))
     return avgRho
+
+
+def getSchema(catalog):
+    """Helper function to determine "schema" of catalog.
+
+    This will be the list of columns if the catalog type is a pandas DataFrame,
+    or the schema object if it is an `lsst.afw.table.SourceCatalog`.
+
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.SourceCatalog` or `pandas.core.frame.DataFrame`
+        The source catalog under consideration.
+
+    Returns
+    -------
+    schema : `list` of `str` or `lsst.afw.table.Schema`
+        The schema associated with the ``catalog``.
+    """
+    if isinstance(catalog, pd.DataFrame):
+        schema = catalog.columns
+        if isinstance(schema, pd.Index):
+            schema = schema.tolist()
+    elif isinstance(catalog, pd.Series):
+        schema = [catalog.name, ]
+    else:
+        schema = catalog.schema
+    return schema

@@ -35,7 +35,7 @@ from lsst.pipe.base import Struct
 
 from .utils import (Data, Stats, E1Resids, E2Resids, fluxToPlotString, computeMeanOfFrac,
                     calcQuartileClippedStats, RhoStatistics, measureRhoMetrics, addMetricMeasurement,
-                    updateVerifyJob)
+                    updateVerifyJob, getSchema)
 from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotText, plotCameraOutline,
                         plotTractOutline, plotPatchOutline, plotCcdOutline, labelCamera, getQuiver,
                         plotRhoStats, getRaDecMinMaxPatchList, bboxToXyCoordLists, makeAlphaCmap)
@@ -141,9 +141,10 @@ class Analysis(object):
             self.quantity = None
 
         self.quantityError = errFunc(catalog) if errFunc is not None else None
+        schema = getSchema(catalog)
         self.fluxColumn = fluxColumn
         if not fluxColumn:
-            if prefix + self.config.fluxColumn in catalog.schema:
+            if prefix + self.config.fluxColumn in schema:
                 self.fluxColumn = self.config.fluxColumn
             else:
                 self.fluxColumn = "flux_psf_flux"
@@ -170,7 +171,7 @@ class Analysis(object):
             flagsList = flags.copy()
             flagsList = flagsList + list(self.config.flags) if self.calibUsedOnly == 0 else flagsList
             for flagName in set(flagsList):
-                if prefix + flagName in catalog.schema:
+                if prefix + flagName in schema:
                     self.good &= ~catalog[prefix + flagName]
         for flagName in goodKeys:
             self.good &= catalog[prefix + flagName]
@@ -178,7 +179,7 @@ class Analysis(object):
         # If the input catalog is a coadd, scale the S/N threshold by roughly
         # the sqrt of the number of input visits (actually the mean of the
         # upper 10% of the base_InputCount_value distribution).
-        if prefix + "base_InputCount_value" in catalog.schema:
+        if prefix + "base_InputCount_value" in schema:
             inputCounts = catalog[prefix + "base_InputCount_value"]
             scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=10)
             if scaleFactor == 0.0:
@@ -221,9 +222,9 @@ class Analysis(object):
         # value, decrease the S/N threshold by 10 until a sample with
         # N > self.config.minHighSampleN is achieved.
         goodSnHigh = np.logical_and(goodSn0, self.signalToNoise >= self.signalToNoiseHighThreshold)
-        if prefix + "base_ClassificationExtendedness_value" in catalog.schema:
+        if prefix + "base_ClassificationExtendedness_value" in schema:
             isStar = catalog[prefix + "base_ClassificationExtendedness_value"] < 0.5
-        elif "numStarFlags" in catalog.schema:
+        elif "numStarFlags" in schema:
             isStar = catalog["numStarFlags"] >= 3
         else:
             isStar = np.ones(len(self.mag), dtype=bool)
@@ -472,6 +473,7 @@ class Analysis(object):
             if not data.mag.any():
                 log.info("plotAgainstMagAndHist: No data for dataset: {:s}".format(name))
                 continue
+            schema = getSchema(data.catalog)
             if ptSize is None:
                 ptSize = setPtSize(len(data.mag))
             alpha = min(0.75, max(0.25, 1.0 - 0.2*np.log10(len(data.mag))))
@@ -516,7 +518,7 @@ class Analysis(object):
                 # data point size.
                 sizeFactor = 1.3
                 for flag, threshValue, color in highlightList:
-                    if flag in data.catalog.schema:
+                    if flag in schema:
                         highlightSelection = data.catalog[flag] > threshValue
                         if sum(highlightSelection) > 0:
                             label = flag
@@ -851,6 +853,7 @@ class Analysis(object):
                 continue
             if not data.mag.any():
                 continue
+            schema = getSchema(data.catalog)
             if ptSize is None:
                 ptSize = 0.7*setPtSize(len(data.mag))
             stats0 = self.calculateStats(data.quantity, good[data.selection])
@@ -861,7 +864,7 @@ class Analysis(object):
                 i = -1
                 sizeFactor = 1.4
                 for flag, threshValue, color in highlightList:
-                    if flag in data.catalog.schema:
+                    if flag in schema:
                         # Only a white "halo" really shows up, so ignore color
                         highlightSelection = (self.catalog[flag] > threshValue) & selection
                         if sum(highlightSelection) > 0:
@@ -1008,8 +1011,9 @@ class Analysis(object):
                    scale=1):
         """Plot ellipticity residuals quiver plot.
         """
+        schema = getSchema(catalog)
         # Use HSM algorithm results if present, if not, use SDSS Shape
-        if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+        if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
             compareCol = "ext_shapeHSM_HsmSourceMoments"
             psfCompareCol = "ext_shapeHSM_HsmPsfMoments"
             shapeAlgorithm = "HSM"
@@ -1027,12 +1031,12 @@ class Analysis(object):
             bad |= catalog[flag]
         # Cull the catalog down to calibration candidates (or stars if
         # calibration flags not available).
-        if "calib_psf_used" in catalog.schema:
+        if "calib_psf_used" in schema:
             bad |= ~catalog["calib_psf_used"]
             catStr = "psf_used"
             thresholdType = "calib_psf_used"
             thresholdValue = None
-        elif "base_ClassificationExtendedness_value" in catalog.schema:
+        elif "base_ClassificationExtendedness_value" in schema:
             bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
             bad |= -2.5*np.log10(catalog[self.fluxColumn]) > self.magThreshold
             catStr = "ClassExtendedness"
@@ -1139,7 +1143,7 @@ class Analysis(object):
                           verifyJob=None):
         """Plot Rho Statistics.
         """
-
+        schema = getSchema(self.catalog)
         figAxes = [plt.subplots(), plt.subplots(), plt.subplots()]
         # first plot for Rho 1, 3, 4, second for Rho 2, 5 and third for Rho 0
         figs, axes = list(zip(*figAxes))
@@ -1177,7 +1181,7 @@ class Analysis(object):
             yield Struct(fig=fig, description=figDescription, stats=stats, statsHigh=None, dpi=120,
                          style="RhoStats")
 
-        if "ext_shapeHSM_HsmSourceMoments_xx" in self.catalog.schema:
+        if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
             figAxes = [plt.subplots(), plt.subplots(), plt.subplots()]
             # first plot for Rho 1, 3, 4, second for Rho 2, 5
             # and third for Rho 0.

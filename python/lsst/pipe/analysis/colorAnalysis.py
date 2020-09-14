@@ -42,7 +42,7 @@ from .utils import (Enforcer, concatenateCatalogs, getFluxKeys, addColumnsToSche
                     fluxToPlotString, writeParquet, getRepoInfo, orthogonalRegression,
                     distanceSquaredToPoly, p2p1CoeffsFromLinearFit, linesFromP2P1Coeffs,
                     makeEqnStr, catColors, addMetricMeasurement, updateVerifyJob, computeMeanOfFrac,
-                    calcQuartileClippedStats, savePlots)
+                    calcQuartileClippedStats, savePlots, getSchema)
 from .plotUtils import (AllLabeller, plotText, labelCamera, setPtSize, determineExternalCalLabel,
                         getPlotInfo)
 
@@ -558,14 +558,15 @@ class ColorAnalysisTask(CmdLineTask):
         for patchRef in patchRefList:
             if patchRef.datasetExists(dataset):
                 cat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+                schema = getSchema(cat)
                 if dataset != self.config.coaddName + "Coadd_meas":
                     refCat = patchRef.get(self.config.coaddName + "Coadd_ref", immediate=True,
                                           flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
-                    refColList = [s for s in refCat.schema.getNames() if
+                    refCatSchema = getSchema(refCat)
+                    refColList = [s for s in refCatSchema.getNames() if
                                   s.startswith(tuple(self.config.columnsToCopyFromRef))]
-                    cat = addColumnsToSchema(refCat, cat,
-                                             [col for col in refColList if col not in cat.schema
-                                              and col in refCat.schema])
+                    cat = addColumnsToSchema(refCat, cat, [col for col in refColList if col not in schema
+                                                           and col in refCatSchema])
 
                 fname = repoInfo.butler.getUri("deepCoadd_calexp", patchRef.dataId)
                 reader = afwImage.ExposureFitsReader(fname)
@@ -638,7 +639,8 @@ class ColorAnalysisTask(CmdLineTask):
                                   "{1:d} out of {2:d} sources.  Flag will be set.".
                                   format(filterName, len(raList[bad]), len(raList)))
                 factor = 10.0**(0.4*galacticExtinction)
-                fluxKeys, errKeys = getFluxKeys(catalog[filterName].schema)
+                schema = getSchema(catalog[filterName])
+                fluxKeys, errKeys = getFluxKeys(schema)
                 self.log.info("Applying per-object Galactic Extinction correction for filter {0:s}.  "
                               "Catalog mean A_{0:s} = {1:.3f}".
                               format(filterName, galacticExtinction[~bad].mean()))
@@ -692,7 +694,8 @@ class ColorAnalysisTask(CmdLineTask):
         if geFound:
             for filterName in catalog.keys():
                 if filterName in self.config.extinctionCoeffs:
-                    fluxKeys, errKeys = getFluxKeys(catalog[filterName].schema)
+                    schema = getSchema(catalog[filterName])
+                    fluxKeys, errKeys = getFluxKeys(schema)
                     galacticExtinction = ebvValue*self.config.extinctionCoeffs[filterName]
                     self.log.info("Applying Per-Field Galactic Extinction correction A_{0:s} = {1:.3f}".
                                   format(filterName, galacticExtinction))
@@ -740,7 +743,8 @@ class ColorAnalysisTask(CmdLineTask):
         num = len(template)
         assert all(len(cat) == num for cat in catalogs.values())
 
-        mapper = afwTable.SchemaMapper(template.schema)
+        schema = getSchema(template)
+        mapper = afwTable.SchemaMapper(schema)
         mapper.addMinimalSchema(afwTable.SourceTable.makeMinimalSchema())
         schema = mapper.getOutputSchema()
 
@@ -818,16 +822,17 @@ class ColorAnalysisTask(CmdLineTask):
     def plotStarPrincipalColors(self, principalColCats, byFilterCats, plotInfoDict, areaDict, labeller,
                                 geLabel=None, uberCalLabel=None):
         yield
+        schema = getSchema(principalColCats)
         mags = {filterName: -2.5*np.log10(byFilterCats[filterName]["base_PsfFlux_instFlux"]) for
                 filterName in byFilterCats}
-        fluxColumn = ("base_PsfFlux_instFlux" if "base_PsfFlux_instFlux" in principalColCats.schema else
+        fluxColumn = ("base_PsfFlux_instFlux" if "base_PsfFlux_instFlux" in schema else
                       "modelfit_CModel_instFlux")
         signalToNoise = {filterName:
                          byFilterCats[filterName][fluxColumn]/byFilterCats[filterName][fluxColumn + "Err"]
                          for filterName in byFilterCats}
         unitStr = "mmag" if self.config.toMilli else "mag"
         for col, transform in self.config.transforms.items():
-            if not transform.plot or col not in principalColCats.schema:
+            if not transform.plot or col not in schema:
                 continue
             if self.config.transforms == ivezicTransformsHSC:
                 if col == "wPerp" or col == "xPerp":
@@ -885,7 +890,8 @@ class ColorAnalysisTask(CmdLineTask):
                 qaGood = np.logical_and(np.logical_not(principalColCats["qaBad_flag"]),
                                         principalColCats["numStarFlags"] >= 3)
                 if self.config.analysis.useSignalToNoiseThreshold:
-                    if "base_InputCount_value" in byFilterCats[self.fluxFilter].schema:
+                    schema = getSchema(byFilterCats[self.fluxFilter])
+                    if "base_InputCount_value" in schema:
                         inputCounts = byFilterCats[self.fluxFilter]["base_InputCount_value"]
                         scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1,
                                                         floorFactor=10)
@@ -999,7 +1005,8 @@ class ColorAnalysisTask(CmdLineTask):
         catLabel = "noDuplicates"
 
         if self.config.analysis.useSignalToNoiseThreshold:
-            if "base_InputCount_value" in byFilterCats[self.fluxFilter].schema:
+            schema = getSchema(byFilterCats[self.fluxFilter])
+            if "base_InputCount_value" in schema:
                 inputCounts = byFilterCats[self.fluxFilter]["base_InputCount_value"]
                 scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=10)
                 if scaleFactor == 0.0:

@@ -40,7 +40,7 @@ from .utils import (AngularDistance, concatenateCatalogs, addApertureFluxesHSC, 
                     calibrateSourceCatalogMosaic, calibrateSourceCatalogPhotoCalib,
                     calibrateSourceCatalog, backoutApCorr, matchNanojanskyToAB, andCatalog, writeParquet,
                     getRepoInfo, getCcdNameRefList, getDataExistsRefList, setAliasMaps,
-                    addPreComputedColumns, savePlots, updateVerifyJob)
+                    addPreComputedColumns, updateVerifyJob, savePlots, getSchema)
 from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText, getPlotInfo
 from .fakesAnalysis import (addDegreePositions, matchCatalogs, addNearestNeighbor, fakesPositionCompare,
                             calcFakesAreaDepth, plotFakesAreaDepth, fakesMagnitudeCompare,
@@ -386,16 +386,17 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 commonZpCat = catStruct.commonZpCatalog
                 catalog = catStruct.catalog
                 areaDict = catStruct.areaDict
+                schema = getSchema(catalog)
                 # Make sub-catalog of sky sources before flag culling as many
                 # of these will have flags set due to measurement difficulties
                 # in regions that are really blank sky.
                 skySrcCat = None
                 if self.config.doPlotSkyObjects:
-                    if "sky_source" in catalog.schema:
+                    if "sky_source" in schema:
                         skySrcCat = catalog[catalog["sky_source"]].copy(deep=True)
                     else:
                         self.log.warn("doPlotSkyObjects is True, but the \"sky_source\" "
-                                      "column does not exist in catalog.schema.  Skipping "
+                                      "column does not exist in the catalog schema.  Skipping "
                                       "skyObjects plot.")
 
                 # Set boolean arrays indicating sources deemed unsuitable for
@@ -506,16 +507,16 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 if self.config.doPlotMags:
                     plotList.append(self.plotMags(catalog, plotInfoDict, areaDict, **plotKwargs))
                 if self.config.doPlotStarGalaxy:
-                    if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+                    if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
                         plotList.append(self.plotStarGal(catalog, plotInfoDict, areaDict, **plotKwargs))
                     else:
                         self.log.warn("Cannot run plotStarGal: "
-                                      "ext_shapeHSM_HsmSourceMoments_xx not in catalog.schema")
+                                      "ext_shapeHSM_HsmSourceMoments_xx not in the catalog schema")
                 if self.config.doPlotSizes:
-                    if "base_SdssShape_psf_xx" in catalog.schema:
+                    if "base_SdssShape_psf_xx" in schema:
                         plotList.append(self.plotSizes(catalog, plotInfoDict, areaDict, **plotKwargs))
                     else:
-                        self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
+                        self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in the catalog schema")
                 if self.config.doPlotCentroids and self.haveFpCoords:
                     plotList.append(self.plotCentroidXY(catalog, plotInfoDict, areaDict, **plotKwargs))
 
@@ -690,10 +691,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                         onCcdList.append(rowId)
                 fakeCat["onCcd"].iloc[np.array(onCcdList)] = dataRef.dataId[repoInfo.ccdKey]
 
+            schema = getSchema(catalog)
             if self.config.doPlotCentroids or self.config.analysis.doPlotFP and self.haveFpCoords:
                 # Compute Focal Plane coordinates for each source if not
                 # already there.
-                if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
+                if "base_FPPosition_x" not in schema and "focalplane_x" not in schema:
                     det = repoInfo.butler.get("calexp_detector", dataRef.dataId)
                     catalog = addFpPoint(det, catalog)
                 xFp = catalog["base_FPPosition_x"]
@@ -702,7 +704,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if self.config.doPlotFootprintNpix:
                 catalog = addFootprintNPix(catalog)
             if repoInfo.hscRun and self.config.doAddAperFluxHsc:
-                self.log.info("HSC run: adding aperture flux to schema...")
+                self.log.info("HSC run: adding aperture flux to catalog schema...")
                 catalog = addApertureFluxesHSC(catalog, prefix="")
             # Optionally backout aperture corrections
             if self.config.doBackoutApCorr:
@@ -846,7 +848,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             # Compute Focal Plane coordinates for each source if not already
             # there.
             if self.config.analysisMatches.doPlotFP:
-                if "src_base_FPPosition_x" not in catalog.schema and "src_focalplane_x" not in catalog.schema:
+                schema = getSchema(catalog)
+                if "src_base_FPPosition_x" not in schema and "src_focalplane_x" not in schema:
                     det = repoInfo.butler.get("calexp_detector", dataRef.dataId)
                     catalog = addFpPoint(det, catalog, prefix="src_")
             # Optionally backout aperture corrections
@@ -1228,6 +1231,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
 
             subdir = "ccd-" + str(ccdListPerTract1[0]) if len(ccdIntersectList) == 1 else subdir
             hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
+            schema = getSchema(catalog)
 
             # Dict of all parameters common to plot* functions
             tractInfo1 = repoInfo1.tractInfo if self.config.doApplyExternalPhotoCalib1 else None
@@ -1265,11 +1269,10 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             if self.config.doPlotMags:
                 plotList.append(self.plotMags(catalog, plotInfoDict, areaDict1, **plotKwargs1))
             if self.config.doPlotSizes:
-                if ("first_base_SdssShape_psf_xx" in catalog.schema
-                        and "second_base_SdssShape_psf_xx" in catalog.schema):
+                if ("first_base_SdssShape_psf_xx" in schema and "second_base_SdssShape_psf_xx" in schema):
                     plotList.append(self.plotSizes(catalog, plotInfoDict, areaDict1, **plotKwargs1))
                 else:
-                    self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
+                    self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in the catalog schema")
             if self.config.doApCorrs:
                 plotList.append(self.plotApCorrs(catalog, plotInfoDict, areaDict1, **plotKwargs1))
             if self.config.doPlotCentroids:
@@ -1390,7 +1393,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                     srcCat = addRotPoint(srcCat, bbox.getWidth(), bbox.getHeight(), nQuarter)
 
                 if repoInfo.hscRun and self.config.doAddAperFluxHsc:
-                    self.log.info("HSC run: adding aperture flux to schema...")
+                    self.log.info("HSC run: adding aperture flux to catalog schema...")
                     srcCat = addApertureFluxesHSC(srcCat, prefix="")
 
                 # Scale fluxes to common zeropoint to make basic comparison
