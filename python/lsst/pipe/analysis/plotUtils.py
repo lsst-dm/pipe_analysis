@@ -1,3 +1,24 @@
+# This file is part of pipe_analysis.
+#
+# Developed for the LSST Data Management System.
+# This product includes software developed by the LSST Project
+# (https://www.lsst.org).
+# See the COPYRIGHT file at the top-level directory of this distribution
+# for details of code ownership.
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 from matplotlib import pyplot as plt
 from matplotlib.colors import ListedColormap
 import matplotlib.patches as patches
@@ -73,7 +94,8 @@ class MatchesStarGalaxyLabeller(StarGalaxyLabeller):
 
 
 class CosmosLabeller(StarGalaxyLabeller):
-    """Do star/galaxy classification using Alexie Leauthaud's Cosmos catalog"""
+    """Do star/galaxy classification using Alexie Leauthaud's Cosmos catalog.
+    """
     def __init__(self, filename, radius):
         original = afwTable.BaseCatalog.readFits(filename)
         good = (original["CLEAN"] == 1) & (original["MU.CLASS"] == 2)
@@ -96,47 +118,52 @@ class CosmosLabeller(StarGalaxyLabeller):
 
 
 def plotText(textStr, fig, axis, xLoc, yLoc, prefix="", fontSize=None, color="k", coordSys="axes", **kwargs):
-    """Label the plot with the string provided at a given location
+    """Label the plot with the string provided at a given location.
 
     Parameters
     ----------
     textStr : `str`
-       String of text to plot.
+        String of text to plot.
     fig : `matplotlib.figure.Figure`
-       The figure to plot ``textStr`` on.
+        The figure to plot ``textStr`` on.
     axis : `matplotlib.axes._axes.Axes`
-       Particular matplotlib axes of ``plt`` on which to plot ``testStr``.
+        Particular matplotlib axes of ``plt`` on which to plot ``testStr``.
     xLoc, yLoc : `float`
-       x and y coordinates, in corrdinate system set by ``coordSys``, at which to plot the ``textStr``.
-       The string will be centered both horizontally and vertically at this position.
+        x and y coordinates, in corrdinate system set by ``coordSys``, at which
+        to plot the ``textStr``.  The string will be centered both horizontally
+        and vertically at this position.
     prefix : `str`, optional
-       Optional prefix to add to ``textStr``.
+        Optional prefix to add to ``textStr``.
     fontSize : `int` or `str` or `None`, optional
-       Size of font for plotting of ``textStr``.  May be either an absolute font size in points, or a
-       size string, relative to the default font size.  Default is `None`, in which case an automatic
-       scaling based on the length of ``textStr`` will be used.
+        Size of font for plotting of ``textStr``.  May be either an absolute
+        font size in points, or a size string, relative to the default font
+        size, or `None`.  If `None`, in which case an automatic scaling based
+        on the length of ``textStr`` will be used.
     color : `str`, optional
-       Color to plot ``textStr``.  Can be any matplotlib color str.  Default is k (for black).
+        Color to plot ``textStr``.  Can be any matplotlib color `str`.
     coordSys : `str`, optional
-       Coordinate system for ``xLoc``, ``yLoc``.  Choices and matplotlib mappings are:
-       axes => axis.transAxes [the default]
-       data => axis.transData
-       figure => axis.transFigure
+        Coordinate system for ``xLoc``, ``yLoc``.  Choices and matplotlib
+        mappings are:
+            "axes" => axis.transAxes (`matplotlib.transforms.BboxTransformTo`)
+            "data" => axis.transData (`matplotlib.transforms.BboxTransformTo`)
+            "figure" => axis.transFigure
+                        (`matplotlib.transforms.BboxTransformTo`)
     **kwargs
-       Arbitrary keyword arguments.  These can include any of those accecpted
-       by matplotlib's matplotlib.pyplot.text function (i.e. are properties of
-       the matplotlib.text.Text class).  Of particular interest here include:
+        Arbitrary keyword arguments.  These can include any of those accecpted
+        by matplotlib's matplotlib.pyplot.text function (i.e. are properties of
+        the matplotlib.text.Text class).  Of particular interest here include:
 
-       - ``rotation`` : Angle in degrees to rotate ``textStr`` for plotting
-                        or one of strings "vertical" or "horizontal".  The
-                        matplotlib default is 0 degrees (`int` or `str`).
-       - ``alpha`` : The matplotlib blending value, between 0 (transparent)
-                     and 1 (opaque).  The matplotlib default is 1 (`float`).
+        - ``rotation`` : Angle in degrees to rotate ``textStr`` for plotting
+                         or one of strings "vertical" or "horizontal".  The
+                         matplotlib default is 0 degrees (`int` or `str`).
+        - ``alpha`` : The matplotlib blending value, between 0 (transparent)
+                      and 1 (opaque).  The matplotlib default is 1 (`float`).
 
     Raises
     ------
-    `ValueError`
-       If unrecognized ``coordSys`` is requested (i.e. something other than axes, data, or figure)
+    ValueError
+        If unrecognized ``coordSys`` is requested (i.e. something other than
+        axes, data, or figure).
     """
     if coordSys == "axes":
         transform = axis.transAxes
@@ -157,84 +184,79 @@ def annotateAxes(description, axes, statsConf, dataSet, magThresholdConf, signal
                  x0=0.03, y0=0.96, yOff=0.05, fontSize=8, ha="left", va="top", color="blue",
                  isHist=False, hscRun=None, matchRadius=None, matchRadiusUnitStr="\"",
                  unitScale=1.0, doPrintMedian=False):
-    """Label the plot with the statistical computation results
+    """Label the plot with the statistical computation results.
 
     Parameters
     ----------
     description : `str`
-       String representing the type of plot. Used here to select for/against
-       certain annotations for certain styles of plots.
+        String representing the type of plot. Used here to select for/against
+        certain annotations for certain styles of plots.
     axes : `matplotlib.axes._axes.Axes`
-       Particular matplotlib axes of ``plt`` on which to plot the annotations.
+        Particular matplotlib axes of ``plt`` on which to plot the annotations.
     statsConf : `lsst.pipe.analysis.utils.Stats`
-       `lsst.pipe.analysis.utils.Stats` object that contains the results from
-       the "configured" statistical computation results for the threshold type
-       and values set in ``analysis.config.suseSignalToNoiseThreshold`` and:
-       - ``analysis.config.signalToNoiseThreshold`` if the former is `True` or
-       - ``analysis.config.magThreshold`` if it is `False`.
+        `lsst.pipe.analysis.utils.Stats` object that contains the results from
+        the "configured" statistical computation results for the threshold type
+        and values set in ``analysis.config.suseSignalToNoiseThreshold`` and:
+        - ``analysis.config.signalToNoiseThreshold`` if the former is `True` or
+        - ``analysis.config.magThreshold`` if it is `False`.
     dataset : `str`
-       Name of the catalog dataset to for which annotations are being added.
-       Valid strings are "star", "galaxy", "all", and "split".
+        Name of the catalog dataset to for which annotations are being added.
+        Valid strings are "star", "galaxy", "all", and "split".
     magThresholdConf : `float`
-       The "configured" value for the magnitude threshold (i.e. the value set
-       in ``analysis.config.magThreshold`` if the threshold was set based on
-       magnitude or the "effective" magnitude threshold if the cut was based
-       on S/N).
+        The "configured" value for the magnitude threshold (i.e. the value set
+        in ``analysis.config.magThreshold`` if the threshold was set based on
+        magnitude or the "effective" magnitude threshold if the cut was based
+        on S/N).
     signalToNoiseStrConf : `str` or `None`, optional
-       A string representing the type of threshold used in culling the data to
-       the subset of the quantity that was used in the statistics computation
-       of ``statsConf``: "S/N" and "mag" indicate a threshold based on
-       signal-to-noise or magnitude, respectively.  Default is `None`.
+        A string representing the type of threshold used in culling the data to
+        the subset of the quantity that was used in the statistics computation
+        of ``statsConf``: "S/N" and "mag" indicate a threshold based on
+        signal-to-noise or magnitude, respectively.
     statsHigh : `lsst.pipe.analysis.utils.Stats`, optional
-       `lsst.pipe.analysis.utils.Stats` object that contains the results from
-       the "high" statistical computation results whose value is set in
-       ``analysis.config.signalToNoiseHighThreshold``.  Default is `None`.
+        `lsst.pipe.analysis.utils.Stats` object that contains the results from
+        the "high" statistical computation results whose value is set in
+        ``analysis.config.signalToNoiseHighThreshold``.
     magThresholdHigh : `float`, optional
-       The "effective" magnitude threshold based on the "high" S/N cut.
-       Default is `None`.
+        The "effective" magnitude threshold based on the "high" S/N cut.
     signalToNoiseHighStr : `str`
-       A string representing the threshold used in culling of the dataset to
-       the subset of the quantity that was used in the statistics computation
-       of ``statsHigh``.  Default is `None`.
+        A string representing the threshold used in culling of the dataset to
+        the subset of the quantity that was used in the statistics computation
+        of ``statsHigh``.
     x0, y0 : `float`, optional
-       Axis coordinates controlling placement of annotations on the plot.
-       Defaults are ``x0``=0.03 and ``y0``=0.96.
+        Axis coordinates controlling placement of annotations on the plot.
     yOff : `float`, optional
-       Offset by which to separate annotations along the y-axis.
-       Default is 0.05.
+        Offset by which to separate annotations along the y-axis.
     fontSize : `int`, optional
-       Font size for plot labels.  Default is 8.
+        Font size for plot labels.
     ha, va : `str`, optional
-       Horizontal and vertical allignments for text labels.  Can be any valid
-       matplotlib allignment string.  Defaults are ``ha``="left", ``va``="top".
+        Horizontal and vertical allignments for text labels.  Can be any valid
+        matplotlib allignment string.
     color : `str`, optional
-       Color for annotations.  Can be any matplotlib color str.
-       Default is "blue".
+        Color for annotations.  Can be any matplotlib color `str`.
     isHist : `bool`, optional
-       Boolean indicating if this is a histogram style plot (for slightly
-       different annotation settings).  Default is `False`.
+        Boolean indicating if this is a histogram style plot (for slightly
+        different annotation settings).
     hscRun : `str` or `None`, optional
-       String representing "HSCPIPE_VERSION" fits header if the data were
-       processed with the (now obsolete, but old reruns still exist)
-       "HSC stack".  Default is `None`.
+        String representing "HSCPIPE_VERSION" fits header if the data were
+        processed with the (now obsolete, but old reruns still exist)
+        "HSC stack".
     matchRadius : `float` or `None`, optional
-       Maximum search radius for source matching between catalogs.
-       Default is `None`.
+        Maximum search radius for source matching between catalogs.
     matchRadiusUnitStr : `str`, optional
-       String representing the units of the match radius (e.g. "arcsec",
-       "pixel").  Default is "\"" (i.e. arcsec).
+        String representing the units of the match radius (e.g. "arcsec",
+        "pixel").
     unitScale : `float`, optional
-       Number indicating any scaling of the units (e.g 1000.0 means units
-       are in "milli" of the base unit).  Default is 1.0.
+        Number indicating any scaling of the units (e.g 1000.0 means units
+        are in "milli" of the base unit).
     doPrintMedian : `bool`, optional
-       Boolean to indicate if the median (in addition to the mean) should
-       be printed on the plot.  Default is `False`.
+        Boolean to indicate if the median (in addition to the mean) should
+        be printed on the plot.
 
     Returns
     -------
     l1, l2 : `matplotlib.lines.Line2D`
-       Output of the axes.axvline commands for the median and clipped
-       values (used for plot legends).
+        Output of the axes.axvline commands for the median and clipped
+        values (used for plot legends).
     """
     xThresh = axes.get_xlim()[0] + 0.58*(axes.get_xlim()[1] - axes.get_xlim()[0])
     plotInfo = [[statsConf, magThresholdConf, signalToNoiseStrConf, y0],
@@ -301,7 +323,7 @@ def annotateAxes(description, axes, statsConf, dataSet, magThresholdConf, signal
 
 
 def labelVisit(plotInfoDict, fig, axis, xLoc, yLoc, color="k", fontSize=9):
-    """Add Visit information to the plot
+    """Add Visit information to the plot.
 
     Parameters
     ----------
@@ -317,10 +339,8 @@ def labelVisit(plotInfoDict, fig, axis, xLoc, yLoc, color="k", fontSize=9):
         The y location to put the label at.
     color : `str`
         The color to make the label.
-        default : "k"
     fontSize : ``
         The fontsize to use for the label.
-        default : 9
     """
     if plotInfoDict["visit"] is None:
         labelStr = "Tract: {}".format(plotInfoDict["tract"])
@@ -356,24 +376,24 @@ def plotCameraOutline(axes, camera, ccdList, color="k", fontSize=6, metricPerCcd
     axes : `matplotlib.axes._axes.Axes`
         Particular matplotlib axes on which to plot the tract outline.
     camera : `lsst.afw.cameraGeom.Camera`, optional
-       The camera associated with the dataset (used to label the plot with
-       the camera's name).
+        The ``camera`` associated with the dataset (used to label the plot with
+        the camera's name).
     ccdList : `list` of `int`, optional
-       List of ccd IDs with data to be plotted.
+        List of ccd IDs with data to be plotted.
     fontSize : `int`, optional
-       Font size for plot labels.
+        Font size for plot labels.
     metricPerCcdDict : `dict` of `float`, optional
-       Dictionary of per patch metric averages; {ccdId: metricValue}.  If
-       provided, these values will be used to color-code the camera outline
-       plot.
+        Dictionary of per patch metric averages; {ccdId: metricValue}.  If
+        provided, these values will be used to color-code the camera outline
+        plot.
     metricStr : `str`, optional
-       String representing the computed metric values provided in
-       ``metricPerCcdDict``.  Default is "".
+        String representing the computed metric values provided in
+        ``metricPerCcdDict``.
     fig : `matplotlib.figure.Figure`, optional
-       The figure on which to add the per-ccd metric info (required to add
-       the colorbar).
+        The figure on which to add the per-ccd metric info (required to add
+        the colorbar).
     metricSigmaRange : `float`, optional
-       Number of sigma to make the +/- range for the metric colorbar.
+        Number of sigma to make the +/- range for the metric colorbar.
     """
     if metricPerCcdDict:
         if fig is None:
@@ -385,9 +405,9 @@ def plotCameraOutline(axes, camera, ccdList, color="k", fontSize=6, metricPerCcd
     camRadius = np.round(camRadius, -1)
     camLimits = np.round(1.25*camRadius, -1)
     intCcdList = [int(ccd) for ccd in ccdList]
-    prop_cycle = plt.rcParams['axes.prop_cycle']
-    colors = prop_cycle.by_key()['color']
-    colors.pop(colors.index('#7f7f7f'))  # get rid of the gray one as is doesn't contrast well with white
+    prop_cycle = plt.rcParams["axes.prop_cycle"]
+    colors = prop_cycle.by_key()["color"]
+    colors.pop(colors.index("#7f7f7f"))  # get rid of the gray one as is doesn't contrast well with white
     colors.append("gold")
     hasRotatedCcds = False
     for ccd in camera:
@@ -441,7 +461,7 @@ def plotCameraOutline(axes, camera, ccdList, color="k", fontSize=6, metricPerCcd
                   color=color)
     if metricPerCcdDict:
         mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vMin, vmax=vMax))
-        mappable._A = []        # fake up the array of the scalar mappable. Urgh...
+        mappable._A = []  # fake up the array of the scalar mappable. Urgh...
         axesBbox = axes.get_position()
         caxDim = [axesBbox.xmin, 0.95*axesBbox.ymin, axesBbox.width, 0.07*axesBbox.height]
         cax = fig.add_axes(caxDim)
@@ -455,9 +475,9 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
     """Plot the outline of the tract and patches highlighting those with data.
 
     As some skyMap settings can define tracts with a large number of patches,
-    this can become very crowded.  So, if only a subset of patches are included,
-    find the outer boudary of all patches in ``patchList`` and only plot to
-    ``maxDegBeyondPatch`` degrees beyond those boundaries (in all four
+    this can become very crowded.  So, if only a subset of patches are
+    included, find the outer boudary of all patches in ``patchList`` and only
+    plot to ``maxDegBeyondPatch`` degrees beyond those boundaries (in all four
     directions).
 
     Parameters
@@ -465,27 +485,27 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
     axes : `matplotlib.axes._axes.Axes`
         Particular matplotlib axes on which to plot the tract outline.
     tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
-       Tract information object for extracting tract RA and DEC limits.
+        Tract information object for extracting tract RA and Dec limits.
     patchList : `list` of `str`
-       List of patch IDs with data to be plotted.  These will be color shaded
-       in the outline plot.
+        List of patch IDs with data to be plotted.  These will be color shaded
+        in the outline plot.
     fontSize : `int`, optional
-       Font size for plot labels.
+        Font size for plot labels.
     maxDegBeyondPatch : `float`, optional
-       Maximum number of degrees to plot beyond the border defined by all
-       patches with data to be plotted.
+        Maximum number of degrees to plot beyond the border defined by all
+        patches with data to be plotted.
     metricPerPatchDict : `dict` of `float`, optional
-       Dictionary of per patch metric averages; {patchId: metricValue}.  If
-       provided, these values will be used to color-code the tract outline
-       plot.
+        Dictionary of per patch metric averages; {patchId: metricValue}.  If
+        provided, these values will be used to color-code the tract outline
+        plot.
     metricStr : `str`, optional
-       String representing the computed metric values provided in
-       ``metricPerPatchDict``.
+        String representing the computed metric values provided in
+        ``metricPerPatchDict``.
     fig : `matplotlib.figure.Figure`, optional
-       The figure on which to add the per-patch metric info (required to add
-       the colorbar).
+        The figure on which to add the per-patch metric info (required to add
+        the colorbar).
     metricSigmaRange : `float`, optional
-       Number of sigma to make the +/- range for the metric colorbar.
+        Number of sigma to make the +/- range for the metric colorbar.
     """
     if metricPerPatchDict:
         if fig is None:
@@ -504,10 +524,10 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
     yMax = min(max(tractDec), patchBoundary.decMax) + buff
     xlim = xMin, xMax
     ylim = yMin, yMax
-    axes.fill(tractRa, tractDec, fill=False, edgecolor='k', lw=0.5, linestyle='solid', color="k", alpha=0.3)
-    prop_cycle = plt.rcParams['axes.prop_cycle']
-    colors = prop_cycle.by_key()['color']
-    colors.pop(colors.index('#7f7f7f'))  # get rid of the gray one as that's our no-data colour
+    axes.fill(tractRa, tractDec, fill=False, edgecolor="k", lw=0.5, linestyle="solid", color="k", alpha=0.3)
+    prop_cycle = plt.rcParams["axes.prop_cycle"]
+    colors = prop_cycle.by_key()["color"]
+    colors.pop(colors.index("#7f7f7f"))  # get rid of the gray one as that's our no-data colour
     colors.append("gold")
     if metricPerPatchDict:  # color-code the ccds by the per-patch metric measurement
         cmap = plt.cm.viridis
@@ -540,13 +560,13 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
         pBuff = 0.5*max(deltaRa, deltaDec)
         centerRa = min(ra) + 0.5*deltaRa
         centerDec = min(dec) + 0.5*deltaDec
-        if (centerRa < xMin + pBuff and centerRa > xMax - pBuff and
-                centerDec > yMin - pBuff and centerDec < yMax + pBuff):
+        if (centerRa < xMin + pBuff and centerRa > xMax - pBuff
+                and centerDec > yMin - pBuff and centerDec < yMax + pBuff):
             axes.fill(ra, dec, fill=True, color=color, lw=0.5, linestyle="solid", alpha=alpha)
-            if patchIndexStr in patchList or (centerRa < xMin - 0.2*pBuff and
-                                              centerRa > xMax + 0.2*pBuff and
-                                              centerDec > yMin + 0.2*pBuff and
-                                              centerDec < yMax - 0.2*pBuff):
+            if patchIndexStr in patchList or (centerRa < xMin - 0.2*pBuff
+                                              and centerRa > xMax + 0.2*pBuff
+                                              and centerDec > yMin + 0.2*pBuff
+                                              and centerDec < yMax - 0.2*pBuff):
                 axes.text(percent(ra), percent(dec, 0.5), str(patchIndexStr),
                           fontsize=fontSize - 1, horizontalalignment="center", verticalalignment="center")
     axes.text(percent((xMin, xMax), 1.065), percent((yMin, yMax), -0.08), "RA",
@@ -558,7 +578,7 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
     axes.set_ylim(ylim)
     if metricPerPatchDict:
         mappable = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vMin, vmax=vMax))
-        mappable._A = []        # fake up the array of the scalar mappable. Urgh...
+        mappable._A = []  # fake up the array of the scalar mappable. Urgh...
         axesBbox = axes.get_position()
         caxDim = [axesBbox.xmin, 0.93*axesBbox.ymin, axesBbox.width, 0.07*axesBbox.height]
         cax = fig.add_axes(caxDim)
@@ -575,21 +595,19 @@ def plotCcdOutline(axes, areaDict, ccdList, tractInfo=None, zpLabel=None, fontSi
     axes : `matplotlib.axes._subplots.AxesSubplot`
         The axes to draw the ccds on.
     areaDict : `dict`
-        A dictionary containing information about the ccds and their corners using the wcs of the visit
+        A dictionary containing information about the ccds and their corners
+        using the wcs of the visit.
     ccdList : `list`
         A list of the ccds used in this analysis.
-    tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
-        The information about the tract
-        Default is None
-    zpLabel : `str`
+    tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`, optional
+        The information about the tract.
+    zpLabel : `str`, optional
         The label for the zero point.
-        Default is None.
-    fontSize : `int`
+    fontSize : `int`, optional
         The fontsize to use for the ccd labels.
-        Default is 8.
     """
     for ccd in ccdList:
-        # Use the precomputed corners to make lists of ra and dec to plot
+        # Use the precomputed corners to make lists of RA and Dec to plot
         ccdCorners = areaDict["corners_{}".format(ccd)]
         ra0 = ccdCorners[0].getRa().asDegrees()
         ra1 = ccdCorners[2].getRa().asDegrees()
@@ -604,7 +622,8 @@ def plotCcdOutline(axes, areaDict, ccdList, tractInfo=None, zpLabel=None, fontSi
         cenX = ra0 + (ra1 - ra0)/2
         cenY = dec0 + (dec1 - dec0)/2
 
-        # Only plot the ccds with any corner in the tract given in tractInfo, plot all if no tractInfo
+        # Only plot the ccds with any corner in the tract given in tractInfo,
+        # plot all if no tractInfo.
         inTract = False
         if tractInfo is not None:
             for coord in ccdCorners:
@@ -618,7 +637,7 @@ def plotCcdOutline(axes, areaDict, ccdList, tractInfo=None, zpLabel=None, fontSi
 
 
 def plotPatchOutline(axes, tractInfo, patchList, plotUnits="deg", idFontSize=None):
-    """!Plot outlines of patches in patchList
+    """Plot outlines of patches in patchList.
     """
     validWcsUnits = ["deg", "rad"]
     idFontSize = max(5, 9 - int(0.4*len(patchList))) if not idFontSize else idFontSize
@@ -646,7 +665,8 @@ def plotPatchOutline(axes, tractInfo, patchList, plotUnits="deg", idFontSize=Non
 
 
 def rotatePixelCoords(sources, width, height, nQuarter):
-    """Rotate catalog (x, y) pixel coordinates such that LLC of detector in FP is (0, 0)
+    """Rotate catalog (x, y) pixel coordinates such that LLC of detector in FP
+    is (0, 0).
     """
     xKey = sources.schema.find("slot_Centroid_x").key
     yKey = sources.schema.find("slot_Centroid_y").key
@@ -671,23 +691,23 @@ def bboxToXyCoordLists(bbox, wcs=None, wcsUnits="deg"):
     Parameters
     ----------
     bbox : `lsst.geom.Box2I`
-       The bounding box under consideration.
+        The bounding box under consideration.
     wcs : `lsst.afw.geom.SkyWcs`, optional
-       If provided, the coordinate lists returned will be Ra and Dec in
-       `wcsUnits`.  Ignored if ``wcs`` is `None`.  Default is "deg".
+        If provided, the coordinate lists returned will be RA and Dec in
+        ``wcsUnits``.  Ignored if ``wcs`` is `None`.
     wcsUnits : `str`, optional
-       Coordinate units to be returned if a wcs is provided (ignored
-       otherwise).  Can be either "deg" or "rad".  Default is "deg".
+        Coordinate units to be returned if a ``wcs`` is provided (ignored
+        otherwise).  Can be either "deg" or "rad".
 
     Raises
     ------
-    `RuntimeError`
-       If ``wcsUnits`` is neither "deg" nor "rad".
+    RuntimeError
+        If ``wcsUnits`` is neither "deg" nor "rad".
 
     Returns
     -------
     xCoords, yCoords : `list` of `float`
-       The lists associated with the x and y coordinates in appropriate uints.
+        The lists associated with the x and y coordinates in appropriate uints.
     """
     validWcsUnits = ["deg", "rad"]
     corners = []
@@ -710,30 +730,31 @@ def bboxToXyCoordLists(bbox, wcs=None, wcsUnits="deg"):
 
 def getRaDecMinMaxPatchList(patchList, tractInfo, pad=0.0, nDecimals=4, raMin=360.0, raMax=0.0,
                             decMin=90.0, decMax=-90.0):
-    """Find the max and min RA and DEC (deg) boundaries encompased in the patchList
+    """Find the max and min RA and Dec (deg) boundaries encompased in the
+    patchList.
 
     Parameters
     ----------
     patchList : `list` of `str`
-       List of patch IDs.
+        List of patch IDs.
     tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
-       Tract information associated with the patches in patchList
-    pad : `float`
-       Pad the boundary by pad degrees
-    nDecimals : `int`
-       Round coordinates to this number of decimal places
-    raMin, raMax : `float`
-       Initiate minimum[maximum] RA determination at raMin[raMax] (deg)
-    decMin, decMax : `float`
-       Initiate minimum[maximum] DEC determination at decMin[decMax] (deg)
+        Tract information associated with the patches in ``patchList``.
+    pad : `float`, optional
+        Pad the boundary by ``pad`` degrees.
+    nDecimals : `int`, optional
+        Round coordinates to this number of decimal places.
+    raMin, raMax : `float`, optional
+        Initiate minimum[maximum] RA determination at raMin[raMax] (deg).
+    decMin, decMax : `float`, optional
+        Initiate minimum[maximum] Dec determination at decMin[decMax] (deg).
 
     Returns
     -------
-    `lsst.pipe.base.Struct`
-       Contains the ra and dec min and max values for the patchList provided
+    result : `lsst.pipe.base.Struct`
+        Contains the RA and Dec min and max values for the patchList provided.
     """
     for ip, patch in enumerate(tractInfo):
-        if str(patch.getIndex()[0])+","+str(patch.getIndex()[1]) in patchList:
+        if str(patch.getIndex()[0]) + "," + str(patch.getIndex()[1]) in patchList:
             raPatch, decPatch = bboxToXyCoordLists(patch.getOuterBBox(), wcs=tractInfo.getWcs())
             raMin = min(np.round(min(raPatch) - pad, nDecimals), raMin)
             raMax = max(np.round(max(raPatch) + pad, nDecimals), raMax)
@@ -748,48 +769,51 @@ def getRaDecMinMaxPatchList(patchList, tractInfo, pad=0.0, nDecimals=4, raMin=36
 
 
 def percent(values, p=0.5):
-    """Return a value a faction of the way between the min and max values in a list."""
+    """Return a value a faction of the way between the min and max values in a
+    list.
+    """
     m = min(values)
     interval = max(values) - m
     return m + p*interval
 
 
 def setPtSize(num, ptSize=12):
-    """Set the point size according to the size of the catalog"""
+    """Set the point size according to the size of the catalog.
+    """
     if num > 10:
         ptSize = min(12, max(3, int(20/np.log10(num))))
     return ptSize
 
 
-def getQuiver(x, y, e1, e2, ax, color=None, scale=3, width=0.005, label=''):
-    """Return the quiver object for the given input parameters"""
+def getQuiver(x, y, e1, e2, ax, color=None, scale=3, width=0.005, label=""):
+    """Return the quiver object for the given input parameters.
+    """
     theta = [np.math.atan2(a, b)/2.0 for a, b in zip(e1, e2)]
     e = np.sqrt(e1**2 + e2**2)
     c1 = e*np.cos(theta)
     c2 = e*np.sin(theta)
     if color is None:
         color = e
-    q = ax.quiver(x, y, c1, c2, color=color, angles='uv', scale=scale, units='width', pivot='middle',
+    q = ax.quiver(x, y, c1, c2, color=color, angles="uv", scale=scale, units="width", pivot="middle",
                   width=width, headwidth=0.0, headlength=0.0, headaxislength=0.0, label=label)
     return q
 
 
 def makeAlphaCmap(cmap=plt.cm.viridis, alpha=1.0):
-    """Given a matplotlib colormap, return it but with given alpha transparency
+    """Given a matplotlib colormap, return it but with given alpha
+    transparency.
 
     Parameters
     ----------
     cmap : `matplotlib.colors.ListedColormap`, optional
-       The matplotlib colormap to make transparent with level ``alpha``.
-       Default color map is `plt.cm.viridis`.
+        The matplotlib colormap to make transparent with level ``alpha``.
     alpha : `float`, optional
-       The matplotlib blending value, between 0 (transparent) and 1 (opaque)
-       (1.0 by default).
+        The matplotlib blending value, between 0 (transparent) and 1 (opaque).
 
     Returns
     -------
     alphaCmap : `matplotlib.colors.ListedColormap`
-       The matplotlib colormap ``cmap`` but with transparency level ``alpha``.
+        The matplotlib colormap ``cmap`` but with transparency level ``alpha``.
     """
     alphaCmap = cmap(np.arange(cmap.N))
     alphaCmap[:, -1] = alpha
@@ -798,32 +822,32 @@ def makeAlphaCmap(cmap=plt.cm.viridis, alpha=1.0):
 
 
 def buildTractImage(butler, dataId, tractInfo, patchList=None, coaddName="deep"):
-    """Build up an image of an entire tract or list of patches
+    """Build up an image of an entire tract or list of patches.
 
     Parameters
     ----------
     butler : `lsst.daf.persistence.Butler`
+        The butler associated with the data of interest.
     dataId : `lsst.daf.persistence.DataId`
-       An instance of `lsst.daf.persistence.DataId` from which to extract the
-       filter name.
+        An instance of `lsst.daf.persistence.DataId` from which to extract the
+        filter name.
     tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
-       Tract information object.
+        Tract information object.
     patchList : `list` of `str`, optional
-       A list of the patches to include.  If `None`, the full list of patches
-       in ``tractInfo`` will be included.
+        A list of the patches to include.  If `None`, the full list of patches
+        in ``tractInfo`` will be included.
     coaddName : `str`, optional
-       The base name of the coadd (e.g. "deep" or "goodSeeing").
-       Default is "deep".
+        The base name of the coadd (e.g. "deep" or "goodSeeing").
 
     Raises
     ------
-    `RuntimeError`
-       If ``nPatches`` is zero, i.e. no data was found.
+    RuntimeError
+        If ``nPatches`` is zero, i.e. no data was found.
 
     Returns
     -------
     image : `lsst.afw.image.ImageF`
-       The full tract or patches in ``patchList`` image.
+        The full tract or patches in ``patchList`` image.
     """
     tractBbox = tractInfo.getBBox()
     nPatches = 0
@@ -858,10 +882,10 @@ def determineExternalCalLabel(repoInfo, patch, coaddName="deep"):
     Make a string representing the external calibrations used in assembling the
     coadd to serve as a label for the plots.  Note that this is really a "best
     guess" based on the datasets that exist in the repo.  The prioritized
-    assigment is based on the assumption that a particular calibration type will
-    have been applied in coaddition if it does indeed exist in the repo (most
-    notably, it is assumed that any fgcm photoCalib would have been used for
-    photometric calibration even if the jointcal equivalent exists).
+    assignment is based on the assumption that a particular calibration type
+    will have been applied in coaddition if it does indeed exist in the repo
+    (most notably, it is assumed that any fgcm photoCalib would have been used
+    for photometric calibration even if the jointcal equivalent exists).
 
     External photometric calibration:
     fcr_md                dataset exists: label as MEAS_MOSAIC
@@ -876,20 +900,20 @@ def determineExternalCalLabel(repoInfo, patch, coaddName="deep"):
     Parameters
     ----------
     repoInfo : `lsst.pipe.base.struct.Struct`
-       A struct containing elements with repo information needed to create
-       appropriate dataIds to look for the external calibration datasets.
+        A struct containing elements with repo information needed to create
+        appropriate dataIds to look for the external calibration datasets.
     patch : `str`
-       An existing patch to use in the coaddDataId.
+        An existing patch to use in the coaddDataId.
     coaddName : `str`, optional
-       The base name of the coadd (e.g. "deep" or "goodSeeing").
-       Default is "deep".
+        The base name of the coadd (e.g. "deep" or "goodSeeing").
 
     Returns
     -------
     uberCalLabel : `str`
-       The label to be used for the external calibration used.
+        The label to be used for the external calibration used.
     """
-    # Find a visit/ccd input so that you can check for meas_mosaic input (i.e. to set uberCalLabel)
+    # Find a visit/ccd input so that you can check for meas_mosaic input (i.e.
+    # to set uberCalLabel).
     coaddDataId = {"tract": repoInfo.tractInfo.getId(), "patch": patch, "filter": repoInfo.filterName}
     fname = repoInfo.butler.getUri(coaddName + "Coadd_calexp", coaddDataId)
     coaddInputs = afwImage.ExposureFitsReader(fname).readExposureInfo().getCoaddInputs()
@@ -926,39 +950,35 @@ def determineExternalCalLabel(repoInfo, patch, coaddName="deep"):
 
 
 def plotRhoStats(axes, rhoStats):
-    """Plot all five Rho Statistics
+    """Plot all five Rho Statistics.
 
     Parameters
     ----------
     axes : `list`
-        A list containing two `matplotlib.figure.ax` handles
+        A list containing two `matplotlib.figure.ax` handles.
     rhoStats : `dict`
         A Python dictionary object with keys 1..5, each containing a
-        treecorr.GGCorrelation object
-
-    Returns
-    -------
-        None
+        `treecorr.GGCorrelation object`.
     """
     for rhoIndex in range(1, 6):
         rho = rhoStats[rhoIndex]
 
-        # The mapping creates plots as in DES papers
-        # ax = axes[1] if rhoIndex in [2,5] else axes[0]
+        # The mapping creates plots as in DES papers:
+        # ax = axes[1] if rhoIndex in [2,5] else axes[0].
         ax = axes[1 if rhoIndex in (2, 5) else 0]
         colorStr = "C{}".format(rhoIndex)
         isPositive = rho.xip > 0
         ax.errorbar(rho.meanr[isPositive], rho.xip[isPositive], yerr=np.sqrt(rho.varxi)[isPositive],
-                    color=colorStr, fmt='o', label=r"$\rho_{0}(\theta)$".format(rhoIndex))
+                    color=colorStr, fmt="o", label=r"$\rho_{0}(\theta)$".format(rhoIndex))
         ax.errorbar(rho.meanr[~isPositive], -rho.xip[~isPositive], yerr=np.sqrt(rho.varxi)[~isPositive],
-                    color=colorStr, fillstyle='none', fmt='o', label=None)
+                    color=colorStr, fillstyle="none", fmt="o", label=None)
 
     for ax in axes:
-        ax.set_yscale('log')
-        ax.set_xscale('log')
-        ax.set_ylabel(r'$\rho(\theta)$')
-        ax.set_xlabel(r'$\theta$ (arcmin)')
-        ax.legend(loc='lower left')
+        ax.set_yscale("log")
+        ax.set_xscale("log")
+        ax.set_ylabel(r"$\rho(\theta)$")
+        ax.set_xlabel(r"$\theta$ (arcmin)")
+        ax.legend(loc="lower left")
 
 
 def getPlotInfo(repoInfo):
@@ -985,8 +1005,8 @@ def getPlotInfo(repoInfo):
                 (`lsst.daf.base.propertyContainer.PropertyList`).
             ``hscRun``
                 A string representing "HSCPIPE_VERSION" fits header if the data
-                were processed with the (now obsolete, but old reruns still exist)
-                "HSC stack", `None` otherwise (`str` or `None`).
+                were processed with the (now obsolete, but old reruns still
+                exist) "HSC stack", `None` otherwise (`str` or `None`).
             ``dataset``
                 The dataset name, ("src" if ``dataRef`` is visit level,
                 coaddName + coaddDataset if ``dataRef`` is a coadd (`str`).
@@ -1003,27 +1023,27 @@ def getPlotInfo(repoInfo):
     -------
     plotInfoDict : `dict`
         A dictionary of information about the data being plotted.
-            ``camera``
+            ``"camera"``
                 The camera used to take the data
                 (`lsst.afw.cameraGeom.Camera`).
-            ``cameraName``
+            ``"cameraName"``
                 The name of the camera used to take the data (`str`).
-            ``filter``
+            ``"filter"``
                 The filter used for this data (`str`).
-            ``tract``
+            ``"tract"``
                 The tract that associated with the data (`str`).
-            ``visit``
+            ``"visit"``
                 The visit of the data; only included if the data is from a
                 single epoch dataset (`str`).
-            ``patch``
+            ``"patch"``
                 The patch that the data is from; only included if the data are
                 from a coadd dataset (`str`).
-            ``photoCalibDataset``
+            ``"photoCalibDataset"``
                 The dataset used for the calibration, e.g: jointcal or fgcm
                 (`str`).
-            ``skyWcsDataset``
-                The sky Wcs dataset used (`lsst.skymap.SkyMap`).
-            ``rerun``
+            ``"skyWcsDataset"``
+                The sky Wcs dataset used (`str`).
+            ``"rerun"``
                 The rerun the data is stored in (`str`).
     """
     camera = repoInfo.camera
