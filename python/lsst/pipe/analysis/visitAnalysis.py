@@ -556,6 +556,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         if plotList:
             savePlots(plotList, "plotVisit", repoInfo.dataId, repoInfo.butler, subdir=subdir)
 
+        # TODO: DM-26758 (or DM-14768) should make the following line a proper
+        # butler.put by directly persisting json files.
         self.verifyJob.write(verifyJobFilename)
 
     def readCatalogs(self, dataRefList, dataset, repoInfo, aliasDictList=None, fakeCat=None,
