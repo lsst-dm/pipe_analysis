@@ -24,6 +24,7 @@ matplotlib.use("Agg")  # noqa E402
 import matplotlib.pyplot as plt
 from matplotlib.ticker import NullFormatter, AutoMinorLocator, FormatStrFormatter
 import numpy as np
+import pandas as pd
 np.seterr(all="ignore")  # noqa E402
 import re
 import astropy.units as u
@@ -133,7 +134,7 @@ class Analysis(object):
         self.prefix = prefix
         self.errFunc = errFunc
         if func is not None:
-            if type(func) == np.ndarray:
+            if isinstance(func, np.ndarray) or isinstance(func, pd.Series):
                 self.quantity = func
             else:
                 self.quantity = func(catalog)
@@ -249,7 +250,7 @@ class Analysis(object):
                        + 0.5)
 
         if labeller is not None:
-            labels = labeller(catalog, compareCat) if compareCat else labeller(catalog)
+            labels = labeller(catalog, compareCat) if compareCat is not None else labeller(catalog)
             self.data = {name: Data(catalog, self.quantity, self.mag, self.signalToNoise,
                                     self.good & (labels == value),
                                     colorList[value], self.quantityError, name in labeller.plot) for
@@ -1317,7 +1318,7 @@ class Analysis(object):
             thetas = [0.0]*len(catalog)
             edgeColors = ["None"]*len(catalog)
         else:
-            for src in catalog:
+            for _, src in catalog.iterrows():
                 edgeColor = "None"
                 srcQuad = afwGeom.Quadrupole(src[shapeStr + "_xx"], src[shapeStr + "_yy"],
                                              src[shapeStr + "_xy"])
@@ -1593,10 +1594,7 @@ class Analysis(object):
             unitList = plotInfoDict["patchList"]
             unitStr = "patchId"
         for iUnit in unitList:
-            if unitStr == "patchId":  # can't read String fields via afwTableSourceCatalog
-                good = skyObjCat.asAstropy()[unitStr] == iUnit
-            else:
-                good = skyObjCat[unitStr] == iUnit
+            good = skyObjCat[unitStr] == iUnit
             perUnitSkyObjCat = skyObjCat[good].copy(deep=True)
             if len(perUnitSkyObjCat) > 0:
                 perUnitSkyFlux = perUnitSkyObjCat[metricFluxStr]*fluxScale

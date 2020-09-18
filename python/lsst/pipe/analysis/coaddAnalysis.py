@@ -22,6 +22,7 @@
 import os
 import astropy.units as u
 import numpy as np
+import pandas as pd
 np.seterr(all="ignore")  # noqa E402
 import functools
 
@@ -32,23 +33,21 @@ from lsst.pex.config import (Config, Field, ConfigField, ListField, DictField, C
                              ConfigurableField)
 from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError, Struct
 from lsst.pipe.drivers.utils import TractDataIdContainer
-from lsst.afw.table.catalogMatches import matchesToCatalog
 from lsst.meas.astrom import AstrometryConfig
 from lsst.pipe.tasks.colorterms import Colorterm, ColortermLibrary
 
 from lsst.meas.algorithms import LoadIndexedReferenceObjectsTask
 
 from .analysis import AnalysisConfig, Analysis
-from .utils import (Enforcer, MagDiff, MagDiffMatches, MagDiffCompare,
-                    AstrometryDiff, TraceSize, PsfTraceSizeDiff, TraceSizeCompare, PercentDiff,
-                    E1Resids, E2Resids, E1ResidsHsmRegauss, E2ResidsHsmRegauss, FootNpixDiffCompare,
-                    MagDiffCompareErr, CentroidDiff, deconvMom, deconvMomStarGal,
-                    concatenateCatalogs, joinMatches, checkPatchOverlap,
-                    addColumnsToSchema, addApertureFluxesHSC, addFpPoint,
-                    addFootprintNPix, makeBadArray, addIntFloatOrStrColumn,
-                    calibrateCoaddSourceCatalog, backoutApCorr, matchNanojanskyToAB,
-                    fluxToPlotString, andCatalog, writeParquet, getRepoInfo, setAliasMaps,
-                    addPreComputedColumns, computeMeanOfFrac, savePlots, updateVerifyJob, getSchema)
+from .utils import (Enforcer, MagDiff, MagDiffMatches, MagDiffCompare, AstrometryDiff, TraceSize,
+                    PsfTraceSizeDiff, TraceSizeCompare, PercentDiff, E1Resids, E2Resids,
+                    E1ResidsHsmRegauss, E2ResidsHsmRegauss, FootNpixDiffCompare, MagDiffCompareErr,
+                    CentroidDiff, deconvMom, deconvMomStarGal, concatenateCatalogs, joinMatches,
+                    matchAndJoinCatalogs, checkPatchOverlap, addColumnsToSchema, addFpPoint,
+                    addFootprintNPix, makeBadArray, addIntFloatOrStrColumn, calibrateCoaddSourceCatalog,
+                    backoutApCorr, matchNanojanskyToAB, fluxToPlotString, andCatalog, writeParquet,
+                    getRepoInfo, addAliasColumns, addPreComputedColumns, computeMeanOfFrac,
+                    savePlots, updateVerifyJob, getSchema, loadDenormalizeAndUnpackMatches)
 from .plotUtils import (CosmosLabeller, AllLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
                         MatchesStarGalaxyLabeller, determineExternalCalLabel, getPlotInfo)
 
@@ -150,6 +149,13 @@ class CoaddAnalysisConfig(Config):
     writeParquetOnly = Field(dtype=bool, default=False,
                              doc="Only write out Parquet tables (i.e. do not produce any plots)?")
     hasFakes = Field(dtype=bool, default=False, doc="Include the analysis of the added fake sources?")
+    readFootprintsAs = Field(dtype=str, default=None, optional=True,
+                             doc=("What type of Footprint to read in along with the catalog: "
+                                  "\n  None : do not read in Footprints."
+                                  "\n\"light\": read in regular Footprints (include SpanSet and list of"
+                                  "\n         peaks per Footprint)."
+                                  "\n\"heavy\": read in HeavyFootprints (include regular Footprint plus"
+                                  "\n         flux values per Footprint)."))
 
     def saveToStream(self, outfile, root="root"):
         """Required for loading colorterms from a Config outside the "lsst"
@@ -244,9 +250,6 @@ class CoaddAnalysisTask(CmdLineTask):
         self.unitScale = 1000.0 if self.config.toMilli else 1.0
         self.matchRadius = self.config.matchRadiusXy if self.config.matchXy else self.config.matchRadiusRaDec
         self.matchRadiusUnitStr = " (pixels)" if self.config.matchXy else "\""
-        self.matchControl = afwTable.MatchControl()
-        self.matchControl.findOnlyClosest = True
-        self.matchControl.symmetricMatch = False
 
         self.verifyJob = verify.Job.load_metrics_package(subset="pipe_analysis")
 
@@ -304,14 +307,16 @@ class CoaddAnalysisTask(CmdLineTask):
                 self.config.doWriteParquetTables]) and not self.config.plotMatchesOnly:
             if haveForced:
                 forcedCatStruct = self.readCatalogs(patchRefList, self.config.coaddName
-                                                    + "Coadd_forced_src", repoInfo)
+                                                    + "Coadd_forced_src", repoInfo,
+                                                    readFootprintsAs=self.config.readFootprintsAs)
                 forced = forcedCatStruct.catalog
                 areaDict = forcedCatStruct.areaDict
                 forced = self.calibrateCatalogs(forced, wcs=repoInfo.wcs)
                 forcedSchema = getSchema(forced)
 
             unforcedCatStruct = self.readCatalogs(patchRefList, self.config.coaddName
-                                                  + "Coadd_meas", repoInfo)
+                                                  + "Coadd_meas", repoInfo,
+                                                  readFootprintsAs=self.config.readFootprintsAs)
             unforced = unforcedCatStruct.catalog
             unforcedSchema = getSchema(unforced)
             if not haveForced:
@@ -340,17 +345,32 @@ class CoaddAnalysisTask(CmdLineTask):
                                   (repoInfo.hscRun and col == "slot_Centroid_flag")]
                 forced = addColumnsToSchema(unforced, forced, measColsToCopy)
 
-            # Set some aliases for differing schema naming conventions
+            # Set some "aliases" for differing schema naming conventions.
+            # Note: we lose the alias maps when converting to pandas, so now
+            # must actually make a copy of the "old" column to a new one with
+            # the "new" name.  This is really just a backwards-compatibility
+            # accommodation for catalogs that are already pretty old, so it
+            # will be a no-op in most cases and will likely disappear in the
+            # not-too-distant future.
             coaddList = [unforced, ]
             if haveForced:
                 coaddList += [forced]
             for cat in coaddList:
-                cat = setAliasMaps(cat, aliasDictList)
+                cat = addAliasColumns(cat, aliasDictList)
 
             if self.config.doPlotFootprintNpix:
                 unforced = addFootprintNPix(unforced, fromCat=unforced)
                 if haveForced:
                     forced = addFootprintNPix(forced, fromCat=unforced)
+
+            # Convert to pandas DataFrames
+            unforced = unforced.asAstropy().to_pandas()
+            if haveForced:
+                forced = forced.asAstropy().to_pandas()
+
+            unforcedSchema = getSchema(unforced)
+            if haveForced:
+                forcedSchema = getSchema(forced)
 
             # Make sub-catalog of sky objects before flag culling as many of
             # these will have flags set due to measurement difficulties in
@@ -362,12 +382,10 @@ class CoaddAnalysisTask(CmdLineTask):
                            & (unforced["deblend_nChild"] == 0) & ~unforced["base_PixelFlags_flag_edge"])
                 skyObjCat = unforced[goodSky].copy(deep=True)
 
-            unforcedSchema = getSchema(unforced)
-            if haveForced:
-                forcedSchema = getSchema(forced)
-
             # Must do the overlaps before purging the catalogs of non-primary
-            # sources.
+            # sources.  We only really need one set of these plots and the
+            # matching takes a fair amount of time, so only plot for one
+            # catalog, favoring the forced catalog if it exists.
             if self.config.doPlotOverlaps:
                 # Determine if any patches in the patchList actually overlap
                 overlappingPatches = checkPatchOverlap(plotInfoDict["patchList"], plotInfoDict["tractInfo"])
@@ -375,8 +393,8 @@ class CoaddAnalysisTask(CmdLineTask):
                     self.log.info("No overlapping patches...skipping overlap plots")
                 else:
                     if haveForced:
-                        forcedOverlaps = self.overlaps(forced)
-                        if forcedOverlaps:
+                        forcedOverlaps = self.overlaps(forced, patchList, repoInfo.tractInfo)
+                        if forcedOverlaps is not None:
                             plotList.append(self.plotOverlaps(forcedOverlaps, plotInfoDict, areaDict,
                                                               matchRadius=self.config.matchOverlapRadius,
                                                               matchRadiusUnitStr="\"",
@@ -385,16 +403,21 @@ class CoaddAnalysisTask(CmdLineTask):
                                                               **plotKwargs))
                             self.log.info("Number of forced overlap objects matched = {:d}".
                                           format(len(forcedOverlaps)))
-                    unforcedOverlaps = self.overlaps(unforced)
-                    if unforcedOverlaps:
-                        plotList.append(self.plotOverlaps(unforcedOverlaps, plotInfoDict, areaDict,
-                                                          matchRadius=self.config.matchOverlapRadius,
-                                                          matchRadiusUnitStr="\"",
-                                                          forcedStr="unforced", postFix="_unforced",
-                                                          fluxToPlotList=["modelfit_CModel", ],
-                                                          highlightList=highlightList, **plotKwargs))
-                        self.log.info("Number of unforced overlap objects matched = {:d}".
-                                      format(len(unforcedOverlaps)))
+                        else:
+                            self.log.info("No forced overlap objects matched. Overlap plots skipped.")
+                    else:
+                        unforcedOverlaps = self.overlaps(unforced, patchList, repoInfo.tractInfo)
+                        if unforcedOverlaps is not None:
+                            plotList.append(self.plotOverlaps(unforcedOverlaps, plotInfoDict, areaDict,
+                                                              matchRadius=self.config.matchOverlapRadius,
+                                                              matchRadiusUnitStr="\"",
+                                                              forcedStr="unforced", postFix="_unforced",
+                                                              fluxToPlotList=["modelfit_CModel", ],
+                                                              highlightList=highlightList, **plotKwargs))
+                            self.log.info("Number of unforced overlap objects matched = {:d}".
+                                          format(len(unforcedOverlaps)))
+                        else:
+                            self.log.info("No unforced overlap objects matched. Overlap plots skipped.")
 
             # Set boolean array indicating sources deemed unsuitable for qa
             # analyses.
@@ -573,7 +596,7 @@ class CoaddAnalysisTask(CmdLineTask):
         self.verifyJob.write(verifyJobFilename)
 
     def readCatalogs(self, patchRefList, dataset, repoInfo, fakeCat=None, raFakesCol="raJ2000",
-                     decFakesCol="decJ2000"):
+                     decFakesCol="decJ2000", readFootprintsAs=None):
         """Read in and concatenate catalogs of type dataset in lists of
         data references.
 
@@ -601,11 +624,22 @@ class CoaddAnalysisTask(CmdLineTask):
             The name of the RA column to use from the fakes catalogue.
         decFakesCol : `str`, optional
             The name of the Dec column to use from the fakes catalogue.
+        readFootprintsAs : `None` or `str`, optional
+            A string dictating if and what type of Footprint to read in along
+            with the catalog:
+            `None` : do not read in Footprints.
+            "light": read in regular Footprints (include SpanSet and list of
+                     peaks per Footprint).
+            "heavy": read in HeavyFootprints (include regular Footprint plus
+                     flux values per Footprint).
 
         Raises
         ------
         TaskError
             If no data is read in for the dataRefList.
+        RuntimeError
+            If entry for ``readFootprintsAs`` is not recognized (i.e. not one
+            of `None`, \"light\", or \"heavy\").
 
         Returns
         -------
@@ -629,7 +663,16 @@ class CoaddAnalysisTask(CmdLineTask):
         areaDict = {}
         for patchRef in patchRefList:
             if patchRef.datasetExists(dataset):
-                cat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+                if not readFootprintsAs:
+                    catFlags = afwTable.SOURCE_IO_NO_FOOTPRINTS
+                elif readFootprintsAs == "light":
+                    catFlags = afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS
+                elif readFootprintsAs == "heavy":
+                    catFlags = 0
+                else:
+                    raise RuntimeError("Unknown entry for readFootprintsAs: {:}.  Only recognize one of: "
+                                       "None, \"light\", or \"heavy\"".format(readFootprintsAs))
+                cat = patchRef.get(dataset, immediate=True, flags=catFlags)
                 cat = addIntFloatOrStrColumn(cat, patchRef.dataId["patch"], "patchId",
                                              "Patch on which source was detected")
                 if self.config.hasFakes:
@@ -679,7 +722,7 @@ class CoaddAnalysisTask(CmdLineTask):
         return Struct(catalog=concatenateCatalogs(catList), areaDict=areaDict, fakeCat=fakeCat)
 
     def readSrcMatches(self, dataRefList, dataset, hscRun=None, wcs=None, aliasDictList=None):
-        catList = []
+        matchList = []
         matchAreaDict = {}
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
@@ -687,15 +730,18 @@ class CoaddAnalysisTask(CmdLineTask):
                 continue
             butler = dataRef.getButler()
 
-            # Generate unnormalized match list (from normalized persisted one)
-            # with joinMatchListWithCatal (which requires a refObjLoader to be
-            # initialized).
+            # Generate unnormalized match list (from normalized persisted
+            # one)  with loadDenormalizeAndUnpackMatches (which requires a
+            # refObjLoader to be initialized).
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
             catalog = addIntFloatOrStrColumn(catalog, dataRef.dataId["patch"], "patchId",
                                              "Patch on which source was detected")
-            # Set some aliases for differing schema naming conventions
+            # Set some "aliases" for differing schema naming conventions.
+            # Note: we lose the alias maps when converting to pandas, so now
+            # must actually make a copy of the "old" column to a new one with
+            # the "new" name.
             if aliasDictList:
-                catalog = setAliasMaps(catalog, aliasDictList)
+                catalog = addAliasColumns(catalog, aliasDictList)
             schema = getSchema(catalog)
             needToAddColumns = any(ss not in schema for ss in list(self.config.columnsToCopyFromMeas)
                                    + list(self.config.columnsToCopyFromRef))
@@ -722,14 +768,28 @@ class CoaddAnalysisTask(CmdLineTask):
                                   and not (hscRun and col == "slot_Centroid_flag")]
                 catalog = addColumnsToSchema(unforced, catalog, measColsToCopy)
                 if aliasDictList:
-                    catalog = setAliasMaps(catalog, aliasDictList)
+                    catalog = addAliasColumns(catalog, aliasDictList)
+            catalog = self.calibrateCatalogs(catalog, wcs=wcs)
+
+            # Compute Focal Plane coordinates for each source if not already
+            # there.
+            if self.config.analysisMatches.doPlotFP:
+                if "src_base_FPPosition_x" not in schema and "src_focalplane_x" not in schema:
+                    det = butler.get("calexp_detector", dataRef.dataId)
+                    catalog = addFpPoint(det, catalog, prefix="src_")
+            # Optionally backout aperture corrections
+            if self.config.doBackoutApCorr:
+                catalog = backoutApCorr(catalog)
+
+            # Convert to pandas DataFrames
+            catalog = catalog.asAstropy().to_pandas()
+            schema = getSchema(catalog)
 
             # Set boolean array indicating sources deemed unsuitable for qa
             # analyses.
             transCentFlag = "base_TransformedCentroid_flag"
             badFlagList = [transCentFlag, ] if transCentFlag in schema else ["slot_Centroid_flag", ]
             bad = makeBadArray(catalog, flagList=badFlagList, onlyReadStars=self.config.onlyReadStars)
-            catalog = self.calibrateCatalogs(catalog, wcs=wcs)
 
             fname = butler.getUri(self.config.coaddName + "Coadd_calexp", dataRef.dataId)
             reader = afwImage.ExposureFitsReader(fname)
@@ -744,7 +804,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 packedMatches = butler.get(dataset + "Match", dataRef.dataId)
 
             # Purge the match list of sources flagged in the catalog
-            badIds = catalog["id"][bad]
+            badIds = catalog["id"][bad].array
             badMatch = np.zeros(len(packedMatches), dtype=bool)
             for iMat, iMatch in enumerate(packedMatches):
                 if iMatch["second"] in badIds:
@@ -754,59 +814,20 @@ class CoaddAnalysisTask(CmdLineTask):
             if not packedMatches:
                 self.log.warn("No good matches for %s" % (dataRef.dataId,))
                 continue
-            # The reference object loader grows the bbox by the config
-            # parameter pixelMargin.  This is set to 50 by default but is not
-            # reflected by the radius parameter set in the metadata, so some
-            # matches may reside outside the circle searched within this
-            # radius.  Thus, increase the radius set in the metadata fed into
-            # joinMatchListWithCatalog() to accommodate.
-            matchmeta = packedMatches.table.getMetadata()
-            rad = matchmeta.getDouble("RADIUS")
-            matchmeta.setDouble("RADIUS", rad*1.05, "field radius in degrees, approximate, padded")
             refObjLoader = self.config.refObjLoader.apply(butler=butler)
-            matches = refObjLoader.joinMatchListWithCatalog(packedMatches, catalog)
-            if not hasattr(matches[0].first, "schema"):
-                raise RuntimeError("Unable to unpack matches.  "
-                                   "Do you have the correct reference catalog setup?")
+            matches = loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader)
             # LSST reads in reference catalogs with flux in "nanojanskys", so
             # must convert to AB.
             matches = matchNanojanskyToAB(matches)
-            if hscRun and self.config.doAddAperFluxHsc:
-                addApertureFluxesHSC(matches, prefix="second_")
-
-            if not matches:
+            if matches.empty:
                 self.log.warn("No matches for %s" % (dataRef.dataId,))
-                continue
-
-            # Set the alias maps for the matches sources (i.e. the .second
-            # attribute schema for each match).
-            if aliasDictList:
-                for mm in matches:
-                    mm.second = setAliasMaps(mm.second, aliasDictList)
-
-            matchMeta = butler.get(dataset, dataRef.dataId,
-                                   flags=afwTable.SOURCE_IO_NO_FOOTPRINTS).getTable().getMetadata()
-            catalog = matchesToCatalog(matches, matchMeta)
-            schema = getSchema(catalog)
-            # Compute Focal Plane coordinates for each source if not already
-            # there.
-            if self.config.analysisMatches.doPlotFP:
-                if "src_base_FPPosition_x" not in schema and "src_focalplane_x" not in schema:
-                    det = butler.get("calexp_detector", dataRef.dataId)
-                    catalog = addFpPoint(det, catalog, prefix="src_")
-            # Optionally backout aperture corrections
-            if self.config.doBackoutApCorr:
-                catalog = backoutApCorr(catalog)
-            # Set the alias maps for the matched catalog sources
-            if aliasDictList:
-                catalog = setAliasMaps(catalog, aliasDictList, prefix="src_")
-
-            catList.append(catalog)
-
-        if not catList:
+            else:
+                matchList.append(matches)
+        if not matchList:
             raise TaskError("No matches read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
 
-        return concatenateCatalogs(catList), matchAreaDict
+        allMatches = pd.concat(matchList, axis=0)
+        return allMatches, matchAreaDict
 
     def calibrateCatalogs(self, catalog, wcs=None):
         self.zpLabel = "common (" + str(self.config.analysis.coaddZp) + ")"
@@ -1240,8 +1261,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                                     **plotAllKwargs)
 
     def plotCompareUnforced(self, forced, unforced, plotInfoDict, areaDict, zpLabel=None, fluxToPlotList=None,
-                            uberCalLabel=None, matchRadius=None, matchRadiusUnitStr=None, matchControl=None,
-                            highlightList=None):
+                            uberCalLabel=None, matchRadius=None, matchRadiusUnitStr=None, highlightList=None):
         yield
         forcedSchema = getSchema(forced)
         fluxToPlotList = fluxToPlotList if fluxToPlotList else self.config.fluxToPlotList
@@ -1272,14 +1292,32 @@ class CoaddAnalysisTask(CmdLineTask):
                 return True
         return False
 
-    def overlaps(self, catalog):
+    def overlaps(self, catalog, patchList, tractInfo):
         badForOverlap = makeBadArray(catalog, flagList=self.config.analysis.flags,
                                      onlyReadStars=self.config.onlyReadStars, patchInnerOnly=False)
-        goodCat = catalog[~badForOverlap]
-        matches = afwTable.matchRaDec(goodCat, self.config.matchOverlapRadius*geom.arcseconds)
-        if not matches:
-            self.log.info("Did not find any overlapping matches")
-        return joinMatches(matches, "first_", "second_")
+        goodCat = catalog[~badForOverlap].copy(deep=True)
+        overlapPatchList = []
+        for patch1 in patchList:
+            for patch2 in patchList:
+                if patch1 != patch2:
+                    overlapping = checkPatchOverlap([patch1, patch2], tractInfo)
+                    if overlapping:
+                        if {patch1, patch2} not in overlapPatchList:
+                            overlapPatchList.append({patch1, patch2})
+        matchList = []
+        matchRadius = self.config.matchOverlapRadius
+        for patchPair in overlapPatchList:
+            patchPair = list(patchPair)
+            patchCat1 = goodCat[goodCat["patchId"] == patchPair[0]].copy(deep=True)
+            patchCat2 = goodCat[goodCat["patchId"] == patchPair[1]].copy(deep=True)
+            patchPairMatches = matchAndJoinCatalogs(patchCat1, patchCat2, matchRadius, log=self.log)
+            if not patchPairMatches.empty:
+                matchList.append(patchPairMatches)
+        if matchList:
+            matches = pd.concat(matchList, axis=0)
+        else:
+            matches = None
+        return matches
 
     def plotOverlaps(self, overlaps, plotInfoDict, areaDict, matchRadius=None, matchRadiusUnitStr=None,
                      zpLabel=None, forcedStr=None, postFix="", fluxToPlotList=None, highlightList=None,
@@ -1653,9 +1691,6 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         self.unitScale = 1000.0 if self.config.toMilli else 1.0
         self.matchRadius = self.config.matchRadiusXy if self.config.matchXy else self.config.matchRadiusRaDec
         self.matchRadiusUnitStr = " (pixels)" if self.config.matchXy else "\""
-        self.matchControl = afwTable.MatchControl()
-        self.matchControl.findOnlyClosest = True
-        self.matchControl.symmetricMatch = False
 
     def runDataRef(self, patchRefList1, patchRefList2, subdir=""):
         plotList = []
@@ -1761,7 +1796,14 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             if hscRun and self.config.srcSchemaMap is not None:
                 aliasDictList += [self.config.srcSchemaMap]
             if aliasDictList:
-                catalog = setAliasMaps(catalog, aliasDictList)
+                catalog = addAliasColumns(catalog, aliasDictList)
+
+        # Convert to pandas DataFrames
+        unforced1 = unforced1.asAstropy().to_pandas()
+        unforced2 = unforced2.asAstropy().to_pandas()
+        if haveForced:
+            forced1 = forced1.asAstropy().to_pandas()
+            forced2 = forced2.asAstropy().to_pandas()
 
         # Set boolean array indicating sources deemed unsuitable for qa
         # analyses.
@@ -1780,18 +1822,13 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         else:
             forced1 = unforced1
             forced2 = unforced2
-        unforced = self.matchCatalogs(unforced1, unforced2)
-        forced = self.matchCatalogs(forced1, forced2)
+        unforced = matchAndJoinCatalogs(unforced1, unforced2, self.matchRadius, matchXy=self.config.matchXy,
+                                        camera1=repoInfo1.camera, camera2=repoInfo2.camera)
+        forced = matchAndJoinCatalogs(forced1, forced2, self.matchRadius, matchXy=self.config.matchXy,
+                                      camera1=repoInfo1.camera, camera2=repoInfo2.camera)
 
         self.catLabel = "nChild = 0"
         forcedStr = forcedStr + " " + self.catLabel
-
-        aliasDictList = aliasDictList0
-        if hscRun and self.config.srcSchemaMap is not None:
-            aliasDictList += [self.config.srcSchemaMap]
-        if aliasDictList:
-            forced = setAliasMaps(forced, aliasDictList)
-            unforced = setAliasMaps(unforced, aliasDictList)
         schema = getSchema(forced)
         self.log.info("\nNumber of sources in forced catalogs: first = {0:d} and second = {1:d}".format(
                       len(forced1), len(forced2)))
@@ -1862,17 +1899,6 @@ class CompareCoaddAnalysisTask(CmdLineTask):
         if not catList:
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
         return Struct(catalog=concatenateCatalogs(catList), areaDict=areaDict)
-
-    def matchCatalogs(self, catalog1, catalog2, matchRadius=None, matchControl=None):
-        matchRadius = matchRadius if matchRadius else self.matchRadius
-        matchControl = matchControl if matchControl else self.matchControl
-        if self.config.matchXy:
-            matches = afwTable.matchXy(catalog1, catalog2, matchRadius, matchControl)
-        else:
-            matches = afwTable.matchRaDec(catalog1, catalog2, matchRadius*geom.arcseconds, matchControl)
-        if not matches:
-            raise TaskError("No matches found")
-        return joinMatches(matches, "first_", "second_")
 
     def calibrateCatalogs(self, catalog, wcs=None):
         self.zpLabel = "common (" + str(self.config.analysis.coaddZp) + ")"

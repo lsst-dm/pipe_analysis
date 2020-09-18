@@ -24,6 +24,7 @@ import matplotlib
 matplotlib.use("Agg")  # noqa 402
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 np.seterr(all="ignore")  # noqa 402
 
 from collections import defaultdict
@@ -32,15 +33,15 @@ from lsst.daf.persistence.butler import Butler
 from lsst.pex.config import Field, ChoiceField
 from lsst.pipe.base import ArgumentParser, TaskRunner, TaskError, Struct
 from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
-from lsst.afw.table.catalogMatches import matchesToCatalog
 from .analysis import Analysis
 from .coaddAnalysis import CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisTask
-from .utils import (AngularDistance, concatenateCatalogs, addApertureFluxesHSC, addFpPoint,
-                    addFootprintNPix, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
+from .utils import (AngularDistance, concatenateCatalogs, addApertureFluxesHSC, matchAndJoinCatalogs,
+                    addFpPoint, addFootprintNPix, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
                     calibrateSourceCatalogMosaic, calibrateSourceCatalogPhotoCalib,
                     calibrateSourceCatalog, backoutApCorr, matchNanojanskyToAB, andCatalog, writeParquet,
-                    getRepoInfo, getCcdNameRefList, getDataExistsRefList, setAliasMaps,
-                    addPreComputedColumns, updateVerifyJob, savePlots, getSchema)
+                    getRepoInfo, getCcdNameRefList, getDataExistsRefList, addAliasColumns,
+                    addPreComputedColumns, updateVerifyJob, savePlots, getSchema,
+                    loadDenormalizeAndUnpackMatches)
 from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText, getPlotInfo
 from .fakesAnalysis import (addDegreePositions, matchCatalogs, addNearestNeighbor, fakesPositionCompare,
                             calcFakesAreaDepth, plotFakesAreaDepth, fakesMagnitudeCompare,
@@ -385,6 +386,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                               aliasDictList=aliasDictList, fakeCat=inputFakes)
                 commonZpCat = catStruct.commonZpCatalog
                 catalog = catStruct.catalog
+                # Convert to pandas DataFrames
+                commonZpCat = commonZpCat.asAstropy().to_pandas()
+                catalog = catalog.asAstropy().to_pandas()
                 areaDict = catStruct.areaDict
                 schema = getSchema(catalog)
                 # Make sub-catalog of sky sources before flag culling as many
@@ -638,7 +642,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
             # Set some aliases for differing schema naming conventions
             if aliasDictList:
-                catalog = setAliasMaps(catalog, aliasDictList)
+                catalog = addAliasColumns(catalog, aliasDictList)
 
             # Add ccdId column (useful to have in Parquet tables for subsequent
             # interactive analysis).
@@ -749,7 +753,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                       catalog=concatenateCatalogs(catList), areaDict=areaDict, fakeCat=fakeCat)
 
     def readSrcMatches(self, dataRefList, dataset, repoInfo, aliasDictList=None):
-        catList = []
+        allMatches = None
         dataIdSubList = []
         matchAreaDict = {}
         for dataRef in dataRefList:
@@ -776,19 +780,32 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                             or dataRef.datasetExists("wcs")):
                         continue
             # Generate unnormalized match list (from normalized persisted one)
-            # with joinMatchListWithCatalog (which requires a refObjLoader to
-            # be initialized).
+            # with loadDenormalizeAndUnpackMatches (which requires a
+            # refObjLoader to be initialized).
             catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
             catalog = addIntFloatOrStrColumn(catalog, dataRef.dataId[repoInfo.ccdKey], "ccdId",
                                              "Id of CCD on which source was detected")
+            # Compute Focal Plane coordinates for each source if not already
+            # there.
+            if self.config.analysisMatches.doPlotFP:
+                schema = getSchema(catalog)
+                if "src_base_FPPosition_x" not in schema and "src_focalplane_x" not in schema:
+                    det = repoInfo.butler.get("calexp_detector", dataRef.dataId)
+                    catalog = addFpPoint(det, catalog, prefix="src_")
+            # Optionally backout aperture corrections
+            if self.config.doBackoutApCorr:
+                catalog = backoutApCorr(catalog)
             # Set some aliases for differing schema naming conventions
             if aliasDictList:
-                catalog = setAliasMaps(catalog, aliasDictList)
+                catalog = addAliasColumns(catalog, aliasDictList)
             fluxMag0 = None
             if not self.config.doApplyExternalPhotoCalib:
                 photoCalib = repoInfo.butler.get("calexp_photoCalib", dataRef.dataId)
                 fluxMag0 = photoCalib.getInstFluxAtZeroMagnitude()
             catalog = self.calibrateCatalogs(dataRef, catalog, fluxMag0, repoInfo)
+            # Convert to pandas DataFrames
+            catalog = catalog.asAstropy().to_pandas()
+
             # getUri is less safe but enables us to use an efficient
             # ExposureFitsReader.
             fname = repoInfo.butler.getUri("calexp", dataRef.dataId)
@@ -802,73 +819,33 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             matchAreaDict["corners_" + str(dataRef.dataId[repoInfo.ccdKey])] = ccdCorners
 
             packedMatches = repoInfo.butler.get(dataset + "Match", dataRef.dataId)
-            # The reference object loader grows the bbox by the config
-            # parameter pixelMargin.  This is set to 50 by default but is not
-            # reflected by the radius parameter set in the metadata, so some
-            # matches may reside outside the circle searched within this radius
-            # Thus, increase the radius set in the metadata fed into
-            # joinMatchListWithCatalog() to accommodate.
-            matchmeta = packedMatches.table.getMetadata()
-            rad = matchmeta.getDouble("RADIUS")
-            matchmeta.setDouble("RADIUS", rad*1.05, "field radius in degrees, approximate, padded")
             refObjLoader = self.config.refObjLoader.apply(butler=repoInfo.butler)
-            matches = refObjLoader.joinMatchListWithCatalog(packedMatches, catalog)
-            if not hasattr(matches[0].first, "schema"):
-                raise RuntimeError("Unable to unpack matches.  "
-                                   "Do you have the correct astrometry_net_data setup?")
-            noMatches = False
-            if len(matches) < 8:
-                for m in matches:
-                    if not hasattr(m.first, "get"):
-                        matches = []
-                        noMatches = True
-                        break
-
-            # LSST reads in a_net catalogs with flux in "nanojanskys", so must
-            # convert to AB.
-            if not noMatches:
-                matches = matchNanojanskyToAB(matches)
-                if repoInfo.hscRun and self.config.doAddAperFluxHsc:
-                    addApertureFluxesHSC(matches, prefix="second_")
-
-            if not matches:
+            matches = loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader)
+            # LSST reads in reference catalogs with flux in "nanojanskys", so
+            # must convert to AB.
+            matches = matchNanojanskyToAB(matches)
+            if matches.empty:
                 self.log.warn("No matches for {:s}".format(dataRef.dataId))
                 continue
 
-            matchMeta = repoInfo.butler.get(dataset, dataRef.dataId,
-                                            flags=afwTable.SOURCE_IO_NO_FOOTPRINTS).getTable().getMetadata()
-            catalog = matchesToCatalog(matches, matchMeta)
             if self.config.doApplyExternalSkyWcs:
                 # Update "distance" between reference and source matches based
                 # on external-calibration positions.
                 angularDist = AngularDistance("ref_coord_ra", "src_coord_ra",
                                               "ref_coord_dec", "src_coord_dec")
-                catalog["distance"] = angularDist(catalog)
+                matches["distance"] = angularDist(matches)
 
-            # Compute Focal Plane coordinates for each source if not already
-            # there.
-            if self.config.analysisMatches.doPlotFP:
-                schema = getSchema(catalog)
-                if "src_base_FPPosition_x" not in schema and "src_focalplane_x" not in schema:
-                    det = repoInfo.butler.get("calexp_detector", dataRef.dataId)
-                    catalog = addFpPoint(det, catalog, prefix="src_")
-            # Optionally backout aperture corrections
-            if self.config.doBackoutApCorr:
-                catalog = backoutApCorr(catalog)
-            # Need to set the alias map for the matched catalog sources
-            if aliasDictList:
-                catalog = setAliasMaps(catalog, aliasDictList, prefix="src_")
             # To avoid multiple counting when visit overlaps multiple tracts
             noTractId = dataRef.dataId.copy()
             noTractId.pop("tract")
             if noTractId not in dataIdSubList:
-                catList.append(catalog)
+                allMatches = matches if allMatches is None else pd.concat([allMatches, matches], axis=0)
             dataIdSubList.append(noTractId)
 
-        if not catList:
+        if allMatches.empty:
             raise TaskError("No matches read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
 
-        return concatenateCatalogs(catList), matchAreaDict
+        return allMatches, matchAreaDict
 
     def calibrateCatalogs(self, dataRef, catalog, fluxMag0, repoInfo):
         """Determine and apply appropriate flux calibration to the catalog.
@@ -1196,6 +1173,16 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             commonZpCat1, catalog1, areaDict1, commonZpCat2, catalog2, areaDict2 = (
                 self.readCatalogs(dataRefListTract1, dataRefListTract2, "src", repoInfo1, repoInfo2,
                                   doReadFootprints=doReadFootprints, aliasDictList=aliasDictList))
+            # Set some aliases for differing schema naming conventions
+            if aliasDictList:
+                for cat in [commonZpCat1, commonZpCat2, catalog1, catalog2]:
+                    cat = addAliasColumns(cat, aliasDictList)
+
+            # Convert to pandas DataFrames
+            commonZpCat1 = commonZpCat1.asAstropy().to_pandas()
+            commonZpCat2 = commonZpCat2.asAstropy().to_pandas()
+            catalog1 = catalog1.asAstropy().to_pandas()
+            catalog2 = catalog2.asAstropy().to_pandas()
 
             # Set boolean arrays indicating sources deemed unsuitable for qa
             # analyses.
@@ -1214,17 +1201,14 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             catalog2 = catalog2[~bad2].copy(deep=True)
             commonZpCat1 = commonZpCat1[~badCommonZp1].copy(deep=True)
             commonZpCat2 = commonZpCat2[~badCommonZp2].copy(deep=True)
-
             self.log.info("\nNumber of sources in catalogs: first = {0:d} and second = {1:d}".format(
                           len(catalog1), len(catalog2)))
-            commonZpCat = self.matchCatalogs(commonZpCat1, commonZpCat2, matchRadius=self.matchRadius,
-                                             matchControl=self.matchControl)
-            catalog = self.matchCatalogs(catalog1, catalog2, matchRadius=self.matchRadius,
-                                         matchControl=self.matchControl)
-            # Set some aliases for differing schema naming conventions
-            if aliasDictList:
-                for cat in [commonZpCat, catalog]:
-                    cat = setAliasMaps(cat, aliasDictList)
+
+            commonZpCat = matchAndJoinCatalogs(commonZpCat1, commonZpCat2, matchRadius=self.matchRadius,
+                                               matchXy=self.config.matchXy, camera1=repoInfo1,
+                                               camera2=repoInfo2)
+            catalog = matchAndJoinCatalogs(catalog1, catalog2, matchRadius=self.matchRadius,
+                                           matchXy=self.config.matchXy, camera1=repoInfo1, camera2=repoInfo2)
 
             self.log.info("Number of matches (maxDist = {0:.2f}{1:s}) = {2:d}".format(
                           self.matchRadius, self.matchRadiusUnitStr, len(catalog)))
@@ -1359,7 +1343,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
 
                 # Set some aliases for differing src naming conventions
                 if aliasDictList:
-                    srcCat = setAliasMaps(srcCat, aliasDictList)
+                    srcCat = addAliasColumns(srcCat, aliasDictList)
 
                 if self.config.doBackoutApCorr:
                     srcCat = backoutApCorr(srcCat)

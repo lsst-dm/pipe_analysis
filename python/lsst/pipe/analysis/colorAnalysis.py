@@ -24,6 +24,7 @@ matplotlib.use("Agg")  # noqa #402
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FormatStrFormatter
 import numpy as np
+import pandas as pd
 np.seterr(all="ignore")  # noqa #402
 import functools
 import os
@@ -439,13 +440,13 @@ class ColorAnalysisTask(CmdLineTask):
         for (filterName, patchRefList) in patchRefsByFilter.items():
             coaddType = self.config.coaddName + "Coadd_forced_src"
             cat, areaDict = self.readCatalogs(patchRefList, coaddType, repoInfo)
+            # Convert to pandas DataFrames
+            cat = cat.asAstropy().to_pandas()
+            cat = calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
             byFilterForcedCats[filterName] = cat
             areaDictAll.update(areaDict)
 
         self.forcedStr = "forced"
-        for cat in byFilterForcedCats.values():
-            calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
-
         geLabel = "None"
         doPlotGalacticExtinction = False
         if self.correctForGalacticExtinction:
@@ -591,7 +592,7 @@ class ColorAnalysisTask(CmdLineTask):
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
         return concatenateCatalogs(catList), areaDict
 
-    def correctForGalacticExtinction(self, catalog, tractInfo):
+    def correctForGalacticExtinction(self, catalogDict, tractInfo):
         """Correct all fluxes for each object for Galactic Extinction.
 
         This function uses the EBVbase class from lsst.sims.catUtils.dust.EBV,
@@ -599,11 +600,12 @@ class ColorAnalysisTask(CmdLineTask):
 
         Parameters
         ----------
-        catalog : `lsst.afw.table.SourceCatalog`
-            The source ``catalog`` for which to apply the per-object Galactic
-            Extinction correction to all fluxes.  The ``catalog`` is corrected
-            in place and a Galactic Extinction applied and flag columns are
-            added.
+        catalogDict : `dict` of `lsst.afw.table.SourceCatalog` or
+                      `pandas.core.frame.DataFrame`
+            A dictionary keyed by filter and containing the source catalogs for
+            which to apply the per-object Galactic Extinction correction to all
+            fluxes.  The catalogs are corrected in place and a Galactic
+            Extinction applied and flag columns are added.
         tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
             TractInfo object associated with ``catalog``.
 
@@ -614,10 +616,12 @@ class ColorAnalysisTask(CmdLineTask):
 
         Returns
         -------
-        catalog : `lsst.afw.table.SourceCatalog`
-            The updated ``catalog`` with fluxes corrected for Galactic
-            Extinction with a column added indicating correction applied and a
-            flag indicating if the correction failed (in the context having a
+        catalogDict : `dict` of `lsst.afw.table.SourceCatalog` or
+                      `pandas.core.frame.DataFrame`
+            The updated dictionary of catalogs with all fluxes corrected (per
+            object) for Galactic Extinction with a column added to each catalog
+            in ``catalogDict`` indicating correction applied and a flag
+            indicating if the correction failed (in the context having a
             non-`numpy.isfinite` value).
         """
         try:
@@ -626,10 +630,10 @@ class ColorAnalysisTask(CmdLineTask):
             raise ImportError("lsst.sims.catUtils.dust.EBV could not be imported.  Cannot use "
                               "correctForGalacticExtinction function without it.")
 
-        for filterName in catalog.keys():
+        for filterName in catalogDict.keys():
             if filterName in self.config.extinctionCoeffs:
-                raList = catalog[filterName]["coord_ra"]
-                decList = catalog[filterName]["coord_dec"]
+                raList = catalogDict[filterName]["coord_ra"]
+                decList = catalogDict[filterName]["coord_dec"]
                 ebvObject = ebv()
                 ebvValues = ebvObject.calculateEbv(equatorialCoordinates=np.array([raList, decList]))
                 galacticExtinction = ebvValues*self.config.extinctionCoeffs[filterName]
@@ -639,30 +643,29 @@ class ColorAnalysisTask(CmdLineTask):
                                   "{1:d} out of {2:d} sources.  Flag will be set.".
                                   format(filterName, len(raList[bad]), len(raList)))
                 factor = 10.0**(0.4*galacticExtinction)
-                schema = getSchema(catalog[filterName])
+                schema = getSchema(catalogDict[filterName])
                 fluxKeys, errKeys = getFluxKeys(schema)
                 self.log.info("Applying per-object Galactic Extinction correction for filter {0:s}.  "
                               "Catalog mean A_{0:s} = {1:.3f}".
                               format(filterName, galacticExtinction[~bad].mean()))
                 for name, key in list(fluxKeys.items()) + list(errKeys.items()):
-                    catalog[filterName][key] *= factor
+                    catalogDict[filterName][key] *= factor
             else:
                 self.log.warn("Do not have A_X/E(B-V) for filter {0:s}.  "
                               "No Galactic Extinction correction applied for that filter.  "
                               "Flag will be set".format(filterName))
-                bad = np.ones(len(catalog[list(catalog.keys())[0]]), dtype=bool)
+                bad = np.ones(len(catalogDict[list(catalogDict.keys())[0]]), dtype=bool)
             # Add column of Galactic Extinction value applied to the catalog
             # and a flag for the sources for which it could not be computed.
-            catalog[filterName] = addIntFloatOrStrColumn(catalog[filterName], galacticExtinction,
-                                                         "A_" + str(filterName),
-                                                         "Galactic Extinction (in mags) applied "
-                                                         "(based on SFD 1998 maps)")
-            catalog[filterName] = addFlag(catalog[filterName], bad, "galacticExtinction_flag",
-                                          "True if Galactic Extinction failed")
+            catalogDict[filterName] = addIntFloatOrStrColumn(catalogDict[filterName], galacticExtinction,
+                                                             "A_" + str(filterName),
+                                                             "Galactic Extinction (in mags) applied "
+                                                             "(based on SFD 1998 maps)")
+            catalogDict[filterName] = addFlag(catalogDict[filterName], bad, "galacticExtinction_flag",
+                                              "True if Galactic Extinction failed")
+        return catalogDict
 
-        return catalog
-
-    def correctFieldForGalacticExtinction(self, catalog, tractInfo):
+    def correctFieldForGalacticExtinction(self, catalogDict, tractInfo):
         """Apply a per-field correction for Galactic Extinction using
         hard-wired values.
 
@@ -673,6 +676,27 @@ class ColorAnalysisTask(CmdLineTask):
         Note that the only fields included are the 5 tracts in the RC + RC2
         datasets.  This is just a placeholder until a per-object implementation
         is added in DM-13519.
+
+        Parameters
+        ----------
+        catalogDict : `dict` of  `lsst.afw.table.SourceCatalog` or
+                      `pandas.core.frame.DataFrame`
+            A dictionary keyed by filter and containing the source catalogs for
+            which to apply the per-object Galactic Extinction correction to all
+            fluxes.  The catalogs are corrected in place and a Galactic
+            Extinction applied and flag columns are added.
+        tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
+            TractInfo object associated with ``catalog``.
+
+        Returns
+        -------
+        catalogDict : `dict` of  `lsst.afw.table.SourceCatalog` or
+                      `pandas.core.frame.DataFrame`
+            The updated dictionary of catalogs with all fluxes corrected (per
+            field) for Galactic Extinction with a column added to each catalog
+            in ``catalogDict`` indicating correction applied and a flag
+            indicating if the correction failed (in the context having a
+            non-`numpy.isfinite` value).
         """
         ebvValues = {"UD_COSMOS_9813": {"centerCoord": geom.SpherePoint(150.25, 2.23, geom.degrees),
                                         "EBmV": 0.0165},
@@ -692,44 +716,48 @@ class ColorAnalysisTask(CmdLineTask):
                 geFound = True
                 break
         if geFound:
-            for filterName in catalog.keys():
+            for filterName in catalogDict.keys():
                 if filterName in self.config.extinctionCoeffs:
-                    schema = getSchema(catalog[filterName])
+                    schema = getSchema(catalogDict[filterName])
                     fluxKeys, errKeys = getFluxKeys(schema)
                     galacticExtinction = ebvValue*self.config.extinctionCoeffs[filterName]
                     self.log.info("Applying Per-Field Galactic Extinction correction A_{0:s} = {1:.3f}".
                                   format(filterName, galacticExtinction))
                     factor = 10.0**(0.4*galacticExtinction)
                     for name, key in list(fluxKeys.items()) + list(errKeys.items()):
-                        catalog[filterName][key] *= factor
+                        catalogDict[filterName][key] *= factor
                     # Add column of Galactic Extinction value applied to the
                     # catalog.
-                    catalog[filterName] = addIntFloatOrStrColumn(catalog[filterName], galacticExtinction,
-                                                                 "A_" + str(filterName),
-                                                                 "Galactic Extinction applied "
-                                                                 "(based on SFD 1998 maps)")
-                    bad = np.zeros(len(catalog[list(catalog.keys())[0]]), dtype=bool)
-                    catalog[filterName] = addFlag(catalog[filterName], bad, "galacticExtinction_flag",
-                                                  "True if Galactic Extinction not found (so not applied)")
+                    galacticExtinction = np.full(len(catalogDict[filterName]), galacticExtinction)
+                    catalogDict[filterName] = (
+                        addIntFloatOrStrColumn(catalogDict[filterName], galacticExtinction,
+                                               "A_" + str(filterName), "Galactic Extinction applied "
+                                               "(based on SFD 1998 maps)"))
+                    bad = np.zeros(len(catalogDict[list(catalogDict.keys())[0]]), dtype=bool)
+                    catalogDict[filterName] = addFlag(
+                        catalogDict[filterName], bad, "galacticExtinction_flag",
+                        "True if Galactic Extinction not found (so not applied)")
                 else:
                     self.log.warn("Do not have A_X/E(B-V) for filter {0:s}.  "
                                   "No Galactic Extinction correction applied for that filter".
                                   format(filterName))
-                    bad = np.ones(len(catalog[list(catalog.keys())[0]]), dtype=bool)
-                    catalog[filterName] = addFlag(catalog[filterName], bad, "galacticExtinction_flag",
-                                                  "True if Galactic Extinction not found (so not applied)")
+                    bad = np.ones(len(catalogDict[list(catalogDict.keys())[0]]), dtype=bool)
+                    catalogDict[filterName] = addFlag(catalogDict[filterName], bad, "galacticExtinction_flag",
+                                                      "True if Galactic Extinction not found (so not "
+                                                      "applied)")
         else:
             self.log.warn("Do not have Galactic Extinction for tract {0:d} at {1:s}.  "
                           "No Galactic Extinction correction applied".
                           format(tractInfo.getId(), str(tractInfo.getCtrCoord())))
-        return catalog
+        return catalogDict
 
-    def transformCatalogs(self, catalogs, transforms, fluxColumn, hscRun=None):
+    def transformCatalogs(self, catalogDict, transforms, fluxColumn, hscRun=None):
         """Transform catalog entries according to the color transform given.
 
         Parameters
         ----------
-        catalogs : `dict` of `lsst.afw.table.SourceCatalog`
+        catalogDict : `dict` of `lsst.afw.table.SourceCatalog` or
+                      `pandas.core.frame.DataFrame`
             One `dict` entry per filter.
         transforms : `dict` of
                      `lsst.pipe.analysis.colorAnalysis.ColorTransform`
@@ -738,66 +766,120 @@ class ColorAnalysisTask(CmdLineTask):
             A string representing "HSCPIPE_VERSION" fits header if the data
             were processed with the (now obsolete, but old reruns still exist)
             "HSC stack", `None` otherwise.
+
+        Returns
+        -------
+        new : `lsst.afw.table.SourceCatalog` or `pandas.core.frame.DataFrame`
+            The catalog of Principal Color transforms along with basic ID,
+            RA/Dec, parent, and deblend_nChild info in addition to a
+            "qaBad_flag" column indicating objects deemed unsuitible for the
+            stellar locus QA analysis and a "numStarFlags" column indicating
+            the number of filters in which the object was classified as a star.
         """
-        template = list(catalogs.values())[0]
+        template = list(catalogDict.values())[0]
         num = len(template)
-        assert all(len(cat) == num for cat in catalogs.values())
+        assert all(len(cat) == num for cat in catalogDict.values())
 
-        schema = getSchema(template)
-        mapper = afwTable.SchemaMapper(schema)
-        mapper.addMinimalSchema(afwTable.SourceTable.makeMinimalSchema())
-        schema = mapper.getOutputSchema()
-
-        for col in transforms:
-            doAdd = True
-            for filterName in transforms[col].coeffs:
-                if filterName != "" and filterName not in catalogs:
-                    doAdd = False
-            if doAdd:
-                schema.addField(col, float, transforms[col].description + transforms[col].subDescription)
-        schema.addField("numStarFlags", type=np.int32, doc="Number of times source was flagged as star")
-        badKey = schema.addField("qaBad_flag", type="Flag", doc="Is this a bad source for color qa analyses?")
-        schema.addField(fluxColumn, type=np.float64, doc="Flux from filter " + self.fluxFilter)
-        schema.addField(fluxColumn + "Err", type=np.float64, doc="Flux error for flux from filter "
-                        + self.fluxFilter)
-        schema.addField("base_InputCount_value", type=np.int32,
-                        doc="Input visit count for " + self.fluxFilter)
-
-        # Copy basics (id, RA, Dec)
-        new = afwTable.SourceCatalog(schema)
-        new.reserve(num)
-        new.extend(template, mapper)
-
-        # Set transformed colors
-        for col, transform in transforms.items():
-            if col not in schema:
-                continue
-            value = np.ones(num)*transform.coeffs[""] if "" in transform.coeffs else np.zeros(num)
-            for filterName, coeff in transform.coeffs.items():
-                if filterName == "":  # Constant: already done
+        if isinstance(template, pd.DataFrame):
+            new = pd.DataFrame()
+            new["coord_ra"] = template["coord_ra"]
+            new["coord_dec"] = template["coord_dec"]
+            new["id"] = template["id"]
+            new["parent"] = template["parent"]
+            new["deblend_nChild"] = template["deblend_nChild"]
+            toAddList = []
+            for col in transforms:
+                doAdd = True
+                for filterName in transforms[col].coeffs:
+                    if filterName != "" and filterName not in catalogDict:
+                        doAdd = False
+                if doAdd:
+                    toAddList.append(col)
+            if not toAddList:
+                self.log.warn("No transforms found...")
+                return new
+            # Set transformed colors
+            for col, transform in transforms.items():
+                if col not in toAddList:
                     continue
-                cat = catalogs[filterName]
-                mag = -2.5*np.log10(cat[fluxColumn])
-                value += mag*coeff
-            new[col][:] = value
+                value = np.ones(num)*transform.coeffs[""] if "" in transform.coeffs else np.zeros(num)
+                for filterName, coeff in transform.coeffs.items():
+                    if filterName == "":  # Constant: already done
+                        continue
+                    mag = -2.5*np.log10(catalogDict[filterName][fluxColumn])
+                    value += mag*coeff
+                new[col] = value
+            # Flag bad values
+            bad = np.zeros(num, dtype=bool)
+            for dataCat in catalogDict.values():
+                bad |= makeBadArray(dataCat, flagList=self.flags)
+            new["qaBad_flag"] = bad
 
-        # Flag bad values
-        bad = np.zeros(num, dtype=bool)
-        for dataCat in catalogs.values():
-            bad |= makeBadArray(dataCat, flagList=self.flags)
-        # Can't set column for flags; do row-by-row
-        for row, badValue in zip(new, bad):
-            row.setFlag(badKey, bool(badValue))
+            # Star/galaxy
+            numStarFlags = np.zeros(num)
+            for cat in catalogDict.values():
+                numStarFlags += np.where(cat[self.classificationColumn] < 0.5, 1, 0)
+            new["numStarFlags"] = numStarFlags
+            new[fluxColumn] = catalogDict[self.fluxFilter][fluxColumn]
+            new[fluxColumn + "Err"] = catalogDict[self.fluxFilter][fluxColumn + "Err"]
+            new["base_InputCount_value"] = catalogDict[self.fluxFilter]["base_InputCount_value"]
+        else:
+            schema = getSchema(template)
+            mapper = afwTable.SchemaMapper(schema)
+            mapper.addMinimalSchema(afwTable.SourceTable.makeMinimalSchema())
+            schema = mapper.getOutputSchema()
 
-        # Star/galaxy
-        numStarFlags = np.zeros(num)
-        for cat in catalogs.values():
-            numStarFlags += np.where(cat[self.classificationColumn] < 0.5, 1, 0)
-        new["numStarFlags"][:] = numStarFlags
+            for col in transforms:
+                doAdd = True
+                for filterName in transforms[col].coeffs:
+                    if filterName != "" and filterName not in catalogDict:
+                        doAdd = False
+                if doAdd:
+                    schema.addField(col, float, transforms[col].description + transforms[col].subDescription)
+            schema.addField("numStarFlags", type=np.int32, doc="Number of times source was flagged as star")
+            badKey = schema.addField("qaBad_flag", type="Flag",
+                                     doc="Is this a bad source for color qa analyses?")
+            schema.addField(fluxColumn, type=np.float64, doc="Flux from filter " + self.fluxFilter)
+            schema.addField(fluxColumn + "Err", type=np.float64, doc="Flux error for flux from filter "
+                            + self.fluxFilter)
+            schema.addField("base_InputCount_value", type=np.int32,
+                            doc="Input visit count for " + self.fluxFilter)
 
-        new[fluxColumn][:] = catalogs[self.fluxFilter][fluxColumn]
-        new[fluxColumn + "Err"][:] = catalogs[self.fluxFilter][fluxColumn + "Err"]
-        new["base_InputCount_value"][:] = catalogs[self.fluxFilter]["base_InputCount_value"]
+            # Copy basics (id, RA, Dec)
+            new = afwTable.SourceCatalog(schema)
+            new.reserve(num)
+            new.extend(template, mapper)
+
+            # Set transformed colors
+            for col, transform in transforms.items():
+                if col not in schema:
+                    continue
+                value = np.ones(num)*transform.coeffs[""] if "" in transform.coeffs else np.zeros(num)
+                for filterName, coeff in transform.coeffs.items():
+                    if filterName == "":  # Constant: already done
+                        continue
+                    cat = catalogDict[filterName]
+                    mag = -2.5*np.log10(cat[fluxColumn])
+                    value += mag*coeff
+                new[col][:] = value
+
+            # Flag bad values
+            bad = np.zeros(num, dtype=bool)
+            for dataCat in catalogDict.values():
+                bad |= makeBadArray(dataCat, flagList=self.flags)
+            # Can't set column for flags; do row-by-row
+            for row, badValue in zip(new, bad):
+                row.setFlag(badKey, bool(badValue))
+
+            # Star/galaxy
+            numStarFlags = np.zeros(num)
+            for cat in catalogDict.values():
+                numStarFlags += np.where(cat[self.classificationColumn] < 0.5, 1, 0)
+            new["numStarFlags"][:] = numStarFlags
+
+            new[fluxColumn][:] = catalogDict[self.fluxFilter][fluxColumn]
+            new[fluxColumn + "Err"][:] = catalogDict[self.fluxFilter][fluxColumn + "Err"]
+            new["base_InputCount_value"][:] = catalogDict[self.fluxFilter]["base_InputCount_value"]
 
         return new
 
@@ -906,8 +988,11 @@ class ColorAnalysisTask(CmdLineTask):
                     # mean magnitude of the lower 5% of the
                     # S/N > signalToNoiseThreshold subsample.
                     ptFrac = max(2, int(0.05*len(mags[self.fluxFilter][qaGood])))
-                    magThreshold = np.floor(mags[self.fluxFilter][qaGood][
-                        mags[self.fluxFilter][qaGood].argsort()[-ptFrac:]].mean()*10 + 0.5)/10
+                    if isinstance(mags[self.fluxFilter], (pd.Series, pd.DataFrame)):
+                        sortedMags = mags[self.fluxFilter][qaGood].sort_values()
+                    else:
+                        sortedMags = mags[self.fluxFilter][qaGood][mags[self.fluxFilter][qaGood].argsort()]
+                    magThreshold = np.floor(sortedMags[-ptFrac:].mean()*10 + 0.5)/10
                     thresholdStr = [r" [S/N$\geqslant$" + str(signalToNoiseThreshold) + "]",
                                     " [" + self.fluxFilter + r"$\lesssim$" + str(magThreshold) + "]"]
                 else:
@@ -1018,8 +1103,11 @@ class ColorAnalysisTask(CmdLineTask):
             # Set self.magThreshold to represent approximately that which
             # corresponds to the S/N threshold.  Computed as the mean magnitude
             # of the lower 5% of the  S/N > signalToNoiseThreshold subsample.
-            magThreshold = np.floor(mags[self.fluxFilter][bright][
-                mags[self.fluxFilter][bright].argsort()[-ptFrac:]].mean()*10 + 0.5)/10
+            if isinstance(mags[self.fluxFilter], (pd.Series, pd.DataFrame)):
+                brightMags = mags[self.fluxFilter][bright].sort_values()
+            else:
+                brightMags = mags[self.fluxFilter][bright][mags[self.fluxFilter][bright].argsort()]
+            magThreshold = np.floor(brightMags[-ptFrac:].mean()*10 + 0.5)/10
             thresholdStr = [r" [S/N$\geqslant$" + str(signalToNoiseThreshold) + "]",
                             " [" + self.fluxFilter + r"$\lesssim$" + str(magThreshold) + "]"]
         else:
@@ -1485,8 +1573,12 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
     xyOther = np.vstack([xx[~keep], yy[~keep]])
     zOther = scipyStats.gaussian_kde(xyOther)(xyOther)
     idxHighDensity = np.argmax(zKeep)
-    xHighDensity = xx[keep][idxHighDensity]
-    yHighDensity = yy[keep][idxHighDensity]
+    if isinstance(xx[keep], (pd.Series, pd.DataFrame)):
+        xHighDensity = xx[keep].iloc[[idxHighDensity]].values[0]
+        yHighDensity = yy[keep].iloc[[idxHighDensity]].values[0]
+    else:
+        xHighDensity = xx[keep][idxHighDensity]
+        yHighDensity = yy[keep][idxHighDensity]
     log.info("Highest Density point x, y: {0:.4f} {1:.4f}".format(xHighDensity, yHighDensity))
 
     initialGuess = list(reversed(poly))
