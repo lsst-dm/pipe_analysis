@@ -26,6 +26,7 @@ from matplotlib.ticker import NullFormatter, AutoMinorLocator, FormatStrFormatte
 import numpy as np
 np.seterr(all="ignore")  # noqa E402
 import re
+import astropy.units as u
 
 import lsst.afw.geom as afwGeom
 import lsst.geom as geom
@@ -1419,7 +1420,8 @@ class Analysis(object):
 
         yield Struct(fig=fig, description=description, stats=None, statsHigh=None, dpi=1200, style="tract")
 
-    def plotSkyObjects(self, skyObjCat, description, plotInfoDict, log, zpLabel=None, forcedStr=None):
+    def plotSkyObjects(self, skyObjCat, description, plotInfoDict, log, zpLabel=None, forcedStr=None,
+                       verifyJob=None):
         """Plot histograms of sky object/source measurements.
 
         Also plots the focal plane or tract outline to indicate which sub-units
@@ -1444,6 +1446,8 @@ class Analysis(object):
             latter is effectively retired).
         forcedStr : `str`, optional
             String to label the catalog type (forced vs. unforced) on the plot.
+        verifyJob : `lsst.verify.Job` or None, optional
+            The verify Job to add any metric measurements to.
         """
         fig, axes = plt.subplots(nrows=1, ncols=2, sharex=False, sharey=False)
         fig.subplots_adjust(wspace=0.17, bottom=0.18, left=0.08, right=0.76, top=0.9)
@@ -1478,7 +1482,25 @@ class Analysis(object):
             finiteFlux = np.isfinite(flux)
             skyFluxArr = flux[finiteFlux]
             skyFluxErrArr = fluxErr[finiteFlux]
-            clippedStats = calcQuartileClippedStats(skyFluxArr, nSigmaToClip=5.0)
+            nSigmaToClip = 5.0
+            clippedStats = calcQuartileClippedStats(skyFluxArr, nSigmaToClip=nSigmaToClip)
+            # add sigma-clipped mean to verify metrics tracker
+            if verifyJob is not None:
+                if fluxStr == "base_CircularApertureFlux_9_0_instFlux":
+                    NANOJANSKYS_PER_AB_FLUX = (0*u.ABmag).to_value(u.nJy)
+                    skyObjectMean = (clippedStats.mean/fluxScale)*NANOJANSKYS_PER_AB_FLUX*u.nanojansky
+                    skyObjectStd = (clippedStats.stdDev/fluxScale)*NANOJANSKYS_PER_AB_FLUX*u.nanojansky
+                    measExtrasDictList = [{"name": "nTotal", "value": len(flux),
+                                           "label": "nTotal", "description": "Total number of sky objects."},
+                                          {"name": "nUsed", "value": len(skyFluxArr),
+                                           "label": "nUsed", "description": "Number of sky objects used."},
+                                          {"name": "nSigmaToClip", "value": nSigmaToClip,
+                                           "label": "nSigma",
+                                           "description": "Number of sigma's used for clipped statistics."}]
+                    verifyJob = addMetricMeasurement(verifyJob, "pipe_analysis.skyObjectMean_CircApRad9pix",
+                                                     skyObjectMean, measExtrasDictList=measExtrasDictList)
+                    verifyJob = addMetricMeasurement(verifyJob, "pipe_analysis.skyObjectStd_CircApRad9pix",
+                                                     skyObjectStd, measExtrasDictList=measExtrasDictList)
             meanStr = "mean = {0:5.2f}".format(clippedStats.mean)
             stdStr = "  std = {0:5.2f}".format(clippedStats.stdDev)
             numStr = "    N = {}".format(sum(clippedStats.goodArray))

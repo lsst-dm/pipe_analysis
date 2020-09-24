@@ -20,7 +20,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import os
-import astropy.units as units
+import astropy.units as u
 import numpy as np
 np.seterr(all="ignore")  # noqa E402
 import functools
@@ -60,7 +60,7 @@ import lsst.verify as verify
 __all__ = ["CoaddAnalysisConfig", "CoaddAnalysisRunner", "CoaddAnalysisTask", "CompareCoaddAnalysisConfig",
            "CompareCoaddAnalysisRunner", "CompareCoaddAnalysisTask"]
 
-NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
+NANOJANSKYS_PER_AB_FLUX = (0*u.ABmag).to_value(u.nJy)
 
 
 class CoaddAnalysisConfig(Config):
@@ -1530,7 +1530,8 @@ class CoaddAnalysisTask(CmdLineTask):
         yield from self.AnalysisClass(catalog, None, "%s" % shortName, shortName, self.config.analysis,
                                       labeller=None,).plotSkyObjects(catalog, shortName, plotInfoDict,
                                                                      self.log, zpLabel=zpLabel,
-                                                                     forcedStr=forcedStr)
+                                                                     forcedStr=forcedStr,
+                                                                     verifyJob=self.verifyJob)
 
         skyplotKwargs = dict(stats=stats, zpLabel=zpLabel)
         skyFlux = "base_CircularApertureFlux_9_0_instFlux"
