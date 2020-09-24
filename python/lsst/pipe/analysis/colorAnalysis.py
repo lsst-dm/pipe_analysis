@@ -43,8 +43,8 @@ from .utils import (Enforcer, concatenateCatalogs, getFluxKeys, addColumnsToSche
                     distanceSquaredToPoly, p2p1CoeffsFromLinearFit, linesFromP2P1Coeffs,
                     makeEqnStr, catColors, addMetricMeasurement, updateVerifyJob, computeMeanOfFrac,
                     calcQuartileClippedStats, savePlots)
-from .plotUtils import (AllLabeller, OverlapsStarGalaxyLabeller, plotText, labelCamera, setPtSize,
-                        determineExternalCalLabel, getPlotInfo)
+from .plotUtils import (AllLabeller, plotText, labelCamera, setPtSize, determineExternalCalLabel,
+                        getPlotInfo)
 
 import lsst.afw.image as afwImage
 import lsst.geom as geom
@@ -474,7 +474,6 @@ class ColorAnalysisTask(CmdLineTask):
             plotList.append(self.plotGalacticExtinction(byFilterForcedCats, plotInfoDict, areaDictAll,
                                                         geLabel=geLabel))
 
-            # self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
         principalColCatsPsf = self.transformCatalogs(byFilterForcedCats, self.config.transforms,
                                                      "base_PsfFlux_instFlux", hscRun=repoInfo.hscRun)
         principalColCatsCModel = self.transformCatalogs(byFilterForcedCats, self.config.transforms,
@@ -815,32 +814,6 @@ class ColorAnalysisTask(CmdLineTask):
                                           magThreshold=99.0).plotAll(shortName, plotInfoDict, areaDict,
                                                                      self.log, zpLabel=geLabel,
                                                                      plotRunStats=False)
-
-    def plotGalaxyColors(self, catalogs, plotInfoDict, areaDict):
-        yield
-        filters = set(catalogs.keys())
-        if filters.issuperset(set(("HSC-G", "HSC-I"))):
-            gg = catalogs["HSC-G"]
-            ii = catalogs["HSC-I"]
-            assert len(gg) == len(ii)
-            mapperList = afwTable.SchemaMapper.join([gg.schema, ii.schema],
-                                                    ["g_", "i_"])
-            catalog = afwTable.BaseCatalog(mapperList[0].getOutputSchema())
-            catalog.reserve(len(gg))
-            for gRow, iRow in zip(gg, ii):
-                row = catalog.addNew()
-                row.assign(gRow, mapperList[0])
-                row.assign(iRow, mapperList[1])
-
-            catalog.writeFits("gi.fits")
-            shortName = "galaxy-TEST"
-            self.log.info("shortName = {:s}".format(shortName))
-            yield from self.AnalysisClass(
-                catalog, GalaxyColor("modelfit_CModel_instFlux", "slot_CalibFlux_flux", "g_", "i_"),
-                "(g-i)_cmodel - (g-i)_CalibFlux", shortName, self.config.analysis,
-                flags=["modelfit_CModel_flag", "slot_CalibFlux_flag"], prefix="i_",
-                labeller=OverlapsStarGalaxyLabeller("g_", "i_"),
-                qMin=-0.5, qMax=0.5,).plotAll(shortName, plotInfoDict, areaDict, self.log)
 
     def plotStarPrincipalColors(self, principalColCats, byFilterCats, plotInfoDict, areaDict, labeller,
                                 geLabel=None, uberCalLabel=None):
