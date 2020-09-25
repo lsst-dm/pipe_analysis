@@ -64,13 +64,13 @@ class CcdAnalysis(Analysis):
                                     matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
                                     zpLabel=zpLabel)
         if self.config.doPlotFP and haveFpCoords:
-            yield from self.plotFocalPlane(self.shortname, plotInfoDict, style="fpa" + postFix,
-                                           stats=stats, matchRadius=matchRadius,
-                                           matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel)
+            yield from self.plotFocalPlane(self.shortname, plotInfoDict, style="fpa" + postFix, stats=stats,
+                                           matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                                           zpLabel=zpLabel, forcedStr=forcedStr)
 
         yield from Analysis.plotAll(self, description, plotInfoDict, areaDict, log, enforcer=enforcer,
-                                    matchRadius=matchRadius,
-                                    matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, postFix=postFix,
+                                    matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                                    zpLabel=zpLabel, forcedStr=forcedStr, postFix=postFix,
                                     plotRunStats=plotRunStats, highlightList=highlightList,
                                     doPrintMedian=doPrintMedian)
 
@@ -406,11 +406,14 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
                 # Set boolean arrays indicating sources deemed unsuitable for
                 # qa analyses.
-                self.catLabel = "nChild = 0"
                 bad = makeBadArray(catalog, flagList=self.config.analysis.flags,
                                    onlyReadStars=self.config.onlyReadStars)
                 badCommonZp = makeBadArray(commonZpCat, flagList=self.config.analysis.flags,
                                            onlyReadStars=self.config.onlyReadStars)
+                self.catLabel = "isPrimary"
+                if self.config.doBackoutApCorr:
+                    self.log.info("Backing out aperture corrections from all fluxes")
+                    self.catLabel += "\n     (noApCorr)"
 
                 # Create and write parquet tables
                 if self.config.doWriteParquetTables:
@@ -479,7 +482,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                                             plotInfoDict, areaDict, zpLabel="raw"))
                     plotList.append(self.plotPsfFluxSnHists(catalog, "base_PsfFlux_cal",
                                                             plotInfoDict, areaDict, zpLabel=self.zpLabel))
-                plotKwargs = dict(zpLabel=self.zpLabel)
+                plotKwargs = dict(zpLabel=self.zpLabel, forcedStr=self.catLabel)
                 if self.config.doPlotFootprintArea:
                     plotList.append(self.plotFootprintHist(catalog, "footArea", plotInfoDict, **plotKwargs))
                     plotList.append(self.plotFootprint(catalog, plotInfoDict, areaDict, plotRunStats=False,
@@ -537,11 +540,17 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     self.log.info("Exiting after writing Parquet tables.  No plots generated.")
                     return
 
+                # The apCorr backing out, if requested, and the purging of
+                # deblend_nChild > 0 objects happens in readSrcMatches, but
+                # label won't be set if plotMatchesOnly is True.
+                self.catLabel = "isPrimary" if "isPrimary" not in self.catLabel else self.catLabel
+                if self.config.doBackoutApCorr and "noApCorr" not in self.catLabel:
+                    self.catLabel += "\n     (noApCorr)"
                 # Dict of all parameters common to plot* functions
                 matchHighlightList = [("src_" + self.config.analysis.fluxColumn.replace("_instFlux", "_flag"),
                                        0, "turquoise"), ]
                 plotList.append(self.plotMatches(matches, plotInfoDict, matchAreaDict, zpLabel=self.zpLabel,
-                                highlightList=matchHighlightList))
+                                                 forcedStr=self.catLabel, highlightList=matchHighlightList))
 
             for cat in self.config.externalCatalogs:
                 if self.config.photoCatName not in cat:
@@ -661,6 +670,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 raise RuntimeError("Unknown entry for readFootprintsAs: {:}.  Only recognize one of: "
                                    "None, \"light\", or \"heavy\"".format(readFootprintsAs))
             catalog = dataRef.get(dataset, immediate=True, flags=catFlags)
+            # Optionally backout aperture corrections
+            if self.config.doBackoutApCorr:
+                catalog = backoutApCorr(catalog)
             # Set some aliases for differing schema naming conventions
             if aliasDictList:
                 catalog = addAliasColumns(catalog, aliasDictList)
@@ -737,9 +749,6 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             if repoInfo.hscRun and self.config.doAddAperFluxHsc:
                 self.log.info("HSC run: adding aperture flux to catalog schema...")
                 catalog = addApertureFluxesHSC(catalog, prefix="")
-            # Optionally backout aperture corrections
-            if self.config.doBackoutApCorr:
-                catalog = backoutApCorr(catalog)
 
             # Scale fluxes to common zeropoint to make basic comparison plots
             # without calibrated ZP influence.
@@ -1210,7 +1219,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
 
             # Set boolean arrays indicating sources deemed unsuitable for qa
             # analyses.
-            self.catLabel = "nChild = 0"
+            self.catLabel = "isPrimary"
             bad1 = makeBadArray(catalog1, flagList=self.config.analysis.flags,
                                 onlyReadStars=self.config.onlyReadStars)
             bad2 = makeBadArray(catalog2, flagList=self.config.analysis.flags,
@@ -1248,7 +1257,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             highlightList = [(self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0,
                               "turquoise"), ]
             plotKwargs1 = dict(matchRadius=self.matchRadius, matchRadiusUnitStr=self.matchRadiusUnitStr,
-                               zpLabel=self.zpLabel, highlightList=highlightList)
+                               zpLabel=self.zpLabel, forcedStr=self.catLabel, highlightList=highlightList)
 
             plotInfoDict = getPlotInfo(repoInfo1)
             plotInfoDict.update({"ccdList": ccdIntersectList, "allCcdList": fullCameraCcdList1,
@@ -1262,10 +1271,6 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             # Create mag comparison plots using common ZP
             if not commonZpDone:
                 zpLabel = "common (" + str(self.config.analysis.commonZp) + ")"
-                try:
-                    zpLabel = zpLabel + " " + self.catLabel
-                except Exception:
-                    pass
                 plotKwargs1.update(dict(zpLabel=zpLabel))
                 plotList.append(self.plotMags(commonZpCat, plotInfoDict, areaDict1,
                                               fluxToPlotList=["base_GaussianFlux",

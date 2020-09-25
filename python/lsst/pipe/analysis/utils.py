@@ -1666,7 +1666,6 @@ def backoutApCorr(catalog):
     for k in keys:
         if fluxStr in k and k[:-len(fluxStr)] + apCorrStr in keys and apCorrStr not in k:
             if ii == 0:
-                print("Backing out aperture corrections to fluxes")
                 ii += 1
             catalog[k] /= catalog[k[:-len(fluxStr)] + apCorrStr]
     return catalog

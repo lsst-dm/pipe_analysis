@@ -266,6 +266,9 @@ class CoaddAnalysisTask(CmdLineTask):
         if patchRefList[0].datasetExists(self.config.coaddName + dataset):
             haveForced = True
         forcedStr = "forced" if haveForced else "unforced"
+        if self.config.doBackoutApCorr:
+            self.log.info("Backing out aperture corrections from all fluxes")
+            forcedStr += "\n (noApCorr)"
         if not haveForced:
             self.log.warn("No forced dataset exists for, e.g.,: {:} (only showing first dataId in "
                           "patchRefList).\nPlotting unforced results only.".format(patchRefList[0].dataId))
@@ -412,12 +415,13 @@ class CoaddAnalysisTask(CmdLineTask):
                     else:
                         unforcedOverlaps = self.overlaps(unforced, patchList, repoInfo.tractInfo)
                         if unforcedOverlaps is not None:
-                            plotList.append(self.plotOverlaps(unforcedOverlaps, plotInfoDict, areaDict,
-                                                              matchRadius=self.config.matchOverlapRadius,
-                                                              matchRadiusUnitStr="\"",
-                                                              forcedStr="unforced", postFix="_unforced",
-                                                              fluxToPlotList=["modelfit_CModel", ],
-                                                              highlightList=highlightList, **plotKwargs))
+                            plotList.append(
+                                self.plotOverlaps(unforcedOverlaps, plotInfoDict, areaDict,
+                                                  matchRadius=self.config.matchOverlapRadius,
+                                                  matchRadiusUnitStr="\"",
+                                                  forcedStr=forcedStr.replace("forced", "unforced"),
+                                                  postFix="_unforced", fluxToPlotList=["modelfit_CModel", ],
+                                                  highlightList=highlightList, **plotKwargs))
                             self.log.info("Number of unforced overlap objects matched = {:d}".
                                           format(len(unforcedOverlaps)))
                         else:
@@ -463,8 +467,12 @@ class CoaddAnalysisTask(CmdLineTask):
                     forced = forced[~badForced].copy(deep=True)
                 else:
                     forced = unforced
-                self.catLabel = "nChild = 0"
-                forcedStr = forcedStr + " " + self.catLabel
+                self.catLabel = " nChild = 0"
+                strIndex = forcedStr.find("\n")
+                if strIndex < 0:
+                    forcedStr = forcedStr + self.catLabel
+                else:
+                    forcedStr = forcedStr[:strIndex] + " " + self.catLabel + forcedStr[strIndex:]
                 if haveForced:
                     self.log.info("\nNumber of sources in catalogs: unforced = {0:d} and forced = {1:d}".
                                   format(len(unforced), len(forced)))
@@ -473,15 +481,17 @@ class CoaddAnalysisTask(CmdLineTask):
 
             if self.config.doPlotPsfFluxSnHists:
                 plotList.append(self.plotPsfFluxSnHists(unforced, "base_PsfFlux_cal", plotInfoDict, areaDict,
-                                                        forcedStr="unforced " + self.catLabel, **plotKwargs))
+                                                        forcedStr=forcedStr.replace("forced", "unforced"),
+                                                        **plotKwargs))
             if self.config.doPlotSkyObjects:
                 plotList.append(self.plotSkyObjects(skyObjCat, "skyObjects", plotInfoDict, areaDict,
-                                                    forcedStr="unforced"))
+                                                    forcedStr=forcedStr.replace("forced", "unforced")))
             if self.config.doPlotSkyObjectsSky:
                 plotList.append(self.plotSkyObjectsSky(skyObjCatAll, "skyObjects", plotInfoDict,
-                                                       forcedStr="unforced", alpha=0.7,
-                                                       doPlotTractImage=True, doPlotPatchOutline=True,
-                                                       sizeFactor=3.0, maxDiamPix=1000))
+                                                       forcedStr=forcedStr.replace("forced", "unforced"),
+                                                       alpha=0.7, doPlotTractImage=True,
+                                                       doPlotPatchOutline=True, sizeFactor=3.0,
+                                                       maxDiamPix=1000))
 
             if self.config.doPlotFootprintArea:
                 if "base_FootprintArea_value" in unforcedSchema:
@@ -497,22 +507,24 @@ class CoaddAnalysisTask(CmdLineTask):
 
             if self.config.doPlotRhoStatistics:
                 plotList.append(self.plotRhoStatistics(unforced, plotInfoDict,
-                                                       forcedStr="unforced " + self.catLabel, **plotKwargs))
+                                                       forcedStr=forcedStr.replace("forced", "unforced"),
+                                                       **plotKwargs))
 
             if self.config.doPlotQuiver:
                 plotList.append(self.plotQuiver(unforced, "ellipResids", plotInfoDict, areaDict,
-                                                forcedStr="unforced " + self.catLabel, scale=2, **plotKwargs))
+                                                forcedStr=forcedStr.replace("forced", "unforced"),
+                                                scale=2, **plotKwargs))
 
             if self.config.doPlotInputCounts:
                 plotList.append(self.plotInputCounts(unforced, "inputCounts", plotInfoDict,
-                                                     forcedStr="unforced " + self.catLabel, alpha=0.5,
-                                                     doPlotPatchOutline=True, sizeFactor=5.0,
+                                                     forcedStr=forcedStr.replace("forced", "unforced"),
+                                                     alpha=0.5, doPlotPatchOutline=True, sizeFactor=5.0,
                                                      maxDiamPix=1000, **plotKwargs))
 
             plotKwargs.update(dict(highlightList=highlightList))
             if self.config.doPlotMags:
                 plotList.append(self.plotMags(unforced, plotInfoDict, areaDict,
-                                              forcedStr="unforced " + self.catLabel,
+                                              forcedStr=forcedStr.replace("forced", "unforced"),
                                               postFix="_unforced", **plotKwargs))
                 if haveForced:
                     plotKwargs.update(dict(highlightList=highlightList
@@ -525,7 +537,8 @@ class CoaddAnalysisTask(CmdLineTask):
             if self.config.doPlotStarGalaxy:
                 if "ext_shapeHSM_HsmSourceMoments_xx" in unforcedSchema:
                     plotList.append(self.plotStarGal(unforced, plotInfoDict, areaDict,
-                                                     forcedStr="unforced " + self.catLabel, **plotKwargs))
+                                                     forcedStr=forcedStr.replace("forced", "unforced"),
+                                                     **plotKwargs))
                 else:
                     self.log.warn("Cannot run plotStarGal: ext_shapeHSM_HsmSourceMoments_xx not "
                                   "in forcedSchema")
@@ -533,7 +546,7 @@ class CoaddAnalysisTask(CmdLineTask):
             if self.config.doPlotSizes:
                 if all(ss in unforcedSchema for ss in ["base_SdssShape_psf_xx", "calib_psf_used"]):
                     plotList.append(self.plotSizes(unforced, plotInfoDict, areaDict,
-                                                   forcedStr="unforced " + self.catLabel,
+                                                   forcedStr=forcedStr.replace("forced", "unforced"),
                                                    postFix="_unforced", **plotKwargs))
                 else:
                     self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx and/or calib_psf_used "
@@ -573,6 +586,13 @@ class CoaddAnalysisTask(CmdLineTask):
                 if self.config.writeParquetOnly:
                     self.log.info("Exiting after writing Parquet tables.  No plots generated.")
                     return
+
+            # The apCorr backing out, if requested, and the purging of
+            # deblend_nChild > 0 objects happens in readSrcMatches, but label
+            # won't be set if plotMatchesOnly is True.
+            if self.config.doBackoutApCorr and "noApCorr" not in forcedStr:
+                forcedStr += "(noApCorr)"
+            forcedStr = forcedStr + " nChild = 0" if "nChild = 0" not in forcedStr else forcedStr
 
             plotKwargs.update(dict(zpLabel=self.zpLabel))
             matchHighlightList = [("src_" + self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0,
@@ -686,6 +706,10 @@ class CoaddAnalysisTask(CmdLineTask):
                 cat = patchRef.get(dataset, immediate=True, flags=catFlags)
                 cat = addIntFloatOrStrColumn(cat, patchRef.dataId["patch"], "patchId",
                                              "Patch on which source was detected")
+                # Optionally backout aperture corrections
+                if self.config.doBackoutApCorr:
+                    cat = backoutApCorr(cat)
+
                 if self.config.hasFakes:
                     fname = repoInfo.butler.getUri("fakes_deepCoadd_calexp", patchRef.dataId)
                 else:
@@ -790,6 +814,9 @@ class CoaddAnalysisTask(CmdLineTask):
                     catalog = addFpPoint(det, catalog, prefix="src_")
             # Optionally backout aperture corrections
             if self.config.doBackoutApCorr:
+                if len(matchList) == 0:
+                    self.log.info("Backing out aperture corrections from all fluxes before matching "
+                                  "to reference cat")
                 catalog = backoutApCorr(catalog)
 
             # Convert to pandas DataFrames
@@ -850,9 +877,6 @@ class CoaddAnalysisTask(CmdLineTask):
             else:
                 for src in catalog:
                     src.updateCoord(wcs)
-        # Optionally backout aperture corrections
-        if self.config.doBackoutApCorr:
-            catalog = backoutApCorr(catalog)
         calibrated = calibrateCoaddSourceCatalog(catalog, self.config.analysis.coaddZp)
         return calibrated
 
@@ -1599,7 +1623,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                                                      forcedStr=forcedStr,
                                                                      verifyJob=self.verifyJob)
 
-        skyplotKwargs = dict(stats=stats, zpLabel=zpLabel)
+        skyplotKwargs = dict(stats=stats, zpLabel=zpLabel, forcedStr=forcedStr)
         skyFlux = "base_CircularApertureFlux_9_0_instFlux"
         skyFluxStr = fluxToPlotString(skyFlux)
         skyFluxes = catalog[skyFlux]*1e12
@@ -2187,7 +2211,7 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                                         ).plotAll(shortName, plotInfoDict, areaDict, self.log,
                                                   enforcer=enforcer, matchRadius=matchRadius,
                                                   matchRadiusUnitStr=matchRadiusUnitStr,
-                                                  zpLabel=None, forcedStr=forcedStr,
+                                                  zpLabel=zpLabel, forcedStr=forcedStr,
                                                   highlightList=highlightList
                                                   + [(col + "_flag_apCorr", 0, "lime"), ],
                                                   uberCalLabel=uberCalLabel)

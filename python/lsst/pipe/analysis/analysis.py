@@ -332,7 +332,7 @@ class Analysis(object):
             prefix = "" if "GalExt" in zpLabel else "zp: "
             plotText(zpLabel, fig, axes, 0.13, -0.09, prefix=prefix, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, fig, axes, 0.85, -0.09, prefix="cat: ", color="green")
+            plotText(forcedStr, fig, axes, 0.85, -0.10, prefix="cat: ", color="green")
         yield Struct(fig=fig, description=description, stats=self.stats, statsHigh=self.statsHigh, dpi=120,
                      style="psfMag")
 
@@ -642,7 +642,7 @@ class Analysis(object):
             uberFontSize = 5 if "_2" in uberCalLabel else 7
             plotText(uberCalLabel, plt.gcf(), axScatter, 0.11, -0.13, fontSize=uberFontSize, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt.gcf(), axScatter, 0.87, -0.11, prefix="cat: ", fontSize=7, color="green")
+            plotText(forcedStr, plt.gcf(), axScatter, 0.87, -0.10, prefix="cat: ", fontSize=7, color="green")
         if extraLabels is not None:
             for i, extraLabel in enumerate(extraLabels):
                 plotText(extraLabel, plt.gcf(), axScatter, 0.3, 0.21 + i*0.05, fontSize=7, color="tab:orange")
@@ -729,11 +729,11 @@ class Analysis(object):
         labelVisit(plotInfoDict, plt.gcf(), axes, 0.5, 1.04)
         if zpLabel is not None:
             prefix = "" if "GalExt" in zpLabel else "zp: "
-            plotText(zpLabel, plt, axes, 0.10, -0.10, prefix=prefix, fontSize=7, color="green")
+            plotText(zpLabel, plt, axes, 0.14, -0.10, prefix=prefix, fontSize=7, color="green")
         if uberCalLabel:
-            plotText(uberCalLabel, plt, axes, 0.10, -0.13, fontSize=7, color="green")
+            plotText(uberCalLabel, plt, axes, 0.14, -0.13, fontSize=7, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes, 0.90, -0.10, prefix="cat: ", fontSize=7, color="green")
+            plotText(forcedStr, plt, axes, 0.88, -0.10, prefix="cat: ", fontSize=7, color="green")
         if plotInfoDict["camera"] is not None and plotInfoDict["plotType"] == "plotVisit":
             axTopMiddle = plt.axes([0.42, 0.68, 0.2, 0.2])
             axTopMiddle.set_aspect("equal")
@@ -912,7 +912,7 @@ class Analysis(object):
         if uberCalLabel:
             plotText(uberCalLabel, plt, axes, 0.14, -0.11, fontSize=7, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
+            plotText(forcedStr, plt, axes, 0.85, -0.08, prefix="cat: ", color="green")
         strKwargs = dict(loc="upper left", fancybox=True, markerscale=1.2, scatterpoints=3, framealpha=0.35,
                          facecolor="k")
         if highlightList is not None:
@@ -999,11 +999,11 @@ class Analysis(object):
         labelVisit(plotInfoDict, fig, axes[0], 0.5, 1.1)
         if zpLabel is not None:
             prefix = "" if "GalExt" in zpLabel else "zp: "
-            plotText(zpLabel, plt, axes[0], 0.13, -0.09, prefix=prefix, color="green")
+            plotText(zpLabel, plt, axes[0], 0.13, -0.09, prefix=prefix, fontsize=8, color="green")
         if uberCalLabel:
             plotText(uberCalLabel, plt, axes[0], 0.13, -0.14, fontSize=8, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes[0], 0.85, -0.09, prefix="cat: ", color="green")
+            plotText(forcedStr, plt, axes[0], 0.85, -0.09, prefix="cat: ", fontsize=8, color="green")
         yield Struct(fig=fig, description=description, stats=self.stats, statsHigh=self.statsHigh, dpi=120,
                      style=style)
 
@@ -1132,9 +1132,9 @@ class Analysis(object):
             plotText(zpLabel, fig, axes, 0.14, -0.08, prefix="zp: ", color="green")
         if uberCalLabel:
             plotText(uberCalLabel, fig, axes, 0.14, -0.12, fontSize=7, color="green")
-        plotText(shapeAlgorithm, fig, axes, 0.85, -0.08, prefix="Shape Alg: ", fontSize=8, color="green")
+        plotText(shapeAlgorithm, fig, axes, 0.85, -0.06, prefix="Shape Alg: ", fontSize=7, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, fig, axes, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
+            plotText(forcedStr, fig, axes, 0.85, -0.105, prefix="cat: ", fontSize=7, color="green")
         axes.legend(loc="upper left", bbox_to_anchor=(0.0, 1.1), fancybox=True, shadow=True, fontsize=8)
 
         yield Struct(fig=fig, description=description, stats=stats, statsHigh=None, dpi=150, style="quiver")
@@ -1166,18 +1166,23 @@ class Analysis(object):
         plotRhoStats(axes, rhoStats)
         log.debug("Tract id in Rho Stats: {0}".format(plotInfoDict["tract"]))
 
+        xOff = 0.18 if uberCalLabel else 0.10
+        yOff = -0.09 if uberCalLabel else -0.10
         for figId, figax in enumerate(figAxes):
             fig, ax = figax
             figDescription = description + str(figId + 1)
             labelCamera(plotInfoDict, fig, ax, 0.5, 1.09)
             labelVisit(plotInfoDict, fig, ax, 0.5, 1.04)
             if zpLabel is not None:
-                plotText(zpLabel, fig, ax, 0.14, -0.08, prefix="zp: ", color="green")
+                plotText(zpLabel, fig, ax, xOff, yOff, prefix="zp: ", color="green")
             if uberCalLabel:
-                plotText(uberCalLabel, fig, ax, 0.14, -0.12, prefix="uberCal: ", fontSize=7, color="green")
-            plotText(shapeAlgorithm, fig, ax, 0.85, -0.08, prefix="Shape Alg: ", fontSize=8, color="green")
+                plotText(uberCalLabel, fig, ax, xOff, yOff - 0.04, prefix="uberCal: ", fontSize=7,
+                         color="green")
+            plotText(shapeAlgorithm, fig, ax, 0.85, yOff, prefix="Shape Alg: ", fontSize=8, color="green")
             if forcedStr is not None:
-                plotText(forcedStr, fig, ax, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
+                xxOff = 0.85 if uberCalLabel else 0.29
+                yyOff = -0.13 if uberCalLabel else yOff
+                plotText(forcedStr, fig, ax, xxOff, yyOff, prefix="cat: ", fontSize=8, color="green")
 
             yield Struct(fig=fig, description=figDescription, stats=stats, statsHigh=None, dpi=120,
                          style="RhoStats")
@@ -1240,14 +1245,16 @@ class Analysis(object):
                 labelCamera(plotInfoDict, fig, ax, 0.5, 1.09)
                 labelVisit(plotInfoDict, fig, ax, 0.5, 1.04)
                 if zpLabel is not None:
-                    plotText(zpLabel, fig, ax, 0.14, -0.08, prefix="zp: ", color="green")
+                    plotText(zpLabel, fig, ax, xOff, yOff, prefix="zp: ", fontSize=7, color="green")
                 if uberCalLabel:
-                    plotText(uberCalLabel, fig, ax, 0.14, -0.12, prefix="uberCal: ", fontSize=8,
+                    plotText(uberCalLabel, fig, ax, xOff, yOff - 0.04, prefix="uberCal: ", fontSize=7,
                              color="green")
-                plotText(shapeAlgorithm, fig, ax, 0.85, -0.08, prefix="Shape Alg: ", fontSize=8,
+                plotText(shapeAlgorithm, fig, ax, 0.85, yOff, prefix="Shape Alg: ", fontSize=7,
                          color="green")
                 if forcedStr is not None:
-                    plotText(forcedStr, fig, ax, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
+                    xxOff = 0.85 if uberCalLabel else 0.29
+                    yyOff = -0.13 if uberCalLabel else yOff
+                    plotText(forcedStr, fig, ax, xxOff, yyOff, prefix="cat: ", fontSize=7, color="green")
 
                 yield Struct(fig=fig, description=figDescription, stats=stats, statsHigh=None, dpi=120,
                              style="RhoStats")
@@ -1419,9 +1426,9 @@ class Analysis(object):
             labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
         labelVisit(plotInfoDict, fig, axes, 0.5, 1.04)
         if forcedStr is not None:
-            plotText(forcedStr, fig, axes, 0.96, -0.11, prefix="cat: ", fontSize=7, color="green")
+            plotText(forcedStr, fig, axes, 0.80, -0.11, prefix="cat: ", fontSize=7, color="green")
         if uberCalLabel:
-            plotText(uberCalLabel, fig, axes, 0.08, -0.11, fontSize=7, color="green")
+            plotText(uberCalLabel, fig, axes, 0.16, -0.11, fontSize=7, color="green")
 
         yield Struct(fig=fig, description=description, stats=None, statsHigh=None, dpi=1200, style="tract")
 
