@@ -55,11 +55,11 @@ except ImportError:
 __all__ = ["Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCompare",
            "AstrometryDiff", "AngularDistance", "TraceSize", "PsfTraceSizeDiff", "TraceSizeCompare",
            "PercentDiff", "E1", "E2", "E1Resids", "E2Resids", "E1ResidsHsmRegauss", "E2ResidsHsmRegauss",
-           "FootNpixDiffCompare", "MagDiffErr", "MagDiffCompareErr", "ApCorrDiffErr",
+           "FootAreaDiffCompare", "MagDiffErr", "MagDiffCompareErr", "ApCorrDiffErr",
            "CentroidDiff", "CentroidDiffErr", "deconvMom", "deconvMomStarGal",
            "concatenateCatalogs", "joinMatches", "matchAndJoinCatalogs", "checkIdLists", "checkPatchOverlap",
            "joinCatalogs", "getFluxKeys", "addColumnsToSchema", "addApertureFluxesHSC", "addFpPoint",
-           "addFootprintNPix", "addRotPoint", "makeBadArray", "addFlag", "addIntFloatOrStrColumn",
+           "addFootprintArea", "addRotPoint", "makeBadArray", "addFlag", "addIntFloatOrStrColumn",
            "calibrateSourceCatalogMosaic", "calibrateSourceCatalogPhotoCalib",
            "calibrateSourceCatalog", "calibrateCoaddSourceCatalog",
            "backoutApCorr", "matchNanojanskyToAB", "checkHscStack", "fluxToPlotString", "andCatalog",
@@ -626,17 +626,17 @@ class RhoStatistics(object):
         return rhoStats
 
 
-class FootNpixDiffCompare(object):
-    """Functor to calculate footprint nPix difference between two entries in
+class FootAreaDiffCompare(object):
+    """Functor to calculate footprint area difference between two entries in
     comparison catalogs.
     """
     def __init__(self, column):
         self.column = column
 
     def __call__(self, catalog):
-        nPix1 = catalog["first_" + self.column]
-        nPix2 = catalog["second_" + self.column]
-        return nPix1 - nPix2
+        footprintArea1 = catalog["first_" + self.column]
+        footprintArea2 = catalog["second_" + self.column]
+        return footprintArea1 - footprintArea2
 
 
 class MagDiffCompareErr(object):
@@ -1098,31 +1098,53 @@ def addFpPoint(det, catalog, prefix=""):
     return newCatalog
 
 
-def addFootprintNPix(catalog, fromCat=None, prefix=""):
-    # Retrieve the number of pixels in an sources footprint and add to schema
+def addFootprintArea(catalog, fromCat=None, prefix=""):
+    """Retrieve the number of pixels in an sources footprint and add to schema.
+
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.SourceCatalog`
+        The source catalog to which to add the footprint area column.
+    fromCat : `lsst.afw.table.SourceCatalog`, optional
+        If not `None`, retrieve the footprints from this catalog.
+    prefix : `str`, optional
+        An optional string to be prepended to the column id name.
+
+    Raises
+    ------
+    TaskError
+        If lengths of ``catalog`` and ``fromCat`` (if not `None`) are not
+        equal.
+
+    Returns
+    -------
+    newCatalog : `lsst.afw.table.SourceCatalog`
+        A new source catalog with the footprint area and flag columns added.
+    """
     mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
     schema = mapper.getOutputSchema()
-    fpName = prefix + "base_Footprint_nPix"
-    fpKey = schema.addField(fpName, type="I", doc="Number of pixels in Footprint")
-    fpFlag = schema.addField(fpName + "_flag", type="Flag", doc="Set to True for any fatal failure")
+    fpName = prefix + "base_FootprintArea_value"
+    fpFlagName = prefix + fpName[:fpName.find("value")] + "flag"
+    fpKey = schema.addField(fpName, type="I",
+                            doc="Area (i.e. number of pixels) in the source's detection footprint")
+    fpFlag = schema.addField(fpFlagName, type="Flag", doc="Set to True for any fatal failure")
     newCatalog = afwTable.SourceCatalog(schema)
     newCatalog.reserve(len(catalog))
     if fromCat:
         if len(fromCat) != len(catalog):
-            raise TaskError("Lengths of fromCat and catalog for getting footprint Npixs do not agree")
+            raise TaskError("Lengths of fromCat and catalog for getting footprint areas do not agree")
     if fromCat is None:
         fromCat = catalog
     for srcFrom, srcTo in zip(fromCat, catalog):
         row = newCatalog.addNew()
         row.assign(srcTo, mapper)
         try:
-            footNpix = srcFrom.getFootprint().getArea()
+            footArea = srcFrom.getFootprint().getArea()
         except Exception:
-            raise
-            footNpix = 0  # used to be np.nan, but didn't work.
+            footArea = 0  # used to be np.nan, but didn't work.
             row.set(fpFlag, True)
-        row.set(fpKey, footNpix)
+        row.set(fpKey, footArea)
     return newCatalog
 
 

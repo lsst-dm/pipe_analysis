@@ -36,7 +36,7 @@ from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
 from .analysis import Analysis
 from .coaddAnalysis import CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisTask
 from .utils import (AngularDistance, concatenateCatalogs, addApertureFluxesHSC, matchAndJoinCatalogs,
-                    addFpPoint, addFootprintNPix, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
+                    addFpPoint, addFootprintArea, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
                     calibrateSourceCatalogMosaic, calibrateSourceCatalogPhotoCalib,
                     calibrateSourceCatalog, backoutApCorr, matchNanojanskyToAB, andCatalog, writeParquet,
                     getRepoInfo, getCcdNameRefList, getDataExistsRefList, addAliasColumns,
@@ -371,7 +371,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
             if any(doPlot for doPlot in
                    [self.config.doPlotPsfFluxSnHists, self.config.doPlotSkyObjects,
-                    self.config.doPlotFootprintNpix, self.config.doPlotRhoStatistics,
+                    self.config.doPlotFootprintArea, self.config.doPlotRhoStatistics,
                     self.config.doPlotQuiver, self.config.doPlotMags, self.config.doPlotStarGalaxy,
                     self.config.doPlotSizes, self.config.doPlotCentroids, self.config.doPlotRhoStatistics,
                     self.config.doWriteParquetTables]) and not self.config.plotMatchesOnly:
@@ -383,7 +383,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     inputFakes = None
                     datasetType = "src"
                 catStruct = self.readCatalogs(dataRefListTract, datasetType, repoInfo,
-                                              aliasDictList=aliasDictList, fakeCat=inputFakes)
+                                              aliasDictList=aliasDictList, fakeCat=inputFakes,
+                                              readFootprintsAs=self.config.readFootprintsAs)
                 commonZpCat = catStruct.commonZpCatalog
                 catalog = catStruct.catalog
                 # Convert to pandas DataFrames
@@ -479,8 +480,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     plotList.append(self.plotPsfFluxSnHists(catalog, "base_PsfFlux_cal",
                                                             plotInfoDict, areaDict, zpLabel=self.zpLabel))
                 plotKwargs = dict(zpLabel=self.zpLabel)
-                if self.config.doPlotFootprintNpix:
-                    plotList.append(self.plotFootprintHist(catalog, "footNpix", plotInfoDict, **plotKwargs))
+                if self.config.doPlotFootprintArea:
+                    plotList.append(self.plotFootprintHist(catalog, "footArea", plotInfoDict, **plotKwargs))
                     plotList.append(self.plotFootprint(catalog, plotInfoDict, areaDict, plotRunStats=False,
                                                        highlightList=[("parent", 0, "yellow"), ],
                                                        **plotKwargs))
@@ -566,7 +567,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         self.verifyJob.write(verifyJobFilename)
 
     def readCatalogs(self, dataRefList, dataset, repoInfo, aliasDictList=None, fakeCat=None,
-                     raFakesCol="raJ2000", decFakesCol="decJ2000"):
+                     raFakesCol="raJ2000", decFakesCol="decJ2000", readFootprintsAs=None):
         """Read in and concatenate catalogs of type dataset in lists of data
         references.
 
@@ -608,11 +609,22 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             Catalog of fake sources, used if config.hasFakes is `True` in which
             case a column (onCcd) is added with the ccd number if the fake
             source overlaps a ccd and np.nan if it does not.
+        readFootprintsAs : `None` or `str`, optional
+            A string dictating if and what type of Footprint to read in along
+            with the catalog:
+            `None` : do not read in Footprints.
+            "light": read in regular Footprints (include SpanSet and list of
+                     peaks per Footprint).
+            "heavy": read in HeavyFootprints (include regular Footprint plus
+                     flux values per Footprint).
 
         Raises
         ------
         TaskError
             If no data is read in for the dataRefList.
+        RuntimeError
+            If entry for ``readFootprintsAs`` is not recognized (i.e. not one
+            of `None`, \"light\", or \"heavy\").
 
         Returns
         -------
@@ -639,7 +651,16 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
                 continue
-            catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+            if not readFootprintsAs:
+                catFlags = afwTable.SOURCE_IO_NO_FOOTPRINTS
+            elif readFootprintsAs == "light":
+                catFlags = afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS
+            elif readFootprintsAs == "heavy":
+                catFlags = 0
+            else:
+                raise RuntimeError("Unknown entry for readFootprintsAs: {:}.  Only recognize one of: "
+                                   "None, \"light\", or \"heavy\"".format(readFootprintsAs))
+            catalog = dataRef.get(dataset, immediate=True, flags=catFlags)
             # Set some aliases for differing schema naming conventions
             if aliasDictList:
                 catalog = addAliasColumns(catalog, aliasDictList)
@@ -705,8 +726,14 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 xFp = catalog["base_FPPosition_x"]
                 if len(xFp[np.where(np.isfinite(xFp))]) <= 0:
                     self.haveFpCoords = False
-            if self.config.doPlotFootprintNpix:
-                catalog = addFootprintNPix(catalog)
+            if self.config.doPlotFootprintArea and "base_FootprintArea_value" not in schema:
+                if self.config.readFootprintsAs != "heavy":
+                    self.log.warn("config.doPlotFootprintArea is True, but do not have "
+                                  "base_FootprintArea_value in schema.  If reading in an older afw "
+                                  "src catalog, may need to run with config.readFootprintsAs=\"heavy\""
+                                  "to be able to read in the footprints and compute their area.")
+                else:
+                    catalog = addFootprintArea(catalog)
             if repoInfo.hscRun and self.config.doAddAperFluxHsc:
                 self.log.info("HSC run: adding aperture flux to catalog schema...")
                 catalog = addApertureFluxesHSC(catalog, prefix="")
@@ -1163,16 +1190,13 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             if self.config.doApplyExternalSkyWcs2:
                 self.log.info(f"ccdSkyWcsListPerTract2: \n{ccdSkyWcsListPerTract2}")
 
-            doReadFootprints = None
-            if self.config.doPlotFootprintNpix:
-                doReadFootprints = "light"
             # Set some aliases for differing schema naming conventions
             aliasDictList = [self.config.flagsToAlias, ]
             if (repoInfo1.hscRun or repoInfo2.hscRun) and self.config.srcSchemaMap is not None:
                 aliasDictList += [self.config.srcSchemaMap]
             commonZpCat1, catalog1, areaDict1, commonZpCat2, catalog2, areaDict2 = (
                 self.readCatalogs(dataRefListTract1, dataRefListTract2, "src", repoInfo1, repoInfo2,
-                                  doReadFootprints=doReadFootprints, aliasDictList=aliasDictList))
+                                  readFootprintsAs=self.config.readFootprintsAs, aliasDictList=aliasDictList))
             # Set some aliases for differing schema naming conventions
             if aliasDictList:
                 for cat in [commonZpCat1, commonZpCat2, catalog1, catalog2]:
@@ -1232,7 +1256,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                  "hscRun1": repoInfo1.hscRun, "hscRun2": repoInfo2.hscRun,
                                  "hscRun": hscRun, "tractInfo": tractInfo1, "dataId": repoInfo1.dataId})
             plotList = []
-            if self.config.doPlotFootprintNpix:
+            if self.config.doPlotFootprintArea:
                 plotList.append(self.plotFootprint(catalog, plotInfoDict, areaDict1, **plotKwargs1))
 
             # Create mag comparison plots using common ZP
@@ -1268,7 +1292,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                                                          repoInfo1.butler, subdir=subdir)
 
     def readCatalogs(self, dataRefList1, dataRefList2, dataset, repoInfo1, repoInfo2,
-                     doReadFootprints=None, aliasDictList=None):
+                     readFootprintsAs=None, aliasDictList=None):
         """Read in and concatenate catalogs of type dataset in lists of data
         references.
 
@@ -1290,7 +1314,7 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             study.  Elements used here include the butler associated with the
             repository, the image metadata, and wether the processing was done
             with an HSC stack (now obsolete, but processing runs still exist).
-        doReadFootprints : `str` or `None`, optional
+        readFootprintsAs : `str` or `None`, optional
             A string dictating if and what type of Footprint to read in along
             with the catalog.
             `None`: do not read in Footprints
@@ -1333,12 +1357,12 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             for dataRef in dataRefList:
                 if not dataRef.datasetExists(dataset):
                     continue
-                if not doReadFootprints:
+                if not readFootprintsAs:
                     srcCat = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-                elif doReadFootprints == "light":
+                elif readFootprintsAs == "light":
                     srcCat = dataRef.get(dataset, immediate=True,
                                          flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
-                elif doReadFootprints == "heavy":
+                elif readFootprintsAs == "heavy":
                     srcCat = dataRef.get(dataset, immediate=True)
 
                 # Set some aliases for differing src naming conventions
@@ -1367,9 +1391,15 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
                 ccdCorners = wcs.pixelToSky(detector.getCorners(cameraGeom.PIXELS))
                 areaDict["corners_" + str(dataRef.dataId["ccd"])] = ccdCorners
 
-                # add footprint nPix column
-                if self.config.doPlotFootprintNpix:
-                    srcCat = addFootprintNPix(srcCat)
+                # add footprint area column
+                if self.config.doPlotFootprintArea and "base_FootprintArea_value" not in srcCat.schema:
+                    if self.config.readFootprintsAs != "heavy":
+                        self.log.warn("config.doPlotFootprintArea is True, but do not have "
+                                      "base_FootprintArea_value in schema.  If reading in an older afw "
+                                      "src catalog, may need to run with config.readFootprintsAs=\"heavy\""
+                                      "to be able to read in the footprints and compute their area.")
+                    else:
+                        srcCat = addFootprintArea(srcCat)
                 # Add rotated point in LSST cat if comparing with HSC cat to
                 # compare centroid pixel positions.
                 if repoInfo.hscRun and not (repoInfo1.hscRun and repoInfo2.hscRun):

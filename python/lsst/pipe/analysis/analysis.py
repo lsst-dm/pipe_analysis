@@ -269,7 +269,7 @@ class Analysis(object):
             # at most mean +/- 20.0*stddev, and clipped stats range + 25%.
             dataType = "all" if "all" in self.data else "star"
             if self.stats[dataType].num > 0:
-                if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar", "resolution",
+                if not any(ss in self.shortName for ss in ["footArea", "distance", "pStar", "resolution",
                                                            "race", "psfInst", "psfCal", "Rho", "hsmRho",
                                                            "Rho_calib_psf_used", "hsmRho_calib_psf_used",
                                                            "Rho_all_stars", "hsmRho_all_stars"]):
@@ -282,7 +282,7 @@ class Analysis(object):
                         minmax = 2.0*max(abs(min(self.quantity[self.good])),
                                          abs(max(self.quantity[self.good])))
                         self.qMin = -minmax if minmax > 0 else self.qMin
-                if not any(ss in self.shortName for ss in ["footNpix", "pStar", "resolution", "race",
+                if not any(ss in self.shortName for ss in ["footArea", "pStar", "resolution", "race",
                                                            "psfInst", "psfCal", "Rho", "hsmRho",
                                                            "Rho_calib_psf_used", "hsmRho_calib_psf_used",
                                                            "Rho_all_stars", "hsmRho_all_stars"]):
