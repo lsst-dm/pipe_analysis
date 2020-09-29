@@ -128,14 +128,38 @@ class CoaddAnalysisConfig(Config):
     columnsToCopyFromMeas = ListField(dtype=str, default=["calib_", ],
                                       doc="List of string \"prefixes\" to identify the columns to copy.  "
                                       "All columns with names that start with one of these strings will be "
-                                      "copied from the *_meas catalogs into the *_forced_src catalogs.")
+                                      "copied from the *_meas catalogs into the *_forced_src catalogs "
+                                      "UNLESS the full column name contains one of the strings listed "
+                                      "in the notInColumnStrList config.")
     # We want the following to come from the *_ref catalogs as they reflect
     # the forced measurement states.
     columnsToCopyFromRef = ListField(dtype=str,
-                                     default=["detect_", "merge_peak_", "merge_measurement_", ],
+                                     default=["detect_", "merge_peak_sky", "merge_measurement_", ],
                                      doc="List of string \"prefixes\" to identify the columns to copy.  "
                                      "All columns with names that start with one of these strings will be "
-                                     "copied from the *_ref catalogs into the *_forced_src catalogs.")
+                                     "copied from the *_ref catalogs into the *_forced_src catalogs "
+                                     "UNLESS the full column name contains one of the strings listed "
+                                     "in the notInColumnStrList config.")
+    baseColStrList = ListField(
+        dtype=str,
+        default=["coord", "tract", "patch", "visit", "ccd", "base_PixelFlags", "base_GaussianFlux",
+                 "base_PsfFlux", "base_CircularApertureFlux_9_0_instFlux", "base_CircularApertureFlux_12_0",
+                 "base_CircularApertureFlux_25_0", "ext_photometryKron_KronFlux", "modelfit_CModel",
+                 "base_Sdss", "slot_Centroid", "slot_Shape", "ext_shapeHSM_HsmSourceMoments_",
+                 "ext_shapeHSM_HsmPsfMoments_", "ext_shapeHSM_HsmShapeRegauss_", "base_Footprint",
+                 "base_FPPosition", "base_ClassificationExtendedness", "parent", "detect", "deblend_nChild",
+                 "base_Blendedness_abs", "base_Blendedness_flag", "base_InputCount",
+                 "merge_peak_sky", "merge_measurement", "calib", "sky_source"],
+        doc=("List of \"startswith\" strings of column names to load from deepCoadd_obj parquet table. "
+             "All columns that start with one of these strings will be loaded UNLESS the full column "
+             "name contains one of the strings listed in the notInColumnStrList config."))
+    notInColStrList = ListField(
+        dtype=str,
+        default=["flag_bad", "flag_no", "missingDetector_flag", "_region_", "Truncated", "_radius",
+                 "_bad_", "initial", "_exp_", "_dev_", "fracDev", "objective", "SdssCentroid_flag_",
+                 "SdssShape_flag_u", "SdssShape_flag_m", "_Cov", "_child_", "_parent_"],
+        doc=("List of substrings to select against when creating list of columns to load from the "
+             "deepCoadd_obj parquet table."))
     flagsToAlias = DictField(keytype=str, itemtype=str,
                              default={"calib_psf_used": "calib_psfUsed",
                                       "calib_psf_candidate": "calib_psfCandidate",
