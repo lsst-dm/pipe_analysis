@@ -35,7 +35,7 @@ import scipy.stats as scipyStats
 from contextlib import contextmanager
 
 from lsst.pipe.base import Struct, TaskError
-from lsst.pipe.tasks.parquetTable import ParquetTable
+from lsst.pipe.tasks.parquetTable import ParquetTable, MultilevelParquetTable
 
 import lsst.afw.cameraGeom as cameraGeom
 import lsst.geom as geom
@@ -59,8 +59,8 @@ __all__ = ["Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCom
            "CentroidDiff", "CentroidDiffErr", "deconvMom", "deconvMomStarGal",
            "concatenateCatalogs", "joinMatches", "matchAndJoinCatalogs", "checkIdLists", "checkPatchOverlap",
            "joinCatalogs", "getFluxKeys", "addColumnsToSchema", "addApertureFluxesHSC", "addFpPoint",
-           "addFootprintArea", "addRotPoint", "makeBadArray", "addFlag", "addIntFloatOrStrColumn",
-           "calibrateSourceCatalogMosaic", "calibrateSourceCatalogPhotoCalib",
+           "addFootprintArea", "addRotPoint", "makeBadArray", "addFlag", "addElementIdColumn",
+           "addIntFloatOrStrColumn", "calibrateSourceCatalogMosaic", "calibrateSourceCatalogPhotoCalib",
            "calibrateSourceCatalog", "calibrateCoaddSourceCatalog",
            "backoutApCorr", "matchNanojanskyToAB", "checkHscStack", "fluxToPlotString", "andCatalog",
            "writeParquet", "getRepoInfo", "findCcdKey", "getCcdNameRefList", "getDataExistsRefList",
@@ -69,7 +69,8 @@ __all__ = ["Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCom
            "addPreComputedColumns", "addMetricMeasurement", "updateVerifyJob", "computeMeanOfFrac",
            "calcQuartileClippedStats", "savePlots", "getSchema", "loadRefCat",
            "loadDenormalizeAndUnpackMatches", "loadReferencesAndMatchToCatalog",
-           "computePhotoCalibScaleArray", "computeAreaDict", "determineIfSrcOnElement"]
+           "computePhotoCalibScaleArray", "computeAreaDict", "determineIfSrcOnElement",
+           "getParquetColumnsList"]
 
 
 NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
@@ -1337,6 +1338,38 @@ def addFlag(catalog, badArray, flagName, doc="General failure flag"):
     return newCatalog
 
 
+def addElementIdColumn(catalog, dataId, repoInfo=None):
+    """Add a column indicating the image element (patch/ccd) ID.
+
+    Parameters
+    ----------
+    catalog : `pandas.core.frame.DataFrame`
+        Source catalog to which the column will be added.
+    dataId : `dict`
+        The `dict` of data id keys from which to extract the image element key.
+
+    Raises
+    ------
+    RuntimeError
+        If unable to determine image element (patch/ccd) key.
+
+    Returns
+    -------
+    catalog : `pandas.core.frame.DataFrame`
+        Source catalog with element Id column added.
+    """
+    if "patch" in dataId:
+        elementKey = "patch"
+        elementStr = "patch"
+    elif repoInfo is not None:
+        elementKey = repoInfo.ccdKey
+        elementStr = "ccd"
+    else:
+        raise RuntimeError("Can't determine image element (e.g. patch/ccd) key")
+    catalog[elementStr + "Id"] = dataId[elementKey]
+    return catalog
+
+
 def addIntFloatOrStrColumn(catalog, values, fieldName, fieldDoc, fieldUnits=""):
     """Add a column of values with name fieldName and doc fieldDoc to the
     catalog schema.
@@ -1762,7 +1795,7 @@ def andCatalog(version):
         eups.setup("astrometry_net_data", current, noRecursion=True)
 
 
-def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyExternalPhotoCalib=False,
+def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, catDataset="src", doApplyExternalPhotoCalib=False,
                 externalPhotoCalibName="jointcal", doApplyExternalSkyWcs=False,
                 externalSkyWcsName="jointcal"):
     """Obtain the relevant repository information for the given dataRef.
@@ -1839,11 +1872,12 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyExternalPhoto
         dataId["filter"] = filterName
     genericFilterName = afwImage.Filter(afwImage.Filter(filterName).getId()).getName()
     ccdKey = None if isCoadd else findCcdKey(dataId)
-    # Check metadata to see if stack used was HSC
-    metaStr = coaddName + coaddDataset + "_md" if coaddName else "calexp_md"
-    metadata = butler.get(metaStr, dataId)
+    try:  # Check metadata to see if stack used was HSC
+        metaStr = coaddName + coaddDataset + "_md" if coaddName else "calexp_md"
+        metadata = butler.get(metaStr, dataId)
+    except AttributeError:
+        metadata = None
     hscRun = checkHscStack(metadata)
-    catDataset = "src"
     skymap = butler.get(coaddName + "Coadd_skyMap") if coaddName else None
     wcs = None
     tractInfo = None
@@ -3082,10 +3116,7 @@ def computeAreaDict(repoInfo, dataRefList, dataset="", fakeCat=None, raFakesCol=
     for dataRef in dataRefList:
         # getUri is less safe but enables us to use an efficient
         # ExposureFitsReader.
-        if fakeCat is not None:
-            fname = repoInfo.butler.getUri("fakes_" + dataset + "calexp", dataRef.dataId)
-        else:
-            fname = repoInfo.butler.getUri(dataset + "calexp", dataRef.dataId)
+        fname = repoInfo.butler.getUri(dataset + "calexp", dataRef.dataId)
         reader = afwImage.ExposureFitsReader(fname)
         if repoInfo.skyWcsDataset is not None:
             wcs = dataRef.get(repoInfo.skyWcsDataset)
@@ -3190,3 +3221,59 @@ def determineIfSrcOnElement(catalog, dataRef, corners, wcs, elementKey, mask=Non
             onElementList.append(rowId)
     catalog["on" + elementKey.capitalize()].iloc[np.array(onElementList)] = dataRef.dataId[elementKey]
     return catalog
+
+
+def getParquetColumnsList(pqTable, dfDataset=None, filterName=None):
+    """Determine the list of columns for a (multilevel)parquet table.
+
+    NOTE: for a multilevel table, we are assuming it has 3 levels with names
+    "dataset", "filter", "column", as is the format persisted in the "_obj"
+    coadd catalogs from pipe_tasks' postprocess.py.  The returned list of
+    column names is that associated with the level specified by ``dfDataset``
+    and ``filterName``.
+
+    Parameters
+    ----------
+    parquetTable : `lsst.pipe.tasks.parquetTable.ParquetTable` or
+                   `lsst.pipe.tasks.parquetTable.MultilevelParquetTable`
+        The parquet table from which to extract the column names
+    dfDataset : `str`, optional
+        Name of the parquet table "dataset" level for which the columns
+        list is to be derived.  If ``parquetTable`` is multilevel, this is
+        actually not optional.  For single level catalogs, it is not relevant.
+    filterName : `str`, optional
+        Name of the parquet table "filter" level for which the columns
+        list is to be derived.  If ``parquetTable`` is multilevel, this is
+        actually not optional.  For single level catalogs, it is not relevant.
+
+    Raises
+    ------
+    RuntimeError
+        If ``parquetTable`` is multilevel but does not have the expected 3
+        levels.
+    RuntimeError
+        If ``parquetTable`` is multilevel but either ``dfDataset`` or
+        ``filterName`` are not set.
+
+    Returns
+    -------
+    catColumnsList : `list` of `str`
+        The list of column names for the ``parquetTable``.  For multilevel
+        parquet tables, the columns list will be associated with the level
+        specified by ``dfDataset`` and ``filterName``.
+    """
+    if isinstance(pqTable, MultilevelParquetTable):
+        nLevels = 3
+        if len(pqTable.columnLevels) != nLevels:
+            raise RuntimeError("Unknown multilevel parquet table: expect {:} levels but got {:}".
+                               format(nLevels, len(pqTable.columnLevels)))
+        if dfDataset is None or filterName is None:
+            raise RuntimeError("Both dfDataset and filterName must be set for multilevel parquet tables: "
+                               "but got {:} and {:}, respectively".format(dfDataset, filterName))
+        pqDatasetNames, pqFilterNames, pqColumnNames = pqTable.columnIndex.levels
+        catColumnsList = [pqColumnNames[icx] for idx, ifx, icx in zip(*pqTable.columnIndex.codes)
+                          if idx == list(pqDatasetNames).index(dfDataset)
+                          and ifx == list(pqFilterNames).index(filterName)]
+    else:
+        catColumnsList = pqTable.columns
+    return catColumnsList

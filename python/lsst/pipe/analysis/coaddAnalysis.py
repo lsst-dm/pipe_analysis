@@ -34,20 +34,22 @@ from lsst.pex.config import (Config, Field, ConfigField, ListField, DictField, C
 from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError, Struct
 from lsst.pipe.drivers.utils import TractDataIdContainer
 from lsst.meas.astrom import AstrometryConfig
+from lsst.pipe.tasks.parquetTable import MultilevelParquetTable
 from lsst.pipe.tasks.colorterms import Colorterm, ColortermLibrary
 
 from lsst.meas.algorithms import LoadIndexedReferenceObjectsTask
 
 from .analysis import AnalysisConfig, Analysis
-from .utils import (Enforcer, MagDiff, MagDiffMatches, MagDiffCompare, AstrometryDiff, TraceSize,
-                    PsfTraceSizeDiff, TraceSizeCompare, PercentDiff, E1Resids, E2Resids,
+from .utils import (Enforcer, MagDiff, MagDiffMatches, MagDiffCompare, AstrometryDiff, AngularDistance,
+                    TraceSize, PsfTraceSizeDiff, TraceSizeCompare, PercentDiff, E1Resids, E2Resids,
                     E1ResidsHsmRegauss, E2ResidsHsmRegauss, FootAreaDiffCompare, MagDiffCompareErr,
                     CentroidDiff, deconvMom, deconvMomStarGal, concatenateCatalogs, joinMatches,
                     matchAndJoinCatalogs, checkPatchOverlap, addColumnsToSchema, addFpPoint,
-                    addFootprintArea, makeBadArray, addIntFloatOrStrColumn, calibrateCoaddSourceCatalog,
-                    backoutApCorr, matchNanojanskyToAB, fluxToPlotString, andCatalog, writeParquet,
-                    getRepoInfo, addAliasColumns, addPreComputedColumns, computeMeanOfFrac,
-                    savePlots, updateVerifyJob, getSchema, loadDenormalizeAndUnpackMatches, computeAreaDict)
+                    addFootprintArea, makeBadArray, addElementIdColumn, addIntFloatOrStrColumn,
+                    calibrateCoaddSourceCatalog, backoutApCorr, matchNanojanskyToAB, fluxToPlotString,
+                    andCatalog, writeParquet, getRepoInfo, addAliasColumns, addPreComputedColumns,
+                    computeMeanOfFrac, savePlots, updateVerifyJob, getSchema, loadDenormalizeAndUnpackMatches,
+                    computeAreaDict, getParquetColumnsList)
 from .plotUtils import (CosmosLabeller, AllLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
                         MatchesStarGalaxyLabeller, determineExternalCalLabel, getPlotInfo)
 
@@ -166,6 +168,9 @@ class CoaddAnalysisConfig(Config):
                                       "calib_astrometry_used": "calib_astrometryUsed"},
                              doc=("List of flags to alias to old, pre-RFC-498, names for backwards "
                                   "compatibility with old processings"))
+    doReadParquetTables = Field(dtype=bool, default=True,
+                                doc=("Read parquet tables from postprocessing (e.g. deepCoadd_obj) as "
+                                     "input data instead of afwTable catalogs."))
     doWriteParquetTables = Field(dtype=bool, default=True,
                                  doc=("Write out Parquet tables (for subsequent interactive analysis)?"
                                       "\nNOTE: if True but fastparquet package is unavailable, a warning is "
@@ -222,13 +227,17 @@ class CoaddAnalysisRunner(TaskRunner):
         kwargs["cosmos"] = parsedCmd.cosmos
         kwargs["subdir"] = parsedCmd.subdir
 
+        # Check for existence of appropriate dataset: parquet obj vs. afwTable
+        # catalogs.
+        datasetList = ["obj"] if parsedCmd.config.doReadParquetTables else ["forced_src", "meas"]
         # Partition all inputs by tract,filter
         FilterRefsDict = functools.partial(defaultdict, list)  # Dict for filter-->dataRefs
         # Make sure the actual input files requested exist (i.e. do not follow
-        # the parent chain).  First check for forced catalogs.  Break out of
-        # datasets loop if forced catalogs were found, otherwise continue
-        # search for existence of unforced (i.e. meas) catalogs.
-        for dataset in ["forced_src", "meas"]:
+        # the parent chain).  If reading afwTable catalogs, first check for
+        # forced catalogs.  Break out of datasets loop if forced catalogs were
+        # found, otherwise continue search for existence of unforced (i.e.
+        # meas) catalogs.
+        for dataset in datasetList:
             tractFilterRefs = defaultdict(FilterRefsDict)  # tract-->filter-->dataRefs
             for patchRef in sum(parsedCmd.id.refList, []):
                 tract = patchRef.dataId["tract"]
@@ -281,7 +290,7 @@ class CoaddAnalysisTask(CmdLineTask):
         plotList = []
 
         haveForced = False  # do forced datasets exits (may not for single band datasets)
-        dataset = "Coadd_forced_src"
+        dataset = "Coadd_obj" if self.config.doReadParquetTables else "Coadd_forced_src"
         # Explicit input file was checked in CoaddAnalysisRunner, so a check
         # on datasetExists is sufficient here (modulo the case where a forced
         # dataset exists higher up the parent tree than the specified input,
@@ -337,73 +346,23 @@ class CoaddAnalysisTask(CmdLineTask):
                 self.config.doPlotMags, self.config.doPlotStarGalaxy,
                 self.config.doPlotRhoStatistics, cosmos, self.config.externalCatalogs,
                 self.config.doWriteParquetTables]) and not self.config.plotMatchesOnly:
-            if haveForced:
-                forcedCatStruct = self.readCatalogs(patchRefList, self.config.coaddName
-                                                    + "Coadd_forced_src", repoInfo,
-                                                    readFootprintsAs=self.config.readFootprintsAs)
-                forced = forcedCatStruct.catalog
-                areaDict = forcedCatStruct.areaDict
-                forced = self.calibrateCatalogs(forced, wcs=repoInfo.wcs)
-                forcedSchema = getSchema(forced)
 
-            unforcedCatStruct = self.readCatalogs(patchRefList, self.config.coaddName
-                                                  + "Coadd_meas", repoInfo,
-                                                  readFootprintsAs=self.config.readFootprintsAs)
-            unforced = unforcedCatStruct.catalog
-            unforcedSchema = getSchema(unforced)
-            if not haveForced:
-                areaDict = unforcedCatStruct.areaDict
-            unforced = self.calibrateCatalogs(unforced, wcs=repoInfo.wcs)
+            if self.config.doReadParquetTables:
+                if haveForced:
+                    forced, _ = self.readParquetTables(patchRefExistsList, self.config.coaddName + dataset,
+                                                       repoInfo, dfDataset="forced_src")
+                unforced, _ = self.readParquetTables(patchRefExistsList, self.config.coaddName + dataset,
+                                                     repoInfo, dfDataset="meas")
+                areaDict, _ = computeAreaDict(repoInfo, patchRefExistsList,
+                                              dataset=self.config.coaddName + "Coadd", fakeCat=None)
+            else:
+                catalogStruct = self.readAfwCoaddTables(patchRefExistsList, repoInfo, haveForced,
+                                                        aliasDictList=aliasDictList)
+                unforced = catalogStruct.unforced
+                forced = catalogStruct.forced
+                areaDict = catalogStruct.areaDict
+
             plotKwargs.update(dict(zpLabel=self.zpLabel))
-            if haveForced:
-                # Copy over some fields from _ref and _meas catalogs to
-                # _forced_src catalog.
-                refCat = self.readCatalogs(patchRefList, self.config.coaddName + "Coadd_ref",
-                                           repoInfo).catalog
-                if len(forced) != len(refCat):
-                    raise RuntimeError(("Lengths of forced (N = {0:d}) and ref (N = {0:d}) cats don't match").
-                                       format(len(forced), len(refCat)))
-                refCatSchema = getSchema(refCat)
-                refColList = [s for s in refCatSchema.getNames() if
-                              s.startswith(tuple(self.config.columnsToCopyFromRef))]
-                refColsToCopy = [col for col in refColList if col not in forcedSchema
-                                 and col in refCatSchema and not
-                                 (repoInfo.hscRun and col == "slot_Centroid_flag")]
-                forced = addColumnsToSchema(refCat, forced, refColsToCopy)
-                measColList = [s for s in unforcedSchema.getNames() if
-                               s.startswith(tuple(self.config.columnsToCopyFromMeas))]
-                measColsToCopy = [col for col in measColList if col not in forcedSchema
-                                  and col in unforcedSchema and not
-                                  (repoInfo.hscRun and col == "slot_Centroid_flag")]
-                forced = addColumnsToSchema(unforced, forced, measColsToCopy)
-
-            # Set some "aliases" for differing schema naming conventions.
-            # Note: we lose the alias maps when converting to pandas, so now
-            # must actually make a copy of the "old" column to a new one with
-            # the "new" name.  This is really just a backwards-compatibility
-            # accommodation for catalogs that are already pretty old, so it
-            # will be a no-op in most cases and will likely disappear in the
-            # not-too-distant future.
-            coaddList = [unforced, ]
-            if haveForced:
-                coaddList += [forced]
-            for cat in coaddList:
-                cat = addAliasColumns(cat, aliasDictList)
-
-            if self.config.doPlotFootprintArea and "base_FootprintArea_value" not in unforced.schema:
-                if self.config.readFootprintsAs != "heavy":
-                    self.log.warn("config.doPlotFootprintArea is True, but do not have "
-                                  "base_FootprintArea_value in schema.  If reading in an older afw "
-                                  "src catalog, may need to run with config.readFootprintsAs=\"heavy\""
-                                  "to be able to read in the footprints and compute their area.")
-                else:
-                    unforced = addFootprintArea(unforced, fromCat=unforced)
-
-            # Convert to pandas DataFrames
-            unforced = unforced.asAstropy().to_pandas()
-            if haveForced:
-                forced = forced.asAstropy().to_pandas()
-
             unforcedSchema = getSchema(unforced)
             if haveForced:
                 forcedSchema = getSchema(forced)
@@ -590,56 +549,60 @@ class CoaddAnalysisTask(CmdLineTask):
             if cosmos:
                 plotList.append(self.plotCosmos(forced, plotInfoDict, areaDict, cosmos, repoInfo.dataId))
 
-        matchAreaDict = {}
         if self.config.doPlotMatches or self.config.doWriteParquetTables:
+            matchAreaDict = {}
+            # First write out unforced match parquet tables
+            matches, matchAreaDict = self.readSrcMatches(repoInfo, patchRefExistsList,
+                                                         self.config.coaddName + "Coadd_meas",
+                                                         aliasDictList=aliasDictList, haveForced=False)
+            qaTableSuffix = "_unforced"
+            if self.config.doWriteParquetTables:
+                matchesDataRef = repoInfo.butler.dataRef("analysisMatchFullRefCoaddTable" + qaTableSuffix,
+                                                         dataId=repoInfo.dataId)
+                writeParquet(matchesDataRef, matches, badArray=None, prefix="src_")
+            # Now write out forced match parquet tables, if present
             if haveForced:
                 matches, matchAreaDict = self.readSrcMatches(repoInfo, patchRefExistsList,
                                                              self.config.coaddName + "Coadd_forced_src",
-                                                             aliasDictList=aliasDictList)
+                                                             aliasDictList=aliasDictList,
+                                                             haveForced=haveForced)
                 qaTableSuffix = "_forced"
                 if self.config.doWriteParquetTables:
                     matchesDataRef = repoInfo.butler.dataRef("analysisMatchFullRefCoaddTable" + qaTableSuffix,
                                                              dataId=repoInfo.dataId)
                     writeParquet(matchesDataRef, matches, badArray=None, prefix="src_")
 
-            matches, matchAreaDict = self.readSrcMatches(repoInfo, patchRefExistsList,
-                                                         self.config.coaddName + "Coadd_meas",
-                                                         aliasDictList=aliasDictList)
-            qaTableSuffix = "_unforced"
+            if self.config.writeParquetOnly:
+                self.log.info("Exiting after writing Parquet tables.  No plots generated.")
+                return
 
-            if self.config.doWriteParquetTables:
-                matchesDataRef = repoInfo.butler.dataRef("analysisMatchFullRefCoaddTable" + qaTableSuffix,
-                                                         dataId=repoInfo.dataId)
-                writeParquet(matchesDataRef, matches, badArray=None, prefix="src_")
-                if self.config.writeParquetOnly:
-                    self.log.info("Exiting after writing Parquet tables.  No plots generated.")
-                    return
+            if self.config.doPlotMatches:
+                # The apCorr backing out, if requested, and the purging of
+                # deblend_nChild > 0 objects happens in readSrcMatches, but
+                # label won't be set if plotMatchesOnly is True.
+                if self.config.doBackoutApCorr and "noApCorr" not in forcedStr:
+                    forcedStr += "(noApCorr)"
+                forcedStr = forcedStr + " nChild = 0" if "nChild = 0" not in forcedStr else forcedStr
 
-            # The apCorr backing out, if requested, and the purging of
-            # deblend_nChild > 0 objects happens in readSrcMatches, but label
-            # won't be set if plotMatchesOnly is True.
-            if self.config.doBackoutApCorr and "noApCorr" not in forcedStr:
-                forcedStr += "(noApCorr)"
-            forcedStr = forcedStr + " nChild = 0" if "nChild = 0" not in forcedStr else forcedStr
+                plotKwargs.update(dict(zpLabel=self.zpLabel))
+                matchHighlightList = [("src_" + self.config.analysis.fluxColumn.replace("_instFlux", "_flag"),
+                                       0, "turquoise"), ]
+                plotKwargs.update(dict(highlightList=matchHighlightList))
+                plotList.append(self.plotMatches(matches, plotInfoDict, matchAreaDict, forcedStr=forcedStr,
+                                                 **plotKwargs))
 
-            plotKwargs.update(dict(zpLabel=self.zpLabel))
-            matchHighlightList = [("src_" + self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0,
-                                   "turquoise"), ]
-            plotKwargs.update(dict(highlightList=matchHighlightList))
-            plotList.append(self.plotMatches(matches, plotInfoDict, matchAreaDict, forcedStr=forcedStr,
-                                             **plotKwargs))
-
-        for cat in self.config.externalCatalogs:
-            with andCatalog(cat):
-                matches = self.matchCatalog(forced, repoInfo.filterName, self.config.externalCatalogs[cat])
-                if matches is not None:
-                    plotList.append(self.plotMatches(matches, plotInfoDict, matchAreaDict,
-                                                     forcedStr=forcedStr, matchRadius=self.matchRadius,
-                                                     matchRadiusUnitStr=self.matchRadiusUnitStr,
-                                                     **plotKwargs))
-                else:
-                    self.log.warn("Could not create match catalog for {:}.  Is "
-                                  "lsst.meas.extensions.astrometryNet setup?".format(cat))
+                for cat in self.config.externalCatalogs:
+                    with andCatalog(cat):
+                        matches = self.matchCatalog(forced, repoInfo.filterName,
+                                                    self.config.externalCatalogs[cat])
+                    if matches is not None:
+                        plotList.append(self.plotMatches(matches, plotInfoDict, matchAreaDict,
+                                                         forcedStr=forcedStr, matchRadius=self.matchRadius,
+                                                         matchRadiusUnitStr=self.matchRadiusUnitStr,
+                                                         **plotKwargs))
+                    else:
+                        self.log.warn("Could not create match catalog for {:}.  Is "
+                                      "lsst.meas.extensions.astrometryNet setup?".format(cat))
 
         self.allStats, self.allStatsHigh = savePlots(plotList, "plotCoadd", repoInfo.dataId,
                                                      repoInfo.butler, subdir=subdir)
@@ -654,8 +617,264 @@ class CoaddAnalysisTask(CmdLineTask):
                                                 dataId=repoInfo.dataId)[0]
         self.verifyJob.write(verifyJobFilename)
 
-    def readCatalogs(self, patchRefList, dataset, repoInfo, fakeCat=None, raFakesCol="raJ2000",
-                     decFakesCol="decJ2000", readFootprintsAs=None):
+    def readParquetTables(self, dataRefList, dataset, repoInfo, dfDataset=None,
+                          doApplyExternalPhotoCalib=False, doApplyExternalSkyWcs=False, useMeasMosaic=False,
+                          iCat=None):
+        """Read in, calibrate, and concatenate parquet tables from a list of
+        dataRefs.
+
+        The calibration performed is based on config parameters.  For coadds,
+        the only option is the calibration zeropoint.  For visits, the options
+        include external calibrations for both photometry (e.g. fgcm) and wcs
+        (e.g. jointcal) or simply the zero point from single frame processing.
+
+        Parameters
+        ----------
+        dataRefList : `list` of
+                      `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+            A list of butler data references whose catalogs of ``dataset``
+            are to be read in.
+        dataset : `str`
+            Name of the catalog ``dataset`` to be read in, e.g.
+            "deepCoadd_obj" (for coadds) or "source" (for visits).
+        repoInfo : `lsst.pipe.base.struct.Struct`
+            A struct containing elements with repo information needed to
+            determine if the catalog data is coadd or visit level and, if the
+            latter, to create appropriate dataIds to look for the external
+            calibration datasets.
+        dfDataset : `str` or `None`, optional
+            Name of the dataFrame \"dataset\" to be read in for multilevel
+            parquet tables.  For coadd catalogs, which are of type
+            `lsst.pipe.tasks.parquetTable.MultilevelParquetTable`, this is
+            actually not optional but must be one of, "forced_src", "meas", or
+            "ref".  This parameter is not relevant for visit-level catalogs,
+            which are of type `lsst.pipe.tasks.parquetTable.ParquetTable`.
+        doApplyExternalPhotoCalib : `bool`, optional
+            If `True`: Apply the external photometric calibrations specified by
+                      ``repoInfo.photoCalibDataset`` to the catalog.
+            If `False`: Apply the ``fluxMag0`` photometric calibration from
+                        Single Frame Measuerment to the catalog.
+        doApplyExternalSkyWcs : `bool`, optional
+            If `True`: Apply the external astrometric calibrations specified by
+                       ``repoInfo.skyWcsDataset`` the catalog.
+            If `False`: Retain the WCS from Single Frame Measurement.
+        useMeasMosaic : `bool`, optional
+            Use meas_mosaic's applyMosaicResultsCatalog for the external
+            calibration (even if photoCalib object exists).  For testing
+            implementations.
+        iCat : `int` or `None,` optional
+            Integer representing whether this is comparison catalog 0 or 1.
+
+        Raises
+        ------
+        TaskError
+            If no data is read in for the ``dataRefList``.
+        RuntimeError
+            If catalog is of type
+            `lsst.pipe.tasks.parquetTable.MultilevelParquetTable` but no
+            ``dfDataset`` is provided.
+
+        Returns
+        -------
+        allCats : `pandas.core.frame.DataFrame`
+            The concatenated catalogs as a pandas DataFrame.
+        """
+        # It is much faster to concatenate a list of DataFrames than to
+        # concatenate successively within the for loop.
+        commonZpCatList = []
+        catList = []
+        colsToLoadList = None
+        dfLoadColumns = None
+        refColsToLoadList = None
+        measColsToLoadList = None
+        for dataRef in dataRefList:
+            if not dataRef.datasetExists(dataset):
+                self.log.info("Dataset does not exist: {0:r}, {1:s}".format(dataRef.dataId, dataset))
+                continue
+            parquetCat = dataRef.get(dataset, immediate=True)
+            if isinstance(parquetCat, MultilevelParquetTable) and not any(
+                    dfDataset == dfName for dfName in ["forced_src", "meas", "ref"]):
+                raise RuntimeError("Must specify a dfDataset for multilevel parquet tables")
+            if dfLoadColumns is None and isinstance(parquetCat, MultilevelParquetTable):
+                dfLoadColumns = {"dataset": dfDataset, "filter": dataRef.dataId["filter"]}
+            # On the first dataRef read in, create list of columns to load
+            # based on config lists and their existence in the catalog table.
+            if colsToLoadList is None:
+                catColumns = getParquetColumnsList(parquetCat, dfDataset=dfDataset,
+                                                   filterName=dataRef.dataId["filter"])
+                colsToLoadList = [col for col in catColumns if
+                                  (col.startswith(tuple(self.config.baseColStrList))
+                                   and not any(s in col for s in self.config.notInColStrList))]
+                if dfLoadColumns is None:
+                    dfLoadColumns = colsToLoadList
+                else:
+                    dfLoadColumns.update(column=colsToLoadList)
+            cat = parquetCat.toDataFrame(columns=dfLoadColumns)
+            cat = addElementIdColumn(cat, dataRef.dataId, repoInfo=repoInfo)
+            if dfDataset == "forced_src":  # insert some columns from the ref and meas cats for forced cats
+                if refColsToLoadList is None:
+                    refColumns = getParquetColumnsList(parquetCat, dfDataset="ref",
+                                                       filterName=dataRef.dataId["filter"])
+                    refColsToLoadList = [col for col in refColumns if
+                                         (col.startswith(tuple(self.config.columnsToCopyFromRef))
+                                          and not any(s in col for s in self.config.notInColStrList))]
+                ref = parquetCat.toDataFrame(columns={"dataset": "ref", "filter": dataRef.dataId["filter"],
+                                                      "column": refColsToLoadList})
+                cat = pd.concat([cat, ref], axis=1)
+                if measColsToLoadList is None:
+                    measColumns = getParquetColumnsList(parquetCat, dfDataset="meas",
+                                                        filterName=dataRef.dataId["filter"])
+                    measColsToLoadList = [col for col in measColumns if
+                                          (col.startswith(tuple(self.config.columnsToCopyFromMeas))
+                                           and not any(s in col for s in self.config.notInColStrList))]
+                meas = parquetCat.toDataFrame(columns={"dataset": "meas", "filter": dataRef.dataId["filter"],
+                                                       "column": measColsToLoadList})
+                cat = pd.concat([cat, meas], axis=1)
+
+            if "patch" in repoInfo.dataId:  # This is a coadd catalog
+                cat = self.calibrateCatalogs(cat, wcs=repoInfo.wcs)
+                catList.append(cat)
+            else:  # This is a visit catalog
+                # Scale fluxes to common zeropoint to make basic comparison
+                # plots without calibrated ZP influence.
+                commonZpCat = cat.copy(True)
+                commonZpCat = calibrateSourceCatalog(commonZpCat, self.config.analysis.commonZp)
+                if doApplyExternalPhotoCalib:
+                    if not dataRef.datasetExists(repoInfo.photoCalibDataset):
+                        continue
+                if doApplyExternalSkyWcs:
+                    if not dataRef.datasetExists(repoInfo.skyWcsDataset):
+                        continue
+                fluxMag0 = None
+                if not doApplyExternalPhotoCalib:
+                    photoCalib = repoInfo.butler.get("calexp_photoCalib", dataRef.dataId)
+                    fluxMag0 = photoCalib.getInstFluxAtZeroMagnitude()
+                cat = self.calibrateCatalogs(dataRef, cat, fluxMag0, repoInfo, doApplyExternalPhotoCalib,
+                                             doApplyExternalSkyWcs, useMeasMosaic, iCat=iCat)
+                catList.append(cat)
+                commonZpCatList.append(commonZpCat)
+        if not catList:
+            raise TaskError("No catalogs read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
+        allCats = pd.concat(catList, axis=0)
+        # The object "id" is associated with the dataframe index.  Add a
+        # column that is the id so that it is available for operations on it,
+        # e.g. cat["id"].
+        allCats["id"] = allCats.index
+        # Optionally backout aperture corrections
+        if self.config.doBackoutApCorr:
+            allCats = backoutApCorr(allCats)
+        if commonZpCatList:
+            allCommonZpCats = pd.concat(commonZpCatList, axis=0)
+            allCommonZpCats["id"] = allCommonZpCats.index
+            if self.config.doBackoutApCorr:
+                allCommonZpCats = backoutApCorr(allCommonZpCats)
+        else:
+            allCommonZpCats = None
+        return allCats, allCommonZpCats
+
+    def readAfwCoaddTables(self, dataRefList, repoInfo, haveForced, aliasDictList=None):
+        """Read in, concatenate, calibrate, and convert to DataFrame a list of
+        coadd catalogs that were persisted as afwTables.
+
+        This function delegates to readCatalogs for the actual catalog reading
+        and concatenating, in which an extra column indicating the patch ID is
+        added to each catalog before appending them all to a single list.  This
+        is useful for any subsequent QA analysis using the persisted parquet
+        files.  Here these catalogs are calibrated, have useful columns copied
+        from the *Coadd_ref to *Coadd_forced_src catalogs, and are converted
+        to pandas DataFrames.
+
+        Parameters
+        ----------
+        dataRefList : `list` of
+                      `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+            A `list` of butler data references whose coadd catalogs are to be
+            read in.
+        repoInfo : `lsst.pipe.base.Struct`
+            A struct containing relevant information about the repository under
+            study.  Elements used here include the dataset names for any
+            external calibrations to be applied.
+        haveForced : `bool`
+            A boolean indicating if a forced_src catalog exists in the
+            repository associated with ``repoInfo``.
+        aliasDictList : `dict` or `None`, optional
+            A `dict` of alias columns to add for backwards compatibility with
+            old repositories.
+
+        Raises
+        ------
+        RuntimeError
+            If lengths of *Coadd_forced_src and *Coadd_ref catalogs are not
+            equal.
+
+        Returns
+        -------
+        result : `lsst.pipe.base.Struct`
+            A struct with attributes:
+            ``unforced``
+                The concatenated unforced, or "_meas", calibrated catalog
+                (`pandas.core.frame.DataFrame`).
+            ``forced``
+                The concatenated forced, or "_forced_src", calibrated catalog
+                (`pandas.core.frame.DataFrame`).
+            ``areaDict``
+                Contains patch keys that index the patch corners in RA/Dec and
+                the effective patch area (i.e. neither the "BAD" nor "NO_DATA"
+                mask bit is set) (`dict`).
+        """
+        if haveForced:
+            forcedCatStruct = self.readCatalogs(dataRefList, self.config.coaddName + "Coadd_forced_src",
+                                                repoInfo, aliasDictList=aliasDictList,
+                                                readFootprintsAs=self.config.readFootprintsAs)
+            forced = forcedCatStruct.catalog
+            areaDict = forcedCatStruct.areaDict
+            forced = self.calibrateCatalogs(forced, wcs=repoInfo.wcs)
+            forcedSchema = getSchema(forced)
+        else:
+            forced = None
+        unforcedCatStruct = self.readCatalogs(dataRefList, self.config.coaddName + "Coadd_meas", repoInfo,
+                                              aliasDictList=aliasDictList,
+                                              readFootprintsAs=self.config.readFootprintsAs)
+        unforced = unforcedCatStruct.catalog
+        unforced = self.calibrateCatalogs(unforced, wcs=repoInfo.wcs)
+        unforcedSchema = getSchema(unforced)
+        if not haveForced:
+            areaDict = unforcedCatStruct.areaDict
+        if haveForced:
+            # Copy over some fields from _ref and _meas catalogs to
+            # _forced_src catalog.
+            refCat = self.readCatalogs(dataRefList, self.config.coaddName + "Coadd_ref", repoInfo).catalog
+            if len(forced) != len(refCat):
+                raise RuntimeError(("Lengths of forced (N = {0:d}) and ref (N = {0:d}) cats "
+                                    "don't match").format(len(forced), len(refCat)))
+            refCatSchema = getSchema(refCat)
+            refColList = []
+            for strPrefix in self.config.columnsToCopyFromRef:
+                refColList.extend(refCatSchema.extract(strPrefix + "*"))
+            refColsToCopy = [col for col in refColList if col not in forcedSchema
+                             and not any(s in col for s in self.config.notInColStrList)
+                             and col in refCatSchema
+                             and not (repoInfo.hscRun and col == "slot_Centroid_flag")]
+            forced = addColumnsToSchema(refCat, forced, refColsToCopy)
+            measColList = []
+            for strPrefix in self.config.columnsToCopyFromMeas:
+                measColList.extend(refCatSchema.extract(strPrefix + "*"))
+            measColsToCopy = [col for col in measColList if col not in forcedSchema
+                              and not any(s in col for s in self.config.notInColStrList)
+                              and col in unforcedSchema
+                              and not (repoInfo.hscRun and col == "slot_Centroid_flag")]
+            forced = addColumnsToSchema(unforced, forced, measColsToCopy)
+
+        # Convert to pandas DataFrames
+        unforced = unforced.asAstropy().to_pandas().set_index("id", drop=False)
+        if haveForced:
+            forced = forced.asAstropy().to_pandas().set_index("id", drop=False)
+        return Struct(unforced=unforced, forced=forced, areaDict=areaDict)
+
+    def readCatalogs(self, dataRefList, dataset, repoInfo, aliasDictList=None, fakeCat=None,
+                     raFakesCol="raJ2000", decFakesCol="decJ2000", readFootprintsAs=None,
+                     doApplyExternalPhotoCalib=False, doApplyExternalSkyWcs=False, useMeasMosaic=False,
+                     iCat=None):
         """Read in and concatenate catalogs of type dataset in lists of
         data references.
 
@@ -665,7 +884,7 @@ class CoaddAnalysisTask(CmdLineTask):
 
         Parameters
         ----------
-        patchRefList : `list` of
+        dataRefList : `list` of
                        `lsst.daf.persistence.butlerSubset.ButlerDataRef`
             A list of butler data references whose catalogs of dataset type are
             to be read in.
@@ -675,7 +894,10 @@ class CoaddAnalysisTask(CmdLineTask):
             A struct containing relevant information about the repository under
             study.  Elements used here include the dataset names for any
             external calibrations to be applied.
-        fakeCat : `pandas.core.frame.DataFrame`, optional
+        aliasDictList : `dict` or `None`, optional
+            A `dict` of alias columns to add for backwards compatibility with
+            old repositories.
+        fakeCat : `pandas.core.frame.DataFrame` or `None`, optional
             Catalog of fake sources, used if hasFakes is `True` in which case a
             column (onPatch) is added with the patch number if the fake source
             overlaps a ccd and `np.nan` if it does not.
@@ -691,6 +913,21 @@ class CoaddAnalysisTask(CmdLineTask):
                      peaks per Footprint).
             "heavy": read in HeavyFootprints (include regular Footprint plus
                      flux values per Footprint).
+        doApplyExternalPhotoCalib : `bool`, optional
+            If `True`: Apply the external photometric calibrations specified by
+                      ``repoInfo.photoCalibDataset`` to the catalog.
+            If `False`: Apply the ``fluxMag0`` photometric calibration from
+                        Single Frame Measuerment to the catalog.
+        doApplyExternalSkyWcs : `bool`, optional
+            If `True`: Apply the external astrometric calibrations specified by
+                       ``repoInfo.skyWcsDataset`` the calalog.
+            If `False`: Retain the WCS from Single Frame Measurement.
+        useMeasMosaic : `bool`, optional
+            Use meas_mosaic's applyMosaicResultsCatalog for the external
+            calibration (even if photoCalib object exists).  For testing
+            implementations.
+        iCat : `int` or `None,` optional
+            Integer representing whether this is comparison catalog 0 or 1.
 
         Raises
         ------
@@ -706,7 +943,7 @@ class CoaddAnalysisTask(CmdLineTask):
             A struct with attributes:
             ``commonZpCatalog``
                 The concatenated common zeropoint calibrated catalog
-                (`lsst.afw.table.SourceCatalog`).
+                (`lsst.afw.table.SourceCatalog` or `None` for coadd data).
             ``catalog``
                 The concatenated SFM or external calibration calibrated catalog
                 (`lsst.afw.table.SourceCatalog`).
@@ -718,8 +955,18 @@ class CoaddAnalysisTask(CmdLineTask):
                 The updated catalog of fake sources (None if the config
                 parameter hasFakes = `False` (`pandas.core.frame.DataFrame`).
         """
+        commonZpCatList = []
         catList = []
-        for patchRef in patchRefList:
+        dataRefExistsList = []
+        for dataRef in dataRefList:
+            if dataRef.datasetExists(dataset):
+                dataRefExistsList.append(dataRef)
+        calexpPrefix = dataset[:dataset.find("_")] if "_" in dataset else ""
+        areaDict, fakeCat = computeAreaDict(repoInfo, dataRefExistsList, dataset=calexpPrefix,
+                                            fakeCat=fakeCat, raFakesCol=raFakesCol, decFakesCol=decFakesCol)
+        for dataRef in dataRefExistsList:
+            if not dataRef.datasetExists(dataset):
+                continue
             if not readFootprintsAs:
                 catFlags = afwTable.SOURCE_IO_NO_FOOTPRINTS
             elif readFootprintsAs == "light":
@@ -729,95 +976,137 @@ class CoaddAnalysisTask(CmdLineTask):
             else:
                 raise RuntimeError("Unknown entry for readFootprintsAs: {:}.  Only recognize one of: "
                                    "None, \"light\", or \"heavy\"".format(readFootprintsAs))
-            cat = patchRef.get(dataset, immediate=True, flags=catFlags)
-            cat = addIntFloatOrStrColumn(cat, patchRef.dataId["patch"], "patchId",
-                                         "Patch on which source was detected")
+            cat = dataRef.get(dataset, immediate=True, flags=catFlags)
             # Optionally backout aperture corrections
             if self.config.doBackoutApCorr:
                 cat = backoutApCorr(cat)
+            schema = getSchema(cat)
+            # Old catalogs did not have base_FootprintArea_value so, for
+            # backwards compatibility, check if present and add if not.
+            if (self.config.doPlotFootprintArea and "base_FootprintArea_value" not in schema
+                    and len(schema.extract("merge_footprint*")) > 0):  # to not bother for forced cats
+                if self.config.readFootprintsAs != "heavy":
+                    self.log.warn("config.doPlotFootprintArea is True, but do not have "
+                                  "base_FootprintArea_value in schema.  If reading in an older afw "
+                                  "src catalog, may need to run with config.readFootprintsAs=\"heavy\""
+                                  "to be able to read in the footprints and compute their area.")
+                else:
+                    cat = addFootprintArea(cat)
+            # Set some "aliases" for differing schema naming conventions.
+            # Note: we lose the alias maps when converting to pandas, so now
+            # must actually make a copy of the "old" column to a new one with
+            # the "new" name. This is really just a backwards-compatibility
+            # accommodation for catalogs that are already pretty old, so it
+            # will be a no-op in most cases and will likely disappear in the
+            #  not-too-distant future.
+            if aliasDictList:
+                cat = addAliasColumns(cat, aliasDictList)
+            # Add elementId column, where element is "patch" for coadd data and
+            # "ccd/detector" for visit data (useful to have in Parquet tables
+            # for subsequent interactive analysis).
+            if "patch" in repoInfo.dataId:  # This is a coadd catalog
+                cat = addIntFloatOrStrColumn(cat, dataRef.dataId["patch"], "patchId",
+                                             "Patch on which source was detected")
+            else:  # This is a visit catalog
+                cat = addIntFloatOrStrColumn(cat, dataRef.dataId[repoInfo.ccdKey], "ccdId",
+                                             "Id of CCD on which source was detected")
+                # Compute Focal Plane coordinates for each source if not
+                # already there.
+                if (self.config.doPlotCentroids or self.config.analysis.doPlotFP
+                        or self.config.analysisMatches.doPlotFP):
+                    if "base_FPPosition_x" not in schema and "focalplane_x" not in schema:
+                        det = repoInfo.butler.get("calexp_detector", dataRef.dataId)
+                        cat = addFpPoint(det, cat)
+
+                # Scale fluxes to common zeropoint to make basic comparison
+                # plots without calibrated ZP influence.
+                commonZpCat = cat.copy(True)
+                commonZpCat = calibrateSourceCatalog(commonZpCat, self.config.analysis.commonZp)
+                commonZpCatList.append(commonZpCat)
+                if self.config.doApplyExternalPhotoCalib:
+                    if repoInfo.hscRun:
+                        if not dataRef.datasetExists("fcr_hsc_md") or not dataRef.datasetExists("wcs_hsc"):
+                            continue
+                    else:
+                        # Check for both jointcal_wcs and wcs for compatibility
+                        # with old datasets.
+                        if not (dataRef.datasetExists(repoInfo.photoCalibDataset)
+                                or dataRef.datasetExists("fcr_md")):
+                            continue
+                if self.config.doApplyExternalSkyWcs:
+                    if repoInfo.hscRun:
+                        if not dataRef.datasetExists("fcr_hsc_md") or not dataRef.datasetExists("wcs_hsc"):
+                            continue
+                    else:
+                        # Check for both jointcal_wcs and wcs for compatibility
+                        # with old datasets.
+                        if not (dataRef.datasetExists(repoInfo.skyWcsDataset)
+                                or dataRef.datasetExists("wcs")):
+                            continue
+                fluxMag0 = None
+                if not doApplyExternalPhotoCalib:
+                    photoCalib = repoInfo.butler.get("calexp_photoCalib", dataRef.dataId)
+                    fluxMag0 = photoCalib.getInstFluxAtZeroMagnitude()
+                cat = self.calibrateCatalogs(dataRef, cat, fluxMag0, repoInfo, doApplyExternalPhotoCalib,
+                                             doApplyExternalSkyWcs, useMeasMosaic, iCat=iCat)
             catList.append(cat)
         if not catList:
-            raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
+            raise TaskError("No catalogs read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
 
-        if not self.config.hasFakes:
-            fakeCat = None
-        areaDict, fakeCat = computeAreaDict(repoInfo, patchRefList,
-                                            dataset=self.config.coaddName + "Coadd", fakeCat=fakeCat,
-                                            raFakesCol=raFakesCol, decFakesCol=decFakesCol)
-        return Struct(catalog=concatenateCatalogs(catList), areaDict=areaDict, fakeCat=fakeCat)
+        return Struct(commonZpCatalog=concatenateCatalogs(commonZpCatList),
+                      catalog=concatenateCatalogs(catList), areaDict=areaDict, fakeCat=fakeCat)
 
-    def readSrcMatches(self, repoInfo, dataRefList, dataset, aliasDictList=None):
+    def readSrcMatches(self, repoInfo, dataRefList, dataset, aliasDictList=None, haveForced=False,
+                       doApplyExternalPhotoCalib=False, doApplyExternalSkyWcs=False, useMeasMosaic=False):
         matchList = []
+        matchAreaDict = {}
+        dataIdSubList = []
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
                 self.log.info("Dataset does not exist: {0:r}, {1:s}".format(dataRef.dataId, dataset))
                 continue
             butler = repoInfo.butler
-
             # Generate unnormalized match list (from normalized persisted
             # one)  with loadDenormalizeAndUnpackMatches (which requires a
             # refObjLoader to be initialized).
-            catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-            catalog = addIntFloatOrStrColumn(catalog, dataRef.dataId["patch"], "patchId",
-                                             "Patch on which source was detected")
-            # Set some "aliases" for differing schema naming conventions.
-            # Note: we lose the alias maps when converting to pandas, so now
-            # must actually make a copy of the "old" column to a new one with
-            # the "new" name.
-            if aliasDictList:
-                catalog = addAliasColumns(catalog, aliasDictList)
-            schema = getSchema(catalog)
-            needToAddColumns = any(ss not in schema for ss in list(self.config.columnsToCopyFromMeas)
-                                   + list(self.config.columnsToCopyFromRef))
-            if dataset != self.config.coaddName + "Coadd_meas" and needToAddColumns:
-                # Copy over some fields from _ref and _meas catalogs to
-                # _forced_src catalog.
-                refCat = dataRef.get(self.config.coaddName + "Coadd_ref", immediate=True,
-                                     flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-                refCatSchema = getSchema(refCat)
-                unforced = dataRef.get(self.config.coaddName + "Coadd_meas", immediate=True,
-                                       flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-                unforcedSchema = getSchema(unforced)
-                if len(catalog) != len(refCat):
-                    raise RuntimeError(("Lengths of forced (N = {0:d}) and ref (N = {0:d}) cats don't match").
-                                       format(len(catalog), len(refCat)))
-                refColList = [s for s in refCatSchema.getNames() if
-                              s.startswith(tuple(self.config.columnsToCopyFromRef))]
-                refColsToCopy = [col for col in refColList if col not in schema and col in refCatSchema
-                                 and not (hscRun and col == "slot_Centroid_flag")]
-                catalog = addColumnsToSchema(refCat, catalog, refColsToCopy)
-                measColList = [s for s in unforcedSchema.getNames() if
-                               s.startswith(tuple(self.config.columnsToCopyFromMeas))]
-                measColsToCopy = [col for col in measColList if col not in schema and col in unforcedSchema
-                                  and not (hscRun and col == "slot_Centroid_flag")]
-                catalog = addColumnsToSchema(unforced, catalog, measColsToCopy)
-                if aliasDictList:
-                    catalog = addAliasColumns(catalog, aliasDictList)
-            catalog = self.calibrateCatalogs(catalog, wcs=wcs)
-
-            # Compute Focal Plane coordinates for each source if not already
-            # there.
-            if self.config.analysisMatches.doPlotFP:
-                if "src_base_FPPosition_x" not in schema and "src_focalplane_x" not in schema:
-                    det = butler.get("calexp_detector", dataRef.dataId)
-                    catalog = addFpPoint(det, catalog, prefix="src_")
-            # Optionally backout aperture corrections
-            if self.config.doBackoutApCorr:
-                if len(matchList) == 0:
-                    self.log.info("Backing out aperture corrections from all fluxes before matching "
-                                  "to reference cat")
-                catalog = backoutApCorr(catalog)
-
-            # Convert to pandas DataFrames
-            catalog = catalog.asAstropy().to_pandas()
-            schema = getSchema(catalog)
-
+            if self.config.doReadParquetTables:
+                if "Coadd" in dataset:
+                    datasetType = dataset[:dataset.find("Coadd_") + len("Coadd_")] + "obj"
+                    dfDataset = dataset[dataset.find("Coadd_") + len("Coadd_"):]
+                    baseDataset = dataset[:dataset.find("Coadd_") + len("Coadd_") - 1]
+                else:
+                    datasetType = "source"
+                    dfDataset = ""
+                    baseDataset = ""
+                catalog, _ = self.readParquetTables([dataRef, ], datasetType, repoInfo, dfDataset=dfDataset,
+                                                    doApplyExternalPhotoCalib=doApplyExternalPhotoCalib,
+                                                    doApplyExternalSkyWcs=doApplyExternalSkyWcs,
+                                                    useMeasMosaic=useMeasMosaic)
+                areaDict, _ = computeAreaDict(repoInfo, [dataRef, ], dataset=baseDataset)
+            else:
+                if "patch" in repoInfo.dataId:  # This is a coadd catalog
+                    catalogStruct = self.readAfwCoaddTables([dataRef, ], repoInfo, haveForced,
+                                                            aliasDictList=aliasDictList)
+                    if "Coadd_meas" in dataset:
+                        catalog = catalogStruct.unforced
+                    if "Coadd_forced_src" in dataset:
+                        catalog = catalogStruct.forced
+                    areaDict = catalogStruct.areaDict
+                else:  # This is a visit catalog
+                    catStruct = self.readCatalogs(
+                        [dataRef, ], dataset, repoInfo, aliasDictList=aliasDictList,
+                        readFootprintsAs=self.config.readFootprintsAs,
+                        doApplyExternalPhotoCalib=doApplyExternalPhotoCalib,
+                        doApplyExternalSkyWcs=doApplyExternalSkyWcs, useMeasMosaic=useMeasMosaic)
+                    catalog = catStruct.catalog
+                    catalog = catalog.asAstropy().to_pandas().set_index("id", drop=False)
+                    areaDict = catStruct.areaDict
             # Set boolean array indicating sources deemed unsuitable for qa
             # analyses.
+            schema = getSchema(catalog)
             transCentFlag = "base_TransformedCentroid_flag"
-            badFlagList = [transCentFlag, ] if transCentFlag in schema else ["slot_Centroid_flag", ]
+            badFlagList = [transCentFlag, ] if transCentFlag in schema else []
             bad = makeBadArray(catalog, flagList=badFlagList, onlyReadStars=self.config.onlyReadStars)
-
             if dataset.startswith("deepCoadd_"):
                 packedMatches = butler.get("deepCoadd_measMatch", dataRef.dataId)
             else:
@@ -839,15 +1128,29 @@ class CoaddAnalysisTask(CmdLineTask):
             # LSST reads in reference catalogs with flux in "nanojanskys", so
             # must convert to AB.
             matches = matchNanojanskyToAB(matches)
+            matchAreaDict.update(areaDict)
             if matches.empty:
                 self.log.warn("No matches for %s" % (dataRef.dataId,))
             else:
-                matchList.append(matches)
+                if "patch" not in repoInfo.dataId:  # This is a visit catalog
+                    if self.config.doApplyExternalSkyWcs:
+                        # Update "distance" between reference and source
+                        # matches based on external-calibration positions.
+                        angularDist = AngularDistance("ref_coord_ra", "src_coord_ra",
+                                                      "ref_coord_dec", "src_coord_dec")
+                        matches["distance"] = angularDist(matches)
+
+                    # Avoid multi-counting when visit overlaps multiple tracts
+                    noTractId = dataRef.dataId.copy()
+                    noTractId.pop("tract")
+                    if noTractId not in dataIdSubList:
+                        matchList.append(matches)
+                    dataIdSubList.append(noTractId)
+                else:
+                    matchList.append(matches)
         if not matchList:
             raise TaskError("No matches read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
 
-        matchAreaDict, _ = computeAreaDict(repoInfo, dataRefList, dataset=self.config.coaddName + "Coadd",
-                                           fakeCat=None)
         allMatches = pd.concat(matchList, axis=0)
         return allMatches, matchAreaDict
 
@@ -859,8 +1162,7 @@ class CoaddAnalysisTask(CmdLineTask):
             if wcs is None:
                 self.log.warn("Bad RA, Dec entries but can't update because wcs is None")
             else:
-                for src in catalog:
-                    src.updateCoord(wcs)
+                afwTable.updateSourceCoords(wcs, catalog)
         calibrated = calibrateCoaddSourceCatalog(catalog, self.config.analysis.coaddZp)
         return calibrated
 
@@ -1658,6 +1960,12 @@ class CoaddAnalysisTask(CmdLineTask):
 
 
 class CompareCoaddAnalysisConfig(CoaddAnalysisConfig):
+    doReadParquetTables1 = Field(dtype=bool, default=True,
+                                 doc=("Read parquet tables from postprocessing (e.g. deepCoadd_obj) as "
+                                      "input1 data instead of afwTable catalogs."))
+    doReadParquetTables2 = Field(dtype=bool, default=True,
+                                 doc=("Read parquet tables from postprocessing (e.g. deepCoadd_obj) as "
+                                      "input2 data instead of afwTable catalogs."))
 
     def setDefaults(self):
         CoaddAnalysisConfig.setDefaults(self)
@@ -1687,7 +1995,7 @@ class CompareCoaddAnalysisRunner(TaskRunner):
                 refList1, refList2 in zip(parsedCmd.id.refList, idParser.refList)]
 
 
-class CompareCoaddAnalysisTask(CmdLineTask):
+class CompareCoaddAnalysisTask(CoaddAnalysisTask):
     ConfigClass = CompareCoaddAnalysisConfig
     RunnerClass = CompareCoaddAnalysisRunner
     _DefaultName = "compareCoaddAnalysis"
@@ -1713,117 +2021,85 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
     def runDataRef(self, patchRefList1, patchRefList2, subdir=""):
         plotList = []
-        haveForced = True  # do forced datasets exits (may not for single band datasets)
-        dataset = "Coadd_forced_src"
+        haveForced = True  # do forced datasets exist (may not for single band datasets)?
+        dataset1 = "Coadd_obj" if self.config.doReadParquetTables1 else "Coadd_forced_src"
         patchRefExistsList1 = [patchRef1 for patchRef1 in patchRefList1 if
-                               patchRef1.datasetExists(self.config.coaddName + dataset)]
-        if not patchRefExistsList1:
+                               patchRef1.datasetExists(self.config.coaddName + dataset1)]
+        dataset2 = "Coadd_obj" if self.config.doReadParquetTables2 else "Coadd_forced_src"
+        patchRefExistsList2 = [patchRef2 for patchRef2 in patchRefList2 if
+                               patchRef2.datasetExists(self.config.coaddName + dataset2)]
+        if not patchRefExistsList1 or not patchRefExistsList2:
             haveForced = False
-
+        forcedStr = "forced" if haveForced else "unforced"
         if not haveForced:
-            self.log.warn("No forced dataset exist for tract: {0:d} filter: {1:s}.  "
-                          "Plotting unforced results only.".format(patchRefList1[0].dataId["tract"],
-                                                                   patchRefList1[0].dataId["filter"]))
-            dataset = "Coadd_meas"
+            self.log.warn("Forced datasets do not exist for both input1 and input2 for tract: {0:d} "
+                          "filter: {1:s}.  Plotting unforced results only.".
+                          format(patchRefList1[0].dataId["tract"], patchRefList1[0].dataId["filter"]))
+            dataset1 = "Coadd_meas"
+            dataset2 = "Coadd_meas"
             patchRefExistsList1 = [patchRef1 for patchRef1 in patchRefList1 if
-                                   patchRef1.datasetExists(self.config.coaddName + dataset)]
+                                   patchRef1.datasetExists(self.config.coaddName + dataset1)]
         if not patchRefExistsList1:
             raise TaskError("No data exists in patRefList1: %s" %
                             ([patchRef1.dataId for patchRef1 in patchRefList1]))
         patchRefList2 = [dataRef2 for dataRef2 in patchRefList2 if
-                         dataRef2.datasetExists(self.config.coaddName + dataset)]
+                         dataRef2.datasetExists(self.config.coaddName + dataset2)]
 
         patchList1 = [dataRef1.dataId["patch"] for dataRef1 in patchRefList1 if
-                      dataRef1.datasetExists(self.config.coaddName + dataset)]
+                      dataRef1.datasetExists(self.config.coaddName + dataset1)]
         patchRefList1 = patchRefExistsList1
 
-        repoInfo1 = getRepoInfo(patchRefList1[0], coaddName=self.config.coaddName, coaddDataset=dataset)
-        repoInfo2 = getRepoInfo(patchRefList2[0], coaddName=self.config.coaddName, coaddDataset=dataset)
+        repoInfo1 = getRepoInfo(patchRefList1[0], coaddName=self.config.coaddName, coaddDataset=dataset1)
+        repoInfo2 = getRepoInfo(patchRefList2[0], coaddName=self.config.coaddName, coaddDataset=dataset2)
         # Find a visit/ccd input so that you can check for meas_mosaic input
         # (i.e. to set uberCalLabel).
         self.uberCalLabel1 = determineExternalCalLabel(repoInfo1, patchList1[0],
                                                        coaddName=self.config.coaddName)
         self.uberCalLabel2 = determineExternalCalLabel(repoInfo2, patchList1[0],
                                                        coaddName=self.config.coaddName)
+        self.uberCalLabel1 = self.uberCalLabel1.replace("  wcs", "_1  wcs")
+        self.uberCalLabel2 = self.uberCalLabel2.replace("  wcs", "_2  wcs")
         self.uberCalLabel = self.uberCalLabel1 + "_1\n" + self.uberCalLabel2 + "_2"
         self.log.info(f"External calibration(s) used: {self.uberCalLabel}")
 
-        if haveForced:
-            forcedStruct1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_forced_src",
-                                              repoInfo1)
-            areaDict1 = forcedStruct1.areaDict
-            forced1 = self.calibrateCatalogs(forcedStruct1.catalog, wcs=repoInfo1.wcs)
-            forcedStruct2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_forced_src",
-                                              repoInfo2)
-            forced2 = self.calibrateCatalogs(forcedStruct2.catalog, wcs=repoInfo2.wcs)
-        unforcedStruct1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_meas", repoInfo1)
-        unforced1 = unforcedStruct1.catalog
-        if not haveForced:
-            areaDict1 = unforcedStruct1.areaDict
-        unforced1 = self.calibrateCatalogs(unforced1, wcs=repoInfo1.wcs)
-        unforcedStruct2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_meas", repoInfo2)
-        unforced2 = self.calibrateCatalogs(unforcedStruct2.catalog, wcs=repoInfo2.wcs)
+        if self.config.doReadParquetTables1 or self.config.doReadParquetTables2:
+            if self.config.doReadParquetTables1:
+                if haveForced:
+                    forced1, _ = self.readParquetTables(patchRefList1, self.config.coaddName + "Coadd_obj",
+                                                        repoInfo1, "forced_src")
+                unforced1, _ = self.readParquetTables(patchRefList1, self.config.coaddName + "Coadd_obj",
+                                                      repoInfo1, "meas")
+                unforced1 = self.calibrateCatalogs(unforced1, wcs=repoInfo1.wcs)
+                areaDict1, _ = computeAreaDict(repoInfo1, patchRefList1,
+                                               dataset=self.config.coaddName + "Coadd", fakeCat=None)
+            if self.config.doReadParquetTables2:
+                if haveForced:
+                    forced2, _ = self.readParquetTables(patchRefList2, self.config.coaddName + "Coadd_obj",
+                                                        repoInfo2, "forced_src")
+                unforced2, _ = self.readParquetTables(patchRefList2, self.config.coaddName + "Coadd_obj",
+                                                      repoInfo2, "meas")
+                unforced2 = self.calibrateCatalogs(unforced2, wcs=repoInfo2.wcs)
 
-        forcedStr = "forced" if haveForced else "unforced"
-
-        unforced1Schema = getSchema(unforced1)
-        unforced2Schema = getSchema(unforced2)
-        if haveForced:
-            forced1Schema = getSchema(forced1)
-            forced2Schema = getSchema(forced2)
-            # Copy over some fields from _ref and _meas catalogs to
-            # _forced_src catalog.
-            refCat1 = self.readCatalogs(patchRefList1, self.config.coaddName + "Coadd_ref", repoInfo1).catalog
-            refCat1Schema = getSchema(refCat1)
-            refColList1 = [s for s in refCat1Schema.getNames() if
-                           s.startswith(tuple(self.config.columnsToCopyFromRef))]
-            refCat2 = self.readCatalogs(patchRefList2, self.config.coaddName + "Coadd_ref", repoInfo2).catalog
-            refCat2Schema = getSchema(refCat2)
-            refColList2 = [s for s in refCat2Schema.getNames() if
-                           s.startswith(tuple(self.config.columnsToCopyFromRef))]
-            refColsToCopy1 = [col for col in refColList1 if col not in forced1Schema
-                              and col in refCat1Schema
-                              and not (repoInfo1.hscRun and col == "slot_Centroid_flag")]
-            refColsToCopy2 = [col for col in refColList2 if col not in forced2Schema
-                              and col in refCat2Schema
-                              and not (repoInfo2.hscRun and col == "slot_Centroid_flag")]
-            forced1 = addColumnsToSchema(refCat1, forced1, refColsToCopy1)
-            forced2 = addColumnsToSchema(refCat2, forced2, refColsToCopy2)
-            measColList1 = [s for s in unforced1Schema.getNames() if
-                            s.startswith(tuple(self.config.columnsToCopyFromMeas))]
-            measColList2 = [s for s in unforced2Schema.getNames() if
-                            s.startswith(tuple(self.config.columnsToCopyFromMeas))]
-            measColsToCopy1 = [col for col in measColList1 if col not in forced1Schema
-                               and col in unforced1Schema
-                               and not (repoInfo1.hscRun and col == "slot_Centroid_flag")]
-            measColsToCopy2 = [col for col in measColList2 if col not in forced2Schema
-                               and col in unforced2Schema
-                               and not (repoInfo2.hscRun and col == "slot_Centroid_flag")]
-            forced1 = addColumnsToSchema(unforced1, forced1, measColsToCopy1)
-            forced2 = addColumnsToSchema(unforced2, forced2, measColsToCopy2)
-
-        # Set an alias map for differing schema naming conventions of different
-        # stacks (if any).
-        repoList = [repoInfo1.hscRun, repoInfo2.hscRun]
-        coaddList = [unforced1, unforced2]
-        if haveForced:
-            repoList += repoList
-            coaddList += [forced1, forced2]
-        aliasDictList0 = [self.config.flagsToAlias, ]
-        for hscRun, catalog in zip(repoList, coaddList):
-            aliasDictList = aliasDictList0
+        if not self.config.doReadParquetTables1 or not self.config.doReadParquetTables2:
+            hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
+            aliasDictList = [self.config.flagsToAlias, ]
             if hscRun and self.config.srcSchemaMap is not None:
                 aliasDictList += [self.config.srcSchemaMap]
-            if aliasDictList:
-                catalog = addAliasColumns(catalog, aliasDictList)
 
-        # Convert to pandas DataFrames
-        unforced1 = unforced1.asAstropy().to_pandas()
-        unforced2 = unforced2.asAstropy().to_pandas()
-        if haveForced:
-            forced1 = forced1.asAstropy().to_pandas()
-            forced2 = forced2.asAstropy().to_pandas()
+            if not self.config.doReadParquetTables1:
+                catStruct1 = self.readAfwCoaddTables(patchRefList1, repoInfo1, haveForced,
+                                                     aliasDictList=aliasDictList)
+                unforced1 = catStruct1.unforced
+                forced1 = catStruct1.forced
+                areaDict1 = catStruct1.areaDict
 
+            if not self.config.doReadParquetTables2:
+                catStruct2 = self.readAfwCoaddTables(patchRefList2, repoInfo2, haveForced,
+                                                     aliasDictList=aliasDictList)
+                unforced2 = catStruct2.unforced
+                forced2 = catStruct2.forced
+
+        forcedStr = "forced" if haveForced else "unforced"
         # Set boolean array indicating sources deemed unsuitable for qa
         # analyses.
         badUnforced1 = makeBadArray(unforced1, onlyReadStars=self.config.onlyReadStars)
@@ -1853,7 +2129,6 @@ class CompareCoaddAnalysisTask(CmdLineTask):
                       len(forced1), len(forced2)))
 
         subdir = "patch-" + str(patchList1[0]) if len(patchList1) == 1 else subdir
-        hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
         # Always highlight points with x-axis flag set (for cases where
         # they do not get explicitly filtered out).
         highlightList = [(self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0, "turquoise"), ]
@@ -1888,34 +2163,6 @@ class CompareCoaddAnalysisTask(CmdLineTask):
 
         self.allStats, self.allStatsHigh = savePlots(plotList, "plotCompareCoadd", repoInfo1.dataId,
                                                      repoInfo1.butler, subdir=subdir)
-
-    def readCatalogs(self, patchRefList, dataset, repoInfo):
-        catList = []
-        for patchRef in patchRefList:
-            if not patchRef.datasetExists(dataset):
-                continue
-            patchCat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-            catList.append(patchCat)
-        catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS) for
-                   patchRef in patchRefList if patchRef.datasetExists(dataset)]
-        if not catList:
-            raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
-        areaDict = computeAreaDict(repoInfo, patchRefList, dataset=self.config.coaddName + "Coadd",
-                                   fakeCat=None)
-        return Struct(catalog=concatenateCatalogs(catList), areaDict=areaDict)
-
-    def calibrateCatalogs(self, catalog, wcs=None):
-        self.zpLabel = "common (" + str(self.config.analysis.coaddZp) + ")"
-        # For some reason my persisted catalogs in lauren/LSST/DM-6816new all
-        # have nan for RA and Dec.
-        if np.all(np.isnan(catalog["coord_ra"])):
-            if wcs is None:
-                self.log.warn("Bad RA, Dec entries but can't update because wcs is None")
-            else:
-                for src in catalog:
-                    src.updateCoord(wcs)
-        calibrated = calibrateCoaddSourceCatalog(catalog, self.config.analysis.coaddZp)
-        return calibrated
 
     def plotMags(self, catalog, plotInfoDict, areaDict, matchRadius=None, matchRadiusUnitStr=None,
                  zpLabel=None, forcedStr=None, fluxToPlotList=None, postFix="",

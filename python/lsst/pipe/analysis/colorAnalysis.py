@@ -440,7 +440,7 @@ class ColorAnalysisTask(CmdLineTask):
             dataset = self.config.coaddName + "Coadd_forced_src"
             cat, areaDict = self.readCatalogs(patchRefList, dataset, repoInfo)
             # Convert to pandas DataFrames
-            cat = cat.asAstropy().to_pandas()
+            cat = cat.asAstropy().to_pandas().set_index("id", drop=False)
             cat = calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
             byFilterForcedCats[filterName] = cat
             byFilterAreaDict[filterName] = areaDict
