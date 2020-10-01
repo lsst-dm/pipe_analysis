@@ -1007,6 +1007,8 @@ def getPlotInfo(repoInfo):
                 (`lsst.afw.cameraGeom.Camera`).
             ``"cameraName"``
                 The name of the camera used to take the data (`str`).
+            ``"ccdKey"``
+                The ccd/dectector key associated with this camera (`str`).
             ``"filter"``
                 The filter used for this data (`str`).
             ``"tract"``
@@ -1029,6 +1031,7 @@ def getPlotInfo(repoInfo):
     cameraName = camera.getName()
     dataId = repoInfo.dataId
     filterName = dataId["filter"]
+    ccdKey = repoInfo.ccdKey
     # Try to get the visit and patch id.  Set to None if not available.
     try:
         visit = str(dataId["visit"])
@@ -1044,7 +1047,7 @@ def getPlotInfo(repoInfo):
     skyWcsDataset = repoInfo.skyWcsDataset
     rerun = list(repoInfo.butler.storage.repositoryCfgs)[0]
 
-    plotInfoDict = dict(camera=camera, cameraName=cameraName, filter=filterName, tract=tract, visit=visit,
-                        patch=patch, photoCalibDataset=photoCalibDataset, skyWcsDataset=skyWcsDataset,
-                        rerun=rerun)
+    plotInfoDict = dict(camera=camera, cameraName=cameraName, filter=filterName, ccdKey=ccdKey, tract=tract,
+                        visit=visit, patch=patch, photoCalibDataset=photoCalibDataset,
+                        skyWcsDataset=skyWcsDataset, rerun=rerun)
     return plotInfoDict

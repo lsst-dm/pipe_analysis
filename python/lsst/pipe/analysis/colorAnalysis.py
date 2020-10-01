@@ -43,11 +43,10 @@ from .utils import (Enforcer, concatenateCatalogs, getFluxKeys, addColumnsToSche
                     fluxToPlotString, writeParquet, getRepoInfo, orthogonalRegression,
                     distanceSquaredToPoly, p2p1CoeffsFromLinearFit, linesFromP2P1Coeffs,
                     makeEqnStr, catColors, addMetricMeasurement, updateVerifyJob, computeMeanOfFrac,
-                    calcQuartileClippedStats, savePlots, getSchema)
+                    calcQuartileClippedStats, savePlots, getSchema, computeAreaDict)
 from .plotUtils import (AllLabeller, plotText, labelCamera, setPtSize, determineExternalCalLabel,
                         getPlotInfo)
 
-import lsst.afw.image as afwImage
 import lsst.geom as geom
 import lsst.afw.table as afwTable
 import lsst.verify as verify
@@ -436,15 +435,15 @@ class ColorAnalysisTask(CmdLineTask):
             self.flags = [self.config.srcSchemaMap[flag] for flag in self.flags]
 
         byFilterForcedCats = {}
-        areaDictAll = {}
+        byFilterAreaDict = {}
         for (filterName, patchRefList) in patchRefsByFilter.items():
-            coaddType = self.config.coaddName + "Coadd_forced_src"
-            cat, areaDict = self.readCatalogs(patchRefList, coaddType, repoInfo)
+            dataset = self.config.coaddName + "Coadd_forced_src"
+            cat, areaDict = self.readCatalogs(patchRefList, dataset, repoInfo)
             # Convert to pandas DataFrames
             cat = cat.asAstropy().to_pandas()
             cat = calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
             byFilterForcedCats[filterName] = cat
-            areaDictAll.update(areaDict)
+            byFilterAreaDict[filterName] = areaDict
 
         self.forcedStr = "forced"
         geLabel = "None"
@@ -472,7 +471,7 @@ class ColorAnalysisTask(CmdLineTask):
         geLabel = "GalExt: " + geLabel
         plotList = []
         if self.config.doPlotGalacticExtinction and doPlotGalacticExtinction:
-            plotList.append(self.plotGalacticExtinction(byFilterForcedCats, plotInfoDict, areaDictAll,
+            plotList.append(self.plotGalacticExtinction(byFilterForcedCats, plotInfoDict, byFilterAreaDict,
                                                         geLabel=geLabel))
 
         principalColCatsPsf = self.transformCatalogs(byFilterForcedCats, self.config.transforms,
@@ -491,8 +490,8 @@ class ColorAnalysisTask(CmdLineTask):
             principalColCats = (principalColCatsCModel if "CModel" in self.fluxColumn else
                                 principalColCatsPsf)
             plotList.append(self.plotStarPrincipalColors(principalColCats, byFilterForcedCats, plotInfoDict,
-                                                         areaDict, NumStarLabeller(3), geLabel=geLabel,
-                                                         uberCalLabel=uberCalLabel))
+                                                         byFilterAreaDict, NumStarLabeller(3),
+                                                         geLabel=geLabel, uberCalLabel=uberCalLabel))
 
         for fluxColumn in ["base_PsfFlux_instFlux", "modelfit_CModel_instFlux"]:
             if fluxColumn == "base_PsfFlux_instFlux":
@@ -503,7 +502,7 @@ class ColorAnalysisTask(CmdLineTask):
                 raise RuntimeError("Have not computed transformations for: {:s}".format(fluxColumn))
 
             plotList.append(self.plotStarColorColor(principalColCats, byFilterForcedCats, plotInfoDict,
-                                                    areaDictAll, fluxColumn, forcedStr=self.forcedStr,
+                                                    byFilterAreaDict, fluxColumn, forcedStr=self.forcedStr,
                                                     geLabel=geLabel, uberCalLabel=uberCalLabel))
 
         self.allStats, self.allStatsHigh = savePlots(plotList, "plotColor", repoInfo.dataId,
@@ -551,43 +550,30 @@ class ColorAnalysisTask(CmdLineTask):
             The concatenated catalog of all existing ``dataset``s in
             ``patchRefList``.
         areaDict : `dict`
-            A `dict` containing the area of each ccd and the locations of their
-            corners.
+            A `dict` of the area and corner locations of each patch.
         """
         catList = []
-        areaDict = {}
+        patchRefExistsList = []
         for patchRef in patchRefList:
             if patchRef.datasetExists(dataset):
-                cat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
-                schema = getSchema(cat)
-                if dataset != self.config.coaddName + "Coadd_meas":
-                    refCat = patchRef.get(self.config.coaddName + "Coadd_ref", immediate=True,
-                                          flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
-                    refCatSchema = getSchema(refCat)
-                    refColList = [s for s in refCatSchema.getNames() if
-                                  s.startswith(tuple(self.config.columnsToCopyFromRef))]
-                    cat = addColumnsToSchema(refCat, cat, [col for col in refColList if col not in schema
-                                                           and col in refCatSchema])
-
-                fname = repoInfo.butler.getUri("deepCoadd_calexp", patchRef.dataId)
-                reader = afwImage.ExposureFitsReader(fname)
-                wcs = reader.readWcs()
-                mask = reader.readMask()
-                maskBad = mask.array & 2**mask.getMaskPlaneDict()["BAD"]
-                maskNoData = mask.array & 2**mask.getMaskPlaneDict()["NO_DATA"]
-                maskedPixels = maskBad + maskNoData
-                numGoodPix = np.count_nonzero(maskedPixels == 0)
-                pixScale = wcs.getPixelScale(reader.readBBox().getCenter()).asArcseconds()
-                area = numGoodPix*pixScale**2
-                areaDict[patchRef.dataId["patch"]] = area
-
-                patchCorners = wcs.pixelToSky(geom.Box2D(reader.readBBox()).getCorners())
-                areaDict["corners_" + str(patchRef.dataId["patch"])] = patchCorners
-
-                if self.config.doWriteParquetTables:
-                    cat = addIntFloatOrStrColumn(cat, patchRef.dataId["patch"], "patchId",
-                                                 "Patch on which source was detected")
-                catList.append(cat)
+                patchRefExistsList.append(patchRef)
+        calexpPrefix = dataset[:dataset.find("_")] if "_" in dataset else ""
+        areaDict, _ = computeAreaDict(repoInfo, patchRefExistsList, dataset=calexpPrefix)
+        for patchRef in patchRefExistsList:
+            cat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+            schema = getSchema(cat)
+            if dataset != self.config.coaddName + "Coadd_meas":
+                refCat = patchRef.get(self.config.coaddName + "Coadd_ref", immediate=True,
+                                      flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+                refCatSchema = getSchema(refCat)
+                refColList = [s for s in refCatSchema.getNames() if
+                              s.startswith(tuple(self.config.columnsToCopyFromRef))]
+                cat = addColumnsToSchema(refCat, cat, [col for col in refColList if col not in schema
+                                                       and col in refCatSchema])
+            if self.config.doWriteParquetTables:
+                cat = addIntFloatOrStrColumn(cat, patchRef.dataId["patch"], "patchId",
+                                             "Patch on which source was detected")
+            catList.append(cat)
         if not catList:
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
         return concatenateCatalogs(catList), areaDict
@@ -883,7 +869,7 @@ class ColorAnalysisTask(CmdLineTask):
 
         return new
 
-    def plotGalacticExtinction(self, byFilterCats, plotInfoDict, areaDict, geLabel=None):
+    def plotGalacticExtinction(self, byFilterCats, plotInfoDict, byFilterAreaDict, geLabel=None):
         yield
         for filterName in byFilterCats:
             qMin = (np.nanmean(byFilterCats[filterName]["A_" + filterName])
@@ -897,12 +883,12 @@ class ColorAnalysisTask(CmdLineTask):
                                           "%s (%s)" % ("Galactic Extinction:  A_" + filterName, "mag"),
                                           shortName, self.config.analysis, flags=["galacticExtinction_flag"],
                                           labeller=AllLabeller(), qMin=qMin, qMax=qMax,
-                                          magThreshold=99.0).plotAll(shortName, plotInfoDict, areaDict,
-                                                                     self.log, zpLabel=geLabel,
-                                                                     plotRunStats=False)
+                                          magThreshold=99.0).plotAll(
+                                              shortName, plotInfoDict, byFilterAreaDict[filterName],
+                                              self.log, zpLabel=geLabel, plotRunStats=False)
 
-    def plotStarPrincipalColors(self, principalColCats, byFilterCats, plotInfoDict, areaDict, labeller,
-                                geLabel=None, uberCalLabel=None):
+    def plotStarPrincipalColors(self, principalColCats, byFilterCats, plotInfoDict, byFilterAreaDict,
+                                labeller, geLabel=None, uberCalLabel=None):
         yield
         schema = getSchema(principalColCats)
         mags = {filterName: -2.5*np.log10(byFilterCats[filterName]["base_PsfFlux_instFlux"]) for
@@ -959,12 +945,10 @@ class ColorAnalysisTask(CmdLineTask):
             yield from self.AnalysisClass(
                 principalColCats, colorsInRange, "%s (%s)" % (col + transform.subDescription, unitStr),
                 shortName, self.config.analysis, flags=["qaBad_flag"], labeller=labeller, qMin=-0.2, qMax=0.2,
-                magThreshold=self.config.analysis.magThreshold).plotAll(shortName, plotInfoDict,
-                                                                        areaDict, self.log,
-                                                                        zpLabel=geLabel, forcedStr=forcedStr,
-                                                                        plotRunStats=False,
-                                                                        extraLabels=principalColorStrs,
-                                                                        uberCalLabel=uberCalLabel)
+                magThreshold=self.config.analysis.magThreshold).plotAll(
+                    shortName, plotInfoDict, byFilterAreaDict[self.fluxFilter], self.log, zpLabel=geLabel,
+                    forcedStr=forcedStr, plotRunStats=False, extraLabels=principalColorStrs,
+                    uberCalLabel=uberCalLabel)
 
             # Plot selections of stars for different criteria
             if self.config.transforms == ivezicTransformsHSC:
@@ -1073,7 +1057,7 @@ class ColorAnalysisTask(CmdLineTask):
                 yield Struct(fig=fig, description=description, stats=None, statsHigh=None,
                              style=col + "Selections")
 
-    def plotStarColorColor(self, principalColCats, byFilterCats, plotInfoDict, areaDict, fluxColumn,
+    def plotStarColorColor(self, principalColCats, byFilterCats, plotInfoDict, byFilterAreaDict, fluxColumn,
                            forcedStr=None, geLabel=None, uberCalLabel=None):
         yield
         num = len(list(byFilterCats.values())[0])
@@ -1244,12 +1228,11 @@ class ColorAnalysisTask(CmdLineTask):
                                           filtersStr + "Distance [%s] (%s)" % (fluxColStr, unitStr),
                                           shortName, self.config.analysis, flags=["qaBad_flag"], qMin=-0.1,
                                           qMax=0.1, magThreshold=prettyBrightThreshold,
-                                          labeller=NumStarLabeller(2)).plotAll(shortName, plotInfoDict,
-                                                                               areaDict, self.log,
-                                                                               stdevEnforcer,
-                                                                               forcedStr=forcedStr,
-                                                                               zpLabel=geLabel,
-                                                                               uberCalLabel=uberCalLabel)
+                                          labeller=NumStarLabeller(2)).plotAll(
+                                              shortName, plotInfoDict, byFilterAreaDict[self.fluxFilter],
+                                              self.log, stdevEnforcer, forcedStr=forcedStr, zpLabel=geLabel,
+                                              uberCalLabel=uberCalLabel)
+
         if filters.issuperset(set(("HSC-R", "HSC-I", "HSC-Z"))):
             # Do a linear fit to regions defined in Ivezic transforms
             transformPerp = self.config.transforms["yPerp"]
@@ -1325,12 +1308,10 @@ class ColorAnalysisTask(CmdLineTask):
                                           filtersStr + "Distance [%s] (%s)" % (fluxColStr, unitStr),
                                           shortName, self.config.analysis, flags=["qaBad_flag"], qMin=-0.1,
                                           qMax=0.1, magThreshold=prettyBrightThreshold,
-                                          labeller=NumStarLabeller(2)).plotAll(shortName, plotInfoDict,
-                                                                               areaDict, self.log,
-                                                                               stdevEnforcer,
-                                                                               forcedStr=forcedStr,
-                                                                               zpLabel=geLabel,
-                                                                               uberCalLabel=uberCalLabel)
+                                          labeller=NumStarLabeller(2)).plotAll(
+                                              shortName, plotInfoDict, byFilterAreaDict[self.fluxFilter],
+                                              self.log, stdevEnforcer, forcedStr=forcedStr, zpLabel=geLabel,
+                                              uberCalLabel=uberCalLabel)
         if filters.issuperset(set(("HSC-I", "HSC-Z", "HSC-Y"))):
             filtersStr = "izy"
             nameStr = filtersStr + fluxColStr
@@ -1388,12 +1369,10 @@ class ColorAnalysisTask(CmdLineTask):
                                           filtersStr + "Distance [%s] (%s)" % (fluxColStr, unitStr),
                                           shortName, self.config.analysis, flags=["qaBad_flag"], qMin=-0.1,
                                           qMax=0.1, magThreshold=prettyBrightThreshold,
-                                          labeller=NumStarLabeller(2)).plotAll(shortName, plotInfoDict,
-                                                                               areaDict, self.log,
-                                                                               stdevEnforcer,
-                                                                               forcedStr=forcedStr,
-                                                                               zpLabel=geLabel,
-                                                                               uberCalLabel=uberCalLabel)
+                                          labeller=NumStarLabeller(2)).plotAll(
+                                              shortName, plotInfoDict, byFilterAreaDict[self.fluxFilter],
+                                              self.log, stdevEnforcer, forcedStr=forcedStr, zpLabel=geLabel,
+                                              uberCalLabel=uberCalLabel)
 
         if filters.issuperset(set(("HSC-Z", "NB0921", "HSC-Y"))):
             filtersStr = "z9y"
@@ -1453,12 +1432,10 @@ class ColorAnalysisTask(CmdLineTask):
                                           filtersStr + "Distance [%s] (%s)" % (fluxColStr, unitStr),
                                           shortName, self.config.analysis, flags=["qaBad_flag"], qMin=-0.1,
                                           qMax=0.1, magThreshold=prettyBrightThreshold,
-                                          labeller=NumStarLabeller(2)).plotAll(shortName, plotInfoDict,
-                                                                               areaDict, self.log,
-                                                                               stdevEnforcer,
-                                                                               forcedStr=forcedStr,
-                                                                               zpLabel=geLabel,
-                                                                               uberCalLabel=uberCalLabel)
+                                          labeller=NumStarLabeller(2)).plotAll(
+                                              shortName, plotInfoDict, byFilterAreaDict[self.fluxFilter],
+                                              self.log, stdevEnforcer, forcedStr=forcedStr, zpLabel=geLabel,
+                                              uberCalLabel=uberCalLabel)
 
     def _getConfigName(self):
         return None

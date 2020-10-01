@@ -69,7 +69,7 @@ __all__ = ["Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCom
            "addPreComputedColumns", "addMetricMeasurement", "updateVerifyJob", "computeMeanOfFrac",
            "calcQuartileClippedStats", "savePlots", "getSchema", "loadRefCat",
            "loadDenormalizeAndUnpackMatches", "loadReferencesAndMatchToCatalog",
-           "computePhotoCalibScaleArray"]
+           "computePhotoCalibScaleArray", "computeAreaDict", "determineIfSrcOnElement"]
 
 
 NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
@@ -1827,7 +1827,7 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyExternalPhoto
 
     butler = dataRef.getButler()
     camera = butler.get("camera")
-    dataId = dataRef.dataId
+    dataId = dataRef.dataId.copy()
     isCoadd = True if "patch" in dataId else False
     try:
         filterName = dataId["filter"]
@@ -3010,3 +3010,183 @@ def loadReferencesAndMatchToCatalog(catalog, packedMatches, refObjLoader, padRad
     goodCatalog = catalog[good].copy(deep=True)
     matches = matchAndJoinCatalogs(goodCatalog, refCat, matchRadius, prefix1="src_", prefix2="ref_", log=log)
     return matches
+
+
+def computeAreaDict(repoInfo, dataRefList, dataset="", fakeCat=None, raFakesCol="raJ2000",
+                    decFakesCol="decJ2000", toMaskList=["BAD", "NO_DATA"]):
+    """Compute the effective area of each image element (detector or patch).
+
+    The effective area is computed while masking out the pixels with the
+    masks planes included in ``toMaskList``.
+
+    Parameters
+    ----------
+    repoInfo : `lsst.pipe.base.Struct`
+        A struct containing relevant information about the repository under
+        study.  Elements used here include the key name associated with a
+        detector and the butler (`lsst.daf.persistence.Butler`) associated
+        with the dataset.
+    dataRefList : `list` of
+                  `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+        The `list` of butler data references under consideration.
+    dataset : `str`, optional
+        Name of the ``dataset`` to be used in order to set up a Fits reader
+        (`lsst.afw.image.readers.ExposureFitsReader`) via the ``dataset``s
+        URI obtained from the butler (`lsst.daf.persistence.Butler`) stored
+        in ``repoInfo`` (e.g. "deepCoadd" for coadds, blank `str` for visits).
+    fakeCat : `pandas.core.frame.DataFrame` or `None`, optional
+        Catalog of fake sources.  If not `None`, to which
+        a column (onCcd) is added with the ccd number if the fake
+        source overlaps a ccd and np.nan if it does not.
+    raFakesCol : `str`, optional
+        The RA column to use from the fakes catalog.
+    decFakesCol : `str`, optional
+        The Dec. column to use from the fakes catalog.
+    toMaskList : `list` of `str`, optional
+        The `list` of mask plane names to be ignored in the effectie are
+        computation.
+
+    Raises
+    ------
+    RuntimeError
+        If it cannot be established whether this is coadd or visit catalog data
+        based on the information in the ``repoInfo`` object.
+
+    Returns
+    -------
+    areaDict : `dict`
+        A `dict` containing the area and corner locations of each element
+        (detector for visits, patch for coadds).
+        Examples of keys: there is one of these for every element ID specified
+        when the code is called.
+            ``"elementId"``
+                The effective area of the the element (i.e where none of the
+                mask bits of the planes in ``toMaskList`` are set), in
+                arcseconds.
+            ``"corners_elemenId"``
+                A `list` of `lsst.geom.SpherePoint`s providing the corners
+                of the element in degrees.
+    fakeCat : `pandas.core.frame.DataFrame` or `None`
+        If the input ``fakeCat`` is not `None`, the updated catalog of fake
+        sources in which a column (onElement) has been added with the element
+        id number if the fake source overlaps the given element and `numpy.nan`
+        if it does not.
+    """
+    isPatch = True if "patch" in repoInfo.dataId else False
+    isCcd = True if repoInfo.ccdKey in repoInfo.dataId else False
+    if (not isPatch and not isCcd) or (isPatch and isCcd):
+        raise RuntimeError("Cannot establish whether this is coadd or visit catalog data")
+    areaDict = {}
+    dataset = dataset + "_" if dataset != "" and dataset[-1] != "_" else dataset
+    elementKey = "patch" if isPatch else repoInfo.ccdKey
+    for dataRef in dataRefList:
+        # getUri is less safe but enables us to use an efficient
+        # ExposureFitsReader.
+        if fakeCat is not None:
+            fname = repoInfo.butler.getUri("fakes_" + dataset + "calexp", dataRef.dataId)
+        else:
+            fname = repoInfo.butler.getUri(dataset + "calexp", dataRef.dataId)
+        reader = afwImage.ExposureFitsReader(fname)
+        if repoInfo.skyWcsDataset is not None:
+            wcs = dataRef.get(repoInfo.skyWcsDataset)
+        else:
+            wcs = reader.readWcs()
+        mask = reader.readMask()
+        maskedPixels = None
+        for maskPlane in toMaskList:
+            maskBad = mask.array & 2**mask.getMaskPlaneDict()[maskPlane]
+            maskedPixels = maskBad if maskedPixels is None else maskedPixels + maskBad
+        numGoodPix = np.count_nonzero(maskedPixels == 0)
+        if isCcd:
+            detector = reader.readDetector()
+            pixScale = wcs.getPixelScale(detector.getCenter(cameraGeom.PIXELS)).asArcseconds()
+            corners = wcs.pixelToSky(detector.getCorners(cameraGeom.PIXELS))
+        else:
+            pixScale = wcs.getPixelScale(reader.readBBox().getCenter()).asArcseconds()
+            corners = wcs.pixelToSky(geom.Box2D(reader.readBBox()).getCorners())
+        areaDict["corners_" + str(dataRef.dataId[elementKey])] = corners
+        area = numGoodPix*pixScale**2
+        areaDict[dataRef.dataId[elementKey]] = area
+
+        if fakeCat is not None:
+            fakeCat = determineIfSrcOnElement(fakeCat, dataRef, corners, wcs, elementKey, mask=mask,
+                                              reader=reader, raCol=raFakesCol, decCol=decFakesCol)
+    return areaDict, fakeCat
+
+
+def determineIfSrcOnElement(catalog, dataRef, corners, wcs, elementKey, mask=None, reader=None,
+                            raCol="raJ2000", decCol="decJ2000"):
+    """Determine which sources in a catalog lie on a given image element.
+
+    A new column is added to ``catalog`` with name on\"ElementKey\" (with the
+    first letter capitalized, e.g. onPatch, onCcd) and is given the value
+    of the element ID if the source lies within the ``dataRef``s validPolygon
+    or `numpy.nan` if it does not.
+
+    Parameters
+    ----------
+    catalog : `pandas.core.frame.DataFrame`
+        Catalog of sources under consideration to which a column (onElement) is
+        added.  For a given source, the value the element Id if the source
+        overlaps the element associate with ``dataRef`` or `numpy.nan` if it
+        does not.
+    dataRef : `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+        The butler data reference under consideration.
+    corners : `list` of `lsst.geom.SpherePoint`
+        A `list` of the four corners of the element (in degrees).
+    wcs : `lsst.afw.geom.SkyWcs`
+        The WCS solution associated with ``dataRef``.
+    elementKey : `str`
+       The column name or key associated with the image element.
+    mask : `lsst.afw.image.MaskX`, or `None`, optional
+       The mask plane associated with ``dataRef``.
+    raCol : `str`, optional
+        The RA column to use from the fakes catalog.
+    decCol : `str`, optional
+        The Dec column to use from the fakes catalog.
+    toMaskList : `list` of `str`, optional
+        The `list` of mask plane names to be ignored in the effectie are
+        computation.
+
+    Raises
+    ------
+    RuntimeError
+        If the data are coadd catalogs (as indicated by having the string
+        \"patch\" in ``elementKey``), but no ``mask`` from which to compute the
+        valid polygon was provided.
+
+    Returns
+    -------
+    catalog : `pandas.core.frame.DataFrame` or `None`
+        If the input ``catalog`` is not `None`, the updated catalog of fake
+        sources in which a column (onElement) has been added with the element
+        id number if the fake source overlaps the given element and `numpy.nan`
+        if it does not.
+    """
+    isPatch = True if "patch" in elementKey else False
+    if isPatch and mask is None:
+        raise RuntimeError("Must provide a mask if isPatch is True")
+    # Check which fake sources fall in the patch
+    cornerRas = [cx.asRadians() for (cx, cy) in corners]
+    cornerDecs = [cy.asRadians() for (cx, cy) in corners]
+    posOnElement = np.where((catalog[raCol].values > np.min(cornerRas))
+                            & (catalog[raCol].values < np.max(cornerRas))
+                            & (catalog[decCol].values > np.min(cornerDecs))
+                            & (catalog[decCol].values < np.max(cornerDecs)))[0]
+    if "on" + elementKey.capitalize() not in catalog.columns:
+        catalog["on" + elementKey.capitalize()] = [np.nan]*len(catalog)
+    if isPatch:
+        validPolygon = mask.getInfo().getValidPolygon()
+    else:
+        validPolygon = reader.readExposureInfo().getValidPolygon()
+
+    onElementList = []
+    for rowId in posOnElement:
+        skyCoord = geom.SpherePoint(catalog[raCol].values[rowId],
+                                    catalog[decCol].values[rowId], geom.radians)
+        pixCoord = wcs.skyToPixel(skyCoord)
+        onElement = validPolygon.contains(pixCoord)
+        if onElement:
+            onElementList.append(rowId)
+    catalog["on" + elementKey.capitalize()].iloc[np.array(onElementList)] = dataRef.dataId[elementKey]
+    return catalog
