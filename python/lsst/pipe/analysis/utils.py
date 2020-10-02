@@ -56,12 +56,11 @@ __all__ = ["Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCom
            "AstrometryDiff", "AngularDistance", "TraceSize", "PsfTraceSizeDiff", "TraceSizeCompare",
            "PercentDiff", "E1", "E2", "E1Resids", "E2Resids", "E1ResidsHsmRegauss", "E2ResidsHsmRegauss",
            "FootAreaDiffCompare", "MagDiffErr", "MagDiffCompareErr", "ApCorrDiffErr",
-           "CentroidDiff", "CentroidDiffErr", "deconvMom", "deconvMomStarGal",
-           "concatenateCatalogs", "joinMatches", "matchAndJoinCatalogs", "checkIdLists", "checkPatchOverlap",
-           "joinCatalogs", "getFluxKeys", "addColumnsToSchema", "addApertureFluxesHSC", "addFpPoint",
-           "addFootprintArea", "addRotPoint", "makeBadArray", "addFlag", "addElementIdColumn",
-           "addIntFloatOrStrColumn", "calibrateSourceCatalogMosaic", "calibrateSourceCatalogPhotoCalib",
-           "calibrateSourceCatalog", "calibrateCoaddSourceCatalog",
+           "CentroidDiff", "CentroidDiffErr", "deconvMom", "deconvMomStarGal", "concatenateCatalogs",
+           "joinMatches", "matchAndJoinCatalogs", "checkIdLists", "checkPatchOverlap", "joinCatalogs",
+           "getFluxKeys", "addColumnsToSchema", "addApertureFluxesHSC", "addFpPoint", "addFootprintArea",
+           "addRotPoint", "makeBadArray", "addFlag", "addElementIdColumn", "addIntFloatOrStrColumn",
+           "calibrateSourceCatalogMosaic", "calibrateSourceCatalogPhotoCalib", "calibrateSourceCatalog",
            "backoutApCorr", "matchNanojanskyToAB", "checkHscStack", "fluxToPlotString", "andCatalog",
            "writeParquet", "getRepoInfo", "findCcdKey", "getCcdNameRefList", "getDataExistsRefList",
            "orthogonalRegression", "distanceSquaredToPoly", "p1CoeffsFromP2x0y0", "p2p1CoeffsFromLinearFit",
@@ -1627,8 +1626,7 @@ def computePhotoCalibScaleArray(photoCalib, xArray, yArray):
 
 
 def calibrateSourceCatalog(catalog, zp):
-    """Calibrate catalog in the case of no meas_mosaic results using FLUXMAG0
-    as zp.
+    """Calibrate catalog to zeropoint given.
 
     Parameters
     ----------
@@ -1643,29 +1641,6 @@ def calibrateSourceCatalog(catalog, zp):
         The calibrated ``catalog``.
     """
     # Convert to constant zero point, as for the coadds
-    schema = getSchema(catalog)
-    fluxKeys, errKeys = getFluxKeys(schema)
-    factor = 10.0**(0.4*zp)
-    for name, key in list(fluxKeys.items()) + list(errKeys.items()):
-        catalog[key] /= factor
-    return catalog
-
-
-def calibrateCoaddSourceCatalog(catalog, zp):
-    """Calibrate a coadd catalog.
-
-    Parameters
-    ----------
-    catalog : `lsst.afw.table.SourceCatalog` or `pandas.core.frame.DataFrame`
-        The source catalog under consideration.
-    zp : `float`
-        The zeropoint value to calibrate the fluxes to.
-
-    Returns
-    -------
-    catalog : `lsst.afw.table.SourceCatalog` or `pandas.core.frame.DataFrame`
-        The calibrated ``catalog``.
-    """
     schema = getSchema(catalog)
     fluxKeys, errKeys = getFluxKeys(schema)
     factor = 10.0**(0.4*zp)

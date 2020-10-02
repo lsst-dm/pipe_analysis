@@ -39,7 +39,7 @@ from lsst.pipe.drivers.utils import TractDataIdContainer
 from .analysis import Analysis, AnalysisConfig
 from .coaddAnalysis import CoaddAnalysisTask
 from .utils import (Enforcer, concatenateCatalogs, getFluxKeys, addColumnsToSchema,
-                    makeBadArray, addFlag, addIntFloatOrStrColumn, calibrateCoaddSourceCatalog,
+                    makeBadArray, addFlag, addIntFloatOrStrColumn, calibrateSourceCatalog,
                     fluxToPlotString, writeParquet, getRepoInfo, orthogonalRegression,
                     distanceSquaredToPoly, p2p1CoeffsFromLinearFit, linesFromP2P1Coeffs,
                     makeEqnStr, catColors, addMetricMeasurement, updateVerifyJob, computeMeanOfFrac,
@@ -441,7 +441,7 @@ class ColorAnalysisTask(CmdLineTask):
             cat, areaDict = self.readCatalogs(patchRefList, dataset, repoInfo)
             # Convert to pandas DataFrames
             cat = cat.asAstropy().to_pandas().set_index("id", drop=False)
-            cat = calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
+            cat = calibrateSourceCatalog(cat, self.config.analysis.coaddZp)
             byFilterForcedCats[filterName] = cat
             byFilterAreaDict[filterName] = areaDict
 

@@ -46,7 +46,7 @@ from .utils import (Enforcer, MagDiff, MagDiffMatches, MagDiffCompare, Astrometr
                     CentroidDiff, deconvMom, deconvMomStarGal, concatenateCatalogs, joinMatches,
                     matchAndJoinCatalogs, checkPatchOverlap, addColumnsToSchema, addFpPoint,
                     addFootprintArea, makeBadArray, addElementIdColumn, addIntFloatOrStrColumn,
-                    calibrateCoaddSourceCatalog, backoutApCorr, matchNanojanskyToAB, fluxToPlotString,
+                    calibrateSourceCatalog, backoutApCorr, matchNanojanskyToAB, fluxToPlotString,
                     andCatalog, writeParquet, getRepoInfo, addAliasColumns, addPreComputedColumns,
                     computeMeanOfFrac, savePlots, updateVerifyJob, getSchema, loadDenormalizeAndUnpackMatches,
                     computeAreaDict, getParquetColumnsList)
@@ -1163,7 +1163,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 self.log.warn("Bad RA, Dec entries but can't update because wcs is None")
             else:
                 afwTable.updateSourceCoords(wcs, catalog)
-        calibrated = calibrateCoaddSourceCatalog(catalog, self.config.analysis.coaddZp)
+        calibrated = calibrateSourceCatalog(catalog, self.config.analysis.coaddZp)
         return calibrated
 
     def plotMags(self, catalog, plotInfoDict, areaDict, matchRadius=None,
