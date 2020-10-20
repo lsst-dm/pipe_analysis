@@ -35,7 +35,7 @@ from lsst.pex.config import Field, ChoiceField
 from lsst.pipe.base import ArgumentParser, TaskRunner, TaskError, Struct
 from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
 from .analysis import Analysis
-from .coaddAnalysis import (CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisConfig,
+from .coaddAnalysis import (FLAGCOLORS, CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisConfig,
                             CompareCoaddAnalysisTask)
 from .utils import (matchAndJoinCatalogs, makeBadArray, calibrateSourceCatalogMosaic,
                     calibrateSourceCatalogPhotoCalib, calibrateSourceCatalog, andCatalog, writeParquet,
@@ -362,9 +362,10 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 aliasDictList += [self.config.srcSchemaMap]
             # Always highlight points with x-axis flag set (for cases where
             # they do not get explicitly filtered out).
-            highlightList = [
-                (self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0, "turquoise"), ]
-
+            highlightList = [(self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0, "turquoise")]
+            for ih, flagName in enumerate(list(self.config.analysis.flags)):
+                if not any(flagName in highlight for highlight in highlightList):
+                    highlightList += [(flagName, 0, FLAGCOLORS[ih%len(FLAGCOLORS)]), ]
             # Dict of all parameters common to plot* functions
             plotInfoDict.update(dict(ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
                                      tractInfo=repoInfo.tractInfo, dataId=repoInfo.dataId))
@@ -498,8 +499,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 if self.config.doPlotFootprintArea:
                     plotList.append(self.plotFootprintHist(catalog, "footArea", plotInfoDict, **plotKwargs))
                     plotList.append(self.plotFootprint(catalog, plotInfoDict, areaDict, plotRunStats=False,
-                                                       highlightList=[("parent", 0, "yellow"), ],
-                                                       **plotKwargs))
+                                                       highlightList=highlightList
+                                                       + [("parent", 0, "yellow"), ], **plotKwargs))
 
                 if self.config.doPlotQuiver:
                     plotList.append(self.plotQuiver(catalog, "ellipResids", plotInfoDict, areaDict, scale=2,

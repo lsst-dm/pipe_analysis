@@ -62,6 +62,7 @@ __all__ = ["CoaddAnalysisConfig", "CoaddAnalysisRunner", "CoaddAnalysisTask", "C
            "CompareCoaddAnalysisRunner", "CompareCoaddAnalysisTask"]
 
 NANOJANSKYS_PER_AB_FLUX = (0*u.ABmag).to_value(u.nJy)
+FLAGCOLORS = ["yellow", "greenyellow", "lime", "aquamarine", "orange", "fuchsia", "gold", "lightseagreen"]
 
 
 class CoaddAnalysisConfig(Config):
@@ -335,7 +336,10 @@ class CoaddAnalysisTask(CmdLineTask):
 
         # Always highlight points with x-axis flag set (for cases where
         # they do not get explicitly filtered out).
-        highlightList = [(self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0, "turquoise"), ]
+        highlightList = [(self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0, "turquoise")]
+        for ih, flagName in enumerate(list(self.config.analysis.flags)):
+            if not any(flagName in highlight for highlight in highlightList):
+                highlightList += [(flagName, 0, FLAGCOLORS[ih%len(FLAGCOLORS)]), ]
         # Dict of all parameters common to plot* functions
         plotKwargs = dict(zpLabel=self.zpLabel, uberCalLabel=self.uberCalLabel)
 
@@ -395,7 +399,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                                               matchRadiusUnitStr="\"",
                                                               forcedStr=forcedStr, postFix="_forced",
                                                               fluxToPlotList=["modelfit_CModel", ],
-                                                              **plotKwargs))
+                                                              highlightList=highlightList, **plotKwargs))
                             self.log.info("Number of forced overlap objects matched = {:d}".
                                           format(len(forcedOverlaps)))
                         else:
@@ -488,7 +492,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                                            **plotKwargs))
                     plotList.append(self.plotFootprint(unforced, plotInfoDict, areaDict,
                                                        forcedStr=forcedStr.replace("forced", "unforced"),
-                                                       **plotKwargs))
+                                                       highlightList=highlightList, **plotKwargs))
                 else:
                     self.log.info("config.doPlotFootprintArea is True, but do not have "
                                   "base_FootprintArea_value in schema...skipping footArea plots.")
@@ -1195,11 +1199,9 @@ class CoaddAnalysisTask(CmdLineTask):
                     shortName = "mag_" + col + postFix + "_calib_psf_used"
                     self.log.info("shortName = {:s}".format(shortName))
                     calibHighlightList = highlightList.copy()
-                    flagColors = ["yellow", "greenyellow", "lime", "aquamarine", "orange",
-                                  "fuchsia", "gold", "lightseagreen"]
                     for i, flagName in enumerate([col + "_flag", ] + list(self.config.analysis.flags)):
                         if not any(flagName in highlight for highlight in calibHighlightList):
-                            calibHighlightList += [(flagName, 0, flagColors[i%len(flagColors)]), ]
+                            calibHighlightList += [(flagName, 0, FLAGCOLORS[i%len(FLAGCOLORS)]), ]
                     yield from self.AnalysisClass(catalog,
                                                   MagDiff(col + "_instFlux", "base_PsfFlux_instFlux",
                                                           unitScale=self.unitScale),
