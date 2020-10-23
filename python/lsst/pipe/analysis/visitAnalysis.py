@@ -1048,8 +1048,9 @@ class CompareVisitAnalysisTask(VisitAnalysisTask, CompareCoaddAnalysisTask):
             catalog = matchAndJoinCatalogs(catalog1, catalog2, matchRadius=self.matchRadius,
                                            matchXy=self.config.matchXy, camera1=repoInfo1, camera2=repoInfo2)
 
-            self.log.info("Number of matches (maxDist = {0:.2f}{1:s}) = {2:d}".format(
-                          self.matchRadius, self.matchRadiusUnitStr, len(catalog)))
+            self.log.info("Number [fraction] of matches (maxDist = {0:.2f}{1:s}) = {2:d} [{3:d}%]".
+                          format(self.matchRadius, self.matchRadiusUnitStr, len(catalog),
+                                 int(100*len(catalog)/len(catalog1))))
 
             subdir = "ccd-" + str(ccdListPerTract1[0]) if len(ccdIntersectList) == 1 else subdir
             hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun

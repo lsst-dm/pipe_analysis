@@ -2119,16 +2119,24 @@ class CompareCoaddAnalysisTask(CoaddAnalysisTask):
         else:
             forced1 = unforced1
             forced2 = unforced2
+        self.log.info("\nNumber of sources in unforced catalogs: first = {0:d} and second = {1:d}".
+                      format(len(unforced1), len(unforced2)))
+        self.log.info("\nNumber of sources in forced catalogs: first = {0:d} and second = {1:d}".
+                      format(len(forced1), len(forced2)))
+
         unforced = matchAndJoinCatalogs(unforced1, unforced2, self.matchRadius, matchXy=self.config.matchXy,
                                         camera1=repoInfo1.camera, camera2=repoInfo2.camera)
         forced = matchAndJoinCatalogs(forced1, forced2, self.matchRadius, matchXy=self.config.matchXy,
                                       camera1=repoInfo1.camera, camera2=repoInfo2.camera)
+        self.log.info("Number [fraction] of matches (maxDist = {0:.2f}{1:s}) = {2:d} [{3:d}%] (unforced) "
+                      "{4:d} [{5:d}%] (forced)".
+                      format(self.matchRadius, self.matchRadiusUnitStr,
+                             len(unforced), int(100*len(unforced)/len(unforced1)),
+                             len(forced), int(100*len(forced)/len(forced1))))
 
         self.catLabel = "nChild = 0"
         forcedStr = forcedStr + " " + self.catLabel
         schema = getSchema(forced)
-        self.log.info("\nNumber of sources in forced catalogs: first = {0:d} and second = {1:d}".format(
-                      len(forced1), len(forced2)))
 
         subdir = "patch-" + str(patchList1[0]) if len(patchList1) == 1 else subdir
         # Always highlight points with x-axis flag set (for cases where
