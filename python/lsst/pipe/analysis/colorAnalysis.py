@@ -36,14 +36,15 @@ from collections import defaultdict
 from lsst.pex.config import Config, Field, ConfigField, ListField, DictField, ConfigDictField
 from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError, Struct
 from lsst.pipe.drivers.utils import TractDataIdContainer
+from lsst.pipe.tasks import parquetTable
 from .analysis import Analysis, AnalysisConfig
 from .coaddAnalysis import CoaddAnalysisTask
-from .utils import (Enforcer, concatenateCatalogs, getFluxKeys, addColumnsToSchema,
-                    makeBadArray, addFlag, addIntFloatOrStrColumn, calibrateSourceCatalog,
+from .utils import (Enforcer, concatenateCatalogs, getFluxKeys, addColumnsToSchema, makeBadArray,
+                    addFlag, addElementIdColumn, addIntFloatOrStrColumn, calibrateSourceCatalog,
                     fluxToPlotString, writeParquet, getRepoInfo, orthogonalRegression,
                     distanceSquaredToPoly, p2p1CoeffsFromLinearFit, linesFromP2P1Coeffs,
                     makeEqnStr, catColors, addMetricMeasurement, updateVerifyJob, computeMeanOfFrac,
-                    calcQuartileClippedStats, savePlots, getSchema, computeAreaDict)
+                    calcQuartileClippedStats, savePlots, getSchema, computeAreaDict, getParquetColumnsList)
 from .plotUtils import (AllLabeller, plotText, labelCamera, setPtSize, determineExternalCalLabel,
                         getPlotInfo)
 
@@ -249,12 +250,38 @@ class ColorAnalysisConfig(Config):
                                                            "and setting star/galaxy classification"))
     srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
                              doc="Mapping between different stack (e.g. HSC vs. LSST) schema names")
+    # We want the following to come from the *_meas catalogs as they reflect
+    # what happened in SFP calibration.
+    columnsToCopyFromMeas = ListField(dtype=str, default=["calib_", ],
+                                      doc="List of string \"prefixes\" to identify the columns to copy.  "
+                                      "All columns with names that start with one of these strings will be "
+                                      "copied from the *_meas catalogs into the *_forced_src catalogs "
+                                      "UNLESS the full column name contains one of the strings listed "
+                                      "in the notInColumnStrList config.")
+    # We want the following to come from the *_ref catalogs as they reflect
+    # the forced measurement states.
     columnsToCopyFromRef = ListField(dtype=str,
                                      default=["detect_", "merge_peak_", "merge_measurement_", ],
                                      doc="List of \"startswith\" strings of column names to copy from "
                                          "*_ref to *_forced_src catalog.  All columns that start with one "
                                          "of these strings will be copied from the *_ref into the "
                                          "*_forced_src catalog.")
+    baseColStrList = ListField(
+        dtype=str,
+        default=["coord", "tract", "patch", "base_PixelFlags", "base_PsfFlux", "modelfit_CModel",
+                 "slot_Centroid", "slot_Shape", "base_ClassificationExtendedness", "parent", "detect",
+                 "deblend_nChild", "base_InputCount", "merge_peak_sky", "merge_measurement", "calib"],
+        doc=("List of \"startswith\" strings of column names to load from deepCoadd_obj parquet table. "
+             "All columns that start with one of these strings will be loaded UNLESS the full column "
+             "name contains one of the strings listed in the notInColumnStrList config."))
+    notInColStrList = ListField(
+        dtype=str,
+        default=["flag_bad", "flag_no", "missingDetector_flag", "_region_", "Truncated", "_radius",
+                 "_bad_", "initial", "_exp_", "_dev_", "fracDev", "objective", "SdssCentroid_flag_",
+                 "SdssShape_flag_u", "SdssShape_flag_m", "_Cov", "_child_", "_parent_", "_rejected"],
+        doc=("List of substrings to select against when creating list of columns to load from the "
+             "deepCoadd_obj parquet table."))
+
     extinctionCoeffs = DictField(keytype=str, itemtype=float, default=None, optional=True,
                                  doc="Dictionary of extinction coefficients for conversion from E(B-V) "
                                      "to extinction, A_filter")
@@ -265,6 +292,9 @@ class ColorAnalysisConfig(Config):
     doPlotPrincipalColors = Field(dtype=bool, default=True,
                                   doc="Create the Ivezic Principal Color offset plots?")
     doPlotGalacticExtinction = Field(dtype=bool, default=True, doc="Create Galactic Extinction plots?")
+    doReadParquetTables = Field(dtype=bool, default=True,
+                                doc=("Read parquet tables from postprocessing (e.g. deepCoadd_obj) as "
+                                     "input data instead of afwTable catalogs."))
     writeParquetOnly = Field(dtype=bool, default=False,
                              doc="Only write out Parquet tables (i.e. do not produce any plots)?")
     doWriteParquetTables = Field(dtype=bool, default=True,
@@ -318,12 +348,13 @@ class ColorAnalysisRunner(TaskRunner):
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
         kwargs["subdir"] = parsedCmd.subdir
+        dataset = "obj" if parsedCmd.config.doReadParquetTables else "forced_src"
         FilterRefsDict = functools.partial(defaultdict, list)  # Dict for filter-->dataRefs
         tractFilterRefs = defaultdict(FilterRefsDict)  # tract-->filter-->dataRefs
         for patchRef in sum(parsedCmd.id.refList, []):
             # Make sure the actual input file requested exists (i.e. do not
             # follow the parent chain).
-            inputDataFile = patchRef.get("deepCoadd_forced_src_filename")[0]
+            inputDataFile = patchRef.get(parsedCmd.config.coaddName + "Coadd_" + dataset + "_filename")[0]
             if parsedCmd.input not in parsedCmd.output:
                 inputDataFile = inputDataFile.replace(parsedCmd.output, parsedCmd.input)
             if os.path.exists(inputDataFile):
@@ -397,6 +428,8 @@ class ColorAnalysisTask(CmdLineTask):
     def runDataRef(self, patchRefsByFilter, subdir=""):
         patchList = []
         repoInfo = None
+        self.fullFilterList = list(patchRefsByFilter.keys())
+        dataset = "Coadd_obj" if self.config.doReadParquetTables else "Coadd_forced_src"
         self.fluxFilter = None
         for patchRefList in patchRefsByFilter.values():
             for dataRef in patchRefList:
@@ -416,9 +449,9 @@ class ColorAnalysisTask(CmdLineTask):
                 if dataRef.dataId["filter"] == self.fluxFilter:
                     patchList.append(dataRef.dataId["patch"])
                 if repoInfo is None:
-                    repoInfo = getRepoInfo(dataRef, coaddName=self.config.coaddName,
-                                           coaddDataset="Coadd_forced_src")
-        self.log.info("Size of patchList with full color coverage: {:d}".format(len(patchList)))
+                    repoInfo = getRepoInfo(dataRef, coaddName=self.config.coaddName, coaddDataset=dataset)
+        self.log.info("Size of patchList with full {0:} coverage: {1:d}".format(self.fluxFilter,
+                                                                                len(patchList)))
         uberCalLabel = determineExternalCalLabel(repoInfo, patchList[0], coaddName=self.config.coaddName)
         self.log.info(f"External calibration(s) used: {uberCalLabel}")
         subdir = "patch-" + str(patchList[0]) if len(patchList) == 1 else subdir
@@ -434,14 +467,27 @@ class ColorAnalysisTask(CmdLineTask):
             self.classificationColumn = self.config.srcSchemaMap[self.classificationColumn]
             self.flags = [self.config.srcSchemaMap[flag] for flag in self.flags]
 
+        self.skipPatchList = []
         byFilterForcedCats = {}
         byFilterAreaDict = {}
+        fullCoveragePatchRefList = []
         for (filterName, patchRefList) in patchRefsByFilter.items():
-            dataset = self.config.coaddName + "Coadd_forced_src"
-            cat, areaDict = self.readCatalogs(patchRefList, dataset, repoInfo)
-            # Convert to pandas DataFrames
-            cat = cat.asAstropy().to_pandas().set_index("id", drop=False)
-            cat = calibrateSourceCatalog(cat, self.config.analysis.coaddZp)
+            if self.config.doReadParquetTables:
+                dfDataset = "forced_src"
+                cat = self.readParquetTables(patchRefList, self.config.coaddName + dataset, repoInfo,
+                                             dfDataset=dfDataset)
+                fullCoveragePatchList = list(set(cat["patchId"].values))
+                if len(fullCoveragePatchRefList) == 0:
+                    for patchRef in patchRefList:
+                        if patchRef.dataId["patch"] in fullCoveragePatchList:
+                            fullCoveragePatchRefList.append(patchRef)
+                areaDict, _ = computeAreaDict(repoInfo, fullCoveragePatchRefList,
+                                              dataset=self.config.coaddName + "Coadd", fakeCat=None)
+            else:
+                cat, areaDict = self.readCatalogs(patchRefList, self.config.coaddName + dataset, repoInfo)
+                # Convert to pandas DataFrames
+                cat = cat.asAstropy().to_pandas().set_index("id", drop=False)
+                cat = calibrateSourceCatalog(cat, self.config.analysis.coaddZp)
             byFilterForcedCats[filterName] = cat
             byFilterAreaDict[filterName] = areaDict
 
@@ -464,7 +510,7 @@ class ColorAnalysisTask(CmdLineTask):
                 geLabel = "Per Field"
 
         plotInfoDict = getPlotInfo(repoInfo)
-        plotInfoDict.update(dict(patchList=patchList, plotType="plotColor", subdir=subdir,
+        plotInfoDict.update(dict(patchList=fullCoveragePatchList, plotType="plotColor", subdir=subdir,
                                  hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo,
                                  dataId=repoInfo.dataId))
 
@@ -521,6 +567,124 @@ class ColorAnalysisTask(CmdLineTask):
                                                 dataId=repoInfo.dataId)[0]
         self.verifyJob.write(verifyJobFilename)
 
+    def readParquetTables(self, dataRefList, dataset, repoInfo, dfDataset=None):
+        """Read in, calibrate, and concatenate parquet tables from a list of
+        dataRefs.
+
+        The calibration performed is based on config parameters.  For coadds,
+        the only option is the calibration zeropoint.  For visit, the options
+        include external calibrations for both photometry (e.g. fgcm) and wcs
+        (e.g. jointcal) or simply the zero point from single frame processing.
+
+        Parameters
+        ----------
+        dataRefList : `list` of
+                      `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+            A list of butler data references whose catalogs of ``dataset``
+            are to be read in.
+        dataset : `str`
+            Name of the catalog ``dataset`` to be read in, e.g.
+            "deepCoadd_obj" (for coadds) or "source" (for visits).
+        repoInfo : `lsst.pipe.base.struct.Struct`
+            A struct containing elements with repo information needed to
+            determine if the catalog data is coadd or visit level and, if the
+            latter, to create appropriate dataIds to look for the external
+            calibration datasets.
+        dfDataset : `str`, optional
+            Name of the dataFrame \"dataset\" to be read in for multilevel
+            parquet tables.  For coadd catalogs, which are of type
+            `lsst.pipe.tasks.parquetTable.MultilevelParquetTable`, this is
+            actually not optional but must be one of, "forced_src", "meas", or
+            "ref".  This parameter is not relevant for visit-level catalogs,
+            which are of type `lsst.pipe.tasks.parquetTable.ParquetTable`.
+
+        Raises
+        ------
+        TaskError
+            If no data is read in for the ``dataRefList``.
+        RuntimeError
+            If catalog is of type
+            `lsst.pipe.tasks.parquetTable.MultilevelParquetTable` but no
+            ``dfDataset`` is provided.
+
+        Returns
+        -------
+        allCats : `pandas.core.frame.DataFrame`
+            The concatenated catalogs as a pandas DataFrame.
+        """
+        # It is much faster to concatenate a list of DataFrames than to
+        # concatenate successively within the for loop.
+        catList = []
+        colsToLoadList = None
+        dfLoadColumns = None
+        refColsToLoadList = None
+        measColsToLoadList = None
+        for dataRef in dataRefList:
+            if not dataRef.datasetExists(dataset):
+                self.log.info("Dataset does not exist: {0:r}, {1:s}".format(dataRef.dataId, dataset))
+                continue
+            parquetCat = dataRef.get(dataset, immediate=True)
+            # Some obj tables do not contain data for all filters
+            if isinstance(parquetCat, parquetTable.MultilevelParquetTable):
+                if not any(dfDataset == dfName for dfName in ["forced_src", "meas", "ref"]):
+                    raise RuntimeError("Must specify a dfDataset for multilevel parquet tables")
+                else:
+                    existsFilterList = parquetCat.columnLevelNames["filter"]
+                    if not (np.all([filt in existsFilterList for filt in self.fullFilterList])):
+                        if dataRef.dataId["patch"] not in self.skipPatchList:
+                            self.skipPatchList.append(dataRef.dataId["patch"])
+                            self.log.info("Full filter list requested {0:}\nnot in patch: {1:} "
+                                          "(it only has {2}).  Skipping... ".format(
+                                              self.fullFilterList, dataRef.dataId["patch"], existsFilterList))
+                        continue
+            if dfLoadColumns is None and isinstance(parquetCat, parquetTable.MultilevelParquetTable):
+                dfLoadColumns = {"dataset": dfDataset, "filter": dataRef.dataId["filter"]}
+            # On the first dataRef read in, create list of columns to load
+            # based on config lists and their existence in the catalog
+            # table.
+            if colsToLoadList is None:
+                catColumns = getParquetColumnsList(parquetCat, dfDataset=dfDataset,
+                                                   filterName=dataRef.dataId["filter"])
+                colsToLoadList = [col for col in catColumns if
+                                  (col.startswith(tuple(self.config.baseColStrList))
+                                   and not any(s in col for s in self.config.notInColStrList))]
+                if dfLoadColumns is None:
+                    dfLoadColumns = colsToLoadList
+                else:
+                    dfLoadColumns.update(column=colsToLoadList)
+            cat = parquetCat.toDataFrame(columns=dfLoadColumns)
+            cat = addElementIdColumn(cat, dataRef.dataId, repoInfo=repoInfo)
+            if dfDataset == "forced_src":  # insert some columns from the ref and meas cats for forced cats
+                if refColsToLoadList is None:
+                    refColumns = getParquetColumnsList(parquetCat, dfDataset="ref",
+                                                       filterName=dataRef.dataId["filter"])
+                    refColsToLoadList = [col for col in refColumns if
+                                         (col.startswith(tuple(self.config.columnsToCopyFromRef))
+                                          and not any(s in col for s in self.config.notInColStrList))]
+                ref = parquetCat.toDataFrame(columns={"dataset": "ref", "filter": dataRef.dataId["filter"],
+                                                      "column": refColsToLoadList})
+                cat = pd.concat([cat, ref], axis=1)
+                if measColsToLoadList is None:
+                    measColumns = getParquetColumnsList(parquetCat, dfDataset="meas",
+                                                        filterName=dataRef.dataId["filter"])
+                    measColsToLoadList = [col for col in measColumns if
+                                          (col.startswith(tuple(self.config.columnsToCopyFromMeas))
+                                           and not any(s in col for s in self.config.notInColStrList))]
+                meas = parquetCat.toDataFrame(columns={"dataset": "meas", "filter": dataRef.dataId["filter"],
+                                                       "column": measColsToLoadList})
+                cat = pd.concat([cat, meas], axis=1)
+            cat = calibrateSourceCatalog(cat, self.config.analysis.coaddZp)
+            catList.append(cat)
+
+        if not catList:
+            raise TaskError("No catalogs read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
+        allCats = pd.concat(catList, axis=0)
+        # The object "id" is associated with the dataframe index.  Add a
+        # column that is the id so that it is available for operations on it,
+        # e.g. cat["id"].
+        allCats["id"] = allCats.index
+        return allCats
+
     def readCatalogs(self, patchRefList, dataset, repoInfo):
         """Read in and concatenate catalogs of type dataset in lists of data
         references.
@@ -566,10 +730,24 @@ class ColorAnalysisTask(CmdLineTask):
                 refCat = patchRef.get(self.config.coaddName + "Coadd_ref", immediate=True,
                                       flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
                 refCatSchema = getSchema(refCat)
-                refColList = [s for s in refCatSchema.getNames() if
-                              s.startswith(tuple(self.config.columnsToCopyFromRef))]
-                cat = addColumnsToSchema(refCat, cat, [col for col in refColList if col not in schema
-                                                       and col in refCatSchema])
+                refColList = []
+                for strPrefix in self.config.columnsToCopyFromRef:
+                    refColList.extend(refCatSchema.extract(strPrefix + "*"))
+                refColsToCopy = [col for col in refColList if col not in schema
+                                 and not any(s in col for s in self.config.notInColStrList)
+                                 and col in refCatSchema]
+                cat = addColumnsToSchema(refCat, cat, refColsToCopy)
+                measCat = patchRef.get(self.config.coaddName + "Coadd_meas", immediate=True,
+                                       flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+                measCatSchema = getSchema(measCat)
+                measColList = []
+                for strPrefix in self.config.columnsToCopyFromMeas:
+                    measColList.extend(measCatSchema.extract(strPrefix + "*"))
+                measColsToCopy = [col for col in measColList if col not in schema
+                                  and not any(s in col for s in self.config.notInColStrList)
+                                  and col in measCatSchema]
+                cat = addColumnsToSchema(measCat, cat, measColsToCopy)
+
             if self.config.doWriteParquetTables:
                 cat = addIntFloatOrStrColumn(cat, patchRef.dataId["patch"], "patchId",
                                              "Patch on which source was detected")
