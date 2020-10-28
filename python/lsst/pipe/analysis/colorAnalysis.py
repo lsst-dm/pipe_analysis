@@ -248,6 +248,10 @@ class ColorAnalysisConfig(Config):
                                                         "setting star/galaxy classification"))
     fluxFilterGeneric = Field(dtype=str, default="i", doc=("Filter to use for plotting against magnitude "
                                                            "and setting star/galaxy classification"))
+    minimalFluxList = ListField(dtype=str, doc="Minimal list of filters for color analysis to run.  "
+                                "These names are HSC-specific", default=["HSC-G", "HSC-R", "HSC-I"])
+    minimalFluxListGeneric = ListField(dtype=str, doc="Minimal list of filters for color analysis to run.  "
+                                       "These names are meant to be generic", default=["g", "r", "i"])
     srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
                              doc="Mapping between different stack (e.g. HSC vs. LSST) schema names")
     # We want the following to come from the *_meas catalogs as they reflect
@@ -430,28 +434,35 @@ class ColorAnalysisTask(CmdLineTask):
         repoInfo = None
         self.fullFilterList = list(patchRefsByFilter.keys())
         dataset = "Coadd_obj" if self.config.doReadParquetTables else "Coadd_forced_src"
-        self.fluxFilter = None
-        for patchRefList in patchRefsByFilter.values():
-            for dataRef in patchRefList:
-                if dataRef.dataId["filter"] == self.config.fluxFilter:
-                    self.fluxFilter = self.config.fluxFilter
-                    break
-                if dataRef.dataId["filter"] == self.config.fluxFilterGeneric:
-                    self.fluxFilter = self.config.fluxFilterGeneric
-                    break
-        if self.fluxFilter is None:
-            raise TaskError("Flux filter from config not found (neither {0:s} nor the generic {1:s}".
-                            format(self.config.fluxFilter, self.config.fluxFilterGeneric))
+        if (not set(self.config.minimalFluxList).intersection(set(self.fullFilterList))
+                == set(self.config.minimalFluxList)
+                and not set(self.config.minimalFluxListGeneric).intersection(set(patchRefsByFilter.keys()))
+                == set(self.config.minimalFluxListGeneric)):
+            raise TaskError("Minimal set of filters not provided in id list.  The valid lists are {0:} "
+                            "for HSC data or a more generic list {1:}".
+                            format(self.config.minimalFluxList, self.config.minimalFluxListGeneric))
+        if self.config.fluxFilter in patchRefsByFilter.keys():
+            self.fluxFilter = self.config.fluxFilter
+        elif self.config.fluxFilterGeneric in patchRefsByFilter.keys():
+            self.fluxFilter = self.config.fluxFilterGeneric
+        else:
+            raise TaskError("Flux filter from config not found (tried both {0:s} and the generic {1:s}. "
+                            "List provided was: {2:})".
+                            format(self.config.fluxFilter, self.config.fluxFilterGeneric,
+                                   list(patchRefsByFilter.keys())))
         self.log.info("Flux filter for plotting and primary star/galaxy classifiation is: {0:s}".
                       format(self.fluxFilter))
         for patchRefList in patchRefsByFilter.values():
             for dataRef in patchRefList:
-                if dataRef.dataId["filter"] == self.fluxFilter:
+                if (dataRef.dataId["filter"] == self.fluxFilter
+                        and dataRef.datasetExists(self.config.coaddName + dataset)):
                     patchList.append(dataRef.dataId["patch"])
-                if repoInfo is None:
-                    repoInfo = getRepoInfo(dataRef, coaddName=self.config.coaddName, coaddDataset=dataset)
-        self.log.info("Size of patchList with full {0:} coverage: {1:d}".format(self.fluxFilter,
-                                                                                len(patchList)))
+                    if repoInfo is None:
+                        repoInfo = getRepoInfo(dataRef, coaddName=self.config.coaddName, coaddDataset=dataset)
+        if len(patchList) > 0:
+            self.log.info("Size of patchList with at least partial coverage: {0:}".format(len(patchList)))
+        else:
+            raise RuntimeError("No data exists for requested dataIds")
         uberCalLabel = determineExternalCalLabel(repoInfo, patchList[0], coaddName=self.config.coaddName)
         self.log.info(f"External calibration(s) used: {uberCalLabel}")
         subdir = "patch-" + str(patchList[0]) if len(patchList) == 1 else subdir

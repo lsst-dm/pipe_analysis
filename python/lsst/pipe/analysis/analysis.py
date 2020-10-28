@@ -886,7 +886,8 @@ class Analysis(object):
             plt.close(fig)
             return
         filterStr = plotInfoDict["filter"]
-        filterLabelStr = "[" + filterStr + "]" if ("color" not in plotInfoDict["plotType"]) else ""
+        filterLabelStr = "[" + filterStr + "]" if ("color" not in plotInfoDict["plotType"]
+                                                   and "galacticExtinction" not in description) else ""
         if "lsst" in plotInfoDict["cameraName"]:
             filterLabelStr = "[" + plotInfoDict["cameraName"] + "-" + plotInfoDict["filter"] + "]"
         axes.set_xlabel("RA (deg) {0:s}".format(filterLabelStr))
