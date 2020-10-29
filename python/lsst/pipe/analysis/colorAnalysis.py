@@ -38,7 +38,6 @@ from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError, S
 from lsst.pipe.drivers.utils import TractDataIdContainer
 from lsst.pipe.tasks import parquetTable
 from .analysis import Analysis, AnalysisConfig
-from .coaddAnalysis import CoaddAnalysisTask
 from .utils import (Enforcer, concatenateCatalogs, getFluxKeys, addColumnsToSchema, makeBadArray,
                     addFlag, addElementIdColumn, addIntFloatOrStrColumn, calibrateSourceCatalog,
                     fluxToPlotString, writeParquet, getRepoInfo, orthogonalRegression,
@@ -54,8 +53,7 @@ import lsst.verify as verify
 
 __all__ = ["ColorTransform", "ivezicTransformsSDSS", "ivezicTransformsHSC", "straightTransforms",
            "NumStarLabeller", "ColorValueInFitRange", "ColorValueInPerpRange", "GalaxyColor",
-           "ColorAnalysisConfig", "ColorAnalysisRunner", "ColorAnalysisTask", "ColorColorDistance",
-           "SkyAnalysisRunner", "SkyAnalysisTask"]
+           "ColorAnalysisConfig", "ColorAnalysisRunner", "ColorAnalysisTask", "ColorColorDistance"]
 
 
 class ColorTransform(Config):
@@ -2335,28 +2333,3 @@ class ColorColorDistance(object):
             distance2[i] = min(distanceSquaredToPoly(x, y, np.real(rr), self.poly) for
                                rr in roots if np.real(rr) == rr)
         return np.sqrt(distance2)*np.where(yy >= self.poly(xx), 1.0, -1.0)*self.unitScale
-
-
-class SkyAnalysisRunner(TaskRunner):
-    @staticmethod
-    def getTargetList(parsedCmd, **kwargs):
-        kwargs["cosmos"] = parsedCmd.cosmos
-
-        # Partition all inputs by filter
-        filterRefs = defaultdict(list)  # filter-->dataRefs
-        for patchRef in sum(parsedCmd.id.refList, []):
-            if patchRef.datasetExists("deepCoadd_meas"):
-                filterName = patchRef.dataId["filter"]
-                filterRefs[filterName].append(patchRef)
-
-        return [(refList, kwargs) for refList in filterRefs.values()]
-
-
-class SkyAnalysisTask(CoaddAnalysisTask):
-    """Version of CoaddAnalysisTask that runs on all inputs simultaneously.
-
-    This is most useful for utilising overlaps between tracts.
-    """
-    _DefaultName = "skyAnalysis"
-    RunnerClass = SkyAnalysisRunner
-    outputDataset = "plotSky"
