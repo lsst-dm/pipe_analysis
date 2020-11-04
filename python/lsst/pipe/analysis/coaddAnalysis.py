@@ -1915,10 +1915,11 @@ class CoaddAnalysisTask(CmdLineTask):
         skyFlux = "base_CircularApertureFlux_9_0_instFlux"
         skyFluxStr = fluxToPlotString(skyFlux)
         skyFluxes = catalog[skyFlux]*1e12
-        qMin, qMax = 0.75*min(skyFluxes), 0.75*max(skyFluxes)
+        qMin, qMax = 0.75*np.nanmin(skyFluxes), 0.75*np.nanmax(skyFluxes)
         yield from self.AnalysisClass(catalog, skyFluxes,
                                       "%s" % "flux(*1e+12)= " + shortName + "[" + skyFluxStr + "]", shortName,
                                       self.config.analysis, qMin=qMin, qMax=qMax, labeller=AllLabeller(),
+                                      fluxColumn=skyFlux, magThreshold=99.0
                                       ).plotSkyPosition(shortName, plotInfoDict, areaDict,
                                                         dataName="all", **skyplotKwargs)
 

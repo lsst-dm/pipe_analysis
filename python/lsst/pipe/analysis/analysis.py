@@ -165,10 +165,8 @@ class Analysis(object):
         # objects used in the visit-level calibrations, so do not cull on the
         # standard self.config.flags.  Rather, only cull on flags explicitly
         # set in the flags variable for calib_*_used subsamples.
-        if ("matches" not in self.shortName and "overlap" not in self.shortName
-                and "quiver" not in self.shortName and "inputCounts" not in self.shortName
-                and "skyObjects" not in self.shortName):
-
+        if not any(ss in self.shortName for ss in ["matches", "overlap", "quiver", "inputCounts",
+                                                   "skyObjects", "skySources"]):
             flagsList = flags.copy()
             flagsList = flagsList + list(self.config.flags) if self.calibUsedOnly == 0 else flagsList
             for flagName in set(flagsList):
@@ -192,29 +190,30 @@ class Analysis(object):
         else:
             self.signalToNoiseThreshold = self.config.signalToNoiseThreshold
             self.signalToNoiseHighThreshold = self.config.signalToNoiseHighThreshold
-        if (("galacticExtinction" in self.shortName and self.magThreshold > 90.0)
-                or any(ss in self.shortName for ss in ["skySources", "skyObjects"])):
+        if "galacticExtinction" in self.shortName and self.magThreshold > 90.0:
             self.signalToNoiseThreshold = 0.0
             self.signalToNoiseHighThreshold = 0.0
 
-        if any(ss in self.shortName for ss in ["skySources", "skyObjects"]) and self.quantity is not None:
-            self.good = np.isfinite(self.quantity)
+        if any(ss in self.shortName for ss in ["skySources", "skyObjects"]):
             # We don't want to cull on S/N for the sky sources and they can be
             # negative, so set threshold to a very large negative number.
             self.signalToNoiseThreshold = -1e30
-
+            self.signalToNoiseHighThreshold = -1e30
+            if self.quantity is not None:
+                self.good = np.isfinite(self.quantity)
         self.signalToNoise = catalog[prefix + self.fluxColumn]/catalog[prefix + self.fluxColumn + "Err"]
         self.signalToNoiseStr = None
         goodSn0 = np.isfinite(self.signalToNoise)
         if self.good is not None:
             goodSn0 = np.logical_and(self.good, goodSn0)
-            if self.config.useSignalToNoiseThreshold:
-                self.signalToNoiseStr = r"[S/N$\geqslant${0:}]".format(int(self.signalToNoiseThreshold))
-                goodSn = np.logical_and(goodSn0, self.signalToNoise >= self.signalToNoiseThreshold)
-                # Set self.magThreshold to represent approximately that which
-                # corresponds to the S/N threshold.  Computed as the mean mag
-                # of the lower 5% of the S/N > signalToNoiseThreshold
-                # subsample.
+        if self.config.useSignalToNoiseThreshold:
+            self.signalToNoiseStr = r"[S/N$\geqslant${0:}]".format(int(self.signalToNoiseThreshold))
+            goodSn = np.logical_and(goodSn0, self.signalToNoise >= self.signalToNoiseThreshold)
+            # Set self.magThreshold to represent approximately that which
+            # corresponds to the S/N threshold.  Computed as the mean mag
+            # of the lower 5% of the S/N > signalToNoiseThreshold
+            # subsample.
+            if self.magThreshold < 90.0:
                 self.magThreshold = computeMeanOfFrac(self.mag[goodSn], tailStr="upper", fraction=0.05,
                                                       floorFactor=0.1)
 
@@ -774,7 +773,8 @@ class Analysis(object):
             magThreshold += 1.0  # plot to fainter mags for galaxies
         if dataName == "star" and "matches" in description and magThreshold < 99.0:
             magThreshold += 1.0  # plot to fainter mags for matching against ref cat
-        good = (self.mag < magThreshold if magThreshold > 0 else np.ones(len(self.mag), dtype=bool))
+        good = (self.mag < magThreshold if (magThreshold > 0 and magThreshold < 90.0)
+                else np.ones(len(self.mag), dtype=bool))
         if ((dataName == "star" or "matches" in description or "Compare" in plotInfoDict["plotType"])
                 and ("pStar" not in description and "race" not in description and "resolution"
                      not in description) or ("compareUnforced" in description)):
