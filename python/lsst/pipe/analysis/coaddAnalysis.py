@@ -2149,7 +2149,8 @@ class CompareCoaddAnalysisTask(CoaddAnalysisTask):
         plotInfoDict = getPlotInfo(repoInfo1)
         plotInfoDict.update(dict(patchList=patchList1, hscRun=hscRun, tractInfo=repoInfo1.tractInfo,
                                  dataId=repoInfo1.dataId, plotType="plotCompareCoadd", subdir=subdir,
-                                 hscRun1=repoInfo1.hscRun, hscRun2=repoInfo2.hscRun))
+                                 hscRun1=repoInfo1.hscRun, hscRun2=repoInfo2.hscRun,
+                                 rerun2=list(repoInfo2.butler.storage.repositoryCfgs)[0]))
 
         if self.config.doPlotMags:
             plotList.append(self.plotMags(forced, plotInfoDict, areaDict1, forcedStr=forcedStr,

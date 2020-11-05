@@ -105,6 +105,7 @@ class AnalysisConfig(Config):
                                 doc="Flux ratio for visit level star/galaxy classifiaction")
     coaddClassFluxRatio = Field(dtype=float, default=0.985,
                                 doc="Flux ratio for coadd level star/galaxy classifiaction")
+    doLabelRerun = Field(dtype=bool, default=True, doc="Include label indicating rerun direcotry on plots?")
 
 
 class Analysis(object):
@@ -601,13 +602,14 @@ class Analysis(object):
         axHistx.legend(fontsize=7, loc=2, edgecolor="w", labelspacing=0.2)
         axHisty.legend(fontsize=7, labelspacing=0.2)
         # Add axis with units of FWHM = 2*sqrt(2*ln(2))*Trace for Trace plots
-        if "race" in self.shortName and "iff" not in self.shortName:
+        if ("race" in self.shortName and "iff" not in self.shortName
+                and "ompare" not in plotInfoDict["plotType"]):
             axHisty2 = axHisty.twinx()  # instantiate a second axes that shares the same x-axis
             sigmaToFwhm = 2.0*np.sqrt(2.0*np.log(2.0))
             axHisty2.set_ylim(axScatterY1*sigmaToFwhm, axScatterY2*sigmaToFwhm)
             axHisty2.yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
-            axHisty2.tick_params(axis="y", which="both", direction="in", labelsize=8)
-            axHisty2.set_ylabel(r"FWHM: $2\sqrt{2\,ln\,2}*$Trace (pixels)", rotation=270, labelpad=13,
+            axHisty2.tick_params(axis="y", which="both", direction="in", labelsize=7)
+            axHisty2.set_ylabel(r"FWHM: $2\sqrt{2\,ln\,2}*$Trace (pixels)", rotation=270, labelpad=12,
                                 fontsize=fontSize)
 
         # Label total number of objects of each data type
@@ -628,6 +630,15 @@ class Analysis(object):
                      fontsize=7, transform=axScatter.transAxes, color=data.color)
 
         labelVisit(plotInfoDict, plt.gcf(), axScatter, 1.18, -0.11, color="green")
+        if self.config.doLabelRerun and not any(ss in self.shortName for ss in ["race-", "race_"]):
+            rerunKwargs = dict(fontSize=6, color="purple", rotation=-90)
+            if "rerun2" in plotInfoDict:
+                plotText("rerun: " + plotInfoDict["rerun"], plt, axHisty, 1.18, 0.7, **rerunKwargs)
+                plotText("rerun2: " + plotInfoDict["rerun2"], plt, axHisty, 1.08, 0.7, **rerunKwargs)
+            else:
+                rerunKwargs.update(fontSize=7)
+                plotText("rerun: " + plotInfoDict["rerun"], plt, axHisty, 1.12, 0.7, **rerunKwargs)
+
         if zpLabel is not None:
             # The following sets yOff to accommodate the longer labels for the
             # compare scripts and/or for the presence of the extra uberCalLabel
@@ -723,9 +734,13 @@ class Analysis(object):
                          matchRadiusUnitStr=matchRadiusUnitStr, unitScale=self.unitScale,
                          doPrintMedian=doPrintMedian)
         axes.legend(loc="upper right", fontsize=8)
+        xOff = 0.0
         if plotInfoDict["cameraName"] is not None:
-            labelCamera(plotInfoDict, plt.gcf(), axes, 0.5, 1.09)
-        labelVisit(plotInfoDict, plt.gcf(), axes, 0.5, 1.04)
+            xOff = max(0.12, 0.04*len(plotInfoDict["cameraName"]))
+            labelCamera(plotInfoDict, plt.gcf(), axes, 0.5 - xOff, 1.04, fontSize=9)
+        labelVisit(plotInfoDict, plt.gcf(), axes, 0.5 + xOff, 1.04, fontSize=9)
+        if self.config.doLabelRerun:
+            plotText("rerun: " + plotInfoDict["rerun"], plt, axes, 0.5, 1.1, fontSize=7, color="purple")
         if zpLabel is not None:
             prefix = "" if "GalExt" in zpLabel else "zp: "
             plotText(zpLabel, plt, axes, 0.14, -0.10, prefix=prefix, fontSize=7, color="green")
@@ -901,12 +916,21 @@ class Analysis(object):
         cb = plt.colorbar(mappable)
         colorbarLabel = self.quantityName + " " + filterLabelStr
         fontSize = min(10, max(6, 10 - int(np.log(max(1, len(colorbarLabel) - 50)))))
-        cb.ax.tick_params(labelsize=max(6, fontSize - 1))
+        cb.ax.tick_params(labelsize=max(6, fontSize - 2))
+        cb.ax.yaxis.offsetText.set_fontsize(6)
         cb.set_label(colorbarLabel, fontsize=fontSize, rotation=270, labelpad=15)
         if plotInfoDict["hscRun"] is not None:
             axes.set_title("HSC stack run: " + plotInfoDict["hscRun"], color="#800080")
-        labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
-        labelVisit(plotInfoDict, fig, axes, 0.5, 1.04)
+        if self.config.doLabelRerun:
+            rerunKwargs = dict(fontSize=5, color="purple")
+            if "rerun2" in plotInfoDict:
+                plotText("rerun: " + plotInfoDict["rerun"], plt, axes, 0.5, 1.13, **rerunKwargs)
+                plotText("rerun2: " + plotInfoDict["rerun2"], plt, axes, 0.5, 1.105, **rerunKwargs)
+            else:
+                rerunKwargs.update(fontSize=6)
+                plotText("rerun: " + plotInfoDict["rerun"], plt, axes, 0.5, 1.11, **rerunKwargs)
+        labelCamera(plotInfoDict, fig, axes, 0.5, 1.07)
+        labelVisit(plotInfoDict, fig, axes, 0.5, 1.03)
         if zpLabel is not None:
             prefix = "" if "GalExt" in zpLabel else "zp: "
             plotText(zpLabel, plt, axes, 0.14, -0.07, prefix=prefix, color="green")
@@ -917,9 +941,9 @@ class Analysis(object):
         strKwargs = dict(loc="upper left", fancybox=True, markerscale=1.2, scatterpoints=3, framealpha=0.35,
                          facecolor="k")
         if highlightList is not None:
-            axes.legend(bbox_to_anchor=(-0.05, 1.15), fontsize=7, **strKwargs)
+            axes.legend(bbox_to_anchor=(-0.05, 1.13), fontsize=6, **strKwargs)
         else:
-            axes.legend(bbox_to_anchor=(-0.01, 1.12), fontsize=8, **strKwargs)
+            axes.legend(bbox_to_anchor=(-0.01, 1.10), fontsize=6, **strKwargs)
 
         meanStr = "{0.mean:.4f}".format(stats0)
         medianStr = "{0.median:.4f}".format(stats0)
@@ -939,16 +963,16 @@ class Analysis(object):
         x0 = 0.86
         deltaX = 0.004
         lenStr = 0.016*(max(len(meanStr), len(stdevStr)))
-        strKwargs = dict(xycoords="axes fraction", va="center", fontsize=8)
-        axes.annotate("mean = ", xy=(x0, 1.08), ha="right", **strKwargs)
-        axes.annotate(meanStr, xy=(x0 + lenStr, 1.08), ha="right", **strKwargs)
+        strKwargs = dict(xycoords="axes fraction", va="center", fontsize=7)
+        axes.annotate("mean = ", xy=(x0, 1.07), ha="right", **strKwargs)
+        axes.annotate(meanStr, xy=(x0 + lenStr, 1.07), ha="right", **strKwargs)
         if doPrintMedian:
             deltaX += (0.155 + lenStr)
-            axes.annotate("median = ", xy=(x0 + deltaX, 1.08), ha="right", **strKwargs)
-            axes.annotate(medianStr, xy=(x0 + lenStr + deltaX, 1.08), ha="right", **strKwargs)
+            axes.annotate("median = ", xy=(x0 + deltaX, 1.07), ha="right", **strKwargs)
+            axes.annotate(medianStr, xy=(x0 + lenStr + deltaX, 1.07), ha="right", **strKwargs)
             deltaX += 0.004
         if statsUnitStr is not None:
-            axes.annotate(statsUnitStr, xy=(x0 + lenStr + deltaX, 1.08), ha="left", **strKwargs)
+            axes.annotate(statsUnitStr, xy=(x0 + lenStr + deltaX, 1.07), ha="left", **strKwargs)
         axes.annotate("stdev = ", xy=(x0, 1.035), ha="right", **strKwargs)
         axes.annotate(stdevStr, xy=(x0 + lenStr, 1.035), ha="right", **strKwargs)
         axes.annotate(r"N = {0} [mag<{1:.1f}]".format(stats0.num, magThreshold),
@@ -1090,9 +1114,11 @@ class Analysis(object):
         nz = matplotlib.colors.Normalize()
         nz.autoscale(e)
         cax, _ = matplotlib.colorbar.make_axes(plt.gca())
+        cax.tick_params(labelsize=7)
         cb = matplotlib.colorbar.ColorbarBase(cax, cmap=plt.cm.jet, norm=nz)
         cb.set_label(
-            r"ellipticity residual: $\delta_e$ = $\sqrt{(e1_{src}-e1_{psf})^2 + (e2_{src}-e2_{psf})^2}$")
+            r"ellipticity residual: $\delta_e$ = $\sqrt{(e1_{src}-e1_{psf})^2 + (e2_{src}-e2_{psf})^2}$",
+            rotation=-90, labelpad=16, fontsize=9)
 
         getQuiver(ra, dec, e1, e2, axes, color=plt.cm.jet(nz(e)), scale=scale, width=0.002, label=catStr)
 
@@ -1114,21 +1140,24 @@ class Analysis(object):
 
         x0 = 0.86
         lenStr = 0.1 + 0.022*(max(max(len(meanStr), len(stdevStr)) - 6, 0))
-        axes.annotate("mean = ", xy=(x0, 1.08), xycoords="axes fraction",
+        axes.annotate("mean = ", xy=(x0, 1.07), xycoords="axes fraction",
                       ha="right", va="center", fontsize=8)
-        axes.annotate(meanStr, xy=(x0 + lenStr, 1.08), xycoords="axes fraction",
+        axes.annotate(meanStr, xy=(x0 + lenStr, 1.07), xycoords="axes fraction",
                       ha="right", va="center", fontsize=8)
-        axes.annotate("stdev = ", xy=(x0, 1.035), xycoords="axes fraction",
+        axes.annotate("stdev = ", xy=(x0, 1.03), xycoords="axes fraction",
                       ha="right", va="center", fontsize=8)
-        axes.annotate(stdevStr, xy=(x0 + lenStr, 1.035), xycoords="axes fraction",
+        axes.annotate(stdevStr, xy=(x0 + lenStr, 1.03), xycoords="axes fraction",
                       ha="right", va="center", fontsize=8)
-        axes.annotate(r"N = {0}".format(stats0.num), xy=(x0 + lenStr + 0.02, 1.035), xycoords="axes fraction",
+        axes.annotate(r"N = {0}".format(stats0.num), xy=(x0 + lenStr + 0.02, 1.03), xycoords="axes fraction",
                       ha="left", va="center", fontsize=8)
 
         if plotInfoDict["hscRun"] is not None:
             axes.set_title("HSC stack run: " + plotInfoDict["hscRun"], color="#800080")
-        labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
-        labelVisit(plotInfoDict, fig, axes, 0.5, 1.04)
+        labelCamera(plotInfoDict, fig, axes, 0.5, 1.07, fontSize=8)
+        labelVisit(plotInfoDict, fig, axes, 0.5, 1.03, fontSize=8)
+        if self.config.doLabelRerun:
+            plotText("rerun: " + plotInfoDict["rerun"], plt, axes, 0.5, 1.11, fontSize=7, color="purple")
+
         if zpLabel is not None:
             plotText(zpLabel, fig, axes, 0.14, -0.08, prefix="zp: ", color="green")
         if uberCalLabel:
@@ -1136,7 +1165,7 @@ class Analysis(object):
         plotText(shapeAlgorithm, fig, axes, 0.85, -0.06, prefix="Shape Alg: ", fontSize=7, color="green")
         if forcedStr is not None:
             plotText(forcedStr, fig, axes, 0.85, -0.105, prefix="cat: ", fontSize=7, color="green")
-        axes.legend(loc="upper left", bbox_to_anchor=(0.0, 1.1), fancybox=True, shadow=True, fontsize=8)
+        axes.legend(loc="upper left", bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=7)
 
         yield Struct(fig=fig, description=description, stats=stats, statsHigh=None, dpi=150, style="quiver")
 
@@ -1174,6 +1203,9 @@ class Analysis(object):
             figDescription = description + str(figId + 1)
             labelCamera(plotInfoDict, fig, ax, 0.5, 1.09)
             labelVisit(plotInfoDict, fig, ax, 0.5, 1.04)
+            if self.config.doLabelRerun:
+                plotText("rerun: " + plotInfoDict["rerun"], fig, ax, 1.03, 0.5, fontSize=7, color="purple",
+                         rotation=-90)
             if zpLabel is not None:
                 plotText(zpLabel, fig, ax, xOff, yOff, prefix="zp: ", color="green")
             if uberCalLabel:
@@ -1245,6 +1277,9 @@ class Analysis(object):
                 figDescription = description + str(figId + 1)
                 labelCamera(plotInfoDict, fig, ax, 0.5, 1.09)
                 labelVisit(plotInfoDict, fig, ax, 0.5, 1.04)
+                if self.config.doLabelRerun:
+                    plotText("rerun: " + plotInfoDict["rerun"], fig, ax, 1.03, 0.5, fontSize=7,
+                             color="purple", rotation=-90)
                 if zpLabel is not None:
                     plotText(zpLabel, fig, ax, xOff, yOff, prefix="zp: ", fontSize=7, color="green")
                 if uberCalLabel:
@@ -1385,13 +1420,13 @@ class Analysis(object):
 
         ec.set_array(inputCounts)
         axes.add_collection(ec)
-        cbar = plt.colorbar(ec, extend=cbarExtend, fraction=0.04)
+        cbar = plt.colorbar(ec, extend=cbarExtend, fraction=0.04, pad=0.03)
         columnStr = fluxToPlotString(columnName)
         fluxScaleStr = "{:.0e}".format(fluxScale)
         columnStr = columnStr + "*" + fluxScaleStr if "instFlux" in columnName else columnStr
         cbar.set_label(columnStr + ": ellipse size * {:} [maxDiam = {:}] (pixels)".
-                       format(sizeFactor, maxDiamPix), fontsize=7)
-        cbar.ax.tick_params(direction="in", labelsize=7)
+                       format(sizeFactor, maxDiamPix), fontsize=7, rotation=-90, labelpad=10)
+        cbar.ax.tick_params(direction="in", labelsize=6)
 
         axes.set_xlim(tractBbox.getMinX(), tractBbox.getMaxX())
         axes.set_ylim(tractBbox.getMinY(), tractBbox.getMaxY())
@@ -1413,19 +1448,23 @@ class Analysis(object):
 
         textKwargs = dict(ha="left", va="center", transform=axes.transAxes, fontsize=7, color="blue")
         plt.text(-0.05, -0.07, str("{:.2f}".format(tract00.getX())), **textKwargs)
-        plt.text(-0.17, 0.00, str("{:.2f}".format(tract00.getY())), **textKwargs)
+        plt.text(-0.15, 0.00, str("{:.2f}".format(tract00.getY())), **textKwargs)
         plt.text(0.96, -0.07, str("{:.2f}".format(tractN0.getX())), **textKwargs)
-        plt.text(-0.17, 0.97, str("{:.2f}".format(tract0N.getY())), **textKwargs)
+        plt.text(-0.15, 0.97, str("{:.2f}".format(tract0N.getY())), **textKwargs)
         textKwargs["fontsize"] = 8
         plt.text(0.45, -0.11, "RA (deg)", **textKwargs)
-        plt.text(-0.17, 0.5, "Dec (deg)", rotation=90, **textKwargs)
+        plt.text(-0.15, 0.5, "Dec (deg)", rotation=90, **textKwargs)
 
         if doPlotPatchOutline:
             plotPatchOutline(axes, plotInfoDict["tractInfo"], plotInfoDict["patchList"], plotUnits="pixel",
                              idFontSize=5)
+        xOff = 0.0
         if plotInfoDict["cameraName"] is not None:
-            labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
-        labelVisit(plotInfoDict, fig, axes, 0.5, 1.04)
+            xOff = max(0.09, 0.03*len(plotInfoDict["cameraName"]))
+            labelCamera(plotInfoDict, fig, axes, 0.5 - xOff, 1.04)
+        labelVisit(plotInfoDict, fig, axes, 0.5 + xOff, 1.04)
+        if self.config.doLabelRerun:
+            plotText("rerun: " + plotInfoDict["rerun"], plt, axes, 0.5, 1.09, fontSize=7, color="purple")
         if forcedStr is not None:
             plotText(forcedStr, fig, axes, 0.80, -0.11, prefix="cat: ", fontSize=7, color="green")
         if uberCalLabel:
@@ -1586,6 +1625,8 @@ class Analysis(object):
         if plotInfoDict["cameraName"] is not None:
             labelCamera(plotInfoDict, fig, axes[0], 0.5, 1.04)
         labelVisit(plotInfoDict, fig, axes[1], 0.5, 1.04)
+        if self.config.doLabelRerun:
+            plotText("rerun: " + plotInfoDict["rerun"], plt, axes[0], 1.02, 1.09, fontSize=7, color="purple")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes[0], 0.99, -0.15, prefix="cat: ", fontSize=8, color="green")
 

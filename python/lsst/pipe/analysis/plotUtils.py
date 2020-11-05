@@ -321,7 +321,7 @@ def annotateAxes(description, axes, statsConf, dataSet, magThresholdConf, signal
     return l1, l2
 
 
-def labelVisit(plotInfoDict, fig, axis, xLoc, yLoc, color="k", fontSize=9):
+def labelVisit(plotInfoDict, fig, axis, xLoc, yLoc, color="k", fontSize=8):
     """Add Visit information to the plot.
 
     Parameters
@@ -349,7 +349,7 @@ def labelVisit(plotInfoDict, fig, axis, xLoc, yLoc, color="k", fontSize=9):
              color=color)
 
 
-def labelCamera(plotInfoDict, fig, axis, xLoc, yLoc, color="k", fontSize=10):
+def labelCamera(plotInfoDict, fig, axis, xLoc, yLoc, color="k", fontSize=9):
     labelStr = "camera: " + plotInfoDict["cameraName"]
     fig.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=fontSize, transform=axis.transAxes,
              color=color)

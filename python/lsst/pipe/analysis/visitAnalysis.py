@@ -1069,7 +1069,8 @@ class CompareVisitAnalysisTask(VisitAnalysisTask, CompareCoaddAnalysisTask):
             plotInfoDict.update({"ccdList": ccdIntersectList, "allCcdList": fullCameraCcdList1,
                                  "plotType": "plotCompareVisit", "subdir": subdir,
                                  "hscRun1": repoInfo1.hscRun, "hscRun2": repoInfo2.hscRun,
-                                 "hscRun": hscRun, "tractInfo": tractInfo1, "dataId": repoInfo1.dataId})
+                                 "hscRun": hscRun, "tractInfo": tractInfo1, "dataId": repoInfo1.dataId,
+                                 "rerun2": list(repoInfo2.butler.storage.repositoryCfgs)[0]})
             plotList = []
             if self.config.doPlotFootprintArea:
                 plotList.append(self.plotFootprint(catalog, plotInfoDict, areaDict1, **plotKwargs1))
