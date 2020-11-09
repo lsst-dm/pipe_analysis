@@ -557,28 +557,29 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     return
 
                 if self.config.doPlotMatches:
-                    # The apCorr backing out, if requested, and the purging of
-                    # deblend_nChild > 0 objects happens in readSrcMatches, but
-                    # label won't be set if plotMatchesOnly is True.
-                    self.catLabel = "isPrimary" if "isPrimary" not in self.catLabel else self.catLabel
-                    if self.config.doBackoutApCorr and "noApCorr" not in self.catLabel:
-                        self.catLabel += "\n     (noApCorr)"
+                    matchLabel = "matched to\n" + self.config.refObjLoader.ref_dataset_name
+                    matchLabel = (matchLabel + "\n     (noApCorr)" if self.config.doBackoutApCorr
+                                  else matchLabel)
+                    plotKwargs = dict(zpLabel=self.zpLabel, forcedStr=matchLabel)
                     # Dict of all parameters common to plot* functions
                     matchHighlightList = [
                         ("src_" + self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0,
-                         "turquoise"), ]
-                    plotList.append(self.plotMatches(matches, plotInfoDict, matchAreaDict,
-                                                     zpLabel=self.zpLabel, forcedStr=self.catLabel,
-                                                     highlightList=matchHighlightList))
+                         "turquoise"), ("src_deblend_nChild", 0, "lime"), ("src_parent", 0, "orange")]
+                    for ih, flagName in enumerate(list(self.config.analysis.flags)):
+                        flagName = "src_" + flagName
+                        if not any(flagName in highlight for highlight in matchHighlightList):
+                            matchHighlightList += [(flagName, 0, FLAGCOLORS[ih%len(FLAGCOLORS)]), ]
+                    plotKwargs.update(dict(highlightList=matchHighlightList, matchRadius=self.matchRadius,
+                                           matchRadiusUnitStr=self.matchRadiusUnitStr))
+                    plotList.append(self.plotMatches(matches, plotInfoDict, matchAreaDict, **plotKwargs))
 
                 for cat in self.config.externalCatalogs:
                     if self.config.photoCatName not in cat:
                         with andCatalog(cat):
                             matches = self.matchCatalog(catalog, plotInfoDict["filter"],
                                                         self.config.externalCatalogs[cat])
+                            matchLabel = "matched to\n" + self.config.externalCatalogs[cat]
                             plotList.append(self.plotMatches(matches, plotInfoDict, matchAreaDict,
-                                                             matchRadius=self.matchRadius,
-                                                             matchRadiusUnitStr=self.matchRadiusUnitStr,
                                                              **plotKwargs))
         metaDict = {"tract": plotInfoDict["tract"], "visit": plotInfoDict["visit"],
                     "filter": plotInfoDict["filter"]}

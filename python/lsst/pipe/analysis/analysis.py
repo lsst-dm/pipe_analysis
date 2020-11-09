@@ -268,14 +268,17 @@ class Analysis(object):
             # Ensure plot limits always encompass at least mean +/- 6.0*stdev,
             # at most mean +/- 20.0*stddev, and clipped stats range + 25%.
             dataType = "all" if "all" in self.data else "star"
+            nStdevMin = 6.0 if "matches" not in self.shortName else 10.0
+            nStdevMax = 20.0
             if self.stats[dataType].num > 0:
                 if not any(ss in self.shortName for ss in ["footArea", "distance", "pStar", "resolution",
                                                            "race", "psfInst", "psfCal", "Rho", "hsmRho",
                                                            "Rho_calib_psf_used", "hsmRho_calib_psf_used",
                                                            "Rho_all_stars", "hsmRho_all_stars"]):
-                    self.qMin = max(min(self.qMin, self.stats[dataType].mean - 6.0*self.stats[dataType].stdev,
+                    self.qMin = max(min(self.qMin,
+                                        self.stats[dataType].mean - nStdevMin*self.stats[dataType].stdev,
                                         self.stats[dataType].median - 1.25*self.stats[dataType].clip),
-                                    min(self.stats[dataType].mean - 20.0*self.stats[dataType].stdev,
+                                    min(self.stats[dataType].mean - nStdevMax*self.stats[dataType].stdev,
                                         -0.005*self.unitScale))
                     if (abs(self.stats[dataType].mean) < 0.0005*self.unitScale
                             and abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
@@ -286,9 +289,10 @@ class Analysis(object):
                                                            "psfInst", "psfCal", "Rho", "hsmRho",
                                                            "Rho_calib_psf_used", "hsmRho_calib_psf_used",
                                                            "Rho_all_stars", "hsmRho_all_stars"]):
-                    self.qMax = min(max(self.qMax, self.stats[dataType].mean + 6.0*self.stats[dataType].stdev,
+                    self.qMax = min(max(self.qMax,
+                                        self.stats[dataType].mean + nStdevMin*self.stats[dataType].stdev,
                                         self.stats[dataType].median + 1.25*self.stats[dataType].clip),
-                                    max(self.stats[dataType].mean + 20.0*self.stats[dataType].stdev,
+                                    max(self.stats[dataType].mean + nStdevMax*self.stats[dataType].stdev,
                                         0.005*self.unitScale))
                     if (abs(self.stats[dataType].mean) < 0.0005*self.unitScale
                             and abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
@@ -412,7 +416,7 @@ class Analysis(object):
                 galMin = np.round(2.5*np.log10(self.config.coaddClassFluxRatio) - 0.08, 2)*self.unitScale
                 deltaMin = max(0.0, self.qMin - galMin)
 
-        if self.magThreshold > 90.0:
+        if self.magThreshold > 90.0 or "matches" in self.shortName and "calib_" not in self.shortName:
             magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
         else:
             magMin, magMax = self.magMin, self.magMax
@@ -652,7 +656,7 @@ class Analysis(object):
             uberFontSize = 5 if "_2" in uberCalLabel else 7
             plotText(uberCalLabel, plt.gcf(), axScatter, 0.11, -0.13, fontSize=uberFontSize, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt.gcf(), axScatter, 0.87, -0.10, prefix="cat: ", fontSize=7, color="green")
+            plotText(forcedStr, plt.gcf(), axScatter, 0.86, -0.10, prefix="cat: ", fontSize=7, color="green")
         if extraLabels is not None:
             for i, extraLabel in enumerate(extraLabels):
                 plotText(extraLabel, plt.gcf(), axScatter, 0.3, 0.21 + i*0.05, fontSize=7, color="tab:orange")
