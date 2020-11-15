@@ -673,7 +673,7 @@ def plotPatchOutline(axes, tractInfo, patchList, plotUnits="deg", idFontSize=Non
                       fontsize=idFontSize, horizontalalignment="center", verticalalignment="center")
 
 
-def bboxToXyCoordLists(bbox, wcs=None, wcsUnits="deg"):
+def bboxToXyCoordLists(bbox, wcs=None, wcsUnits="deg", close=False):
     """Get the corners of a BBox and convert them to x and y coord lists.
 
     Parameters
@@ -686,6 +686,9 @@ def bboxToXyCoordLists(bbox, wcs=None, wcsUnits="deg"):
     wcsUnits : `str`, optional
         Coordinate units to be returned if a ``wcs`` is provided (ignored
         otherwise).  Can be either "deg" or "rad".
+    close : `bool`, optional
+        If `True`, close the polygon such that the starting and ending points
+        are the same.
 
     Raises
     ------
@@ -712,8 +715,11 @@ def bboxToXyCoordLists(bbox, wcs=None, wcsUnits="deg"):
         else:
             coord = p
             corners.append([coord.getX(), coord.getY()])
-    xCoords, yCoords = zip(*corners)
-    return xCoords, yCoords
+
+    if close:
+        corners.append(corners[0])
+    xCoords, yCorrds = zip(*corners)
+    return xCoords, yCorrds
 
 
 def getRaDecMinMaxPatchList(patchList, tractInfo, pad=0.0, nDecimals=4, raMin=360.0, raMax=0.0,
