@@ -1,0 +1,146 @@
+description: Make colour analysis plots
+tasks:
+  addQAColumns:
+    class: lsst.pipe.analysis.addQAColumns.AddQAColumnsTask
+  plot_wPerp_psfMag:
+    class: lsst.pipe.analysis.scatterPlot.ScatterPlotWithTwoHistsTask
+    config:
+      xColName: iPsMag
+      yColName: wPerp
+      xLabel: "PSF Mag i (mag)"
+      yLabel: "w Perp (griBlue) (mmag)"
+      connections.plotName: wPerp_iPsMag
+  plot_xPerp_psfMag:
+    class: lsst.pipe.analysis.scatterPlot.ScatterPlotWithTwoHistsTask
+    config:
+      xColName: iPsMag
+      yColName: xPerp
+      xLabel: "PSF Mag i (mag)"
+      yLabel: "x Perp (griRed) (mmag)"
+      connections.plotName: xPerp_iPsMag
+  plot_yPerp_psfMag:
+    class: lsst.pipe.analysis.scatterPlot.ScatterPlotWithTwoHistsTask
+    config:
+      xColName: iPsMag
+      yColName: yPerp
+      xLabel: "PSF Mag i (mag)"
+      yLabel: "y Perp (rizRed) (mmag)"
+      connections.plotName: yPerp_iPsMag
+  plot_ri_gr_CModel:
+    class: lsst.pipe.analysis.colorColorPlot.ColorColorPlotTask
+    config:
+      xColName: grCModelMag
+      yColName: riCModelMag
+      xLabel: "g - r [CModel] (mag)"
+      yLabel: "r - i [CModel] (mag)"
+      connections.plotName: ri_gr_CModel
+  plot_zy_iz_CModel:
+    class: lsst.pipe.analysis.colorColorPlot.ColorColorPlotTask
+    config:
+      xColName: izCModelMag
+      yColName: zyCModelMag
+      xLabel: "i - z [CModel] (mag)"
+      yLabel: "z - y [CModel] (mag)"
+      connections.plotName: zy_iz_CModel
+  plot_iz_ri_CModel:
+    class: lsst.pipe.analysis.colorColorPlot.ColorColorPlotTask
+    config:
+      xColName: riCModelMag
+      yColName: izCModelMag
+      xLabel: "r - i [CModel] (mag)"
+      yLabel: "i - z [CModel] (mag)"
+      connections.plotName: iz_ri_CModel
+  plot_iz_ri_CModel_byMag:
+    class: lsst.pipe.analysis.colorColorByMagPlot.ColorColorByMagPlotTask
+    config:
+      xColName: riCModelMag
+      yColName: izCModelMag
+      xLabel: "r - i [CModel] (mag)"
+      yLabel: "i - z [CModel] (mag)"
+      connections.plotName: iz_ri_CModel_byMag
+  plot_ri_gr_CModel_byMag:
+    class: lsst.pipe.analysis.colorColorByMagPlot.ColorColorByMagPlotTask
+    config:
+      xColName: grCModelMag
+      yColName: riCModelMag
+      xLabel: "g - r [CModel] (mag)"
+      yLabel: "r - i [CModel] (mag)"
+      connections.plotName: ri_gr_CModel_byMag
+  plot_zy_iz_CModel_byMag:
+    class: lsst.pipe.analysis.colorColorByMagPlot.ColorColorByMagPlotTask
+    config:
+      xColName: izCModelMag
+      yColName: zyCModelMag
+      xLabel: "i - z [CModel] (mag)"
+      yLabel: "z - y [CModel] (mag)"
+      connections.plotName: zy_iz_CModel_byMag
+  plot_wPerp_sky:
+    class: lsst.pipe.analysis.skyPlot.SkyPlotTask
+    config:
+      colorCodeValueColName: wPerp
+      connections.plotName: wPerp_sky
+  plot_xPerp_sky:
+    class: lsst.pipe.analysis.skyPlot.SkyPlotTask
+    config:
+      colorCodeValueColName: xPerp
+      connections.plotName: xPerp_sky
+  plot_yPerp_sky:
+    class: lsst.pipe.analysis.skyPlot.SkyPlotTask
+    config:
+      colorCodeValueColName: yPerp
+      connections.plotName: yPerp_sky
+  plot_griPSF_wFit:
+    class: lsst.pipe.analysis.colorColorFitPlot.ColorColorFitPlotTask
+    config:
+      xColName: grPsMag
+      yColName: riPsMag
+      xLabel: "g - r [PSF] (mag)"
+      yLabel: "r - i [PSF] (mag)"
+      name: "wFit"
+      connections.plotName: "PSF_wFit"
+  plot_griCModel_wFit:
+    class: lsst.pipe.analysis.colorColorFitPlot.ColorColorFitPlotTask
+    config:
+      xColName: grCModelMag
+      yColName: riCModelMag
+      xLabel: "g - r [CModel] (mag)"
+      yLabel: "r - i [CModel] (mag)"
+      name: "wFit"
+      connections.plotName: "CModel_wFit"
+  plot_griPSF_xFit:
+    class: lsst.pipe.analysis.colorColorFitPlot.ColorColorFitPlotTask
+    config:
+      xColName: grPsMag
+      yColName: riPsMag
+      xLabel: "g - r [PSF] (mag)"
+      yLabel: "r - i [PSF] (mag)"
+      name: "xFit"
+      connections.plotName: "PSF_xFit"
+  plot_griCModel_xFit:
+    class: lsst.pipe.analysis.colorColorFitPlot.ColorColorFitPlotTask
+    config:
+      xColName: grCModelMag
+      yColName: riCModelMag
+      xLabel: "g - r [CModel] (mag)"
+      yLabel: "r - i [CModel] (mag)"
+      name: "xFit"
+      connections.plotName: "CModel_xFit"
+  plot_rizPSF_yFit:
+    class: lsst.pipe.analysis.colorColorFitPlot.ColorColorFitPlotTask
+    config:
+      xColName: riPsMag
+      yColName: izPsMag
+      xLabel: "r - i [PSF] (mag)"
+      yLabel: "i - z [PSF] (mag)"
+      name: "xFit"
+      connections.plotName: "PSF_yFit"
+  plot_rizCModel_yFit:
+    class: lsst.pipe.analysis.colorColorFitPlot.ColorColorFitPlotTask
+    config:
+      xColName: riCModelMag
+      yColName: izCModelMag
+      xLabel: "r - i [CModel] (mag)"
+      yLabel: "i - z [CModel] (mag)"
+      name: "yFit"
+      connections.plotName: "CModel_yFit"
+  
