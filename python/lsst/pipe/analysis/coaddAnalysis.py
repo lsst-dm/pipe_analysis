@@ -35,6 +35,7 @@ from lsst.pipe.drivers.utils import TractDataIdContainer
 from lsst.afw.table.catalogMatches import matchesToCatalog
 from lsst.meas.astrom import AstrometryConfig
 from lsst.pipe.tasks.colorterms import Colorterm, ColortermLibrary
+from lsst.pipe.tasks.mergeDetections import matchCatalogsExact
 
 from lsst.meas.algorithms import LoadIndexedReferenceObjectsTask
 
@@ -67,6 +68,8 @@ class CoaddAnalysisConfig(Config):
     coaddName = Field(dtype=str, default="deep", doc="Name for coadd")
     matchRadiusRaDec = Field(dtype=float, default=0.5, doc="RaDec Matching radius (arcseconds)")
     matchOverlapRadius = Field(dtype=float, default=0.5, doc="Matching radius for overlaps (arcseconds)")
+    matchExact = Field(dtype=bool, default=False,
+                       doc="Match catalogs derived from the same mergeDet catalog exactly?")
     matchXy = Field(dtype=bool, default=False, doc="Perform matching based on X/Y pixel values?")
     matchRadiusXy = Field(dtype=float, default=3.0, doc=("X/Y Matching radius (pixels): "
                                                          "ignored unless matchXy=True"))
@@ -83,6 +86,7 @@ class CoaddAnalysisConfig(Config):
     matchesMaxDistance = Field(dtype=float, default=0.15, doc="Maximum plotting distance for matches")
     externalCatalogs = ConfigDictField(keytype=str, itemtype=AstrometryConfig, default={},
                                        doc="Additional external catalogs for matching")
+    maxPatchDigits = Field(dtype=int, default=2, doc="Maximum number of patches on a single side of a tract")
     refObjLoader = ConfigurableField(target=LoadIndexedReferenceObjectsTask, doc="Reference object loader")
     doPlotMags = Field(dtype=bool, default=True, doc="Plot magnitudes? (ignored if plotMatchesOnly is True)")
     doPlotSizes = Field(dtype=bool, default=True, doc="Plot PSF sizes? (ignored if plotMatchesOnly is True)")
@@ -126,7 +130,7 @@ class CoaddAnalysisConfig(Config):
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(fluxColumn)")
     # We want the following to come from the *_meas catalogs as they reflect
     # what happened in SFP calibration.
-    columnsToCopyFromMeas = ListField(dtype=str, default=["calib_", ],
+    columnsToCopyFromMeas = ListField(dtype=str, default=["calib_", "deblend_"],
                                       doc="List of string \"prefixes\" to identify the columns to copy.  "
                                       "All columns with names that start with one of these strings will be "
                                       "copied from the *_meas catalogs into the *_forced_src catalogs.")
@@ -1613,6 +1617,31 @@ class CompareCoaddAnalysisRunner(TaskRunner):
                 refList1, refList2 in zip(parsedCmd.id.refList, idParser.refList)]
 
 
+def patchToInt(patch, maxPatchDigits):
+    """Convert a patch to an integer
+
+    This function takes a patch ``"x,y"`` and converts it
+    to a unique integer.
+
+    Parameters
+    ----------
+    patch: str
+        Patch identifier of the form "x,y".
+    maxPatchDigits: int
+        Maximum number of patches on a side. For example,
+        in HSC the default is for a tract to have 9x9 patches,
+        so `maxPatchDigits=1`. However if a tract has between 10 to 99
+        patches on a side, then `maxPatchDigits=2`.
+
+    Returns
+    -------
+    result: int
+        The patch converted into a unique integer.
+    """
+    x, y = patch.split(",")
+    return int(x)*10**maxPatchDigits + int(y)
+
+
 class CompareCoaddAnalysisTask(CmdLineTask):
     ConfigClass = CompareCoaddAnalysisConfig
     RunnerClass = CompareCoaddAnalysisRunner
@@ -1814,10 +1843,14 @@ class CompareCoaddAnalysisTask(CmdLineTask):
     def readCatalogs(self, patchRefList, dataset, repoInfo):
         catList = []
         areaDict = {}
+
         for patchRef in patchRefList:
             if not patchRef.datasetExists(dataset):
                 continue
             patchCat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
+            patchId = patchToInt(patchRef.dataId["patch"], self.config.maxPatchDigits)
+            patchCat = addIntFloatOrStrColumn(patchCat, patchId, "patchId",
+                                              "Patch on which source was detected")
             catList.append(patchCat)
             fname = repoInfo.butler.getUri("deepCoadd_calexp", patchRef.dataId)
             reader = afwImage.ExposureFitsReader(fname)
@@ -1835,8 +1868,6 @@ class CompareCoaddAnalysisTask(CmdLineTask):
             patchCorners = wcs.pixelToSky(geom.Box2D(reader.readBBox()).getCorners())
             areaDict["corners_" + str(patchRef.dataId["patch"])] = patchCorners
 
-        catList = [patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS) for
-                   patchRef in patchRefList if patchRef.datasetExists(dataset)]
         if not catList:
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
         return Struct(catalog=concatenateCatalogs(catList), areaDict=areaDict)
@@ -1844,7 +1875,10 @@ class CompareCoaddAnalysisTask(CmdLineTask):
     def matchCatalogs(self, catalog1, catalog2, matchRadius=None, matchControl=None):
         matchRadius = matchRadius if matchRadius else self.matchRadius
         matchControl = matchControl if matchControl else self.matchControl
-        if self.config.matchXy:
+        if self.config.matchExact:
+            matches = matchCatalogsExact(catalog1, catalog2,
+                                         catalog1["patchId"], catalog2["patchId"])
+        elif self.config.matchXy:
             matches = afwTable.matchXy(catalog1, catalog2, matchRadius, matchControl)
         else:
             matches = afwTable.matchRaDec(catalog1, catalog2, matchRadius*geom.arcseconds, matchControl)
