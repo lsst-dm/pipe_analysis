@@ -40,9 +40,8 @@ except ImportError:
 __all__ = ["AllLabeller", "StarGalaxyLabeller", "OverlapsStarGalaxyLabeller", "MatchesStarGalaxyLabeller",
            "CosmosLabeller", "plotText", "annotateAxes", "labelVisit", "labelCamera",
            "filterStrFromFilename", "plotCameraOutline", "plotTractOutline", "plotPatchOutline",
-           "plotCcdOutline", "rotatePixelCoords", "bboxToXyCoordLists", "getRaDecMinMaxPatchList",
-           "percent", "setPtSize", "getQuiver", "makeAlphaCmap", "buildTractImage",
-           "determineExternalCalLabel", "getPlotInfo"]
+           "plotCcdOutline", "bboxToXyCoordLists", "getRaDecMinMaxPatchList", "percent", "setPtSize",
+           "getQuiver", "makeAlphaCmap", "buildTractImage", "determineExternalCalLabel", "getPlotInfo"]
 
 
 class AllLabeller(object):
@@ -60,7 +59,7 @@ class StarGalaxyLabeller(object):
     _column = "base_ClassificationExtendedness_value"
 
     def __call__(self, catalog):
-        starGal = catalog[self._column]
+        starGal = catalog[self._column].copy(deep=True)
         starGal[np.isnan(starGal)] = 9
         starGal[(starGal > 0.5) & (starGal < 1.5)] = 1
         starGal[starGal <= 0.5] = 0
@@ -77,12 +76,12 @@ class OverlapsStarGalaxyLabeller(StarGalaxyLabeller):
         self._second = second
 
     def __call__(self, catalog1, catalog2=None):
-        catalog2 = catalog2 if catalog2 else catalog1
-        starGal1 = catalog1[self._first + self._column]
+        catalog2 = catalog2 if catalog2 is not None else catalog1
+        starGal1 = catalog1[self._first + self._column].copy(deep=True)
         starGal1[np.isnan(starGal1)] = 9
         starGal1[(starGal1 > 0.5) & (starGal1 < 1.5)] = 1
         starGal1[starGal1 <= 0.5] = 0
-        starGal2 = catalog2[self._second + self._column]
+        starGal2 = catalog2[self._second + self._column].copy(deep=True)
         starGal2[np.isnan(starGal2)] = 9
         starGal2[(starGal2 > 0.5) & (starGal2 < 1.5)] = 1
         starGal2[starGal2 <= 0.5] = 0
@@ -322,7 +321,7 @@ def annotateAxes(description, axes, statsConf, dataSet, magThresholdConf, signal
     return l1, l2
 
 
-def labelVisit(plotInfoDict, fig, axis, xLoc, yLoc, color="k", fontSize=9):
+def labelVisit(plotInfoDict, fig, axis, xLoc, yLoc, color="k", fontSize=8):
     """Add Visit information to the plot.
 
     Parameters
@@ -350,7 +349,7 @@ def labelVisit(plotInfoDict, fig, axis, xLoc, yLoc, color="k", fontSize=9):
              color=color)
 
 
-def labelCamera(plotInfoDict, fig, axis, xLoc, yLoc, color="k", fontSize=10):
+def labelCamera(plotInfoDict, fig, axis, xLoc, yLoc, color="k", fontSize=9):
     labelStr = "camera: " + plotInfoDict["cameraName"]
     fig.text(xLoc, yLoc, labelStr, ha="center", va="center", fontsize=fontSize, transform=axis.transAxes,
              color=color)
@@ -662,27 +661,6 @@ def plotPatchOutline(axes, tractInfo, patchList, plotUnits="deg", idFontSize=Non
             axes.plot(xCoords, yCoords, color="black", lw=0.8, linestyle="dashed")
             axes.text(percent(xCoords), percent(yCoords, 0.5), str(patch.getIndex()),
                       fontsize=idFontSize, horizontalalignment="center", verticalalignment="center")
-
-
-def rotatePixelCoords(sources, width, height, nQuarter):
-    """Rotate catalog (x, y) pixel coordinates such that LLC of detector in FP
-    is (0, 0).
-    """
-    xKey = sources.schema.find("slot_Centroid_x").key
-    yKey = sources.schema.find("slot_Centroid_y").key
-    for s in sources:
-        x0 = s[xKey]
-        y0 = s[yKey]
-        if nQuarter == 1:
-            s.set(xKey, height - y0 - 1.0)
-            s.set(yKey, x0)
-        if nQuarter == 2:
-            s.set(xKey, width - x0 - 1.0)
-            s.set(yKey, height - y0 - 1.0)
-        if nQuarter == 3:
-            s.set(xKey, y0)
-            s.set(yKey, width - x0 - 1.0)
-    return sources
 
 
 def bboxToXyCoordLists(bbox, wcs=None, wcsUnits="deg"):
@@ -1029,6 +1007,8 @@ def getPlotInfo(repoInfo):
                 (`lsst.afw.cameraGeom.Camera`).
             ``"cameraName"``
                 The name of the camera used to take the data (`str`).
+            ``"ccdKey"``
+                The ccd/dectector key associated with this camera (`str`).
             ``"filter"``
                 The filter used for this data (`str`).
             ``"tract"``
@@ -1051,6 +1031,7 @@ def getPlotInfo(repoInfo):
     cameraName = camera.getName()
     dataId = repoInfo.dataId
     filterName = dataId["filter"]
+    ccdKey = repoInfo.ccdKey
     # Try to get the visit and patch id.  Set to None if not available.
     try:
         visit = str(dataId["visit"])
@@ -1066,7 +1047,7 @@ def getPlotInfo(repoInfo):
     skyWcsDataset = repoInfo.skyWcsDataset
     rerun = list(repoInfo.butler.storage.repositoryCfgs)[0]
 
-    plotInfoDict = dict(camera=camera, cameraName=cameraName, filter=filterName, tract=tract, visit=visit,
-                        patch=patch, photoCalibDataset=photoCalibDataset, skyWcsDataset=skyWcsDataset,
-                        rerun=rerun)
+    plotInfoDict = dict(camera=camera, cameraName=cameraName, filter=filterName, ccdKey=ccdKey, tract=tract,
+                        visit=visit, patch=patch, photoCalibDataset=photoCalibDataset,
+                        skyWcsDataset=skyWcsDataset, rerun=rerun)
     return plotInfoDict

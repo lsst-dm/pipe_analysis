@@ -22,9 +22,12 @@
 import re
 import operator
 
+import astropy.coordinates as coord
 import astropy.units as units
-import numpy as np
 import matplotlib.pyplot as plt
+import logging
+import numpy as np
+import pandas as pd
 import scipy.odr as scipyOdr
 import scipy.optimize as scipyOptimize
 import scipy.stats as scipyStats
@@ -32,13 +35,15 @@ import scipy.stats as scipyStats
 from contextlib import contextmanager
 
 from lsst.pipe.base import Struct, TaskError
-from lsst.pipe.tasks.parquetTable import ParquetTable
+from lsst.pipe.tasks.parquetTable import ParquetTable, MultilevelParquetTable
 
 import lsst.afw.cameraGeom as cameraGeom
 import lsst.geom as geom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 import lsst.pex.config as pexConfig
+import lsst.pex.exceptions as pexExceptions
+import lsst.sphgeom as sphgeom
 import lsst.verify as verify
 import treecorr
 
@@ -50,22 +55,25 @@ except ImportError:
 __all__ = ["Data", "Stats", "Enforcer", "MagDiff", "MagDiffMatches", "MagDiffCompare",
            "AstrometryDiff", "AngularDistance", "TraceSize", "PsfTraceSizeDiff", "TraceSizeCompare",
            "PercentDiff", "E1", "E2", "E1Resids", "E2Resids", "E1ResidsHsmRegauss", "E2ResidsHsmRegauss",
-           "FootNpixDiffCompare", "MagDiffErr", "MagDiffCompareErr", "ApCorrDiffErr",
-           "CentroidDiff", "CentroidDiffErr", "deconvMom", "deconvMomStarGal",
-           "concatenateCatalogs", "joinMatches", "checkIdLists", "checkPatchOverlap",
-           "joinCatalogs", "getFluxKeys", "addColumnsToSchema", "addApertureFluxesHSC", "addFpPoint",
-           "addFootprintNPix", "addRotPoint", "makeBadArray", "addFlag", "addIntFloatOrStrColumn",
-           "calibrateSourceCatalogMosaic", "calibrateSourceCatalogPhotoCalib",
-           "calibrateSourceCatalog", "calibrateCoaddSourceCatalog",
+           "FootAreaDiffCompare", "MagDiffErr", "MagDiffCompareErr", "ApCorrDiffErr",
+           "CentroidDiff", "CentroidDiffErr", "deconvMom", "deconvMomStarGal", "concatenateCatalogs",
+           "joinMatches", "matchAndJoinCatalogs", "checkIdLists", "checkPatchOverlap", "joinCatalogs",
+           "getFluxKeys", "addColumnsToSchema", "addApertureFluxesHSC", "addFpPoint", "addFootprintArea",
+           "addRotPoint", "makeBadArray", "addFlag", "addElementIdColumn", "addIntFloatOrStrColumn",
+           "calibrateSourceCatalogMosaic", "calibrateSourceCatalogPhotoCalib", "calibrateSourceCatalog",
            "backoutApCorr", "matchNanojanskyToAB", "checkHscStack", "fluxToPlotString", "andCatalog",
            "writeParquet", "getRepoInfo", "findCcdKey", "getCcdNameRefList", "getDataExistsRefList",
            "orthogonalRegression", "distanceSquaredToPoly", "p1CoeffsFromP2x0y0", "p2p1CoeffsFromLinearFit",
            "lineFromP2Coeffs", "linesFromP2P1Coeffs", "makeEqnStr", "catColors", "setAliasMaps",
            "addPreComputedColumns", "addMetricMeasurement", "updateVerifyJob", "computeMeanOfFrac",
-           "calcQuartileClippedStats", "savePlots"]
+           "calcQuartileClippedStats", "savePlots", "getSchema", "loadRefCat",
+           "loadDenormalizeAndUnpackMatches", "loadReferencesAndMatchToCatalog",
+           "computePhotoCalibScaleArray", "computeAreaDict", "determineIfSrcOnElement",
+           "getParquetColumnsList"]
 
 
 NANOJANSKYS_PER_AB_FLUX = (0*units.ABmag).to_value(units.nJy)
+log = logging.getLogger(__name__)
 
 
 def savePlots(plotList, plotType, dataId, butler, subdir=""):
@@ -121,31 +129,31 @@ def writeParquet(dataRef, table, badArray=None, prefix=""):
     ----------
     dataRef : `lsst.daf.persistence.butlerSubset.ButlerDataRef`
         Reference to butler dataset.
-    table : `lsst.afw.table.SourceCatalog`
+    table : `lsst.afw.table.SourceCatalog` or `pandas.core.frame.DataFrame`
         Table to be written to parquet.
-    badArray : `numpy.ndarray`, optional
+    badArray : `numpy.ndarray` or `None`, optional
         Boolean array with same length as catalog whose values indicate whether
         the source was deemed inappropriate for qa analyses.
     prefix : `str`, optional
         A string to be prepended to the column id name.
 
-    Returns
-    -------
-    None
-
     Notes
     -----
-    This function first converts the afwTable to an astropy table,
-    then to a pandas DataFrame, which is then written to parquet
-    format using the butler.
+    If ``table`` is an instance of `lsst.afw.table.SourceCatalog`, this
+    function first converts the afwTable to an astropy table, then to a pandas
+    DataFrame, which is then written to parquet format using the butler.
     """
-    if badArray is not None:
+    schema = getSchema(table)
+    if badArray is not None and "qaBad_flag" not in schema:
         # Add flag indicating source "badness" for qa analyses for the benefit
         # of the Parquet files being written to disk for subsequent interactive
         # QA analysis.
         table = addFlag(table, badArray, "qaBad_flag", "Set to True for any source deemed bad for qa")
-    df = table.asAstropy().to_pandas()
-    df = df.set_index(prefix + "id", drop=False)
+    if isinstance(table, pd.DataFrame):
+        df = table
+    else:
+        df = table.asAstropy().to_pandas() if not isinstance(table, pd.DataFrame) else table
+        df = df.set_index(prefix + "id", drop=False)
 
     dataRef.put(ParquetTable(dataFrame=df))
 
@@ -208,7 +216,7 @@ class MagDiff(object):
         self.unitScale = unitScale
 
     def __call__(self, catalog1, catalog2=None):
-        catalog2 = catalog2 if catalog2 else catalog1
+        catalog2 = catalog2 if catalog2 is not None else catalog1
         return -2.5*np.log10(catalog1[self.col1]/catalog2[self.col2])*self.unitScale
 
 
@@ -618,17 +626,17 @@ class RhoStatistics(object):
         return rhoStats
 
 
-class FootNpixDiffCompare(object):
-    """Functor to calculate footprint nPix difference between two entries in
+class FootAreaDiffCompare(object):
+    """Functor to calculate footprint area difference between two entries in
     comparison catalogs.
     """
     def __init__(self, column):
         self.column = column
 
     def __call__(self, catalog):
-        nPix1 = catalog["first_" + self.column]
-        nPix2 = catalog["second_" + self.column]
-        return nPix1 - nPix2
+        footprintArea1 = catalog["first_" + self.column]
+        footprintArea2 = catalog["second_" + self.column]
+        return footprintArea1 - footprintArea2
 
 
 class MagDiffCompareErr(object):
@@ -679,31 +687,25 @@ class CentroidDiffErr(CentroidDiff):
     """Functor to calculate difference error for astrometry.
     """
     def __call__(self, catalog):
-        firstx = self.first + self.centroid + "_xErr"
-        firsty = self.first + self.centroid + "_yErr"
-        secondx = self.second + self.centroid + "_xErr"
-        secondy = self.second + self.centroid + "_yErr"
+        first = self.first + self.centroid + "_" + self.component + "Err"
+        second = self.second + self.centroid + "_" + self.component + "Err"
 
-        subkeys1 = [catalog.schema[firstx].asKey(), catalog.schema[firsty].asKey()]
-        subkeys2 = [catalog.schema[secondx].asKey(), catalog.schema[secondy].asKey()]
-        menu = {"x": 0, "y": 1}
-
-        return np.hypot(catalog[subkeys1[menu[self.component]]],
-                        catalog[subkeys2[menu[self.component]]])*self.unitScale
+        return np.hypot(catalog[first], catalog[second])*self.unitScale
 
 
 def deconvMom(catalog):
     """Calculate deconvolved moments.
     """
-    if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+    schema = getSchema(catalog)
+    if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
         hsm = catalog["ext_shapeHSM_HsmSourceMoments_xx"] + catalog["ext_shapeHSM_HsmSourceMoments_yy"]
     else:
         hsm = np.ones(len(catalog))*np.nan
     sdss = catalog["base_SdssShape_xx"] + catalog["base_SdssShape_yy"]
-    if "ext_shapeHSM_HsmPsfMoments_xx" in catalog.schema:
+    if "ext_shapeHSM_HsmPsfMoments_xx" in schema:
         psfXxName = "ext_shapeHSM_HsmPsfMoments_xx"
         psfYyName = "ext_shapeHSM_HsmPsfMoments_yy"
-    elif "base_SdssShape_psf_xx" in catalog.schema:
+    elif "base_SdssShape_psf_xx" in schema:
         psfXxName = "base_SdssShape_psf_xx"
         psfYyName = "base_SdssShape_psf_yy"
     else:
@@ -725,9 +727,23 @@ def deconvMomStarGal(catalog):
 
 
 def concatenateCatalogs(catalogList):
-    assert len(catalogList) > 0, "No catalogs to concatenate"
+    """Concatenate a list of catalogs.
+
+    Parameters
+    ----------
+    catalogList : `list` of `lsst.afw.table.SourceCatalog`
+       The `list` of catalogs to concatenate.
+
+    Returns
+    -------
+    catalog : `lsst.afw.table.SourceCatalog` or `None`
+       The concatenated catalog or `None` if ``catalogList`` is empty.
+    """
+    if len(catalogList) == 0:  # "No catalogs to concatenate"
+        return None
     template = catalogList[0]
-    catalog = type(template)(template.schema)
+    schema = getSchema(template)
+    catalog = type(template)(schema)
     catalog.reserve(sum(len(cat) for cat in catalogList))
     for cat in catalogList:
         catalog.extend(cat, True)
@@ -735,6 +751,22 @@ def concatenateCatalogs(catalogList):
 
 
 def joinMatches(matches, first="first_", second="second_"):
+    """Join a match catalog into a base source catalog.
+
+    Parameters
+    ----------
+    matches : `lsst.afw.table.match.SimpleMatch`
+        The catalog of unpacked matches to join, i.e. a list of Match objects
+        whose schema has "first" and "second" attributes which, resepectively,
+        contain the reference and source catalog entries, and a "distance"
+        field (the measured distance between the reference and source objects).
+
+    Returns
+    -------
+    catalog : `lsst.afw.table.SourceCatalog`
+        The joined matched catalog with prefixes ``first`` and ``second``
+        for reference and source entries, respectively.
+    """
     if not matches:
         return []
 
@@ -746,7 +778,7 @@ def joinMatches(matches, first="first_", second="second_"):
     distanceKey = schema.addField("distance", type="Angle",
                                   doc="Distance between {0:s} and {1:s}".format(first, second))
     catalog = afwTable.BaseCatalog(schema)
-    aliases = catalog.schema.getAliasMap()
+    aliases = schema.getAliasMap()
     catalog.reserve(len(matches))
     for mm in matches:
         row = catalog.addNew()
@@ -761,23 +793,116 @@ def joinMatches(matches, first="first_", second="second_"):
     return catalog
 
 
+def matchAndJoinCatalogs(catalog1, catalog2, matchRadius, raColStr="coord_ra", decColStr="coord_dec",
+                         unit=units.rad, prefix1="first_", prefix2="second_", nthNeighbor=1, log=None,
+                         matchXy=False, camera1=None, camera2=None):
+    """Match two catalogs by RA/Dec or x/y using astropy and join the results.
+
+    Parameters
+    ----------
+    catalog1, catalog2 : `pandas.core.frame.DataFrame`
+        The two catalogs on which to do the matching.
+    matchRadius : `float`
+        The match radius within which to consider two objects a match in units
+        of arcsec if ``matchXy`` is `False` else in pixels (which will get
+        converted to arcsec prior to matching).
+    raColStr, decColStr : `str`, optional
+        The string names for the RA and Dec columns in the catalogs.
+    unit : `astropy.units.core.IrreducibleUnit`, optional
+        The astropy compliant unit to use in the matching.
+    prefix1, prefix2 : `str`, optional
+        The prefix strings to prepend to the two catalogs upon joining them.
+    nthNeighbor : `int`, optional
+        Which closest neighbor to search for in astropy's match_coordinates_sky
+        function.  As per the astropy documentation, this is typically 1 as is
+        appropriate for matching one set of coordinates to another. Another use
+        case is 2, for matching a coordinate catalog against itself (i.e. when
+        ``catalog1`` and ``catalog2`` are actually the same catalog, as in our
+        overlaps identification case).  A value of 1 would inappropriate in
+        that case because each point will find itself as the closest match).
+        However, this is not robust agaist other zero distance matches (i.e.
+        if any object other than the source itself has identical coordinates,
+        the returned index may still be that of "self" as it will just choose
+        between the two, and the choice may be that of "self").
+    log : `lsst.log.Log` or `None`, optional
+        Logger object for logging messages.
+    camera1, camera2 : `lsst.afw.cameraGeom.Camera` or `None`, optional
+        The cameras associated with ``catalog1`` and ``catalog2``.
+    matchXy : `bool`, optional
+        Whether to perform the matching in "x/y" pixel coordinates (these are
+        converted to pseudo-arcsec coordinates to make use of astropy's
+        match_coordinates_sky function).
+
+    Raises
+    ------
+    RuntimeError
+        If ``matchXy`` is `True` but either ``camera1`` or ``camera2`` was not
+        provided.
+
+    Returns
+    -------
+    matches : `pandas.core.frame.DataFrame`
+        The matched and joined catalog.  The parameters associated with
+        ``catalog1`` and ``catalog2`` are prefixed with ``prefix1`` and
+        ``prefix2``, respectively.
+    """
+    if matchXy:
+        if camera1 is None or camera2 is None:
+            raise RuntimeError(f"matchXy is True, but at least one of the two cameras was not provided: "
+                               f"camera1 = {camera1}, camera2 = {camera2}")
+        # The astropy matching requires "sky" coordinates, so convert to rough
+        # "arcsec" units.
+        pixelSize1 = camera1[0].getPixelSize()[0]  # rough arcsec/pixel (assumes square pixels)
+        pixelSize2 = camera2[0].getPixelSize()[0]  # rough arcsec/pixel (assumes square pixels)
+        matchRadius *= pixelSize1  # convert from pixel to arcsec
+        skyCoords1 = coord.SkyCoord(catalog1["slot_Centroid_x"]*pixelSize1,
+                                    catalog1["slot_Centroid_y"]*pixelSize1,
+                                    unit=units.arcsec)
+        skyCoords2 = coord.SkyCoord(catalog2["slot_Centroid_x"]*pixelSize2,
+                                    catalog2["slot_Centroid_y"]*pixelSize2,
+                                    unit=units.arcsec)
+    else:
+        skyCoords1 = coord.SkyCoord(catalog1[raColStr], catalog1[decColStr], unit=unit)
+        skyCoords2 = coord.SkyCoord(catalog2[raColStr], catalog2[decColStr], unit=unit)
+    inds, dists, _ = coord.match_coordinates_sky(skyCoords1, skyCoords2, nthneighbor=nthNeighbor)
+    if nthNeighbor > 1:
+        selfMatches = [i == ind for i, ind in enumerate(inds)]
+        if sum(selfMatches) > 0 and log is not None:
+            log.warn("There were {} objects self-matched by "
+                     "astropy.coordinates.match_coordinates_sky()").format(sum(selfMatches))
+    matchedIds = dists < matchRadius*units.arcsec
+    matchedIndices = inds[matchedIds]
+    matchedDistances = dists[matchedIds]
+    matchFirst = catalog1[matchedIds].copy(deep=True)
+    matchSecond = catalog2.iloc[matchedIndices].copy(deep=True)
+    matchFirst.rename(columns=lambda x: prefix1 + x, inplace=True)
+    matchSecond.rename(columns=lambda x: prefix2 + x, inplace=True)
+    matchFirst.index = pd.RangeIndex(len(matchFirst.index))
+    matchSecond.index = pd.RangeIndex(len(matchSecond.index))
+    matches = pd.concat([matchFirst, matchSecond], axis=1)
+    matches["distance"] = matchedDistances.rad
+    return matches
+
+
 def checkIdLists(catalog1, catalog2, prefix=""):
     # Check to see if two catalogs have an identical list of objects by id
+    schema1 = getSchema(catalog1)
+    schema2 = getSchema(catalog2)
     idStrList = ["", ""]
-    for i, cat in enumerate((catalog1, catalog2)):
-        if "id" in cat.schema:
+    for i, schema in enumerate([schema1, schema2]):
+        if "id" in schema:
             idStrList[i] = "id"
-        elif "objectId" in cat.schema:
+        elif "objectId" in schema:
             idStrList[i] = "objectId"
-        elif prefix + "id" in cat.schema:
+        elif prefix + "id" in schema:
             idStrList[i] = prefix + "id"
-        elif prefix + "objectId" in cat.schema:
+        elif prefix + "objectId" in schema:
             idStrList[i] = prefix + "objectId"
         else:
-            raise RuntimeError("Cannot identify object id field (tried id, objectId, " + prefix + "id, and "
-                               + prefix + "objectId)")
-
-    return np.all(catalog1[idStrList[0]] == catalog2[idStrList[1]])
+            raise RuntimeError("Cannot identify object id field (tried id, objectId, {0:}id, and "
+                               "{0:}objectId)".format(prefix))
+    identicalIds = np.all(catalog1[idStrList[0]] == catalog2[idStrList[1]])
+    return identicalIds
 
 
 def checkPatchOverlap(patchList, tractInfo):
@@ -796,9 +921,12 @@ def checkPatchOverlap(patchList, tractInfo):
                 patchIndex = [int(val) for val in patch1.split(",")]
                 patchInfo = tractInfo.getPatchInfo(patchIndex)
                 patchBBox1 = patchInfo.getOuterBBox()
-                if patchBBox0.overlaps(patchBBox1):
-                    overlappingPatches = True
-                    break
+                xCen0, xCen1 = patchBBox0.getCenterX(), patchBBox1.getCenterX()
+                yCen0, yCen1 = patchBBox0.getCenterY(), patchBBox1.getCenterY()
+                if xCen0 == xCen1 or yCen0 == yCen1:  # omit patches that only overlap at corners
+                    if patchBBox0.overlaps(patchBBox1):
+                        overlappingPatches = True
+                        break
         if overlappingPatches:
             break
     return overlappingPatches
@@ -829,29 +957,33 @@ def getFluxKeys(schema):
     Both are returned as dicts indexed on the flux name (e.g.
     "base_PsfFlux_instFlux" or "modelfit_CModel_instFlux").
     """
-    fluxTypeStr = "_instFlux"
-    fluxSchemaItems = schema.extract("*" + fluxTypeStr)
-    # Do not include any flag fields (as determined by their type).  Also
-    # exclude slot fields, as these would effectively duplicate whatever they
-    # point to.
-    fluxKeys = dict((name, schemaItem.key) for name, schemaItem in list(fluxSchemaItems.items()) if
-                    schemaItem.field.getTypeString() != "Flag"
-                    and not name.startswith("slot"))
-    errSchemaItems = schema.extract("*" + fluxTypeStr + "Err")
-    errKeys = dict((name, schemaItem.key) for name, schemaItem in list(errSchemaItems.items()) if
-                   name[:-len("Err")] in fluxKeys)
+    if isinstance(schema, list):
+        fluxKeys = {flux: flux for flux in schema if flux.endswith("_instFlux") and flux + "Err" in schema}
+        errKeys = {flux + "Err": flux + "Err" for (flux, flux) in fluxKeys.items()}
+    else:
+        fluxTypeStr = "_instFlux"
+        fluxSchemaItems = schema.extract("*" + fluxTypeStr)
+        # Do not include any flag fields (as determined by their type).  Also
+        # exclude slot fields, as these would effectively duplicate whatever
+        # they point to.
+        fluxKeys = dict((name, schemaItem.key) for name, schemaItem in list(fluxSchemaItems.items()) if
+                        schemaItem.field.getTypeString() != "Flag"
+                        and not name.startswith("slot"))
+        errSchemaItems = schema.extract("*" + fluxTypeStr + "Err")
+        errKeys = dict((name, schemaItem.key) for name, schemaItem in list(errSchemaItems.items()) if
+                       name[:-len("Err")] in fluxKeys)
 
-    # Also check for any in HSC format
-    schemaKeys = dict((s.field.getName(), s.key) for s in schema)
-    fluxKeysHSC = dict((name, key) for name, key in schemaKeys.items() if
-                       (re.search(r"^(flux\_\w+|\w+\_flux)$", name)
-                        or re.search(r"^(\w+flux\_\w+|\w+\_flux)$", name))
-                       and not re.search(r"^(\w+\_apcorr)$", name) and name + "_err" in schemaKeys)
-    errKeysHSC = dict((name + "_err", schemaKeys[name + "_err"]) for name in fluxKeysHSC.keys() if
-                      name + "_err" in schemaKeys)
-    if fluxKeysHSC:
-        fluxKeys.update(fluxKeysHSC)
-        errKeys.update(errKeysHSC)
+        # Also check for any in HSC format
+        schemaKeys = dict((s.field.getName(), s.key) for s in schema)
+        fluxKeysHSC = dict((name, key) for name, key in schemaKeys.items() if
+                           (re.search(r"^(flux\_\w+|\w+\_flux)$", name)
+                            or re.search(r"^(\w+flux\_\w+|\w+\_flux)$", name))
+                           and not re.search(r"^(\w+\_apcorr)$", name) and name + "_err" in schemaKeys)
+        errKeysHSC = dict((name + "_err", schemaKeys[name + "_err"]) for name in fluxKeysHSC.keys() if
+                          name + "_err" in schemaKeys)
+        if fluxKeysHSC:
+            fluxKeys.update(fluxKeysHSC)
+            errKeys.update(errKeysHSC)
 
     if not fluxKeys:
         raise RuntimeError("No flux keys found")
@@ -924,6 +1056,20 @@ def addApertureFluxesHSC(catalog, prefix=""):
 def addFpPoint(det, catalog, prefix=""):
     """Compute Focal Plane coordinates for SdssCentroid of each source and add
     to schema.
+
+    Parameters
+    ----------
+    det : `lsst.afw.cameraGeom.Detector`
+        The detector (ccd) under consideration.
+    catalog : `lsst.afw.table.SourceCatalog`
+        The source catalog to which to add the Focal Plane point columns.
+    prefix : `str`, optional
+        An optional string to be prepended to the column id name.
+
+    Returns
+    -------
+    newCatalog : `lsst.afw.table.SourceCatalog`
+       New source catalog with the Focal Plane point and flag columns added.
     """
     mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
@@ -952,58 +1098,98 @@ def addFpPoint(det, catalog, prefix=""):
     return newCatalog
 
 
-def addFootprintNPix(catalog, fromCat=None, prefix=""):
-    # Retrieve the number of pixels in an sources footprint and add to schema
+def addFootprintArea(catalog, fromCat=None, prefix=""):
+    """Retrieve the number of pixels in an sources footprint and add to schema.
+
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.SourceCatalog`
+        The source catalog to which to add the footprint area column.
+    fromCat : `lsst.afw.table.SourceCatalog`, optional
+        If not `None`, retrieve the footprints from this catalog.
+    prefix : `str`, optional
+        An optional string to be prepended to the column id name.
+
+    Raises
+    ------
+    TaskError
+        If lengths of ``catalog`` and ``fromCat`` (if not `None`) are not
+        equal.
+
+    Returns
+    -------
+    newCatalog : `lsst.afw.table.SourceCatalog`
+        A new source catalog with the footprint area and flag columns added.
+    """
     mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
     mapper.addMinimalSchema(catalog[0].schema)
     schema = mapper.getOutputSchema()
-    fpName = prefix + "base_Footprint_nPix"
-    fpKey = schema.addField(fpName, type="I", doc="Number of pixels in Footprint")
-    fpFlag = schema.addField(fpName + "_flag", type="Flag", doc="Set to True for any fatal failure")
+    fpName = prefix + "base_FootprintArea_value"
+    fpFlagName = prefix + fpName[:fpName.find("value")] + "flag"
+    fpKey = schema.addField(fpName, type="I",
+                            doc="Area (i.e. number of pixels) in the source's detection footprint")
+    fpFlag = schema.addField(fpFlagName, type="Flag", doc="Set to True for any fatal failure")
     newCatalog = afwTable.SourceCatalog(schema)
     newCatalog.reserve(len(catalog))
     if fromCat:
         if len(fromCat) != len(catalog):
-            raise TaskError("Lengths of fromCat and catalog for getting footprint Npixs do not agree")
+            raise TaskError("Lengths of fromCat and catalog for getting footprint areas do not agree")
     if fromCat is None:
         fromCat = catalog
     for srcFrom, srcTo in zip(fromCat, catalog):
         row = newCatalog.addNew()
         row.assign(srcTo, mapper)
         try:
-            footNpix = srcFrom.getFootprint().getArea()
+            footArea = srcFrom.getFootprint().getArea()
         except Exception:
-            raise
-            footNpix = 0  # used to be np.nan, but didn't work.
+            footArea = 0  # used to be np.nan, but didn't work.
             row.set(fpFlag, True)
-        row.set(fpKey, footNpix)
+        row.set(fpKey, footArea)
     return newCatalog
 
 
-def rotatePixelCoord(s, width, height, nQuarter):
+def rotatePixelCoord(src, width, height, nQuarter):
     """Rotate single (x, y) pixel coordinate such that LLC of detector in FP
     is (0, 0).
     """
-    xKey = s.schema.find("slot_Centroid_x").key
-    yKey = s.schema.find("slot_Centroid_y").key
-    x0 = s[xKey]
-    y0 = s[yKey]
+    x0 = src["slot_Centroid_x"]
+    y0 = src["slot_Centroid_y"]
     if nQuarter == 1:
-        s.set(xKey, height - y0 - 1.0)
-        s.set(yKey, x0)
+        src["slot_Centroid_x"] = height - y0 - 1.0
+        src["slot_Centroid_y"] = x0
     if nQuarter == 2:
-        s.set(xKey, width - x0 - 1.0)
-        s.set(yKey, height - y0 - 1.0)
+        src["slot_Centroid_x"] = width - x0 - 1.0
+        src["slot_Centroid_y"] = height - y0 - 1.0
     if nQuarter == 3:
-        s.set(xKey, y0)
-        s.set(yKey, width - x0 - 1.0)
-    return s
+        src["slot_Centroid_x"] = y0
+        src["slot_Centroid_y"] = width - x0 - 1.0
+    return src
 
 
 def addRotPoint(catalog, width, height, nQuarter, prefix=""):
-    # Compute rotated CCD pixel coords for comparing LSST vs HSC run centroids
-    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
-    mapper.addMinimalSchema(catalog[0].schema)
+    """Compute rotated CCD pixel coords for comparing LSST vs HSC run
+    centroids.
+
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.SourceCatalog`
+        The source catalog to which to add the rotated point columns.
+    width, height : `float`
+        The width and height of the detector associated with the ``catalog``.
+    nQuarter : `int`
+        The number of 90 degree rotations of the detector associated with the
+        ``catalog``.
+    prefix : `str`, optional
+        An optional string to be prepended to the column id name.
+
+    Returns
+    -------
+    newCatalog : `lsst.afw.table.SourceCatalog`
+        A new source catalog with the rotated point and flag columns added.
+    """
+    schema = getSchema(catalog[0])
+    mapper = afwTable.SchemaMapper(schema, shareAliasMap=True)
+    mapper.addMinimalSchema(schema)
     schema = mapper.getOutputSchema()
     rotName = prefix + "base_SdssCentroid_Rot"
     rotxKey = schema.addField(rotName + "_x", type="D", doc="Centroid x (in rotated pixels)")
@@ -1047,9 +1233,9 @@ def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True,
 
     Parameters
     ----------
-    catalog : `lsst.afw.table.SourceCatalog`
+    catalog : `lsst.afw.table.SourceCatalog` or `pandas.core.frame.DataFrame`
         The source catalog under consideration.
-    flagList : `list`
+    flagList : `list`, optional
         The list of flags for which, if any is set for a given source, set bad
         entry to `True` for that source.
     onlyReadStars : `bool`, optional
@@ -1070,18 +1256,38 @@ def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True,
        Boolean array with same length as catalog whose values indicate whether
        the source was deemed inappropriate for qa analyses.
     """
+    schema = getSchema(catalog)
     bad = np.zeros(len(catalog), dtype=bool)
-    if "detect_isPatchInner" in catalog.schema and patchInnerOnly:
-        bad |= ~catalog["detect_isPatchInner"]
-    if "detect_isTractInner" in catalog.schema and tractInnerOnly:
-        bad |= ~catalog["detect_isTractInner"]
-    bad |= catalog["deblend_nChild"] > 0  # Exclude non-deblended (i.e. parents)
-    if "merge_peak_sky" in catalog.schema:
-        bad |= catalog["merge_peak_sky"]  # Exclude "sky" objects (currently only inserted in coadds)
-    for flag in flagList:
-        bad |= catalog[flag]
-    if onlyReadStars and "base_ClassificationExtendedness_value" in catalog.schema:
-        bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
+    if isinstance(catalog, pd.DataFrame):
+        if "detect_isPatchInner" in schema and patchInnerOnly:
+            bad |= ~catalog["detect_isPatchInner"].values
+        if "detect_isTractInner" in schema and tractInnerOnly:
+            bad |= ~catalog["detect_isTractInner"].values
+        bad |= catalog["deblend_nChild"].values > 0  # Exclude non-deblended (i.e. parents)
+        # Exclude "sky" objects from catalogs (column names differ for visit
+        # and coadd catalogs).
+        for skyObjectCol in ["merge_peak_sky", "sky_source"]:
+            if skyObjectCol in schema:
+                bad |= catalog[skyObjectCol].values
+        for flag in flagList:
+            bad |= catalog[flag].values
+        if onlyReadStars and "base_ClassificationExtendedness_value" in schema:
+            bad |= catalog["base_ClassificationExtendedness_value"].values > 0.5
+    else:
+        if "detect_isPatchInner" in schema and patchInnerOnly:
+            bad |= ~catalog["detect_isPatchInner"]
+        if "detect_isTractInner" in schema and tractInnerOnly:
+            bad |= ~catalog["detect_isTractInner"]
+        bad |= catalog["deblend_nChild"] > 0  # Exclude non-deblended (i.e. parents)
+        # Exclude "sky" objects from catalogs (column names differ for visit
+        # and coadd catalogs).
+        for skyObjectCol in ["merge_peak_sky", "sky_source"]:
+            if skyObjectCol in schema:
+                bad |= catalog[skyObjectCol]
+        for flag in flagList:
+            bad |= catalog[flag]
+        if onlyReadStars and "base_ClassificationExtendedness_value" in schema:
+            bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
     return bad
 
 
@@ -1090,7 +1296,7 @@ def addFlag(catalog, badArray, flagName, doc="General failure flag"):
 
     Parameters
     ----------
-    catalog : `lsst.afw.table.SourceCatalog`
+    catalog : `lsst.afw.table.SourceCatalog` or `pandas.core.frame.DataFrame`
         Source catalog to which the flag will be added.
     badArray : `numpy.ndarray`
         Boolean array with same length as catalog whose values indicate whether
@@ -1107,23 +1313,60 @@ def addFlag(catalog, badArray, flagName, doc="General failure flag"):
 
     Returns
     -------
-    newCatalog : `lsst.afw.table.SourceCatalog`
+    newCatalog : `lsst.afw.table.SourceCatalog` or
+                 `pandas.core.frame.DataFrame`
         Source catalog with ``flagName`` column added.
     """
     if len(catalog) != len(badArray):
         raise RuntimeError("Lengths of catalog and bad objects array do not match.")
 
-    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
-    mapper.addMinimalSchema(catalog[0].schema)
-    schema = mapper.getOutputSchema()
-    badFlag = schema.addField(flagName, type="Flag", doc=doc)
-    newCatalog = afwTable.SourceCatalog(schema)
-    newCatalog.reserve(len(catalog))
-    newCatalog.extend(catalog, mapper)
+    if isinstance(catalog, pd.DataFrame):
+        catalog[flagName] = badArray
+        newCatalog = catalog
+    else:
+        mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
+        mapper.addMinimalSchema(catalog[0].schema)
+        schema = mapper.getOutputSchema()
+        badFlag = schema.addField(flagName, type="Flag", doc=doc)
+        newCatalog = afwTable.SourceCatalog(schema)
+        newCatalog.reserve(len(catalog))
+        newCatalog.extend(catalog, mapper)
 
-    for i, row in enumerate(newCatalog):
-        row.set(badFlag, bool(badArray[i]))
+        for i, row in enumerate(newCatalog):
+            row.set(badFlag, bool(badArray[i]))
     return newCatalog
+
+
+def addElementIdColumn(catalog, dataId, repoInfo=None):
+    """Add a column indicating the image element (patch/ccd) ID.
+
+    Parameters
+    ----------
+    catalog : `pandas.core.frame.DataFrame`
+        Source catalog to which the column will be added.
+    dataId : `dict`
+        The `dict` of data id keys from which to extract the image element key.
+
+    Raises
+    ------
+    RuntimeError
+        If unable to determine image element (patch/ccd) key.
+
+    Returns
+    -------
+    catalog : `pandas.core.frame.DataFrame`
+        Source catalog with element Id column added.
+    """
+    if "patch" in dataId:
+        elementKey = "patch"
+        elementStr = "patch"
+    elif repoInfo is not None:
+        elementKey = repoInfo.ccdKey
+        elementStr = "ccd"
+    else:
+        raise RuntimeError("Can't determine image element (e.g. patch/ccd) key")
+    catalog[elementStr + "Id"] = dataId[elementKey]
+    return catalog
 
 
 def addIntFloatOrStrColumn(catalog, values, fieldName, fieldDoc, fieldUnits=""):
@@ -1132,7 +1375,7 @@ def addIntFloatOrStrColumn(catalog, values, fieldName, fieldDoc, fieldUnits=""):
 
     Parameters
     ----------
-    catalog : `lsst.afw.table.SourceCatalog`
+    catalog : `lsst.afw.table.SourceCatalog` or `pandas.core.frame.DataFrame`
         Source catalog to which the column will be added.
     values : `list`, `numpy.ndarray`, or scalar of type `int`, `float`, or
              `str`
@@ -1156,13 +1399,16 @@ def addIntFloatOrStrColumn(catalog, values, fieldName, fieldDoc, fieldUnits=""):
 
     Returns
     -------
-    newCatalog : `lsst.afw.table.SourceCatalog`
+    newCatalog : `lsst.afw.table.SourceCatalog` or
+                 `pandas.core.frame.DataFrame`
         Source catalog with ``fieldName`` column added.
     """
+    if isinstance(values, pd.Series):
+        values = list(values)
     if not isinstance(values, (list, np.ndarray)):
-        if type(values) in (int, float, str):
-            values = [values, ]
-        else:
+        values = [values, ]
+    if not any((isinstance(v, str) for v in values)):
+        if not isinstance(values[np.where(np.isfinite(values))[0][0]], (int, float)):
             raise RuntimeError(("Have only accommodated int, float, or str types.  Type provided was : "
                                 "{}.  (Note, if you want to add a boolean flag column, use the addFlag "
                                 "function.)").format(type(values)))
@@ -1171,36 +1417,42 @@ def addIntFloatOrStrColumn(catalog, values, fieldName, fieldDoc, fieldUnits=""):
                             "({0:d}).  Length of values list provided was: {1:d}").
                            format(len(catalog), len(values)))
 
-    size = None
-    mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
-    mapper.addMinimalSchema(catalog[0].schema)
-    schema = mapper.getOutputSchema()
-
-    if all(type(value) is int for value in values):
-        fieldType = "I"
-    elif all(isinstance(value, float) for value in values):
-        fieldType = "D"
-    elif all(type(value) is str for value in values):
-        fieldType = str
-        size = len(max(values, key=len))
+    if isinstance(catalog, pd.DataFrame):
+        catalog[fieldName] = values
+        newCatalog = catalog
     else:
-        raise RuntimeError(("Have only accommodated int, float, or str types.  Type provided for the first "
-                            "element was: {} (and note that all values in the list must have the same type.  "
-                            "Also note, if you want to add a boolean flag column, use the addFlag "
-                            "function.)").format(type(values[0])))
+        size = None
+        mapper = afwTable.SchemaMapper(catalog[0].schema, shareAliasMap=True)
+        mapper.addMinimalSchema(catalog[0].schema)
+        schema = mapper.getOutputSchema()
 
-    fieldKey = schema.addField(fieldName, type=fieldType, size=size, doc=fieldDoc, units=fieldUnits)
+        if all(type(value) is int for value in values):
+            fieldType = "I"
+        elif all(type(value) is np.longlong for value in values):
+            fieldType = "L"
+        elif all(isinstance(value, float) for value in values):
+            fieldType = "D"
+        elif all(type(value) is str for value in values):
+            fieldType = str
+            size = len(max(values, key=len))
+        else:
+            raise RuntimeError(("Have only accommodated int, np.longlong, float, or str types.  Type "
+                                "provided for the first element was: {} (and note that all values in the "
+                                "list must have the same type.  Also note, if you want to add a boolean "
+                                "flag column, use the addFlag function.)").format(type(values[0])))
 
-    newCatalog = afwTable.SourceCatalog(schema)
-    newCatalog.reserve(len(catalog))
+        fieldKey = schema.addField(fieldName, type=fieldType, size=size, doc=fieldDoc, units=fieldUnits)
 
-    newCatalog.extend(catalog, mapper)
-    if len(values) == 1:
-        for row in newCatalog:
-            row.set(fieldKey, values[0])
-    else:
-        for i, row in enumerate(newCatalog):
-            row.set(fieldKey, values[i])
+        newCatalog = afwTable.SourceCatalog(schema)
+        newCatalog.reserve(len(catalog))
+
+        newCatalog.extend(catalog, mapper)
+        if len(values) == 1:
+            for row in newCatalog:
+                row.set(fieldKey, values[0])
+        else:
+            for i, row in enumerate(newCatalog):
+                row.set(fieldKey, values[i])
     return newCatalog
 
 
@@ -1235,12 +1487,12 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, photoCalibDataset, fluxKe
     ----------
     dataRef : `lsst.daf.persistence.butlerSubset.ButlerDataRef`
         The data reference for which the relevant datasets are to be retrieved.
-    catalog : `lsst.afw.table.SourceCatalog`
+    catalog : `lsst.afw.table.SourceCatalog` or `pandas.core.frame.DataFrame`
         The source catalog to which the calibrations will be applied.
     photoCalibDataset : `str`:
         The name of the photoCalib dataset to be applied (e.g.
         "jointcal_photoCalib" or "fgcm_tract_photoCalib").
-    fluxKeys : `dict`, optional
+    fluxKeys : `dict` or `None`, optional
         A `dict` of the flux keys to which the photometric calibration will
         be applied.  If not provided, the getFluxKeys function will be used
         to set it.
@@ -1250,7 +1502,7 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, photoCalibDataset, fluxKe
 
     Returns
     -------
-    catalog : `lsst.afw.table.SourceCatalog`
+    catalog : `lsst.afw.table.SourceCatalog` or `pandas.core.frame.DataFrame`
         The calibrated catalog.
 
     Notes
@@ -1261,27 +1513,36 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, photoCalibDataset, fluxKe
     respectively.
     """
     photoCalib = dataRef.get(photoCalibDataset)
+    schema = getSchema(catalog)
     # Scale to AB and convert to constant zero point, as for the coadds
     factor = NANOJANSKYS_PER_AB_FLUX/10.0**(0.4*zp)
     if fluxKeys is None:
-        fluxKeys, errKeys = getFluxKeys(catalog.schema)
+        fluxKeys, errKeys = getFluxKeys(schema)
 
     magColsToAdd = []
     for fluxName, fluxKey in list(fluxKeys.items()):
         if len(catalog[fluxKey].shape) > 1:
             continue
-        try:  # photoCalib.instFluxToNanojansky() requires an error for each flux
-            fluxErrKey = catalog.schema.find(fluxName + "Err").key
-        except KeyError:
-            fluxErrKey = None
+        # photoCalib.instFluxToNanojansky() requires an error for each flux
+        fluxErrKey = errKeys[fluxName + "Err"] if fluxName + "Err" in errKeys else None
         baseName = fluxName.replace("_instFlux", "")
         if fluxErrKey:
-            if "Flux" in baseName:
-                magsAndErrArray = photoCalib.instFluxToMagnitude(catalog, baseName)
-                magColsToAdd.append((magsAndErrArray, baseName))
-            calibratedFluxAndErrArray = photoCalib.instFluxToNanojansky(catalog, baseName)
-            catalog[fluxKey] = calibratedFluxAndErrArray[:, 0]
-            catalog[fluxErrKey] = calibratedFluxAndErrArray[:, 1]
+            if isinstance(catalog, pd.DataFrame):
+                photoCalibArray, photoCalibErrArray = computePhotoCalibScaleArray(
+                    photoCalib, catalog["slot_Centroid_x"].values, catalog["slot_Centroid_y"].values)
+                errorHypot = np.hypot(catalog[fluxErrKey].values/catalog[fluxKey].values,
+                                      photoCalibErrArray/photoCalibArray)
+                catalog[fluxErrKey] = np.abs(catalog[fluxKey].values)*photoCalibArray*errorHypot
+                catalog[fluxKey] *= photoCalibArray
+                catalog[baseName + "_magErr"] = 2.5/np.log(10)*errorHypot
+                catalog[baseName + "_mag"] = -2.5*np.log10(catalog[fluxKey])
+            else:
+                calibratedFluxAndErrArray = photoCalib.instFluxToNanojansky(catalog, baseName)
+                catalog[fluxKey] = calibratedFluxAndErrArray[:, 0]
+                catalog[fluxErrKey] = calibratedFluxAndErrArray[:, 1]
+                if "Flux" in baseName:
+                    magsAndErrArray = photoCalib.instFluxToMagnitude(catalog, baseName)
+                    magColsToAdd.append((magsAndErrArray, baseName))
         else:
             # photoCalib requires an error for each flux, but some don't
             # have one in the schema (currently only certain deblender
@@ -1289,7 +1550,7 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, photoCalibDataset, fluxKe
             # correction factor from any slot flux (it only depends on
             # position, so any slot with a successful measurement will do)
             # and apply that to any flux entries that do not have errors.
-            for fluxSlotName in catalog.schema.extract("slot*instFlux"):
+            for fluxSlotName in schema.extract("slot*instFlux"):
                 photoCalibFactor = None
                 for src in catalog:
                     if np.isfinite(src[fluxSlotName]):
@@ -1315,27 +1576,73 @@ def calibrateSourceCatalogPhotoCalib(dataRef, catalog, photoCalibDataset, fluxKe
     return catalog
 
 
+def computePhotoCalibScaleArray(photoCalib, xArray, yArray):
+    """Compute the photometric calibration scaling value for a list of
+    positions.
+
+    The calibrated flux for any _instFlux or _instFluxErr value in a source
+    catilog will thus be:
+        _calibratedFlux[Err] = _instFlux[Err]*photoCalibScale
+
+    Parameters
+    ----------
+    photoCalib : `lsst.afw.image.PhotoCalib`
+        The `lsst.afw.image.PhotoCalib` object from which to calculate the
+        photometric calibration scaling at the (pixel) positions in
+        ``xArray`` and ``yArray``.
+    xArray, yArray : `numpy.ndarray`
+        1D arrays of (x, y) (pixel) positions at which to compute the
+        photometric calibration scale value.
+
+    Raises
+    ------
+    RuntimeError
+        If lengths of ``xArray`` and ``yArray`` are not equal.
+
+    Returns
+    -------
+    photoCalibScaleArray : `numpy.ndarray`
+        1D array of same length as ``xArray`` and ``yArray`` consiting of
+        the photometric calibration scale values associated with the
+        (``xArray``, ``yArray``) positions.
+    """
+    if len(xArray) != len(yArray):
+        raise RuntimeError("Lengths of xArray (N={}) and yArray (N={}) must be equal".
+                           format(len(xArray), len(yArray)))
+    boundedField = photoCalib.computeScaledCalibration()
+    # The following represents the spatially constant component of the
+    # calibration.
+    photoCalibScaleArray = np.full_like(xArray, photoCalib.getCalibrationMean())
+    photoCalibScaleErrArray = np.full_like(xArray, photoCalib.getCalibrationErr())
+    # The following will be true for a variable photoCalib
+    if boundedField.getBBox().getArea() > 0:
+        variableScaleArray = boundedField.evaluate(xArray, yArray)
+        photoCalibScaleArray *= variableScaleArray
+        # TODO: decide if this scaling should be included for proper error
+        # propagation.  Leaving commented out for now to mimic what is
+        # currently implemented in the methods on the photoCalib object.
+        # photoCalibScaleErrArray *= variableScaleArray
+    return photoCalibScaleArray, photoCalibScaleErrArray
+
+
 def calibrateSourceCatalog(catalog, zp):
-    """Calibrate catalog in the case of no meas_mosaic results using FLUXMAG0
-    as zp.
+    """Calibrate catalog to zeropoint given.
 
-    Requires a SourceCatalog and zeropoint as input.
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.SourceCatalog` or `pandas.core.frame.DataFrame`
+        The source catalog under consideration.
+    zp : `float`
+        The zeropoint value to calibrate the fluxes to.
+
+    Returns
+    -------
+    catalog : `lsst.afw.table.SourceCatalog` or `pandas.core.frame.DataFrame`
+        The calibrated ``catalog``.
     """
     # Convert to constant zero point, as for the coadds
-    fluxKeys, errKeys = getFluxKeys(catalog.schema)
-    factor = 10.0**(0.4*zp)
-    for name, key in list(fluxKeys.items()) + list(errKeys.items()):
-        catalog[key] /= factor
-    return catalog
-
-
-def calibrateCoaddSourceCatalog(catalog, zp):
-    """Calibrate a coadd catalog.
-
-    Requires a SourceCatalog and zeropoint as input.
-    """
-    # Convert to constant zero point, as for the coadds
-    fluxKeys, errKeys = getFluxKeys(catalog.schema)
+    schema = getSchema(catalog)
+    fluxKeys, errKeys = getFluxKeys(schema)
     factor = 10.0**(0.4*zp)
     for name, key in list(fluxKeys.items()) + list(errKeys.items()):
         catalog[key] /= factor
@@ -1344,26 +1651,61 @@ def calibrateCoaddSourceCatalog(catalog, zp):
 
 def backoutApCorr(catalog):
     """Back out the aperture correction to all fluxes.
+
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.SourceCatalog` or `pandas.core.frame.DataFrame`
+        The source catalog under consideration.
+
+    Returns
+    -------
+    catalog : `lsst.afw.table.SourceCatalog` or `pandas.core.frame.DataFrame`
+        The ``catalog`` whose flux entries have had their aperture corrections
+        backed out.
     """
     ii = 0
-    for k in catalog.schema.getNames():
-        if "_instFlux" in k and k[:-5] + "_apCorr" in catalog.schema.getNames() and "_apCorr" not in k:
+    fluxStr = "_instFlux"
+    apCorrStr = "_apCorr"
+    schema = getSchema(catalog)
+    if isinstance(catalog, pd.DataFrame):
+        keys = {flux: flux for flux in schema if (flux.endswith(fluxStr) or flux.endswith(apCorrStr))}
+    else:
+        keys = schema.getNames()
+    for k in keys:
+        if fluxStr in k and k[:-len(fluxStr)] + apCorrStr in keys and apCorrStr not in k:
             if ii == 0:
-                print("Backing out aperture corrections to fluxes")
                 ii += 1
-            catalog[k] /= catalog[k[:-5] + "_apCorr"]
+            catalog[k] /= catalog[k[:-len(fluxStr)] + apCorrStr]
     return catalog
 
 
 def matchNanojanskyToAB(matches):
-    # LSST reads in catalogs with flux in "nanojanskys", so must convert to AB.
-    # Using astropy units for conversion for consistency with PhotoCalib.
-    schema = matches[0].first.schema
-    keys = [schema[kk].asKey() for kk in schema.getNames() if "_flux" in kk]
+    """Convert catalog fluxes with unit "nanojanskys" to AB.
 
-    for m in matches:
+    Using astropy units for conversion for consistency with PhotoCalib.
+
+    Parameters
+    ----------
+    matches : `lsst.afw.table.SourceCatalog` or `pandas.core.frame.DataFrame`
+        The match catalog under consideration.
+
+    Returns
+    -------
+    matches : `lsst.afw.table.SourceCatalog` or `pandas.core.frame.DataFrame`
+        The ``matches`` catalog whose flux entries have had their aperture
+        corrections backed out.
+    """
+    if isinstance(matches, pd.DataFrame):
+        schema = getSchema(matches)
+        keys = [kk for kk in schema if kk.startswith("ref_") and "_flux" in kk]
         for k in keys:
-            m.first[k] /= NANOJANSKYS_PER_AB_FLUX
+            matches[k] = matches[k].apply(lambda x: x/NANOJANSKYS_PER_AB_FLUX)
+    else:
+        schema = matches[0].first.schema
+        keys = [schema[kk].asKey() for kk in schema.getNames() if "_flux" in kk]
+        for m in matches:
+            for k in keys:
+                m.first[k] /= NANOJANSKYS_PER_AB_FLUX
     return matches
 
 
@@ -1428,7 +1770,7 @@ def andCatalog(version):
         eups.setup("astrometry_net_data", current, noRecursion=True)
 
 
-def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyExternalPhotoCalib=False,
+def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, catDataset="src", doApplyExternalPhotoCalib=False,
                 externalPhotoCalibName="jointcal", doApplyExternalSkyWcs=False,
                 externalSkyWcsName="jointcal"):
     """Obtain the relevant repository information for the given dataRef.
@@ -1493,7 +1835,7 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyExternalPhoto
 
     butler = dataRef.getButler()
     camera = butler.get("camera")
-    dataId = dataRef.dataId
+    dataId = dataRef.dataId.copy()
     isCoadd = True if "patch" in dataId else False
     try:
         filterName = dataId["filter"]
@@ -1505,11 +1847,12 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, doApplyExternalPhoto
         dataId["filter"] = filterName
     genericFilterName = afwImage.Filter(afwImage.Filter(filterName).getId()).getName()
     ccdKey = None if isCoadd else findCcdKey(dataId)
-    # Check metadata to see if stack used was HSC
-    metaStr = coaddName + coaddDataset + "_md" if coaddName else "calexp_md"
-    metadata = butler.get(metaStr, dataId)
+    try:  # Check metadata to see if stack used was HSC
+        metaStr = coaddName + coaddDataset + "_md" if coaddName else "calexp_md"
+        metadata = butler.get(metaStr, dataId)
+    except AttributeError:
+        metadata = None
     hscRun = checkHscStack(metadata)
-    catDataset = "src"
     skymap = butler.get(coaddName + "Coadd_skyMap") if coaddName else None
     wcs = None
     tractInfo = None
@@ -1967,11 +2310,60 @@ def setAliasMaps(catalog, aliasDictList, prefix=""):
         aliasDictList = [aliasDictList, ]
     if not all(isinstance(aliasDict, (dict, pexConfig.dictField.Dict)) for aliasDict in aliasDictList):
         raise RuntimeError("All elements in aliasDictList must be instances of type dict")
-    aliasMap = catalog.schema.getAliasMap()
+    schema = getSchema(catalog)
+    aliasMap = schema.getAliasMap()
     for aliasDict in aliasDictList:
         for newName, oldName in aliasDict.items():
-            if prefix + oldName in catalog.schema:
+            if prefix + oldName in schema:
                 aliasMap.set(prefix + newName, prefix + oldName)
+    return catalog
+
+
+def addAliasColumns(catalog, aliasDictList, prefix=""):
+    """Copy columns from an alias map for differing schema naming conventions.
+
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.SourceCatalog`
+        The source catalog to which the mapping columns will be added.
+    aliasDictList : `dict` of `str` or `list` of `dict` of `str`
+        A `list` of `dict` or single `dict` representing the column "mappings"
+        to be added to ``catalog``'s schema, i.e. a new column with the "new"
+        name will by added to the catalog which is simply a duplicate of the
+        "old" name column.  Note that the new column will only be added if
+        the column with the old name exists in ``catalog``'s schema.
+    prefix : `str`, optional
+        This `str` will be prepended to the alias names (used, e.g., in matched
+        catalogs for which "src_" and "ref_" prefixes have been added to all
+        schema names).  Both the old and new names have ``prefix`` associated
+        with them.
+
+    Raises
+    ------
+    RuntimeError
+        If not all elements in ``aliasDictList`` are instances of type `dict`
+        or `lsst.pex.config.dictField.Dict`.
+
+    Returns
+    -------
+    catalog : `lsst.afw.table.SourceCatalog`
+        The source ``catalog`` with the "alias" columns added to the schema.
+    """
+    if isinstance(aliasDictList, dict):
+        aliasDictList = [aliasDictList, ]
+    if not all(isinstance(aliasDict, (dict, pexConfig.dictField.Dict)) for aliasDict in aliasDictList):
+        raise RuntimeError("All elements in aliasDictList must be instances of type dict")
+    for aliasDict in aliasDictList:
+        for newName, oldName in aliasDict.items():
+            if oldName in catalog.schema and newName not in catalog.schema:
+                fieldDoc = catalog.schema[oldName].asField().getDoc()
+                fieldUnits = catalog.schema[oldName].asField().getUnits()
+                fieldType = catalog.schema[oldName].asField().getTypeString()
+                if fieldType == "Flag":
+                    catalog = addFlag(catalog, catalog[oldName], newName, doc=fieldDoc)
+                else:
+                    catalog = addIntFloatOrStrColumn(catalog, catalog[oldName], newName, fieldDoc,
+                                                     fieldUnits=fieldUnits)
     return catalog
 
 
@@ -2000,9 +2392,10 @@ def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=No
     """
     unitScale = 1000.0 if toMilli else 1.0
     fieldUnits = " (mmag)" if toMilli else " (mag)"
+    schema = getSchema(catalog)
     for col in fluxToPlotList:
         colStr = fluxToPlotString(col)
-        if col + "_instFlux" in catalog.schema:
+        if col + "_instFlux" in schema:
             compCol = "base_PsfFlux"
             compColStr = fluxToPlotString(compCol)
             fieldName = colStr + "-" + compColStr + "_magDiff_" + fieldUnits.strip(" ()")
@@ -2021,7 +2414,7 @@ def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=No
     for compareCol, psfCompareCol, compareStr in [["base_SdssShape", "base_SdssShape_psf", "Sdss"],
                                                   ["ext_shapeHSM_HsmSourceMoments",
                                                    "ext_shapeHSM_HsmPsfMoments", "Hsm"]]:
-        if compareCol + "_xx" in catalog.schema:
+        if compareCol + "_xx" in schema:
             # Source Trace
             fieldUnits = " (pixel)"
             fieldName = "trace" + compareStr + "_" + fieldUnits.strip(" ()")
@@ -2060,26 +2453,26 @@ def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=No
 
     # HSM Regauss E1/E2 resids
     fieldUnits = " (milli)" if toMilli else ""
-    if "ext_shapeHSM_HsmShapeRegauss_e1" in catalog.schema:
+    if "ext_shapeHSM_HsmShapeRegauss_e1" in schema:
         fieldName = "e1ResidsHsmRegauss_" + fieldUnits.strip(" ()")
         fieldDoc = fieldName + " = src(e1) - hsmPsfMoments(e1), e1 = (Ixx - Iyy)/(Ixx + Iyy)" + fieldUnits
         parameterFunc = E1ResidsHsmRegauss(unitScale=unitScale)
         e1ResidsHsmRegauss = parameterFunc(catalog)
         catalog = addIntFloatOrStrColumn(catalog, e1ResidsHsmRegauss, fieldName, fieldDoc)
-    if "ext_shapeHSM_HsmShapeRegauss_e2" in catalog.schema:
+    if "ext_shapeHSM_HsmShapeRegauss_e2" in schema:
         fieldName = "e2ResidsHsmRegauss_" + fieldUnits.strip(" ()")
         fieldDoc = fieldName + " = src(e2) - hsmPsfMoments(e2), e2 = (Ixx - Iyy)/(Ixx + Iyy)" + fieldUnits
         parameterFunc = E2ResidsHsmRegauss(unitScale=unitScale)
         e2ResidsHsmRegauss = parameterFunc(catalog)
         catalog = addIntFloatOrStrColumn(catalog, e2ResidsHsmRegauss, fieldName, fieldDoc)
 
-    if "base_SdssShape_xx" in catalog.schema:
+    if "base_SdssShape_xx" in schema:
         fieldName = "deconvMoments"
         fieldDoc = "Deconvolved moments"
         deconvMoments = deconvMom(catalog)
         catalog = addIntFloatOrStrColumn(catalog, deconvMoments, fieldName, fieldDoc)
 
-    if unforcedCat:
+    if unforcedCat is not None:
         fieldUnits = " (mmag)" if toMilli else " (mag)"
         for col in fluxToPlotList:
             colStr = fluxToPlotString(col)
@@ -2196,6 +2589,7 @@ def computeMeanOfFrac(valueArray, tailStr="upper", fraction=0.1, floorFactor=1):
        The mean of the upper/lower ``fraction`` of the values in
        ``valueArray``.
     """
+    valueArray = valueArray.array if hasattr(valueArray, "array") else valueArray
     pad = 0.49
     ptFrac = max(2, int(fraction*len(valueArray)))
     if tailStr == "upper":
@@ -2412,3 +2806,449 @@ def measureRhoMetrics(rhoStat, thetaExtremum=1.0, operatorStr="<="):
         xi = rhoStat.xi  # for Rho 0
     avgRho = abs(np.average(xi[w]))
     return avgRho
+
+
+def getSchema(catalog):
+    """Helper function to determine "schema" of catalog.
+
+    This will be the list of columns if the catalog type is a pandas DataFrame,
+    or the schema object if it is an `lsst.afw.table.SourceCatalog`.
+
+    Parameters
+    ----------
+    catalog : `lsst.afw.table.SourceCatalog` or `pandas.core.frame.DataFrame`
+        The source catalog under consideration.
+
+    Returns
+    -------
+    schema : `list` of `str` or `lsst.afw.table.Schema`
+        The schema associated with the ``catalog``.
+    """
+    if isinstance(catalog, pd.DataFrame):
+        schema = catalog.columns
+        if isinstance(schema, pd.Index):
+            schema = schema.tolist()
+    elif isinstance(catalog, pd.Series):
+        schema = [catalog.name, ]
+    else:
+        schema = catalog.schema
+    return schema
+
+
+def loadRefCat(packedMatches, refObjLoader, padRadiusFactor=1.05):
+    """Function to load a reference catalog using the information stored in the
+    persisted packed match catalog.
+
+    During single frame processing calibration, a list of reference-to-source
+    matches list is persisted as a "normalized" catalog of IDs produced by
+    afw.table.packMatches(), with match metadata (as returned by the astrometry
+    tasks) in the catalog's metadata attribute.  This method uses the
+    information in the metadata to load in the reference sources covering the
+    entire area that was considered in the calibration.
+
+    When loading in reference objects for a region defined by an image's
+    current WCS estimate, the reference object loader grows the bbox by the
+    config parameter pixelMargin.  This is set to 50 by default but this is not
+    reflected by the radius parameter set in the metadata, so some matches may
+    reside outside the circle searched within this radius.  Thus, we increase
+    the radius set in the metadata by the factor ``padRadiusFactor`` to
+    accommodate.
+
+    Parameters
+    ----------
+    packedMatches : `lsst.afw.table.BaseCatalog`
+        Catalog of packed matches to be denormalized (i.e. load in associated
+        reference catalogs with full column information).
+    refObjLoader :
+           `lsst.meas.algorithms.loadReferenceObjects.LoadReferenceObjectsTask`
+        Reference object loader to read in the reference catalogs.
+    padRadiusFactor : `float`, optional
+        Factor by which to "pad" (increase) the sky circle radius to be loaded
+        from that stored in the metadata.
+
+    Returns
+    -------
+    refCat : `lsst.afw.table.SimpleCatalog`
+        The loaded catalog of reference sources.
+    """
+    matchmeta = packedMatches.table.getMetadata()
+    version = matchmeta.getInt("SMATCHV")
+    if version != 1:
+        raise ValueError("SourceMatchVector version number is {:}, not 1.".format(version))
+    filterName = matchmeta.getString("FILTER").strip()
+    try:
+        epoch = matchmeta.getDouble("EPOCH")
+    except (pexExceptions.NotFoundError, pexExceptions.TypeError):
+        epoch = None  # Not present, or not correct type means it's not set
+    if "RADIUS" in matchmeta:
+        # This is a circle style metadata, call loadSkyCircle
+        ctrCoord = geom.SpherePoint(matchmeta.getDouble("RA"), matchmeta.getDouble("DEC"), geom.degrees)
+        rad = matchmeta.getDouble("RADIUS")*padRadiusFactor*geom.degrees
+        refCat = refObjLoader.loadSkyCircle(ctrCoord, rad, filterName, epoch=epoch).refCat
+    elif "INNER_UPPER_LEFT_RA" in matchmeta:
+        # This is the sky box type (only triggers in the LoadReferenceObject
+        # class, not task).  Only the outer box is required to be loaded to get
+        # the maximum region, all filtering will be done below on the
+        # unpackedMatches catalog, and no spatial filtering needs to be done by
+        # the refObjLoader.
+        box = []
+        for place in ("UPPER_LEFT", "UPPER_RIGHT", "LOWER_LEFT", "LOWER_RIGHT"):
+            coord = geom.SpherePoint(matchmeta.getDouble(f"OUTER_{place}_RA"),
+                                     matchmeta.getDouble(f"OUTER_{place}_DEC"), geom.degrees).getVector()
+            box.append(coord)
+        outerBox = sphgeom.ConvexPolygon(box)
+        refCat = refObjLoader.loadRegion(outerBox, filterName=filterName, epoch=epoch).refCat
+    return refCat
+
+
+def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, padRadiusFactor=1.05, log=None):
+    """Function to load and denormalize a catalog of packed matches.
+
+    A match list is persisted and unpersisted as a catalog of IDs produced by
+    afw.table.packMatches(), with match metadata (as returned by the astrometry
+    tasks) in the catalog's metadata attribute. This method converts such a
+    match catalog into a match list, with links to source records and reference
+    object records.
+
+    Parameters
+    ----------
+    catalog : `'pandas.core.frame.DataFrame`
+        The source catalog linked to the ``patchMatches`` catalog.
+    packedMatches : `lsst.afw.table.BaseCatalog`
+        Catalog of packed matches to be denormalized (i.e. load in associated
+        reference catalogs with full column information).
+    refObjLoader :
+           `lsst.meas.algorithms.loadReferenceObjects.LoadReferenceObjectsTask`
+        Reference object loader to read in the reference catalogs.
+    padRadiusFactor : `float`, optional
+        Factor by which to "pad" (increase) the sky circle radius to be loaded
+        from that stored in the metadata.
+    log : `lsst.log.Log`, optional
+        Logger object for logging messages.
+
+    Returns
+    -------
+    unpackedMatches : `pandas.core.frame.DataFrame`
+        The unpacked match catalog (i.e. contains all fields from the original
+        source and external reference catalogs (but with "src_" and "ref_"
+        prefixes on the column names).
+    """
+    refCat = loadRefCat(packedMatches, refObjLoader, padRadiusFactor=padRadiusFactor)
+    refCat = refCat.asAstropy().to_pandas().set_index("id")
+    packedMatches = packedMatches.asAstropy().to_pandas().set_index("first")
+    denormMatches = packedMatches.join(refCat)
+    # Check that matches were found for all obects in patchedMatches catalog
+    numUnmatched = denormMatches.coord_ra.isnull().sum()
+    if numUnmatched > 0 and log is not None:
+        logStr = ("No match found for N={0:} objects in the packedMatch catalog. "
+                  "Try increasing padRadiusFactor (currently = {1:}) to load "
+                  "sources over a wider area?".format(numUnmatched, padRadiusFactor))
+        log.warn(logStr)
+    catalogCopy = catalog.copy(deep=True)
+    catalogCopy.rename(columns=lambda x: "src_" + x, inplace=True)
+    denormMatches.rename(columns=lambda x: "ref_" + x if x != "distance" else x, inplace=True)
+    unpackedMatches = catalogCopy.join(denormMatches.set_index("ref_second"), on="src_id")
+    unpackedMatches = unpackedMatches[unpackedMatches["distance"].notnull()]
+
+    return unpackedMatches
+
+
+def loadReferencesAndMatchToCatalog(catalog, packedMatches, refObjLoader, padRadiusFactor=1.05,
+                                    matchRadius=0.5, matchFlagList=[], log=None):
+    """Function to load a reference catalog and match it to a source catalog.
+
+    When loading in reference objects for a region defined by an image's
+    current WCS estimate, the reference object loader grows the bbox by the
+    config parameter pixelMargin.  This is set to 50 by default but this is not
+    reflected by the radius parameter set in the metadata, so some matches may
+    reside outside the circle searched within this radius.  Thus, we increase
+    the radius set in the metadata by the factor ``padRadiusFactor`` to
+    accommodate.
+
+    Parameters
+    ----------
+    catalog : `'pandas.core.frame.DataFrame`
+        The source catalog linked to the ``packedMatches`` catalog.
+    packedMatches : `lsst.afw.table.BaseCatalog`
+        Catalog of packed matches to be denormalized (i.e. load in associated
+        reference catalogs with full column information).
+    refObjLoader :
+           `lsst.meas.algorithms.loadReferenceObjects.LoadReferenceObjectsTask`
+        Reference object loader to read in the reference catalogs.
+    padRadiusFactor : `float`, optional
+        Factor by which to "pad" (increase) the sky circle radius to be loaded
+        from that stored in the metadata.
+    matchRadius : `float`, optional
+        The radius within which to consider two objects a match in units of
+        arcsec.
+    matchFlagList : `list` of `str`, optional
+        List of column flag names for which to cull sources before matching to
+        the reference catlago if any are set to `True`.  An exception is made
+        for any sources that were used in the SFM calibration (identified by
+        the "calib_*_used" flags).  The later are all retained for matching
+        regardless of any other flags being set.
+    log : `lsst.log.Log`, optional
+        Logger object for logging messages.
+
+    Returns
+    -------
+    matches : `pandas.core.frame.DataFrame`
+        The unpacked match catalog of all matches (i.e. contains all fields
+        from the original source and external reference catalogs (but with
+        "src_" and "ref_" prefixes on the column names).
+    """
+    refCat = loadRefCat(packedMatches, refObjLoader, padRadiusFactor=padRadiusFactor)
+    refCat = refCat.asAstropy().to_pandas().set_index("id")
+    schema = getSchema(catalog)
+    flagList = []
+    for flag in matchFlagList:
+        if flag in schema:
+            flagList.append(flag)
+        else:
+            if log is not None:
+                log.warn("Did not find column {:} in catalog so it will not be added to the list of "
+                         "flags for culling the source catalog prior to the generic matching.".format(flag))
+    # Cull on bad sources from the catalogs as these should not be
+    # considered in our match-to-reference catalog metric.  However, we do not
+    # cull out those that were actually used in any of the calibrations
+    # (astrometry, photometry, psf modelling) to allow for subselection on the
+    # complete list of thos subsets.
+    bad = makeBadArray(catalog, flagList=flagList)
+    good = catalog["calib_astrometry_used"] | catalog["calib_photometry_used"] | catalog["calib_psf_used"]
+    good = good.values | ~bad
+    goodCatalog = catalog[good].copy(deep=True)
+    matches = matchAndJoinCatalogs(goodCatalog, refCat, matchRadius, prefix1="src_", prefix2="ref_", log=log)
+    return matches
+
+
+def computeAreaDict(repoInfo, dataRefList, dataset="", fakeCat=None, raFakesCol="raJ2000",
+                    decFakesCol="decJ2000", toMaskList=["BAD", "NO_DATA"]):
+    """Compute the effective area of each image element (detector or patch).
+
+    The effective area is computed while masking out the pixels with the
+    masks planes included in ``toMaskList``.
+
+    Parameters
+    ----------
+    repoInfo : `lsst.pipe.base.Struct`
+        A struct containing relevant information about the repository under
+        study.  Elements used here include the key name associated with a
+        detector and the butler (`lsst.daf.persistence.Butler`) associated
+        with the dataset.
+    dataRefList : `list` of
+                  `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+        The `list` of butler data references under consideration.
+    dataset : `str`, optional
+        Name of the ``dataset`` to be used in order to set up a Fits reader
+        (`lsst.afw.image.readers.ExposureFitsReader`) via the ``dataset``s
+        URI obtained from the butler (`lsst.daf.persistence.Butler`) stored
+        in ``repoInfo`` (e.g. "deepCoadd" for coadds, blank `str` for visits).
+    fakeCat : `pandas.core.frame.DataFrame` or `None`, optional
+        Catalog of fake sources.  If not `None`, to which
+        a column (onCcd) is added with the ccd number if the fake
+        source overlaps a ccd and np.nan if it does not.
+    raFakesCol : `str`, optional
+        The RA column to use from the fakes catalog.
+    decFakesCol : `str`, optional
+        The Dec. column to use from the fakes catalog.
+    toMaskList : `list` of `str`, optional
+        The `list` of mask plane names to be ignored in the effectie are
+        computation.
+
+    Raises
+    ------
+    RuntimeError
+        If it cannot be established whether this is coadd or visit catalog data
+        based on the information in the ``repoInfo`` object.
+
+    Returns
+    -------
+    areaDict : `dict`
+        A `dict` containing the area and corner locations of each element
+        (detector for visits, patch for coadds).
+        Examples of keys: there is one of these for every element ID specified
+        when the code is called.
+            ``"elementId"``
+                The effective area of the the element (i.e where none of the
+                mask bits of the planes in ``toMaskList`` are set), in
+                arcseconds.
+            ``"corners_elemenId"``
+                A `list` of `lsst.geom.SpherePoint`s providing the corners
+                of the element in degrees.
+    fakeCat : `pandas.core.frame.DataFrame` or `None`
+        If the input ``fakeCat`` is not `None`, the updated catalog of fake
+        sources in which a column (onElement) has been added with the element
+        id number if the fake source overlaps the given element and `numpy.nan`
+        if it does not.
+    """
+    isPatch = True if "patch" in repoInfo.dataId else False
+    isCcd = True if repoInfo.ccdKey in repoInfo.dataId else False
+    if (not isPatch and not isCcd) or (isPatch and isCcd):
+        raise RuntimeError("Cannot establish whether this is coadd or visit catalog data")
+    areaDict = {}
+    dataset = dataset + "_" if dataset != "" and dataset[-1] != "_" else dataset
+    elementKey = "patch" if isPatch else repoInfo.ccdKey
+    for dataRef in dataRefList:
+        # getUri is less safe but enables us to use an efficient
+        # ExposureFitsReader.
+        fname = repoInfo.butler.getUri(dataset + "calexp", dataRef.dataId)
+        reader = afwImage.ExposureFitsReader(fname)
+        if repoInfo.skyWcsDataset is not None:
+            wcs = dataRef.get(repoInfo.skyWcsDataset)
+        else:
+            wcs = reader.readWcs()
+        mask = reader.readMask()
+        maskedPixels = None
+        for maskPlane in toMaskList:
+            maskBad = mask.array & 2**mask.getMaskPlaneDict()[maskPlane]
+            maskedPixels = maskBad if maskedPixels is None else maskedPixels + maskBad
+        numGoodPix = np.count_nonzero(maskedPixels == 0)
+        if isCcd:
+            detector = reader.readDetector()
+            pixScale = wcs.getPixelScale(detector.getCenter(cameraGeom.PIXELS)).asArcseconds()
+            corners = wcs.pixelToSky(detector.getCorners(cameraGeom.PIXELS))
+        else:
+            pixScale = wcs.getPixelScale(reader.readBBox().getCenter()).asArcseconds()
+            corners = wcs.pixelToSky(geom.Box2D(reader.readBBox()).getCorners())
+        areaDict["corners_" + str(dataRef.dataId[elementKey])] = corners
+        area = numGoodPix*pixScale**2
+        areaDict[dataRef.dataId[elementKey]] = area
+
+        if fakeCat is not None:
+            fakeCat = determineIfSrcOnElement(fakeCat, dataRef, corners, wcs, elementKey, mask=mask,
+                                              reader=reader, raCol=raFakesCol, decCol=decFakesCol)
+    return areaDict, fakeCat
+
+
+def determineIfSrcOnElement(catalog, dataRef, corners, wcs, elementKey, mask=None, reader=None,
+                            raCol="raJ2000", decCol="decJ2000"):
+    """Determine which sources in a catalog lie on a given image element.
+
+    A new column is added to ``catalog`` with name on\"ElementKey\" (with the
+    first letter capitalized, e.g. onPatch, onCcd) and is given the value
+    of the element ID if the source lies within the ``dataRef``s validPolygon
+    or `numpy.nan` if it does not.
+
+    Parameters
+    ----------
+    catalog : `pandas.core.frame.DataFrame`
+        Catalog of sources under consideration to which a column (onElement) is
+        added.  For a given source, the value the element Id if the source
+        overlaps the element associate with ``dataRef`` or `numpy.nan` if it
+        does not.
+    dataRef : `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+        The butler data reference under consideration.
+    corners : `list` of `lsst.geom.SpherePoint`
+        A `list` of the four corners of the element (in degrees).
+    wcs : `lsst.afw.geom.SkyWcs`
+        The WCS solution associated with ``dataRef``.
+    elementKey : `str`
+       The column name or key associated with the image element.
+    mask : `lsst.afw.image.MaskX`, or `None`, optional
+       The mask plane associated with ``dataRef``.
+    raCol : `str`, optional
+        The RA column to use from the fakes catalog.
+    decCol : `str`, optional
+        The Dec column to use from the fakes catalog.
+    toMaskList : `list` of `str`, optional
+        The `list` of mask plane names to be ignored in the effectie are
+        computation.
+
+    Raises
+    ------
+    RuntimeError
+        If the data are coadd catalogs (as indicated by having the string
+        \"patch\" in ``elementKey``), but no ``mask`` from which to compute the
+        valid polygon was provided.
+
+    Returns
+    -------
+    catalog : `pandas.core.frame.DataFrame` or `None`
+        If the input ``catalog`` is not `None`, the updated catalog of fake
+        sources in which a column (onElement) has been added with the element
+        id number if the fake source overlaps the given element and `numpy.nan`
+        if it does not.
+    """
+    isPatch = True if "patch" in elementKey else False
+    if isPatch and mask is None:
+        raise RuntimeError("Must provide a mask if isPatch is True")
+    # Check which fake sources fall in the patch
+    cornerRas = [cx.asRadians() for (cx, cy) in corners]
+    cornerDecs = [cy.asRadians() for (cx, cy) in corners]
+    posOnElement = np.where((catalog[raCol].values > np.min(cornerRas))
+                            & (catalog[raCol].values < np.max(cornerRas))
+                            & (catalog[decCol].values > np.min(cornerDecs))
+                            & (catalog[decCol].values < np.max(cornerDecs)))[0]
+    if "on" + elementKey.capitalize() not in catalog.columns:
+        catalog["on" + elementKey.capitalize()] = [np.nan]*len(catalog)
+    if isPatch:
+        validPolygon = mask.getInfo().getValidPolygon()
+    else:
+        validPolygon = reader.readExposureInfo().getValidPolygon()
+
+    onElementList = []
+    for rowId in posOnElement:
+        skyCoord = geom.SpherePoint(catalog[raCol].values[rowId],
+                                    catalog[decCol].values[rowId], geom.radians)
+        pixCoord = wcs.skyToPixel(skyCoord)
+        onElement = validPolygon.contains(pixCoord)
+        if onElement:
+            onElementList.append(rowId)
+    catalog["on" + elementKey.capitalize()].iloc[np.array(onElementList)] = dataRef.dataId[elementKey]
+    return catalog
+
+
+def getParquetColumnsList(pqTable, dfDataset=None, filterName=None):
+    """Determine the list of columns for a (multilevel)parquet table.
+
+    NOTE: for a multilevel table, we are assuming it has 3 levels with names
+    "dataset", "filter", "column", as is the format persisted in the "_obj"
+    coadd catalogs from pipe_tasks' postprocess.py.  The returned list of
+    column names is that associated with the level specified by ``dfDataset``
+    and ``filterName``.
+
+    Parameters
+    ----------
+    parquetTable : `lsst.pipe.tasks.parquetTable.ParquetTable` or
+                   `lsst.pipe.tasks.parquetTable.MultilevelParquetTable`
+        The parquet table from which to extract the column names
+    dfDataset : `str`, optional
+        Name of the parquet table "dataset" level for which the columns
+        list is to be derived.  If ``parquetTable`` is multilevel, this is
+        actually not optional.  For single level catalogs, it is not relevant.
+    filterName : `str`, optional
+        Name of the parquet table "filter" level for which the columns
+        list is to be derived.  If ``parquetTable`` is multilevel, this is
+        actually not optional.  For single level catalogs, it is not relevant.
+
+    Raises
+    ------
+    RuntimeError
+        If ``parquetTable`` is multilevel but does not have the expected 3
+        levels.
+    RuntimeError
+        If ``parquetTable`` is multilevel but either ``dfDataset`` or
+        ``filterName`` are not set.
+
+    Returns
+    -------
+    catColumnsList : `list` of `str`
+        The list of column names for the ``parquetTable``.  For multilevel
+        parquet tables, the columns list will be associated with the level
+        specified by ``dfDataset`` and ``filterName``.
+    """
+    if isinstance(pqTable, MultilevelParquetTable):
+        nLevels = 3
+        if len(pqTable.columnLevels) != nLevels:
+            raise RuntimeError("Unknown multilevel parquet table: expect {:} levels but got {:}".
+                               format(nLevels, len(pqTable.columnLevels)))
+        if dfDataset is None or filterName is None:
+            raise RuntimeError("Both dfDataset and filterName must be set for multilevel parquet tables: "
+                               "but got {:} and {:}, respectively".format(dfDataset, filterName))
+        pqDatasetNames, pqFilterNames, pqColumnNames = pqTable.columnIndex.levels
+        catColumnsList = [pqColumnNames[icx] for idx, ifx, icx in zip(*pqTable.columnIndex.codes)
+                          if idx == list(pqDatasetNames).index(dfDataset)
+                          and ifx == list(pqFilterNames).index(filterName)]
+    else:
+        catColumnsList = pqTable.columns
+    return catColumnsList

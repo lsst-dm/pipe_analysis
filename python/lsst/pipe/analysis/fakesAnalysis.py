@@ -1419,6 +1419,8 @@ def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, 
                 The name of camera used to take the data (`str`).
             ``"filter"``
                 The filter used for this data (`str`).
+            ``"ccdKey"``
+                The ccd/dectector key associated with this camera (`str`).
             ``"visit"``
                 The visit of the data; only included if the data is from a
                 single epoch dataset (`str`).
@@ -1596,7 +1598,7 @@ def fakesCompletenessPlot(inputFakes, inputFakesMatched, processedFakesMatched, 
     axLeft.set_xlabel("Input Magnitude (mag)")
     axRight.set_ylabel("Number of Sources")
     plt.title("Fraction of Sources Recovered at Each Magnitude")
-    overlap = np.isfinite(inputFakes["onCcd"])
+    overlap = np.isfinite(inputFakes["on" + plotInfoDict["ccdKey"].capitalize()])
     nInput, bins, _ = axRight.hist(inputFakes[band + "magVar"][overlap], bins=100, log=True, histtype="step",
                                    label="Input Fakes", color="black")
     nOutput, _, _ = axRight.hist(inputFakesMatched[band + "magVar"], bins=bins, log=True, histtype="step",

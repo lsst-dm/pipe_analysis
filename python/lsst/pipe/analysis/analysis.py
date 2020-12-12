@@ -24,6 +24,7 @@ matplotlib.use("Agg")  # noqa E402
 import matplotlib.pyplot as plt
 from matplotlib.ticker import NullFormatter, AutoMinorLocator, FormatStrFormatter
 import numpy as np
+import pandas as pd
 np.seterr(all="ignore")  # noqa E402
 import re
 import astropy.units as u
@@ -35,7 +36,7 @@ from lsst.pipe.base import Struct
 
 from .utils import (Data, Stats, E1Resids, E2Resids, fluxToPlotString, computeMeanOfFrac,
                     calcQuartileClippedStats, RhoStatistics, measureRhoMetrics, addMetricMeasurement,
-                    updateVerifyJob)
+                    updateVerifyJob, getSchema)
 from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotText, plotCameraOutline,
                         plotTractOutline, plotPatchOutline, plotCcdOutline, labelCamera, getQuiver,
                         plotRhoStats, getRaDecMinMaxPatchList, bboxToXyCoordLists, makeAlphaCmap)
@@ -104,6 +105,7 @@ class AnalysisConfig(Config):
                                 doc="Flux ratio for visit level star/galaxy classifiaction")
     coaddClassFluxRatio = Field(dtype=float, default=0.985,
                                 doc="Flux ratio for coadd level star/galaxy classifiaction")
+    doLabelRerun = Field(dtype=bool, default=True, doc="Include label indicating rerun direcotry on plots?")
 
 
 class Analysis(object):
@@ -133,7 +135,7 @@ class Analysis(object):
         self.prefix = prefix
         self.errFunc = errFunc
         if func is not None:
-            if type(func) == np.ndarray:
+            if isinstance(func, np.ndarray) or isinstance(func, pd.Series):
                 self.quantity = func
             else:
                 self.quantity = func(catalog)
@@ -141,9 +143,10 @@ class Analysis(object):
             self.quantity = None
 
         self.quantityError = errFunc(catalog) if errFunc is not None else None
+        schema = getSchema(catalog)
         self.fluxColumn = fluxColumn
         if not fluxColumn:
-            if prefix + self.config.fluxColumn in catalog.schema:
+            if prefix + self.config.fluxColumn in schema:
                 self.fluxColumn = self.config.fluxColumn
             else:
                 self.fluxColumn = "flux_psf_flux"
@@ -163,14 +166,12 @@ class Analysis(object):
         # objects used in the visit-level calibrations, so do not cull on the
         # standard self.config.flags.  Rather, only cull on flags explicitly
         # set in the flags variable for calib_*_used subsamples.
-        if ("matches" not in self.shortName and "overlap" not in self.shortName
-                and "quiver" not in self.shortName and "inputCounts" not in self.shortName
-                and "skyObjects" not in self.shortName):
-
+        if not any(ss in self.shortName for ss in ["matches", "overlap", "quiver", "inputCounts",
+                                                   "skyObjects", "skySources"]):
             flagsList = flags.copy()
             flagsList = flagsList + list(self.config.flags) if self.calibUsedOnly == 0 else flagsList
             for flagName in set(flagsList):
-                if prefix + flagName in catalog.schema:
+                if prefix + flagName in schema:
                     self.good &= ~catalog[prefix + flagName]
         for flagName in goodKeys:
             self.good &= catalog[prefix + flagName]
@@ -178,7 +179,7 @@ class Analysis(object):
         # If the input catalog is a coadd, scale the S/N threshold by roughly
         # the sqrt of the number of input visits (actually the mean of the
         # upper 10% of the base_InputCount_value distribution).
-        if prefix + "base_InputCount_value" in catalog.schema:
+        if prefix + "base_InputCount_value" in schema:
             inputCounts = catalog[prefix + "base_InputCount_value"]
             scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=10)
             if scaleFactor == 0.0:
@@ -190,29 +191,30 @@ class Analysis(object):
         else:
             self.signalToNoiseThreshold = self.config.signalToNoiseThreshold
             self.signalToNoiseHighThreshold = self.config.signalToNoiseHighThreshold
-        if (("galacticExtinction" in self.shortName and self.magThreshold > 90.0)
-                or any(ss in self.shortName for ss in ["skySources", "skyObjects"])):
+        if "galacticExtinction" in self.shortName and self.magThreshold > 90.0:
             self.signalToNoiseThreshold = 0.0
             self.signalToNoiseHighThreshold = 0.0
 
-        if any(ss in self.shortName for ss in ["skySources", "skyObjects"]) and self.quantity is not None:
-            self.good = np.isfinite(self.quantity)
+        if any(ss in self.shortName for ss in ["skySources", "skyObjects"]):
             # We don't want to cull on S/N for the sky sources and they can be
             # negative, so set threshold to a very large negative number.
             self.signalToNoiseThreshold = -1e30
-
+            self.signalToNoiseHighThreshold = -1e30
+            if self.quantity is not None:
+                self.good = np.isfinite(self.quantity)
         self.signalToNoise = catalog[prefix + self.fluxColumn]/catalog[prefix + self.fluxColumn + "Err"]
         self.signalToNoiseStr = None
         goodSn0 = np.isfinite(self.signalToNoise)
         if self.good is not None:
             goodSn0 = np.logical_and(self.good, goodSn0)
-            if self.config.useSignalToNoiseThreshold:
-                self.signalToNoiseStr = r"[S/N$\geqslant${0:}]".format(int(self.signalToNoiseThreshold))
-                goodSn = np.logical_and(goodSn0, self.signalToNoise >= self.signalToNoiseThreshold)
-                # Set self.magThreshold to represent approximately that which
-                # corresponds to the S/N threshold.  Computed as the mean mag
-                # of the lower 5% of the S/N > signalToNoiseThreshold
-                # subsample.
+        if self.config.useSignalToNoiseThreshold:
+            self.signalToNoiseStr = r"[S/N$\geqslant${0:}]".format(int(self.signalToNoiseThreshold))
+            goodSn = np.logical_and(goodSn0, self.signalToNoise >= self.signalToNoiseThreshold)
+            # Set self.magThreshold to represent approximately that which
+            # corresponds to the S/N threshold.  Computed as the mean mag
+            # of the lower 5% of the S/N > signalToNoiseThreshold
+            # subsample.
+            if self.magThreshold < 90.0:
                 self.magThreshold = computeMeanOfFrac(self.mag[goodSn], tailStr="upper", fraction=0.05,
                                                       floorFactor=0.1)
 
@@ -221,9 +223,9 @@ class Analysis(object):
         # value, decrease the S/N threshold by 10 until a sample with
         # N > self.config.minHighSampleN is achieved.
         goodSnHigh = np.logical_and(goodSn0, self.signalToNoise >= self.signalToNoiseHighThreshold)
-        if prefix + "base_ClassificationExtendedness_value" in catalog.schema:
+        if prefix + "base_ClassificationExtendedness_value" in schema:
             isStar = catalog[prefix + "base_ClassificationExtendedness_value"] < 0.5
-        elif "numStarFlags" in catalog.schema:
+        elif "numStarFlags" in schema:
             isStar = catalog["numStarFlags"] >= 3
         else:
             isStar = np.ones(len(self.mag), dtype=bool)
@@ -248,7 +250,7 @@ class Analysis(object):
                        + 0.5)
 
         if labeller is not None:
-            labels = labeller(catalog, compareCat) if compareCat else labeller(catalog)
+            labels = labeller(catalog, compareCat) if compareCat is not None else labeller(catalog)
             self.data = {name: Data(catalog, self.quantity, self.mag, self.signalToNoise,
                                     self.good & (labels == value),
                                     colorList[value], self.quantityError, name in labeller.plot) for
@@ -266,27 +268,31 @@ class Analysis(object):
             # Ensure plot limits always encompass at least mean +/- 6.0*stdev,
             # at most mean +/- 20.0*stddev, and clipped stats range + 25%.
             dataType = "all" if "all" in self.data else "star"
+            nStdevMin = 6.0 if "matches" not in self.shortName else 10.0
+            nStdevMax = 20.0
             if self.stats[dataType].num > 0:
-                if not any(ss in self.shortName for ss in ["footNpix", "distance", "pStar", "resolution",
+                if not any(ss in self.shortName for ss in ["footArea", "distance", "pStar", "resolution",
                                                            "race", "psfInst", "psfCal", "Rho", "hsmRho",
                                                            "Rho_calib_psf_used", "hsmRho_calib_psf_used",
                                                            "Rho_all_stars", "hsmRho_all_stars"]):
-                    self.qMin = max(min(self.qMin, self.stats[dataType].mean - 6.0*self.stats[dataType].stdev,
+                    self.qMin = max(min(self.qMin,
+                                        self.stats[dataType].mean - nStdevMin*self.stats[dataType].stdev,
                                         self.stats[dataType].median - 1.25*self.stats[dataType].clip),
-                                    min(self.stats[dataType].mean - 20.0*self.stats[dataType].stdev,
+                                    min(self.stats[dataType].mean - nStdevMax*self.stats[dataType].stdev,
                                         -0.005*self.unitScale))
                     if (abs(self.stats[dataType].mean) < 0.0005*self.unitScale
                             and abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
                         minmax = 2.0*max(abs(min(self.quantity[self.good])),
                                          abs(max(self.quantity[self.good])))
                         self.qMin = -minmax if minmax > 0 else self.qMin
-                if not any(ss in self.shortName for ss in ["footNpix", "pStar", "resolution", "race",
+                if not any(ss in self.shortName for ss in ["footArea", "pStar", "resolution", "race",
                                                            "psfInst", "psfCal", "Rho", "hsmRho",
                                                            "Rho_calib_psf_used", "hsmRho_calib_psf_used",
                                                            "Rho_all_stars", "hsmRho_all_stars"]):
-                    self.qMax = min(max(self.qMax, self.stats[dataType].mean + 6.0*self.stats[dataType].stdev,
+                    self.qMax = min(max(self.qMax,
+                                        self.stats[dataType].mean + nStdevMin*self.stats[dataType].stdev,
                                         self.stats[dataType].median + 1.25*self.stats[dataType].clip),
-                                    max(self.stats[dataType].mean + 20.0*self.stats[dataType].stdev,
+                                    max(self.stats[dataType].mean + nStdevMax*self.stats[dataType].stdev,
                                         0.005*self.unitScale))
                     if (abs(self.stats[dataType].mean) < 0.0005*self.unitScale
                             and abs(self.stats[dataType].stdev) < 0.0005*self.unitScale):
@@ -330,7 +336,7 @@ class Analysis(object):
             prefix = "" if "GalExt" in zpLabel else "zp: "
             plotText(zpLabel, fig, axes, 0.13, -0.09, prefix=prefix, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, fig, axes, 0.85, -0.09, prefix="cat: ", color="green")
+            plotText(forcedStr, fig, axes, 0.85, -0.10, prefix="cat: ", color="green")
         yield Struct(fig=fig, description=description, stats=self.stats, statsHigh=self.statsHigh, dpi=120,
                      style="psfMag")
 
@@ -410,7 +416,7 @@ class Analysis(object):
                 galMin = np.round(2.5*np.log10(self.config.coaddClassFluxRatio) - 0.08, 2)*self.unitScale
                 deltaMin = max(0.0, self.qMin - galMin)
 
-        if self.magThreshold > 90.0:
+        if self.magThreshold > 90.0 or "matches" in self.shortName and "calib_" not in self.shortName:
             magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
         else:
             magMin, magMax = self.magMin, self.magMax
@@ -472,6 +478,7 @@ class Analysis(object):
             if not data.mag.any():
                 log.info("plotAgainstMagAndHist: No data for dataset: {:s}".format(name))
                 continue
+            schema = getSchema(data.catalog)
             if ptSize is None:
                 ptSize = setPtSize(len(data.mag))
             alpha = min(0.75, max(0.25, 1.0 - 0.2*np.log10(len(data.mag))))
@@ -516,7 +523,7 @@ class Analysis(object):
                 # data point size.
                 sizeFactor = 1.3
                 for flag, threshValue, color in highlightList:
-                    if flag in data.catalog.schema:
+                    if flag in schema:
                         highlightSelection = data.catalog[flag] > threshValue
                         if sum(highlightSelection) > 0:
                             label = flag
@@ -599,13 +606,14 @@ class Analysis(object):
         axHistx.legend(fontsize=7, loc=2, edgecolor="w", labelspacing=0.2)
         axHisty.legend(fontsize=7, labelspacing=0.2)
         # Add axis with units of FWHM = 2*sqrt(2*ln(2))*Trace for Trace plots
-        if "race" in self.shortName and "iff" not in self.shortName:
+        if ("race" in self.shortName and "iff" not in self.shortName
+                and "ompare" not in plotInfoDict["plotType"]):
             axHisty2 = axHisty.twinx()  # instantiate a second axes that shares the same x-axis
             sigmaToFwhm = 2.0*np.sqrt(2.0*np.log(2.0))
             axHisty2.set_ylim(axScatterY1*sigmaToFwhm, axScatterY2*sigmaToFwhm)
             axHisty2.yaxis.set_major_formatter(FormatStrFormatter("%.1f"))
-            axHisty2.tick_params(axis="y", which="both", direction="in", labelsize=8)
-            axHisty2.set_ylabel(r"FWHM: $2\sqrt{2\,ln\,2}*$Trace (pixels)", rotation=270, labelpad=13,
+            axHisty2.tick_params(axis="y", which="both", direction="in", labelsize=7)
+            axHisty2.set_ylabel(r"FWHM: $2\sqrt{2\,ln\,2}*$Trace (pixels)", rotation=270, labelpad=12,
                                 fontsize=fontSize)
 
         # Label total number of objects of each data type
@@ -626,6 +634,15 @@ class Analysis(object):
                      fontsize=7, transform=axScatter.transAxes, color=data.color)
 
         labelVisit(plotInfoDict, plt.gcf(), axScatter, 1.18, -0.11, color="green")
+        if self.config.doLabelRerun and not any(ss in self.shortName for ss in ["race-", "race_"]):
+            rerunKwargs = dict(fontSize=6, color="purple", rotation=-90)
+            if "rerun2" in plotInfoDict:
+                plotText("rerun: " + plotInfoDict["rerun"], plt, axHisty, 1.18, 0.7, **rerunKwargs)
+                plotText("rerun2: " + plotInfoDict["rerun2"], plt, axHisty, 1.08, 0.7, **rerunKwargs)
+            else:
+                rerunKwargs.update(fontSize=7)
+                plotText("rerun: " + plotInfoDict["rerun"], plt, axHisty, 1.12, 0.7, **rerunKwargs)
+
         if zpLabel is not None:
             # The following sets yOff to accommodate the longer labels for the
             # compare scripts and/or for the presence of the extra uberCalLabel
@@ -639,7 +656,7 @@ class Analysis(object):
             uberFontSize = 5 if "_2" in uberCalLabel else 7
             plotText(uberCalLabel, plt.gcf(), axScatter, 0.11, -0.13, fontSize=uberFontSize, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt.gcf(), axScatter, 0.87, -0.11, prefix="cat: ", fontSize=7, color="green")
+            plotText(forcedStr, plt.gcf(), axScatter, 0.86, -0.10, prefix="cat: ", fontSize=7, color="green")
         if extraLabels is not None:
             for i, extraLabel in enumerate(extraLabels):
                 plotText(extraLabel, plt.gcf(), axScatter, 0.3, 0.21 + i*0.05, fontSize=7, color="tab:orange")
@@ -721,16 +738,20 @@ class Analysis(object):
                          matchRadiusUnitStr=matchRadiusUnitStr, unitScale=self.unitScale,
                          doPrintMedian=doPrintMedian)
         axes.legend(loc="upper right", fontsize=8)
+        xOff = 0.0
         if plotInfoDict["cameraName"] is not None:
-            labelCamera(plotInfoDict, plt.gcf(), axes, 0.5, 1.09)
-        labelVisit(plotInfoDict, plt.gcf(), axes, 0.5, 1.04)
+            xOff = max(0.12, 0.04*len(plotInfoDict["cameraName"]))
+            labelCamera(plotInfoDict, plt.gcf(), axes, 0.5 - xOff, 1.04, fontSize=9)
+        labelVisit(plotInfoDict, plt.gcf(), axes, 0.5 + xOff, 1.04, fontSize=9)
+        if self.config.doLabelRerun:
+            plotText("rerun: " + plotInfoDict["rerun"], plt, axes, 0.5, 1.1, fontSize=7, color="purple")
         if zpLabel is not None:
             prefix = "" if "GalExt" in zpLabel else "zp: "
-            plotText(zpLabel, plt, axes, 0.10, -0.10, prefix=prefix, fontSize=7, color="green")
+            plotText(zpLabel, plt, axes, 0.14, -0.10, prefix=prefix, fontSize=7, color="green")
         if uberCalLabel:
-            plotText(uberCalLabel, plt, axes, 0.10, -0.13, fontSize=7, color="green")
+            plotText(uberCalLabel, plt, axes, 0.14, -0.13, fontSize=7, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes, 0.90, -0.10, prefix="cat: ", fontSize=7, color="green")
+            plotText(forcedStr, plt, axes, 0.88, -0.10, prefix="cat: ", fontSize=7, color="green")
         if plotInfoDict["camera"] is not None and plotInfoDict["plotType"] == "plotVisit":
             axTopMiddle = plt.axes([0.42, 0.68, 0.2, 0.2])
             axTopMiddle.set_aspect("equal")
@@ -771,7 +792,8 @@ class Analysis(object):
             magThreshold += 1.0  # plot to fainter mags for galaxies
         if dataName == "star" and "matches" in description and magThreshold < 99.0:
             magThreshold += 1.0  # plot to fainter mags for matching against ref cat
-        good = (self.mag < magThreshold if magThreshold > 0 else np.ones(len(self.mag), dtype=bool))
+        good = (self.mag < magThreshold if (magThreshold > 0 and magThreshold < 90.0)
+                else np.ones(len(self.mag), dtype=bool))
         if ((dataName == "star" or "matches" in description or "Compare" in plotInfoDict["plotType"])
                 and ("pStar" not in description and "race" not in description and "resolution"
                      not in description) or ("compareUnforced" in description)):
@@ -851,6 +873,7 @@ class Analysis(object):
                 continue
             if not data.mag.any():
                 continue
+            schema = getSchema(data.catalog)
             if ptSize is None:
                 ptSize = 0.7*setPtSize(len(data.mag))
             stats0 = self.calculateStats(data.quantity, good[data.selection])
@@ -861,7 +884,7 @@ class Analysis(object):
                 i = -1
                 sizeFactor = 1.4
                 for flag, threshValue, color in highlightList:
-                    if flag in data.catalog.schema:
+                    if flag in schema:
                         # Only a white "halo" really shows up, so ignore color
                         highlightSelection = (self.catalog[flag] > threshValue) & selection
                         if sum(highlightSelection) > 0:
@@ -882,7 +905,8 @@ class Analysis(object):
             plt.close(fig)
             return
         filterStr = plotInfoDict["filter"]
-        filterLabelStr = "[" + filterStr + "]" if ("color" not in plotInfoDict["plotType"]) else ""
+        filterLabelStr = "[" + filterStr + "]" if ("color" not in plotInfoDict["plotType"]
+                                                   and "galacticExtinction" not in description) else ""
         if "lsst" in plotInfoDict["cameraName"]:
             filterLabelStr = "[" + plotInfoDict["cameraName"] + "-" + plotInfoDict["filter"] + "]"
         axes.set_xlabel("RA (deg) {0:s}".format(filterLabelStr))
@@ -896,25 +920,34 @@ class Analysis(object):
         cb = plt.colorbar(mappable)
         colorbarLabel = self.quantityName + " " + filterLabelStr
         fontSize = min(10, max(6, 10 - int(np.log(max(1, len(colorbarLabel) - 50)))))
-        cb.ax.tick_params(labelsize=max(6, fontSize - 1))
+        cb.ax.tick_params(labelsize=max(6, fontSize - 2))
+        cb.ax.yaxis.offsetText.set_fontsize(6)
         cb.set_label(colorbarLabel, fontsize=fontSize, rotation=270, labelpad=15)
         if plotInfoDict["hscRun"] is not None:
             axes.set_title("HSC stack run: " + plotInfoDict["hscRun"], color="#800080")
-        labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
-        labelVisit(plotInfoDict, fig, axes, 0.5, 1.04)
+        if self.config.doLabelRerun:
+            rerunKwargs = dict(fontSize=5, color="purple")
+            if "rerun2" in plotInfoDict:
+                plotText("rerun: " + plotInfoDict["rerun"], plt, axes, 0.5, 1.13, **rerunKwargs)
+                plotText("rerun2: " + plotInfoDict["rerun2"], plt, axes, 0.5, 1.105, **rerunKwargs)
+            else:
+                rerunKwargs.update(fontSize=6)
+                plotText("rerun: " + plotInfoDict["rerun"], plt, axes, 0.5, 1.11, **rerunKwargs)
+        labelCamera(plotInfoDict, fig, axes, 0.5, 1.07)
+        labelVisit(plotInfoDict, fig, axes, 0.5, 1.03)
         if zpLabel is not None:
             prefix = "" if "GalExt" in zpLabel else "zp: "
             plotText(zpLabel, plt, axes, 0.14, -0.07, prefix=prefix, color="green")
         if uberCalLabel:
             plotText(uberCalLabel, plt, axes, 0.14, -0.11, fontSize=7, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes, 0.85, -0.09, prefix="cat: ", color="green")
+            plotText(forcedStr, plt, axes, 0.85, -0.08, prefix="cat: ", color="green")
         strKwargs = dict(loc="upper left", fancybox=True, markerscale=1.2, scatterpoints=3, framealpha=0.35,
                          facecolor="k")
         if highlightList is not None:
-            axes.legend(bbox_to_anchor=(-0.05, 1.15), fontsize=7, **strKwargs)
+            axes.legend(bbox_to_anchor=(-0.05, 1.13), fontsize=6, **strKwargs)
         else:
-            axes.legend(bbox_to_anchor=(-0.01, 1.12), fontsize=8, **strKwargs)
+            axes.legend(bbox_to_anchor=(-0.01, 1.10), fontsize=6, **strKwargs)
 
         meanStr = "{0.mean:.4f}".format(stats0)
         medianStr = "{0.median:.4f}".format(stats0)
@@ -934,16 +967,16 @@ class Analysis(object):
         x0 = 0.86
         deltaX = 0.004
         lenStr = 0.016*(max(len(meanStr), len(stdevStr)))
-        strKwargs = dict(xycoords="axes fraction", va="center", fontsize=8)
-        axes.annotate("mean = ", xy=(x0, 1.08), ha="right", **strKwargs)
-        axes.annotate(meanStr, xy=(x0 + lenStr, 1.08), ha="right", **strKwargs)
+        strKwargs = dict(xycoords="axes fraction", va="center", fontsize=7)
+        axes.annotate("mean = ", xy=(x0, 1.07), ha="right", **strKwargs)
+        axes.annotate(meanStr, xy=(x0 + lenStr, 1.07), ha="right", **strKwargs)
         if doPrintMedian:
             deltaX += (0.155 + lenStr)
-            axes.annotate("median = ", xy=(x0 + deltaX, 1.08), ha="right", **strKwargs)
-            axes.annotate(medianStr, xy=(x0 + lenStr + deltaX, 1.08), ha="right", **strKwargs)
+            axes.annotate("median = ", xy=(x0 + deltaX, 1.07), ha="right", **strKwargs)
+            axes.annotate(medianStr, xy=(x0 + lenStr + deltaX, 1.07), ha="right", **strKwargs)
             deltaX += 0.004
         if statsUnitStr is not None:
-            axes.annotate(statsUnitStr, xy=(x0 + lenStr + deltaX, 1.08), ha="left", **strKwargs)
+            axes.annotate(statsUnitStr, xy=(x0 + lenStr + deltaX, 1.07), ha="left", **strKwargs)
         axes.annotate("stdev = ", xy=(x0, 1.035), ha="right", **strKwargs)
         axes.annotate(stdevStr, xy=(x0 + lenStr, 1.035), ha="right", **strKwargs)
         axes.annotate(r"N = {0} [mag<{1:.1f}]".format(stats0.num, magThreshold),
@@ -995,11 +1028,11 @@ class Analysis(object):
         labelVisit(plotInfoDict, fig, axes[0], 0.5, 1.1)
         if zpLabel is not None:
             prefix = "" if "GalExt" in zpLabel else "zp: "
-            plotText(zpLabel, plt, axes[0], 0.13, -0.09, prefix=prefix, color="green")
+            plotText(zpLabel, plt, axes[0], 0.13, -0.09, prefix=prefix, fontsize=8, color="green")
         if uberCalLabel:
             plotText(uberCalLabel, plt, axes[0], 0.13, -0.14, fontSize=8, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, plt, axes[0], 0.85, -0.09, prefix="cat: ", color="green")
+            plotText(forcedStr, plt, axes[0], 0.85, -0.09, prefix="cat: ", fontsize=8, color="green")
         yield Struct(fig=fig, description=description, stats=self.stats, statsHigh=self.statsHigh, dpi=120,
                      style=style)
 
@@ -1008,8 +1041,9 @@ class Analysis(object):
                    scale=1):
         """Plot ellipticity residuals quiver plot.
         """
+        schema = getSchema(catalog)
         # Use HSM algorithm results if present, if not, use SDSS Shape
-        if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+        if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
             compareCol = "ext_shapeHSM_HsmSourceMoments"
             psfCompareCol = "ext_shapeHSM_HsmPsfMoments"
             shapeAlgorithm = "HSM"
@@ -1027,12 +1061,12 @@ class Analysis(object):
             bad |= catalog[flag]
         # Cull the catalog down to calibration candidates (or stars if
         # calibration flags not available).
-        if "calib_psf_used" in catalog.schema:
+        if "calib_psf_used" in schema:
             bad |= ~catalog["calib_psf_used"]
             catStr = "psf_used"
             thresholdType = "calib_psf_used"
             thresholdValue = None
-        elif "base_ClassificationExtendedness_value" in catalog.schema:
+        elif "base_ClassificationExtendedness_value" in schema:
             bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
             bad |= -2.5*np.log10(catalog[self.fluxColumn]) > self.magThreshold
             catStr = "ClassExtendedness"
@@ -1084,9 +1118,11 @@ class Analysis(object):
         nz = matplotlib.colors.Normalize()
         nz.autoscale(e)
         cax, _ = matplotlib.colorbar.make_axes(plt.gca())
+        cax.tick_params(labelsize=7)
         cb = matplotlib.colorbar.ColorbarBase(cax, cmap=plt.cm.jet, norm=nz)
         cb.set_label(
-            r"ellipticity residual: $\delta_e$ = $\sqrt{(e1_{src}-e1_{psf})^2 + (e2_{src}-e2_{psf})^2}$")
+            r"ellipticity residual: $\delta_e$ = $\sqrt{(e1_{src}-e1_{psf})^2 + (e2_{src}-e2_{psf})^2}$",
+            rotation=-90, labelpad=16, fontsize=9)
 
         getQuiver(ra, dec, e1, e2, axes, color=plt.cm.jet(nz(e)), scale=scale, width=0.002, label=catStr)
 
@@ -1108,29 +1144,32 @@ class Analysis(object):
 
         x0 = 0.86
         lenStr = 0.1 + 0.022*(max(max(len(meanStr), len(stdevStr)) - 6, 0))
-        axes.annotate("mean = ", xy=(x0, 1.08), xycoords="axes fraction",
+        axes.annotate("mean = ", xy=(x0, 1.07), xycoords="axes fraction",
                       ha="right", va="center", fontsize=8)
-        axes.annotate(meanStr, xy=(x0 + lenStr, 1.08), xycoords="axes fraction",
+        axes.annotate(meanStr, xy=(x0 + lenStr, 1.07), xycoords="axes fraction",
                       ha="right", va="center", fontsize=8)
-        axes.annotate("stdev = ", xy=(x0, 1.035), xycoords="axes fraction",
+        axes.annotate("stdev = ", xy=(x0, 1.03), xycoords="axes fraction",
                       ha="right", va="center", fontsize=8)
-        axes.annotate(stdevStr, xy=(x0 + lenStr, 1.035), xycoords="axes fraction",
+        axes.annotate(stdevStr, xy=(x0 + lenStr, 1.03), xycoords="axes fraction",
                       ha="right", va="center", fontsize=8)
-        axes.annotate(r"N = {0}".format(stats0.num), xy=(x0 + lenStr + 0.02, 1.035), xycoords="axes fraction",
+        axes.annotate(r"N = {0}".format(stats0.num), xy=(x0 + lenStr + 0.02, 1.03), xycoords="axes fraction",
                       ha="left", va="center", fontsize=8)
 
         if plotInfoDict["hscRun"] is not None:
             axes.set_title("HSC stack run: " + plotInfoDict["hscRun"], color="#800080")
-        labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
-        labelVisit(plotInfoDict, fig, axes, 0.5, 1.04)
+        labelCamera(plotInfoDict, fig, axes, 0.5, 1.07, fontSize=8)
+        labelVisit(plotInfoDict, fig, axes, 0.5, 1.03, fontSize=8)
+        if self.config.doLabelRerun:
+            plotText("rerun: " + plotInfoDict["rerun"], plt, axes, 0.5, 1.11, fontSize=7, color="purple")
+
         if zpLabel is not None:
             plotText(zpLabel, fig, axes, 0.14, -0.08, prefix="zp: ", color="green")
         if uberCalLabel:
             plotText(uberCalLabel, fig, axes, 0.14, -0.12, fontSize=7, color="green")
-        plotText(shapeAlgorithm, fig, axes, 0.85, -0.08, prefix="Shape Alg: ", fontSize=8, color="green")
+        plotText(shapeAlgorithm, fig, axes, 0.85, -0.06, prefix="Shape Alg: ", fontSize=7, color="green")
         if forcedStr is not None:
-            plotText(forcedStr, fig, axes, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
-        axes.legend(loc="upper left", bbox_to_anchor=(0.0, 1.1), fancybox=True, shadow=True, fontsize=8)
+            plotText(forcedStr, fig, axes, 0.85, -0.105, prefix="cat: ", fontSize=7, color="green")
+        axes.legend(loc="upper left", bbox_to_anchor=(0.0, 1.08), fancybox=True, shadow=True, fontsize=7)
 
         yield Struct(fig=fig, description=description, stats=stats, statsHigh=None, dpi=150, style="quiver")
 
@@ -1139,7 +1178,7 @@ class Analysis(object):
                           verifyJob=None):
         """Plot Rho Statistics.
         """
-
+        schema = getSchema(self.catalog)
         figAxes = [plt.subplots(), plt.subplots(), plt.subplots()]
         # first plot for Rho 1, 3, 4, second for Rho 2, 5 and third for Rho 0
         figs, axes = list(zip(*figAxes))
@@ -1161,23 +1200,31 @@ class Analysis(object):
         plotRhoStats(axes, rhoStats)
         log.debug("Tract id in Rho Stats: {0}".format(plotInfoDict["tract"]))
 
+        xOff = 0.18 if uberCalLabel else 0.10
+        yOff = -0.09 if uberCalLabel else -0.10
         for figId, figax in enumerate(figAxes):
             fig, ax = figax
             figDescription = description + str(figId + 1)
             labelCamera(plotInfoDict, fig, ax, 0.5, 1.09)
             labelVisit(plotInfoDict, fig, ax, 0.5, 1.04)
+            if self.config.doLabelRerun:
+                plotText("rerun: " + plotInfoDict["rerun"], fig, ax, 1.03, 0.5, fontSize=7, color="purple",
+                         rotation=-90)
             if zpLabel is not None:
-                plotText(zpLabel, fig, ax, 0.14, -0.08, prefix="zp: ", color="green")
+                plotText(zpLabel, fig, ax, xOff, yOff, prefix="zp: ", color="green")
             if uberCalLabel:
-                plotText(uberCalLabel, fig, ax, 0.14, -0.12, prefix="uberCal: ", fontSize=7, color="green")
-            plotText(shapeAlgorithm, fig, ax, 0.85, -0.08, prefix="Shape Alg: ", fontSize=8, color="green")
+                plotText(uberCalLabel, fig, ax, xOff, yOff - 0.04, prefix="uberCal: ", fontSize=7,
+                         color="green")
+            plotText(shapeAlgorithm, fig, ax, 0.85, yOff, prefix="Shape Alg: ", fontSize=8, color="green")
             if forcedStr is not None:
-                plotText(forcedStr, fig, ax, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
+                xxOff = 0.85 if uberCalLabel else 0.29
+                yyOff = -0.13 if uberCalLabel else yOff
+                plotText(forcedStr, fig, ax, xxOff, yyOff, prefix="cat: ", fontSize=8, color="green")
 
             yield Struct(fig=fig, description=figDescription, stats=stats, statsHigh=None, dpi=120,
                          style="RhoStats")
 
-        if "ext_shapeHSM_HsmSourceMoments_xx" in self.catalog.schema:
+        if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
             figAxes = [plt.subplots(), plt.subplots(), plt.subplots()]
             # first plot for Rho 1, 3, 4, second for Rho 2, 5
             # and third for Rho 0.
@@ -1234,15 +1281,20 @@ class Analysis(object):
                 figDescription = description + str(figId + 1)
                 labelCamera(plotInfoDict, fig, ax, 0.5, 1.09)
                 labelVisit(plotInfoDict, fig, ax, 0.5, 1.04)
+                if self.config.doLabelRerun:
+                    plotText("rerun: " + plotInfoDict["rerun"], fig, ax, 1.03, 0.5, fontSize=7,
+                             color="purple", rotation=-90)
                 if zpLabel is not None:
-                    plotText(zpLabel, fig, ax, 0.14, -0.08, prefix="zp: ", color="green")
+                    plotText(zpLabel, fig, ax, xOff, yOff, prefix="zp: ", fontSize=7, color="green")
                 if uberCalLabel:
-                    plotText(uberCalLabel, fig, ax, 0.14, -0.12, prefix="uberCal: ", fontSize=8,
+                    plotText(uberCalLabel, fig, ax, xOff, yOff - 0.04, prefix="uberCal: ", fontSize=7,
                              color="green")
-                plotText(shapeAlgorithm, fig, ax, 0.85, -0.08, prefix="Shape Alg: ", fontSize=8,
+                plotText(shapeAlgorithm, fig, ax, 0.85, yOff, prefix="Shape Alg: ", fontSize=7,
                          color="green")
                 if forcedStr is not None:
-                    plotText(forcedStr, fig, ax, 0.85, -0.12, prefix="cat: ", fontSize=8, color="green")
+                    xxOff = 0.85 if uberCalLabel else 0.29
+                    yyOff = -0.13 if uberCalLabel else yOff
+                    plotText(forcedStr, fig, ax, xxOff, yyOff, prefix="cat: ", fontSize=7, color="green")
 
                 yield Struct(fig=fig, description=figDescription, stats=stats, statsHigh=None, dpi=120,
                              style="RhoStats")
@@ -1313,7 +1365,7 @@ class Analysis(object):
             thetas = [0.0]*len(catalog)
             edgeColors = ["None"]*len(catalog)
         else:
-            for src in catalog:
+            for _, src in catalog.iterrows():
                 edgeColor = "None"
                 srcQuad = afwGeom.Quadrupole(src[shapeStr + "_xx"], src[shapeStr + "_yy"],
                                              src[shapeStr + "_xy"])
@@ -1372,13 +1424,13 @@ class Analysis(object):
 
         ec.set_array(inputCounts)
         axes.add_collection(ec)
-        cbar = plt.colorbar(ec, extend=cbarExtend, fraction=0.04)
+        cbar = plt.colorbar(ec, extend=cbarExtend, fraction=0.04, pad=0.03)
         columnStr = fluxToPlotString(columnName)
         fluxScaleStr = "{:.0e}".format(fluxScale)
         columnStr = columnStr + "*" + fluxScaleStr if "instFlux" in columnName else columnStr
         cbar.set_label(columnStr + ": ellipse size * {:} [maxDiam = {:}] (pixels)".
-                       format(sizeFactor, maxDiamPix), fontsize=7)
-        cbar.ax.tick_params(direction="in", labelsize=7)
+                       format(sizeFactor, maxDiamPix), fontsize=7, rotation=-90, labelpad=10)
+        cbar.ax.tick_params(direction="in", labelsize=6)
 
         axes.set_xlim(tractBbox.getMinX(), tractBbox.getMaxX())
         axes.set_ylim(tractBbox.getMinY(), tractBbox.getMaxY())
@@ -1400,23 +1452,27 @@ class Analysis(object):
 
         textKwargs = dict(ha="left", va="center", transform=axes.transAxes, fontsize=7, color="blue")
         plt.text(-0.05, -0.07, str("{:.2f}".format(tract00.getX())), **textKwargs)
-        plt.text(-0.17, 0.00, str("{:.2f}".format(tract00.getY())), **textKwargs)
+        plt.text(-0.15, 0.00, str("{:.2f}".format(tract00.getY())), **textKwargs)
         plt.text(0.96, -0.07, str("{:.2f}".format(tractN0.getX())), **textKwargs)
-        plt.text(-0.17, 0.97, str("{:.2f}".format(tract0N.getY())), **textKwargs)
+        plt.text(-0.15, 0.97, str("{:.2f}".format(tract0N.getY())), **textKwargs)
         textKwargs["fontsize"] = 8
         plt.text(0.45, -0.11, "RA (deg)", **textKwargs)
-        plt.text(-0.17, 0.5, "Dec (deg)", rotation=90, **textKwargs)
+        plt.text(-0.15, 0.5, "Dec (deg)", rotation=90, **textKwargs)
 
         if doPlotPatchOutline:
             plotPatchOutline(axes, plotInfoDict["tractInfo"], plotInfoDict["patchList"], plotUnits="pixel",
                              idFontSize=5)
+        xOff = 0.0
         if plotInfoDict["cameraName"] is not None:
-            labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
-        labelVisit(plotInfoDict, fig, axes, 0.5, 1.04)
+            xOff = max(0.09, 0.03*len(plotInfoDict["cameraName"]))
+            labelCamera(plotInfoDict, fig, axes, 0.5 - xOff, 1.04)
+        labelVisit(plotInfoDict, fig, axes, 0.5 + xOff, 1.04)
+        if self.config.doLabelRerun:
+            plotText("rerun: " + plotInfoDict["rerun"], plt, axes, 0.5, 1.09, fontSize=7, color="purple")
         if forcedStr is not None:
-            plotText(forcedStr, fig, axes, 0.96, -0.11, prefix="cat: ", fontSize=7, color="green")
+            plotText(forcedStr, fig, axes, 0.80, -0.11, prefix="cat: ", fontSize=7, color="green")
         if uberCalLabel:
-            plotText(uberCalLabel, fig, axes, 0.08, -0.11, fontSize=7, color="green")
+            plotText(uberCalLabel, fig, axes, 0.16, -0.11, fontSize=7, color="green")
 
         yield Struct(fig=fig, description=description, stats=None, statsHigh=None, dpi=1200, style="tract")
 
@@ -1573,6 +1629,8 @@ class Analysis(object):
         if plotInfoDict["cameraName"] is not None:
             labelCamera(plotInfoDict, fig, axes[0], 0.5, 1.04)
         labelVisit(plotInfoDict, fig, axes[1], 0.5, 1.04)
+        if self.config.doLabelRerun:
+            plotText("rerun: " + plotInfoDict["rerun"], plt, axes[0], 1.02, 1.09, fontSize=7, color="purple")
         if forcedStr is not None:
             plotText(forcedStr, plt, axes[0], 0.99, -0.15, prefix="cat: ", fontSize=8, color="green")
 
@@ -1589,10 +1647,7 @@ class Analysis(object):
             unitList = plotInfoDict["patchList"]
             unitStr = "patchId"
         for iUnit in unitList:
-            if unitStr == "patchId":  # can't read String fields via afwTableSourceCatalog
-                good = skyObjCat.asAstropy()[unitStr] == iUnit
-            else:
-                good = skyObjCat[unitStr] == iUnit
+            good = skyObjCat[unitStr] == iUnit
             perUnitSkyObjCat = skyObjCat[good].copy(deep=True)
             if len(perUnitSkyObjCat) > 0:
                 perUnitSkyFlux = perUnitSkyObjCat[metricFluxStr]*fluxScale

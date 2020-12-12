@@ -24,33 +24,28 @@ import matplotlib
 matplotlib.use("Agg")  # noqa 402
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 np.seterr(all="ignore")  # noqa 402
 
 from collections import defaultdict
 
+import lsst.afw.table as afwTable
 from lsst.daf.persistence.butler import Butler
 from lsst.pex.config import Field, ChoiceField
 from lsst.pipe.base import ArgumentParser, TaskRunner, TaskError, Struct
 from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
-from lsst.afw.table.catalogMatches import matchesToCatalog
 from .analysis import Analysis
-from .coaddAnalysis import CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisTask
-from .utils import (AngularDistance, concatenateCatalogs, addApertureFluxesHSC, addFpPoint,
-                    addFootprintNPix, addRotPoint, makeBadArray, addIntFloatOrStrColumn,
-                    calibrateSourceCatalogMosaic, calibrateSourceCatalogPhotoCalib,
-                    calibrateSourceCatalog, backoutApCorr, matchNanojanskyToAB, andCatalog, writeParquet,
-                    getRepoInfo, getCcdNameRefList, getDataExistsRefList, setAliasMaps,
-                    addPreComputedColumns, savePlots, updateVerifyJob)
+from .coaddAnalysis import (FLAGCOLORS, CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisConfig,
+                            CompareCoaddAnalysisTask)
+from .utils import (matchAndJoinCatalogs, makeBadArray, calibrateSourceCatalogMosaic,
+                    calibrateSourceCatalogPhotoCalib, calibrateSourceCatalog, andCatalog, writeParquet,
+                    getRepoInfo, getCcdNameRefList, getDataExistsRefList, addPreComputedColumns,
+                    updateVerifyJob, savePlots, getSchema, computeAreaDict)
 from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText, getPlotInfo
 from .fakesAnalysis import (addDegreePositions, matchCatalogs, addNearestNeighbor, fakesPositionCompare,
                             calcFakesAreaDepth, plotFakesAreaDepth, fakesMagnitudeCompare,
                             fakesMagnitudeNearestNeighbor, fakesMagnitudeBlendedness, fakesCompletenessPlot,
                             fakesMagnitudePositionError)
-
-import lsst.afw.cameraGeom as cameraGeom
-import lsst.afw.image as afwImage
-import lsst.afw.table as afwTable
-import lsst.geom as geom
 
 
 class CcdAnalysis(Analysis):
@@ -63,13 +58,13 @@ class CcdAnalysis(Analysis):
                                     matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
                                     zpLabel=zpLabel)
         if self.config.doPlotFP and haveFpCoords:
-            yield from self.plotFocalPlane(self.shortname, plotInfoDict, style="fpa" + postFix,
-                                           stats=stats, matchRadius=matchRadius,
-                                           matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel)
+            yield from self.plotFocalPlane(self.shortname, plotInfoDict, style="fpa" + postFix, stats=stats,
+                                           matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                                           zpLabel=zpLabel, forcedStr=forcedStr)
 
         yield from Analysis.plotAll(self, description, plotInfoDict, areaDict, log, enforcer=enforcer,
-                                    matchRadius=matchRadius,
-                                    matchRadiusUnitStr=matchRadiusUnitStr, zpLabel=zpLabel, postFix=postFix,
+                                    matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
+                                    zpLabel=zpLabel, forcedStr=forcedStr, postFix=postFix,
                                     plotRunStats=plotRunStats, highlightList=highlightList,
                                     doPrintMedian=doPrintMedian)
 
@@ -277,6 +272,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
 
     def runDataRef(self, dataRefList, tract=None, subdir=""):
         plotList = []
+        dataset = "source" if self.config.doReadParquetTables else "src"
         self.log.info("dataRefList size: {:d}".format(len(dataRefList)))
         if tract is None:
             tractList = [0, ]
@@ -285,13 +281,18 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         dataRefListPerTract = [None]*len(tractList)
         for i, tract in enumerate(tractList):
             dataRefListPerTract[i] = [dataRef for dataRef in dataRefList if
-                                      dataRef.dataId["tract"] == tract and dataRef.datasetExists("src")]
+                                      dataRef.dataId["tract"] == tract and dataRef.datasetExists(dataset)]
         commonZpDone = False
+        self.catLabel = ""
+
         for i, dataRefListTract in enumerate(dataRefListPerTract):
             if not dataRefListTract:
-                self.log.info("No data found for tract: {:d}".format(tractList[i]))
-                continue
-            repoInfo = getRepoInfo(dataRefListTract[0],
+                if len(dataRefListPerTract) <= 1:
+                    raise RuntimeError("No data found for tract: {:d}".format(tractList[i]))
+                else:
+                    self.log.info("No data found for tract: {:d}".format(tractList[i]))
+                    continue
+            repoInfo = getRepoInfo(dataRefListTract[0], catDataset=dataset,
                                    doApplyExternalPhotoCalib=self.config.doApplyExternalPhotoCalib,
                                    externalPhotoCalibName=self.config.externalPhotoCalibName,
                                    doApplyExternalSkyWcs=self.config.doApplyExternalSkyWcs,
@@ -349,7 +350,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 if set(ccdListPerTract) != set(ccdPhotoCalibListPerTract):
                     self.log.warn(f"Did not find {repoInfo.photoCalibDataset} external calibrations for "
                                   f"all dataIds that do have {repoInfo.catDataset} catalogs.")
-            if self.config.doApplyExternalPhotoCalib:
+            if self.config.doApplyExternalSkyWcs:
                 if set(ccdListPerTract) != set(ccdSkyWcsListPerTract):
                     self.log.warn(f"Did not find {repoInfo.skyWcsDataset} external calibrations for "
                                   f"all dataIds that do have {repoInfo.catDataset} catalogs.")
@@ -361,50 +362,71 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 aliasDictList += [self.config.srcSchemaMap]
             # Always highlight points with x-axis flag set (for cases where
             # they do not get explicitly filtered out).
-            highlightList = [
-                (self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0, "turquoise"), ]
-
+            highlightList = [(self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0, "turquoise")]
+            for ih, flagName in enumerate(list(self.config.analysis.flags)):
+                if not any(flagName in highlight for highlight in highlightList):
+                    highlightList += [(flagName, 0, FLAGCOLORS[ih%len(FLAGCOLORS)]), ]
             # Dict of all parameters common to plot* functions
             plotInfoDict.update(dict(ccdList=ccdListPerTract, hscRun=repoInfo.hscRun,
                                      tractInfo=repoInfo.tractInfo, dataId=repoInfo.dataId))
 
             if any(doPlot for doPlot in
                    [self.config.doPlotPsfFluxSnHists, self.config.doPlotSkyObjects,
-                    self.config.doPlotFootprintNpix, self.config.doPlotRhoStatistics,
+                    self.config.doPlotFootprintArea, self.config.doPlotRhoStatistics,
                     self.config.doPlotQuiver, self.config.doPlotMags, self.config.doPlotStarGalaxy,
                     self.config.doPlotSizes, self.config.doPlotCentroids, self.config.doPlotRhoStatistics,
                     self.config.doWriteParquetTables]) and not self.config.plotMatchesOnly:
                 if self.config.hasFakes:
                     inputFakes = repoInfo.butler.get("deepCoadd_fakeSourceCat", dataId=repoInfo.dataId)
                     inputFakes = inputFakes.toDataFrame()
-                    datasetType = "fakes_src"
+                    datasetType = "fakes_" + dataset
                 else:
                     inputFakes = None
-                    datasetType = "src"
-                catStruct = self.readCatalogs(dataRefListTract, datasetType, repoInfo,
-                                              aliasDictList=aliasDictList, fakeCat=inputFakes)
-                commonZpCat = catStruct.commonZpCatalog
-                catalog = catStruct.catalog
-                areaDict = catStruct.areaDict
+                    datasetType = dataset
+
+                externalCalKwargs = dict(doApplyExternalPhotoCalib=self.config.doApplyExternalPhotoCalib,
+                                         doApplyExternalSkyWcs=self.config.doApplyExternalSkyWcs,
+                                         useMeasMosaic=self.config.useMeasMosaic)
+                if self.config.doReadParquetTables:
+                    catalog, commonZpCat = self.readParquetTables(dataRefListTract, datasetType, repoInfo,
+                                                                  **externalCalKwargs)
+                    areaDict, _ = computeAreaDict(repoInfo, dataRefListTract, dataset="", fakeCat=None)
+                else:
+                    catStruct = self.readCatalogs(dataRefListTract, datasetType, repoInfo,
+                                                  aliasDictList=aliasDictList, fakeCat=inputFakes,
+                                                  readFootprintsAs=self.config.readFootprintsAs,
+                                                  **externalCalKwargs)
+                    commonZpCat = catStruct.commonZpCatalog
+                    catalog = catStruct.catalog
+                    # Convert to pandas DataFrames
+                    commonZpCat = commonZpCat.asAstropy().to_pandas().set_index("id", drop=False)
+                    catalog = catalog.asAstropy().to_pandas().set_index("id", drop=False)
+                    areaDict = catStruct.areaDict
+                schema = getSchema(catalog)
+                xFp = catalog["base_FPPosition_x"].array  # Double check for compatibility with older repos
+                self.haveFpCoords = False if len(xFp[np.where(np.isfinite(xFp))]) <= 0 else True
                 # Make sub-catalog of sky sources before flag culling as many
                 # of these will have flags set due to measurement difficulties
                 # in regions that are really blank sky.
                 skySrcCat = None
                 if self.config.doPlotSkyObjects:
-                    if "sky_source" in catalog.schema:
+                    if "sky_source" in schema:
                         skySrcCat = catalog[catalog["sky_source"]].copy(deep=True)
                     else:
                         self.log.warn("doPlotSkyObjects is True, but the \"sky_source\" "
-                                      "column does not exist in catalog.schema.  Skipping "
+                                      "column does not exist in the catalog schema.  Skipping "
                                       "skyObjects plot.")
 
                 # Set boolean arrays indicating sources deemed unsuitable for
                 # qa analyses.
-                self.catLabel = "nChild = 0"
                 bad = makeBadArray(catalog, flagList=self.config.analysis.flags,
                                    onlyReadStars=self.config.onlyReadStars)
                 badCommonZp = makeBadArray(commonZpCat, flagList=self.config.analysis.flags,
                                            onlyReadStars=self.config.onlyReadStars)
+                self.catLabel = "isPrimary"
+                if self.config.doBackoutApCorr:
+                    self.log.info("Backing out aperture corrections from all fluxes")
+                    self.catLabel += "\n     (noApCorr)"
 
                 # Create and write parquet tables
                 if self.config.doWriteParquetTables:
@@ -428,7 +450,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 commonZpCat = commonZpCat[~badCommonZp].copy(deep=True)
 
                 if self.config.hasFakes:
-                    processedFakes = catalog.asAstropy().to_pandas()
+                    processedFakes = catalog
                     inputFakes = catStruct.fakeCat
                     inputFakes = addDegreePositions(inputFakes, self.config.inputFakesRaCol,
                                                     self.config.inputFakesDecCol)
@@ -473,12 +495,12 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                                             plotInfoDict, areaDict, zpLabel="raw"))
                     plotList.append(self.plotPsfFluxSnHists(catalog, "base_PsfFlux_cal",
                                                             plotInfoDict, areaDict, zpLabel=self.zpLabel))
-                plotKwargs = dict(zpLabel=self.zpLabel)
-                if self.config.doPlotFootprintNpix:
-                    plotList.append(self.plotFootprintHist(catalog, "footNpix", plotInfoDict, **plotKwargs))
+                plotKwargs = dict(zpLabel=self.zpLabel, forcedStr=self.catLabel)
+                if self.config.doPlotFootprintArea:
+                    plotList.append(self.plotFootprintHist(catalog, "footArea", plotInfoDict, **plotKwargs))
                     plotList.append(self.plotFootprint(catalog, plotInfoDict, areaDict, plotRunStats=False,
-                                                       highlightList=[("parent", 0, "yellow"), ],
-                                                       **plotKwargs))
+                                                       highlightList=highlightList
+                                                       + [("parent", 0, "yellow"), ], **plotKwargs))
 
                 if self.config.doPlotQuiver:
                     plotList.append(self.plotQuiver(catalog, "ellipResids", plotInfoDict, areaDict, scale=2,
@@ -506,23 +528,26 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 if self.config.doPlotMags:
                     plotList.append(self.plotMags(catalog, plotInfoDict, areaDict, **plotKwargs))
                 if self.config.doPlotStarGalaxy:
-                    if "ext_shapeHSM_HsmSourceMoments_xx" in catalog.schema:
+                    if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
                         plotList.append(self.plotStarGal(catalog, plotInfoDict, areaDict, **plotKwargs))
                     else:
                         self.log.warn("Cannot run plotStarGal: "
-                                      "ext_shapeHSM_HsmSourceMoments_xx not in catalog.schema")
+                                      "ext_shapeHSM_HsmSourceMoments_xx not in the catalog schema")
                 if self.config.doPlotSizes:
-                    if "base_SdssShape_psf_xx" in catalog.schema:
+                    if "base_SdssShape_psf_xx" in schema:
                         plotList.append(self.plotSizes(catalog, plotInfoDict, areaDict, **plotKwargs))
                     else:
-                        self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
+                        self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in the catalog schema")
                 if self.config.doPlotCentroids and self.haveFpCoords:
                     plotList.append(self.plotCentroidXY(catalog, plotInfoDict, areaDict, **plotKwargs))
 
-            matchAreaDict = {}
-            if self.config.doPlotMatches:
-                matches, matchAreaDict = self.readSrcMatches(dataRefListTract, "src", repoInfo,
-                                                             aliasDictList=aliasDictList)
+            if self.config.doPlotMatches or self.config.doWriteParquetTables:
+                matchAreaDict = {}
+                externalCalKwargs = dict(doApplyExternalPhotoCalib=self.config.doApplyExternalPhotoCalib,
+                                         doApplyExternalSkyWcs=self.config.doApplyExternalSkyWcs,
+                                         useMeasMosaic=self.config.useMeasMosaic)
+                matches, matchAreaDict = self.readSrcMatches(repoInfo, dataRefListTract, dataset="src",
+                                                             aliasDictList=aliasDictList, **externalCalKwargs)
                 if self.config.doWriteParquetTables:
                     matchesDataRef = repoInfo.butler.dataRef("analysisMatchFullRefVisitTable",
                                                              dataId=repoInfo.dataId)
@@ -531,21 +556,31 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     self.log.info("Exiting after writing Parquet tables.  No plots generated.")
                     return
 
-                # Dict of all parameters common to plot* functions
-                matchHighlightList = [("src_" + self.config.analysis.fluxColumn.replace("_instFlux", "_flag"),
-                                       0, "turquoise"), ]
-                plotList.append(self.plotMatches(matches, plotInfoDict, matchAreaDict, zpLabel=self.zpLabel,
-                                highlightList=matchHighlightList))
+                if self.config.doPlotMatches:
+                    matchLabel = "matched to\n" + self.config.refObjLoader.ref_dataset_name
+                    matchLabel = (matchLabel + "\n     (noApCorr)" if self.config.doBackoutApCorr
+                                  else matchLabel)
+                    plotKwargs = dict(zpLabel=self.zpLabel, forcedStr=matchLabel)
+                    # Dict of all parameters common to plot* functions
+                    matchHighlightList = [
+                        ("src_" + self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0,
+                         "turquoise"), ("src_deblend_nChild", 0, "lime"), ("src_parent", 0, "orange")]
+                    for ih, flagName in enumerate(list(self.config.analysis.flags)):
+                        flagName = "src_" + flagName
+                        if not any(flagName in highlight for highlight in matchHighlightList):
+                            matchHighlightList += [(flagName, 0, FLAGCOLORS[ih%len(FLAGCOLORS)]), ]
+                    plotKwargs.update(dict(highlightList=matchHighlightList, matchRadius=self.matchRadius,
+                                           matchRadiusUnitStr=self.matchRadiusUnitStr))
+                    plotList.append(self.plotMatches(matches, plotInfoDict, matchAreaDict, **plotKwargs))
 
-            for cat in self.config.externalCatalogs:
-                if self.config.photoCatName not in cat:
-                    with andCatalog(cat):
-                        matches = self.matchCatalog(catalog, plotInfoDict["filter"],
-                                                    self.config.externalCatalogs[cat])
-                        plotList.append(self.plotMatches(matches, plotInfoDict, matchAreaDict,
-                                                         matchRadius=self.matchRadius,
-                                                         matchRadiusUnitStr=self.matchRadiusUnitStr,
-                                                         **plotKwargs))
+                for cat in self.config.externalCatalogs:
+                    if self.config.photoCatName not in cat:
+                        with andCatalog(cat):
+                            matches = self.matchCatalog(catalog, plotInfoDict["filter"],
+                                                        self.config.externalCatalogs[cat])
+                            matchLabel = "matched to\n" + self.config.externalCatalogs[cat]
+                            plotList.append(self.plotMatches(matches, plotInfoDict, matchAreaDict,
+                                                             **plotKwargs))
         metaDict = {"tract": plotInfoDict["tract"], "visit": plotInfoDict["visit"],
                     "filter": plotInfoDict["filter"]}
         if plotInfoDict["cameraName"]:
@@ -560,314 +595,8 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         # butler.put by directly persisting json files.
         self.verifyJob.write(verifyJobFilename)
 
-    def readCatalogs(self, dataRefList, dataset, repoInfo, aliasDictList=None, fakeCat=None,
-                     raFakesCol="raJ2000", decFakesCol="decJ2000"):
-        """Read in and concatenate catalogs of type dataset in lists of data
-        references.
-
-        If self.config.doWriteParquetTables is `True`, before appending each
-        catalog to a single `list`, an extra column indicating the ccd is added
-        to the catalog.  This is useful for the subsequent interactive QA
-        analysis.
-
-        Also added to the catalog are columns with the focal plane coordinate
-        (if not already present) and the number of pixels in the object's
-        footprint.  Finally, the catalogs are calibrated according to the
-        self.config.doApplyExternalPhotoCalib/SkyWcs config parameters:
-
-        self.config.doApplyExternalPhotoCalib:
-        - external photometric flux calibration ("fgcmcal", "jointcal", or
-          "meas_mosaic") if `True`.
-        - fluxMag0, the instrumental flux corresponding to 0th magnitude, from
-          SFM if `False`.
-
-        self.config.doApplyExternalSkyWcs:
-        - external astrometric calibration ("jointcal" or "meas_mosaic") if
-          `True`.
-        - no change to SFM astrometric calibration if `False`.
-
-        Parameters
-        ----------
-        dataRefList : `list` of
-                      `lsst.daf.persistence.butlerSubset.ButlerDataRef`
-            A list of butler data references whose catalogs of dataset type
-            are to be read in.
-        dataset : `str`
-            Name of the catalog dataset to be read in.
-        repoInfo : `lsst.pipe.base.Struct`
-            A struct containing relevant information about the repository under
-            study.  Elements used here include the key name associated with a
-            ccd and wether the processing was done with an HSC stack (now
-            obsolete, but processing runs still exist).
-        fakeCat : `pandas.core.frame.DataFrame` or `None`, optional
-            Catalog of fake sources, used if config.hasFakes is `True` in which
-            case a column (onCcd) is added with the ccd number if the fake
-            source overlaps a ccd and np.nan if it does not.
-
-        Raises
-        ------
-        TaskError
-            If no data is read in for the dataRefList.
-
-        Returns
-        -------
-        result : `lsst.pipe.base.Struct`
-            A struct with attributes:
-            ``commonZpCatalog``
-                The concatenated common zeropoint calibrated catalog
-                (`lsst.afw.table.SourceCatalog`).
-            ``catalog``
-                The concatenated SFM or external calibration calibrated catalog
-                (`lsst.afw.table.SourceCatalog`).
-            ``areaDict``
-                Contains ccd keys that index the ccd corners in RA/Dec and
-                the effective ccd area (i.e. neither the "BAD" nor "NO_DATA"
-                mask bit is set) (`dict`).
-            ``fakeCat``
-                The updated catalog of fake sources or `None` if no ``fakeCat``
-                provided (`pandas.core.frame.DataFrame`).
-        """
-        catList = []
-        commonZpCatList = []
-        areaDict = {}
-        self.haveFpCoords = True
-        for dataRef in dataRefList:
-            if not dataRef.datasetExists(dataset):
-                continue
-            catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
-            # Set some aliases for differing schema naming conventions
-            if aliasDictList:
-                catalog = setAliasMaps(catalog, aliasDictList)
-
-            # Add ccdId column (useful to have in Parquet tables for subsequent
-            # interactive analysis).
-            catalog = addIntFloatOrStrColumn(catalog, dataRef.dataId[repoInfo.ccdKey], "ccdId",
-                                             "Id of CCD on which source was detected")
-
-            # getUri is less safe but enables us to use an efficient
-            # ExposureFitsReader.
-            fname = repoInfo.butler.getUri("calexp", dataRef.dataId)
-            reader = afwImage.ExposureFitsReader(fname)
-            detector = reader.readDetector()
-            if self.config.doApplyExternalSkyWcs:
-                wcs = dataRef.get(repoInfo.skyWcsDataset)
-            else:
-                wcs = reader.readWcs()
-            ccdCorners = wcs.pixelToSky(detector.getCorners(cameraGeom.PIXELS))
-            areaDict["corners_" + str(dataRef.dataId[repoInfo.ccdKey])] = ccdCorners
-
-            # Actual mask is needed because BAD and NO_DATA pixels are more
-            # than just the defects.
-            mask = reader.readMask()
-            maskBad = mask.array & 2**mask.getMaskPlaneDict()["BAD"]
-            maskNoData = mask.array & 2**mask.getMaskPlaneDict()["NO_DATA"]
-            maskedPixels = maskBad + maskNoData
-            numGoodPix = np.count_nonzero(maskedPixels == 0)
-            pixScale = wcs.getPixelScale(detector.getCenter(cameraGeom.PIXELS)).asArcseconds()
-            area = numGoodPix*pixScale**2
-            areaDict[dataRef.dataId["ccd"]] = area
-
-            if self.config.hasFakes:
-                # Check which fake sources fall on the ccd
-                cornerRas = [cx.asRadians() for (cx, cy) in ccdCorners]
-                cornerDecs = [cy.asRadians() for (cx, cy) in ccdCorners]
-                possOnCcd = np.where((fakeCat[raFakesCol].values > np.min(cornerRas))
-                                     & (fakeCat[raFakesCol].values < np.max(cornerRas))
-                                     & (fakeCat[decFakesCol].values > np.min(cornerDecs))
-                                     & (fakeCat[decFakesCol].values < np.max(cornerDecs)))[0]
-
-                if "onCcd" not in fakeCat.columns:
-                    fakeCat["onCcd"] = [np.nan]*len(fakeCat)
-
-                validCcdPolygon = reader.readExposureInfo().getValidPolygon()
-                onCcdList = []
-                for rowId in possOnCcd:
-                    skyCoord = geom.SpherePoint(fakeCat[raFakesCol].values[rowId],
-                                                fakeCat[decFakesCol].values[rowId], geom.radians)
-                    pixCoord = wcs.skyToPixel(skyCoord)
-                    onCcd = validCcdPolygon.contains(pixCoord)
-                    if onCcd:
-                        onCcdList.append(rowId)
-                fakeCat["onCcd"].iloc[np.array(onCcdList)] = dataRef.dataId[repoInfo.ccdKey]
-
-            if self.config.doPlotCentroids or self.config.analysis.doPlotFP and self.haveFpCoords:
-                # Compute Focal Plane coordinates for each source if not
-                # already there.
-                if "base_FPPosition_x" not in catalog.schema and "focalplane_x" not in catalog.schema:
-                    det = repoInfo.butler.get("calexp_detector", dataRef.dataId)
-                    catalog = addFpPoint(det, catalog)
-                xFp = catalog["base_FPPosition_x"]
-                if len(xFp[np.where(np.isfinite(xFp))]) <= 0:
-                    self.haveFpCoords = False
-            if self.config.doPlotFootprintNpix:
-                catalog = addFootprintNPix(catalog)
-            if repoInfo.hscRun and self.config.doAddAperFluxHsc:
-                self.log.info("HSC run: adding aperture flux to schema...")
-                catalog = addApertureFluxesHSC(catalog, prefix="")
-            # Optionally backout aperture corrections
-            if self.config.doBackoutApCorr:
-                catalog = backoutApCorr(catalog)
-
-            # Scale fluxes to common zeropoint to make basic comparison plots
-            # without calibrated ZP influence.
-            commonZpCat = catalog.copy(True)
-            commonZpCat = calibrateSourceCatalog(commonZpCat, self.config.analysis.commonZp)
-            commonZpCatList.append(commonZpCat)
-            if self.config.doApplyExternalPhotoCalib:
-                if repoInfo.hscRun:
-                    if not dataRef.datasetExists("fcr_hsc_md") or not dataRef.datasetExists("wcs_hsc"):
-                        continue
-                else:
-                    # Check for both jointcal_wcs and wcs for compatibility
-                    # with old datasets.
-                    if not (dataRef.datasetExists(repoInfo.photoCalibDataset)
-                            or dataRef.datasetExists("fcr_md")):
-                        continue
-            if self.config.doApplyExternalSkyWcs:
-                if repoInfo.hscRun:
-                    if not dataRef.datasetExists("fcr_hsc_md") or not dataRef.datasetExists("wcs_hsc"):
-                        continue
-                else:
-                    # Check for both jointcal_wcs and wcs for compatibility
-                    # with old datasets.
-                    if not (dataRef.datasetExists(repoInfo.skyWcsDataset)
-                            or dataRef.datasetExists("wcs")):
-                        continue
-            fluxMag0 = None
-            if not self.config.doApplyExternalPhotoCalib:
-                photoCalib = repoInfo.butler.get("calexp_photoCalib", dataRef.dataId)
-                fluxMag0 = photoCalib.getInstFluxAtZeroMagnitude()
-            catalog = self.calibrateCatalogs(dataRef, catalog, fluxMag0, repoInfo)
-            catList.append(catalog)
-
-        if not catList:
-            raise TaskError("No catalogs read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
-
-        return Struct(commonZpCatalog=concatenateCatalogs(commonZpCatList),
-                      catalog=concatenateCatalogs(catList), areaDict=areaDict, fakeCat=fakeCat)
-
-    def readSrcMatches(self, dataRefList, dataset, repoInfo, aliasDictList=None):
-        catList = []
-        dataIdSubList = []
-        matchAreaDict = {}
-        for dataRef in dataRefList:
-            if not dataRef.datasetExists(dataset):
-                continue
-            if self.config.doApplyExternalPhotoCalib:
-                if repoInfo.hscRun:
-                    if not dataRef.datasetExists("fcr_hsc_md") or not dataRef.datasetExists("wcs_hsc"):
-                        continue
-                else:
-                    # Check for both jointcal_wcs and wcs for compatibility
-                    # with old datasets.
-                    if (not (dataRef.datasetExists(repoInfo.photoCalibDataset)
-                             or dataRef.datasetExists("fcr_md"))):
-                        continue
-            if self.config.doApplyExternalSkyWcs:
-                if repoInfo.hscRun:
-                    if not dataRef.datasetExists("fcr_hsc_md") or not dataRef.datasetExists("wcs_hsc"):
-                        continue
-                else:
-                    # Check for both jointcal_wcs and wcs for compatibility
-                    # with old datasets.
-                    if not (dataRef.datasetExists(repoInfo.skyWcsDataset)
-                            or dataRef.datasetExists("wcs")):
-                        continue
-            # Generate unnormalized match list (from normalized persisted one)
-            # with joinMatchListWithCatalog (which requires a refObjLoader to
-            # be initialized).
-            catalog = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-            catalog = addIntFloatOrStrColumn(catalog, dataRef.dataId[repoInfo.ccdKey], "ccdId",
-                                             "Id of CCD on which source was detected")
-            # Set some aliases for differing schema naming conventions
-            if aliasDictList:
-                catalog = setAliasMaps(catalog, aliasDictList)
-            fluxMag0 = None
-            if not self.config.doApplyExternalPhotoCalib:
-                photoCalib = repoInfo.butler.get("calexp_photoCalib", dataRef.dataId)
-                fluxMag0 = photoCalib.getInstFluxAtZeroMagnitude()
-            catalog = self.calibrateCatalogs(dataRef, catalog, fluxMag0, repoInfo)
-            # getUri is less safe but enables us to use an efficient
-            # ExposureFitsReader.
-            fname = repoInfo.butler.getUri("calexp", dataRef.dataId)
-            reader = afwImage.ExposureFitsReader(fname)
-            detector = reader.readDetector()
-            if self.config.doApplyExternalSkyWcs:
-                wcs = dataRef.get(repoInfo.skyWcsDataset)
-            else:
-                wcs = reader.readWcs()
-            ccdCorners = wcs.pixelToSky(detector.getCorners(cameraGeom.PIXELS))
-            matchAreaDict["corners_" + str(dataRef.dataId[repoInfo.ccdKey])] = ccdCorners
-
-            packedMatches = repoInfo.butler.get(dataset + "Match", dataRef.dataId)
-            # The reference object loader grows the bbox by the config
-            # parameter pixelMargin.  This is set to 50 by default but is not
-            # reflected by the radius parameter set in the metadata, so some
-            # matches may reside outside the circle searched within this radius
-            # Thus, increase the radius set in the metadata fed into
-            # joinMatchListWithCatalog() to accommodate.
-            matchmeta = packedMatches.table.getMetadata()
-            rad = matchmeta.getDouble("RADIUS")
-            matchmeta.setDouble("RADIUS", rad*1.05, "field radius in degrees, approximate, padded")
-            refObjLoader = self.config.refObjLoader.apply(butler=repoInfo.butler)
-            matches = refObjLoader.joinMatchListWithCatalog(packedMatches, catalog)
-            if not hasattr(matches[0].first, "schema"):
-                raise RuntimeError("Unable to unpack matches.  "
-                                   "Do you have the correct astrometry_net_data setup?")
-            noMatches = False
-            if len(matches) < 8:
-                for m in matches:
-                    if not hasattr(m.first, "get"):
-                        matches = []
-                        noMatches = True
-                        break
-
-            # LSST reads in a_net catalogs with flux in "nanojanskys", so must
-            # convert to AB.
-            if not noMatches:
-                matches = matchNanojanskyToAB(matches)
-                if repoInfo.hscRun and self.config.doAddAperFluxHsc:
-                    addApertureFluxesHSC(matches, prefix="second_")
-
-            if not matches:
-                self.log.warn("No matches for {:s}".format(dataRef.dataId))
-                continue
-
-            matchMeta = repoInfo.butler.get(dataset, dataRef.dataId,
-                                            flags=afwTable.SOURCE_IO_NO_FOOTPRINTS).getTable().getMetadata()
-            catalog = matchesToCatalog(matches, matchMeta)
-            if self.config.doApplyExternalSkyWcs:
-                # Update "distance" between reference and source matches based
-                # on external-calibration positions.
-                angularDist = AngularDistance("ref_coord_ra", "src_coord_ra",
-                                              "ref_coord_dec", "src_coord_dec")
-                catalog["distance"] = angularDist(catalog)
-
-            # Compute Focal Plane coordinates for each source if not already
-            # there.
-            if self.config.analysisMatches.doPlotFP:
-                if "src_base_FPPosition_x" not in catalog.schema and "src_focalplane_x" not in catalog.schema:
-                    det = repoInfo.butler.get("calexp_detector", dataRef.dataId)
-                    catalog = addFpPoint(det, catalog, prefix="src_")
-            # Optionally backout aperture corrections
-            if self.config.doBackoutApCorr:
-                catalog = backoutApCorr(catalog)
-            # Need to set the alias map for the matched catalog sources
-            if aliasDictList:
-                catalog = setAliasMaps(catalog, aliasDictList, prefix="src_")
-            # To avoid multiple counting when visit overlaps multiple tracts
-            noTractId = dataRef.dataId.copy()
-            noTractId.pop("tract")
-            if noTractId not in dataIdSubList:
-                catList.append(catalog)
-            dataIdSubList.append(noTractId)
-
-        if not catList:
-            raise TaskError("No matches read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
-
-        return concatenateCatalogs(catList), matchAreaDict
-
-    def calibrateCatalogs(self, dataRef, catalog, fluxMag0, repoInfo):
+    def calibrateCatalogs(self, dataRef, catalog, fluxMag0, repoInfo, doApplyExternalPhotoCalib,
+                          doApplyExternalSkyWcs, useMeasMosaic, iCat=None):
         """Determine and apply appropriate flux calibration to the catalog.
 
         Parameters
@@ -887,23 +616,55 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             A struct containing relevant information about the repository under
             study.  Elements used here include the dataset names for any
             external calibrations to be applied.
+        doApplyExternalPhotoCalib : `bool`
+            If `True`: Apply the external photometric calibrations specified by
+                      ``repoInfo.photoCalibDataset`` to the catalog.
+            If `False`: Apply the ``fluxMag0`` photometric calibration from
+                        Single Frame Measuerment to the catalog.
+        doApplyExternalSkyWcs : `bool`
+            If `True`: Apply the external astrometric calibrations specified by
+                       ``repoInfo.skyWcsDataset`` the catalog.
+            If `False`: Retain the WCS from Single Frame Measurement.
+        useMeasMosaic : `bool`
+            Use meas_mosaic's applyMosaicResultsCatalog for the external
+            calibration (even if photoCalib object exists).  For testing
+            implementations.
+        iCat : `int` or None, optional
+            Integer representing whether this is comparison catalog 0 or 1.
+
+        Returns
+        -------
+        calibrated : `lsst.afw.table.SourceCatalog`
+            The calibrated source catalog.
+        zpLabel : `str`
+            A label indicating the external calibration applied (currently
+            either "jointcal", "fgcm", "fgcm_tract", or "meas_mosaic", but the
+            latter is effectively retired)
         """
         self.zp = 0.0
-        try:
-            self.zpLabel = self.zpLabel
-        except Exception:
+        if iCat is None:
+            try:
+                self.zpLabel = self.zpLabel
+            except Exception:
+                self.zpLabel = None
+        else:
             self.zpLabel = None
-
-        if self.config.doApplyExternalPhotoCalib:
-            if not self.config.useMeasMosaic:
+        zpLabel = self.zpLabel
+        if doApplyExternalPhotoCalib:
+            if not useMeasMosaic:
                 # i.e. the processing was post-photoCalib output generation
                 # AND you want the photoCalib flux object used for the
                 # calibration (as opposed to meas_mosaic's fcr object).
                 if not self.zpLabel:
                     zpStr = ("MMphotoCalib" if dataRef.datasetExists("fcr_md")
-                             else self.config.externalPhotoCalibName.upper())
-                    self.log.info(f"Applying {zpStr} photoCalib calibration to catalog")
-                    self.zpLabel = zpStr
+                             else repoInfo.photoCalibDataset.split("_")[0].upper())
+                    if (iCat is None or (iCat == 0 and self.zpLabel1 is None)
+                            or (iCat == 1 and self.zpLabel2 is None)):  # Suppress superfluous logging
+                        msg = "Applying {0:} photoCalib calibration to catalog".format(zpStr)
+                        msg = msg + str(iCat + 1) if iCat is not None else msg
+                        self.log.info(msg)
+                    zpLabel = zpStr
+                    zpLabel = zpLabel + "_" + str(iCat + 1) if iCat is not None else zpLabel
                 calibrated = calibrateSourceCatalogPhotoCalib(dataRef, catalog, repoInfo.photoCalibDataset,
                                                               zp=self.zp)
             else:
@@ -918,27 +679,58 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                      "--config doApplyExternalPhotoCalib=False doApplyExternalSkyWcs=False")
                 if not self.zpLabel:
                     self.log.info("Applying meas_mosaic calibration to catalog")
-                self.zpLabel = "MEAS_MOSAIC"
+                zpLabel = "MEAS_MOSAIC"
                 calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
         else:
             # Scale fluxes to measured zeropoint
             self.zp = 2.5*np.log10(fluxMag0)
-            if not self.zpLabel:
-                self.log.info("Using 2.5*log10(fluxMag0) = {:.4f} from SFM for zeropoint".format(self.zp))
-            self.zpLabel = "FLUXMAG0"
+            if ((iCat is None and self.zpLabel is None) or (iCat == 0 and self.zpLabel1 is None)
+                    or (iCat == 1 and self.zpLabel2 is None)):  # Suppress superfluous logging
+                msg = ("Using 2.5*log10(fluxMag0) (zeropoint of order ~{0:.2f}) from SFM for catalog".
+                       format(self.zp))
+                msg = msg + str(iCat + 1) if iCat is not None else msg
+                self.log.info(msg)
+            zpLabel = "FLUXMAG0"
+            zpLabel = zpLabel + "_" + str(iCat + 1) if iCat is not None else zpLabel
             calibrated = calibrateSourceCatalog(catalog, self.zp)
 
-        if self.config.doApplyExternalSkyWcs:
+        if doApplyExternalSkyWcs:
             wcs = dataRef.get(repoInfo.skyWcsDataset)
-            for record in calibrated:
-                record.updateCoord(wcs)
-            if "wcs" not in self.zpLabel:
-                self.zpLabel += "\nwcs: " + self.config.externalSkyWcsName.upper()
-
+            if isinstance(calibrated, pd.DataFrame):
+                xPixelArray = np.array(calibrated["slot_Centroid_x"])
+                yPixelArray = np.array(calibrated["slot_Centroid_y"])
+                updatedRaDec = wcs.pixelToSkyArray(xPixelArray, yPixelArray)
+                calibrated["coord_ra"] = updatedRaDec[0]
+                calibrated["coord_dec"] = updatedRaDec[1]
+            else:
+                afwTable.updateSourceCoords(wcs, calibrated)
+            if "wcs" not in zpLabel:
+                if iCat is None:
+                    zpLabel += "\nwcs: " + repoInfo.skyWcsDataset.split("_")[0].upper()
+                if iCat is not None:
+                    zpLabel += (" wcs: " + repoInfo.skyWcsDataset.split("_")[0].upper() + "_"
+                                + str(iCat + 1))
+        else:
+            if "wcs" not in zpLabel:
+                if iCat is None:
+                    zpLabel += "\nwcs: SFM"
+                if iCat is not None:
+                    zpLabel += " wcs: SFM_" + str(iCat + 1)
+        if ((iCat is None and self.zpLabel is None) or (iCat == 0 and self.zpLabel1 is None)
+                or (iCat == 1 and self.zpLabel2 is None)):  # Suppress superfluous logging
+            msg = "Applying WCS from {0:}".format(zpLabel[zpLabel.find("wcs:") + 5:])
+            msg = msg.replace("Applying", "Using") if "SFM" in msg else msg
+            msg = msg.replace("_", " for catalog") if "_" in msg else msg
+            self.log.info(msg)
+        if iCat is None:
+            self.zpLabel = zpLabel
+        else:
+            self.zpLabel1 = zpLabel if iCat == 0 and not self.zpLabel1 else self.zpLabel1
+            self.zpLabel2 = zpLabel if iCat == 1 and not self.zpLabel2 else self.zpLabel2
         return calibrated
 
 
-class CompareVisitAnalysisConfig(VisitAnalysisConfig):
+class CompareVisitAnalysisConfig(VisitAnalysisConfig, CompareCoaddAnalysisConfig):
     doApplyExternalPhotoCalib1 = Field(dtype=bool, default=True,
                                        doc=("Whether to apply external photometric calibration (e.g. "
                                             "fgcmcal/jointcal/meas_mosaic) via an "
@@ -1058,7 +850,7 @@ class CompareVisitAnalysisRunner(TaskRunner):
                 refs1, refs2 in zip(visits1.values(), visits2.values())]
 
 
-class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
+class CompareVisitAnalysisTask(VisitAnalysisTask, CompareCoaddAnalysisTask):
     ConfigClass = CompareVisitAnalysisConfig
     RunnerClass = CompareVisitAnalysisRunner
     _DefaultName = "compareVisitAnalysis"
@@ -1094,7 +886,10 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
         if len(dataRefListPerTract1) != len(dataRefListPerTract2):
             raise TaskError("Lengths of comparison dataRefLists do not match!")
         commonZpDone = False
-
+        dataset1 = "source" if self.config.doReadParquetTables1 else "src"
+        dataset2 = "source" if self.config.doReadParquetTables2 else "src"
+        self.zpLabel1 = None
+        self.zpLabel2 = None
         i = -1
         for dataRefListTract1, dataRefListTract2 in zip(dataRefListPerTract1, dataRefListPerTract2):
             i += 1
@@ -1110,12 +905,12 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             # the data were processed with the HSC stack.  We assume all
             # processing in a given rerun is self-consistent, so only need one
             # valid dataId per comparison rerun.
-            repoInfo1 = getRepoInfo(dataRefListTract1[0],
+            repoInfo1 = getRepoInfo(dataRefListTract1[0], catDataset=dataset1,
                                     doApplyExternalPhotoCalib=self.config.doApplyExternalPhotoCalib1,
                                     externalPhotoCalibName=self.config.externalPhotoCalibName1,
                                     doApplyExternalSkyWcs=self.config.doApplyExternalSkyWcs1,
                                     externalSkyWcsName=self.config.externalSkyWcsName1)
-            repoInfo2 = getRepoInfo(dataRefListTract2[0],
+            repoInfo2 = getRepoInfo(dataRefListTract2[0], catDataset=dataset2,
                                     doApplyExternalPhotoCalib=self.config.doApplyExternalPhotoCalib2,
                                     externalPhotoCalibName=self.config.externalPhotoCalibName2,
                                     doApplyExternalSkyWcs=self.config.doApplyExternalSkyWcs2,
@@ -1183,20 +978,54 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             if self.config.doApplyExternalSkyWcs2:
                 self.log.info(f"ccdSkyWcsListPerTract2: \n{ccdSkyWcsListPerTract2}")
 
-            doReadFootprints = None
-            if self.config.doPlotFootprintNpix:
-                doReadFootprints = "light"
             # Set some aliases for differing schema naming conventions
             aliasDictList = [self.config.flagsToAlias, ]
             if (repoInfo1.hscRun or repoInfo2.hscRun) and self.config.srcSchemaMap is not None:
                 aliasDictList += [self.config.srcSchemaMap]
-            commonZpCat1, catalog1, areaDict1, commonZpCat2, catalog2, areaDict2 = (
-                self.readCatalogs(dataRefListTract1, dataRefListTract2, "src", repoInfo1, repoInfo2,
-                                  doReadFootprints=doReadFootprints, aliasDictList=aliasDictList))
+
+            externalCalKwargs1 = dict(doApplyExternalPhotoCalib=self.config.doApplyExternalPhotoCalib1,
+                                      doApplyExternalSkyWcs=self.config.doApplyExternalSkyWcs1,
+                                      useMeasMosaic=self.config.useMeasMosaic1, iCat=0)
+            externalCalKwargs2 = dict(doApplyExternalPhotoCalib=self.config.doApplyExternalPhotoCalib2,
+                                      doApplyExternalSkyWcs=self.config.doApplyExternalSkyWcs2,
+                                      useMeasMosaic=self.config.useMeasMosaic2, iCat=1)
+            if self.config.doReadParquetTables1 or self.config.doReadParquetTables2:
+                if self.config.doReadParquetTables1:
+                    catalog1, commonZpCat1 = self.readParquetTables(dataRefListTract1, repoInfo1.catDataset,
+                                                                    repoInfo1, **externalCalKwargs1)
+                    areaDict1, _ = computeAreaDict(repoInfo1, dataRefListTract1, dataset="", fakeCat=None)
+
+                if self.config.doReadParquetTables2:
+                    catalog2, commonZpCat2 = self.readParquetTables(dataRefListTract2, repoInfo2.catDataset,
+                                                                    repoInfo2, **externalCalKwargs2)
+            if not self.config.doReadParquetTables1 or not self.config.doReadParquetTables2:
+                if not self.config.doReadParquetTables1:
+                    catStruct1 = self.readCatalogs(dataRefListTract1, dataset1, repoInfo1,
+                                                   aliasDictList=aliasDictList, fakeCat=None,
+                                                   readFootprintsAs=self.config.readFootprintsAs,
+                                                   **externalCalKwargs1)
+                    commonZpCat1 = catStruct1.commonZpCatalog
+                    catalog1 = catStruct1.catalog
+                    areaDict1 = catStruct1.areaDict
+                    # Convert to pandas DataFrames
+                    commonZpCat1 = commonZpCat1.asAstropy().to_pandas().set_index("id", drop=False)
+                    catalog1 = catalog1.asAstropy().to_pandas().set_index("id", drop=False)
+                if not self.config.doReadParquetTables2:
+                    catStruct2 = self.readCatalogs(dataRefListTract2, dataset2, repoInfo2,
+                                                   aliasDictList=aliasDictList, fakeCat=None,
+                                                   readFootprintsAs=self.config.readFootprintsAs,
+                                                   **externalCalKwargs2)
+                    commonZpCat2 = catStruct2.commonZpCatalog
+                    catalog2 = catStruct2.catalog
+                    # Convert to pandas DataFrames
+                    commonZpCat2 = commonZpCat2.asAstropy().to_pandas().set_index("id", drop=False)
+                    catalog2 = catalog2.asAstropy().to_pandas().set_index("id", drop=False)
+
+            self.zpLabel = self.zpLabel1 + "\nzp: " + self.zpLabel2
 
             # Set boolean arrays indicating sources deemed unsuitable for qa
             # analyses.
-            self.catLabel = "nChild = 0"
+            self.catLabel = "isPrimary"
             bad1 = makeBadArray(catalog1, flagList=self.config.analysis.flags,
                                 onlyReadStars=self.config.onlyReadStars)
             bad2 = makeBadArray(catalog2, flagList=self.config.analysis.flags,
@@ -1211,23 +1040,22 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             catalog2 = catalog2[~bad2].copy(deep=True)
             commonZpCat1 = commonZpCat1[~badCommonZp1].copy(deep=True)
             commonZpCat2 = commonZpCat2[~badCommonZp2].copy(deep=True)
-
             self.log.info("\nNumber of sources in catalogs: first = {0:d} and second = {1:d}".format(
                           len(catalog1), len(catalog2)))
-            commonZpCat = self.matchCatalogs(commonZpCat1, commonZpCat2, matchRadius=self.matchRadius,
-                                             matchControl=self.matchControl)
-            catalog = self.matchCatalogs(catalog1, catalog2, matchRadius=self.matchRadius,
-                                         matchControl=self.matchControl)
-            # Set some aliases for differing schema naming conventions
-            if aliasDictList:
-                for cat in [commonZpCat, catalog]:
-                    cat = setAliasMaps(cat, aliasDictList)
 
-            self.log.info("Number of matches (maxDist = {0:.2f}{1:s}) = {2:d}".format(
-                          self.matchRadius, self.matchRadiusUnitStr, len(catalog)))
+            commonZpCat = matchAndJoinCatalogs(commonZpCat1, commonZpCat2, matchRadius=self.matchRadius,
+                                               matchXy=self.config.matchXy, camera1=repoInfo1,
+                                               camera2=repoInfo2)
+            catalog = matchAndJoinCatalogs(catalog1, catalog2, matchRadius=self.matchRadius,
+                                           matchXy=self.config.matchXy, camera1=repoInfo1, camera2=repoInfo2)
+
+            self.log.info("Number [fraction] of matches (maxDist = {0:.2f}{1:s}) = {2:d} [{3:d}%]".
+                          format(self.matchRadius, self.matchRadiusUnitStr, len(catalog),
+                                 int(100*len(catalog)/len(catalog1))))
 
             subdir = "ccd-" + str(ccdListPerTract1[0]) if len(ccdIntersectList) == 1 else subdir
             hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
+            schema = getSchema(catalog)
 
             # Dict of all parameters common to plot* functions
             tractInfo1 = repoInfo1.tractInfo if self.config.doApplyExternalPhotoCalib1 else None
@@ -1236,24 +1064,21 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             highlightList = [(self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0,
                               "turquoise"), ]
             plotKwargs1 = dict(matchRadius=self.matchRadius, matchRadiusUnitStr=self.matchRadiusUnitStr,
-                               zpLabel=self.zpLabel, highlightList=highlightList)
+                               zpLabel=self.zpLabel, forcedStr=self.catLabel, highlightList=highlightList)
 
             plotInfoDict = getPlotInfo(repoInfo1)
             plotInfoDict.update({"ccdList": ccdIntersectList, "allCcdList": fullCameraCcdList1,
                                  "plotType": "plotCompareVisit", "subdir": subdir,
                                  "hscRun1": repoInfo1.hscRun, "hscRun2": repoInfo2.hscRun,
-                                 "hscRun": hscRun, "tractInfo": tractInfo1, "dataId": repoInfo1.dataId})
+                                 "hscRun": hscRun, "tractInfo": tractInfo1, "dataId": repoInfo1.dataId,
+                                 "rerun2": list(repoInfo2.butler.storage.repositoryCfgs)[0]})
             plotList = []
-            if self.config.doPlotFootprintNpix:
+            if self.config.doPlotFootprintArea:
                 plotList.append(self.plotFootprint(catalog, plotInfoDict, areaDict1, **plotKwargs1))
 
             # Create mag comparison plots using common ZP
             if not commonZpDone:
                 zpLabel = "common (" + str(self.config.analysis.commonZp) + ")"
-                try:
-                    zpLabel = zpLabel + " " + self.catLabel
-                except Exception:
-                    pass
                 plotKwargs1.update(dict(zpLabel=zpLabel))
                 plotList.append(self.plotMags(commonZpCat, plotInfoDict, areaDict1,
                                               fluxToPlotList=["base_GaussianFlux",
@@ -1265,11 +1090,10 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
             if self.config.doPlotMags:
                 plotList.append(self.plotMags(catalog, plotInfoDict, areaDict1, **plotKwargs1))
             if self.config.doPlotSizes:
-                if ("first_base_SdssShape_psf_xx" in catalog.schema
-                        and "second_base_SdssShape_psf_xx" in catalog.schema):
+                if ("first_base_SdssShape_psf_xx" in schema and "second_base_SdssShape_psf_xx" in schema):
                     plotList.append(self.plotSizes(catalog, plotInfoDict, areaDict1, **plotKwargs1))
                 else:
-                    self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in catalog.schema")
+                    self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in the catalog schema")
             if self.config.doApCorrs:
                 plotList.append(self.plotApCorrs(catalog, plotInfoDict, areaDict1, **plotKwargs1))
             if self.config.doPlotCentroids:
@@ -1279,241 +1103,3 @@ class CompareVisitAnalysisTask(CompareCoaddAnalysisTask):
 
             self.allStats, self.allStatsHigh = savePlots(plotList, "plotCompareVisit", repoInfo1.dataId,
                                                          repoInfo1.butler, subdir=subdir)
-
-    def readCatalogs(self, dataRefList1, dataRefList2, dataset, repoInfo1, repoInfo2,
-                     doReadFootprints=None, aliasDictList=None):
-        """Read in and concatenate catalogs of type dataset in lists of data
-        references.
-
-        Parameters
-        ----------
-        dataRefList1 : `list` of
-                       `lsst.daf.persistence.butlerSubset.ButlerDataRef`
-            A list of butler data references whose catalogs of dataset type are
-            to be read in.
-        dataRefList2 : `list` of
-                       `lsst.daf.persistence.butlerSubset.ButlerDataRef`
-            A second list of butler data references whose catalogs of dataset
-            type are to be read in and compared against the catalogs associated
-            with dataRefList1.
-        dataset : `str`
-            Name of the catalog dataset to be read in
-        repoInfo1, repoInfo2 : `lsst.pipe.base.Struct`
-            A struct containing relevant information about the repository under
-            study.  Elements used here include the butler associated with the
-            repository, the image metadata, and wether the processing was done
-            with an HSC stack (now obsolete, but processing runs still exist).
-        doReadFootprints : `str` or `None`, optional
-            A string dictating if and what type of Footprint to read in along
-            with the catalog.
-            `None`: do not read in Footprints
-            light: read in regular Footprints (include SpanSet and list of
-                   peaks per Footprint)
-            heavy: read in HeavyFootprints (include regular Footprint plus flux
-                   values per Footprint)
-
-        Raises
-        ------
-        TaskError
-            If no data is read in for either dataRefList.
-
-        Returns
-        -------
-        `list` of 4 concatenated `lsst.afw.table.SourceCatalog`
-           The concatenated catalogs returned are (common ZP-calibrated of
-           dataRefList1, sfm or external-calibrated of dataRefList1,
-           common ZP-calibrated of dataRefList2, sfm or external-calibrated
-           of dataRefList2).
-        """
-        catList1 = []
-        commonZpCatList1 = []
-        catList2 = []
-        commonZpCatList2 = []
-        self.zpLabel1 = None
-        self.zpLabel2 = None
-        areaDict1 = {}
-        areaDict2 = {}
-
-        info1 = [catList1, commonZpCatList1, dataRefList1, repoInfo1, self.config.doApplyExternalPhotoCalib1,
-                 self.config.doApplyExternalSkyWcs1, self.config.useMeasMosaic1, areaDict1]
-        info2 = [catList2, commonZpCatList2, dataRefList2, repoInfo2, self.config.doApplyExternalPhotoCalib2,
-                 self.config.doApplyExternalSkyWcs2, self.config.useMeasMosaic2, areaDict2]
-
-        for (iCat, catInfoList) in enumerate([info1, info2]):
-            [catList, commonZpCatList, dataRefList, repoInfo, doApplyExternalPhotoCalib,
-                doApplyExternalSkyWcs, useMeasMosaic, areaDict] = catInfoList
-
-            for dataRef in dataRefList:
-                if not dataRef.datasetExists(dataset):
-                    continue
-                if not doReadFootprints:
-                    srcCat = dataRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_FOOTPRINTS)
-                elif doReadFootprints == "light":
-                    srcCat = dataRef.get(dataset, immediate=True,
-                                         flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
-                elif doReadFootprints == "heavy":
-                    srcCat = dataRef.get(dataset, immediate=True)
-
-                # Set some aliases for differing src naming conventions
-                if aliasDictList:
-                    srcCat = setAliasMaps(srcCat, aliasDictList)
-
-                if self.config.doBackoutApCorr:
-                    srcCat = backoutApCorr(srcCat)
-
-                fluxMag0 = None
-                if not doApplyExternalPhotoCalib:
-                    photoCalib = repoInfo.butler.get("calexp_photoCalib", dataRef.dataId)
-                    fluxMag0 = photoCalib.getInstFluxAtZeroMagnitude()
-                det = repoInfo.butler.get("calexp_detector", dataRef.dataId)
-                nQuarter = det.getOrientation().getNQuarter()
-
-                # getUri is less safe but enables us to use an efficient
-                # ExposureFitsReader.
-                fname = repoInfo.butler.getUri("calexp", dataRef.dataId)
-                reader = afwImage.ExposureFitsReader(fname)
-                detector = reader.readDetector()
-                if self.config.doApplyExternalSkyWcs:
-                    wcs = dataRef.get(repoInfo.skyWcsDataset)
-                else:
-                    wcs = reader.readWcs()
-                ccdCorners = wcs.pixelToSky(detector.getCorners(cameraGeom.PIXELS))
-                areaDict["corners_" + str(dataRef.dataId["ccd"])] = ccdCorners
-
-                # add footprint nPix column
-                if self.config.doPlotFootprintNpix:
-                    srcCat = addFootprintNPix(srcCat)
-                # Add rotated point in LSST cat if comparing with HSC cat to
-                # compare centroid pixel positions.
-                if repoInfo.hscRun and not (repoInfo1.hscRun and repoInfo2.hscRun):
-                    bbox = repoInfo.butler.get("calexp_bbox", dataRef.dataId)
-                    srcCat = addRotPoint(srcCat, bbox.getWidth(), bbox.getHeight(), nQuarter)
-
-                if repoInfo.hscRun and self.config.doAddAperFluxHsc:
-                    self.log.info("HSC run: adding aperture flux to schema...")
-                    srcCat = addApertureFluxesHSC(srcCat, prefix="")
-
-                # Scale fluxes to common zeropoint to make basic comparison
-                # plots without calibration influence.
-                commonZpCat = srcCat.copy(True)
-                commonZpCat = calibrateSourceCatalog(commonZpCat, self.config.analysis.commonZp)
-                commonZpCatList.append(commonZpCat)
-
-                if self.config.doApplyExternalPhotoCalib:
-                    if repoInfo.hscRun:
-                        if not dataRef.datasetExists("fcr_hsc_md") or not dataRef.datasetExists("wcs_hsc"):
-                            continue
-                    else:
-                        # Check for both jointcal_wcs and wcs for compatibility
-                        # with old datasets.
-                        if (not (dataRef.datasetExists(repoInfo.photoCalibDataset)
-                                 or dataRef.datasetExists("fcr_md"))):
-                            continue
-                if self.config.doApplyExternalSkyWcs:
-                    if repoInfo.hscRun:
-                        if not dataRef.datasetExists("fcr_hsc_md") or not dataRef.datasetExists("wcs_hsc"):
-                            continue
-                    else:
-                        # Check for both jointcal_wcs and wcs for compatibility
-                        # with old datasets.
-                        if not (dataRef.datasetExists(repoInfo.skyWcsDataset)
-                                or dataRef.datasetExists("wcs")):
-                            continue
-                srcCat, zpLabel = self.calibrateCatalogs(dataRef, srcCat, fluxMag0, repoInfo,
-                                                         doApplyExternalPhotoCalib, doApplyExternalSkyWcs,
-                                                         useMeasMosaic, iCat)
-                self.zpLabel1 = zpLabel if iCat == 0 and not self.zpLabel1 else self.zpLabel1
-                self.zpLabel2 = zpLabel if iCat == 1 and not self.zpLabel2 else self.zpLabel2
-
-                catList.append(srcCat)
-
-        self.zpLabel = self.zpLabel1 + "\n zp: " + self.zpLabel2
-        self.log.info("Applying {:} calibration to catalogs".format(self.zpLabel))
-        if not catList1:
-            raise TaskError("No catalogs read: %s" % ([dataRefList1[0].dataId for dataRef1 in dataRefList1]))
-        if not catList2:
-            raise TaskError("No catalogs read: %s" % ([dataRefList2[0].dataId for dataRef2 in dataRefList2]))
-
-        return (concatenateCatalogs(commonZpCatList1), concatenateCatalogs(catList1), areaDict1,
-                concatenateCatalogs(commonZpCatList2), concatenateCatalogs(catList2), areaDict2)
-
-    def calibrateCatalogs(self, dataRef, catalog, fluxMag0, repoInfo, doApplyExternalPhotoCalib,
-                          doApplyExternalSkyWcs, useMeasMosaic, iCat):
-        """Determine and apply appropriate flux calibration to the catalog.
-
-        Parameters
-        ----------
-        dataRef : `lsst.daf.persistence.butlerSubset.ButlerDataRef`
-            A dataRef is needed for call to meas_mosaic's
-            applyMosaicResultsCatalog() in utils'
-            calibrateSourceCatalogMosaic().
-        catalog : `lsst.afw.table.SourceCatalog`
-            The catalog to which the calibration is applied in place
-        fluxMag0 : `float`
-            The instrumental flux corresponding to 0 magnitude from Single
-            Frame Measurement for the catalog.
-        repoInfo : `lsst.pipe.base.Struct`
-            A struct containing relevant information about the repository under
-            study.  Elements used here include the dataset names for any
-            external calibrations to be applied.
-        doApplyExternalPhotoCalib : `bool`
-            If `True`: Apply the external photometric calibrations specified by
-                      ``repoInfo.photoCalibDataset`` to the caltalog.
-            If `False`: Apply the ``fluxMag0`` photometric calibration from
-                        Single Frame Measuerment to the catalog.
-        doApplyExternalSkyWcs : `bool`
-            If `True`: Apply the external astrometric calibrations specified by
-                       ``repoInfo.skyWcsDataset`` the caltalog.
-            If `False`: Retain the WCS from Single Frame Measurement.
-        useMeasMosaic : `bool`
-            Use meas_mosaic's applyMosaicResultsCatalog for the external
-            calibration (even if photoCalib object exists).  For testing
-            implementations.
-        iCat : `int`
-            Integer representing whether this is comparison catalog 0 or 1.
-
-        Returns
-        -------
-        calibrated : `lsst.afw.table.SourceCatalog`
-            The calibrated source catalog.
-        zpLabel : `str`
-            A label indicating the external calibration applied (currently
-            either "jointcal", "fgcm", "fgcm_tract", or "meas_mosaic", but the
-            latter is effectively retired).
-        """
-        self.zp = 0.0
-        if doApplyExternalPhotoCalib:
-            if not useMeasMosaic:
-                # i.e. the processing was post-photoCalib output generation
-                # AND you want the photoCalib flux object used for the
-                # calibration (as opposed to meas_mosaic's fcr object).
-                zpLabel = ("MMphotoCalib" if dataRef.datasetExists("fcr_md")
-                           else repoInfo.photoCalibDataset.split("_")[0].upper())
-                zpLabel += "_" + str(iCat + 1)
-                calibrated = calibrateSourceCatalogPhotoCalib(dataRef, catalog, repoInfo.photoCalibDataset,
-                                                              zp=self.zp)
-            else:
-                # If here, the data were processed pre-photoCalib output
-                # generation, so must use old method OR old method was
-                # explicitly requested via useMeasMosaic.
-                try:
-                    import lsst.meas.mosaic  # noqa : F401
-                except ImportError:
-                    raise ValueError("Cannot apply calibrations because meas_mosaic could not "
-                                     "be imported. \nEither setup meas_mosaic or run with "
-                                     "--config doApplyExternalPhotoCalib=False doApplyExternalSkyWcs=False")
-                zpLabel = "MEAS_MOSAIC"
-                calibrated = calibrateSourceCatalogMosaic(dataRef, catalog, zp=self.zp)
-        else:
-            # Scale fluxes to measured zeropoint
-            self.zp = 2.5*np.log10(fluxMag0)
-            zpLabel = "FLUXMAG0"
-            calibrated = calibrateSourceCatalog(catalog, self.zp)
-
-        if doApplyExternalSkyWcs:
-            wcs = dataRef.get(repoInfo.skyWcsDataset)
-            afwTable.updateSourceCoords(wcs, catalog)
-            if "wcs" not in zpLabel:
-                zpLabel += " wcs: " + repoInfo.skyWcsDataset.split("_")[0].upper() + "_" + str(iCat + 1)
-
-        return calibrated, zpLabel

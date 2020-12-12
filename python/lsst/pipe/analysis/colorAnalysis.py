@@ -24,6 +24,7 @@ matplotlib.use("Agg")  # noqa #402
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FormatStrFormatter
 import numpy as np
+import pandas as pd
 np.seterr(all="ignore")  # noqa #402
 import functools
 import os
@@ -35,26 +36,24 @@ from collections import defaultdict
 from lsst.pex.config import Config, Field, ConfigField, ListField, DictField, ConfigDictField
 from lsst.pipe.base import CmdLineTask, ArgumentParser, TaskRunner, TaskError, Struct
 from lsst.pipe.drivers.utils import TractDataIdContainer
+from lsst.pipe.tasks import parquetTable
 from .analysis import Analysis, AnalysisConfig
-from .coaddAnalysis import CoaddAnalysisTask
-from .utils import (Enforcer, concatenateCatalogs, getFluxKeys, addColumnsToSchema,
-                    makeBadArray, addFlag, addIntFloatOrStrColumn, calibrateCoaddSourceCatalog,
+from .utils import (Enforcer, concatenateCatalogs, getFluxKeys, addColumnsToSchema, makeBadArray,
+                    addFlag, addElementIdColumn, addIntFloatOrStrColumn, calibrateSourceCatalog,
                     fluxToPlotString, writeParquet, getRepoInfo, orthogonalRegression,
                     distanceSquaredToPoly, p2p1CoeffsFromLinearFit, linesFromP2P1Coeffs,
                     makeEqnStr, catColors, addMetricMeasurement, updateVerifyJob, computeMeanOfFrac,
-                    calcQuartileClippedStats, savePlots)
-from .plotUtils import (AllLabeller, OverlapsStarGalaxyLabeller, plotText, labelCamera, setPtSize,
-                        determineExternalCalLabel, getPlotInfo)
+                    calcQuartileClippedStats, savePlots, getSchema, computeAreaDict, getParquetColumnsList)
+from .plotUtils import (AllLabeller, plotText, labelCamera, setPtSize, determineExternalCalLabel,
+                        getPlotInfo)
 
-import lsst.afw.image as afwImage
 import lsst.geom as geom
 import lsst.afw.table as afwTable
 import lsst.verify as verify
 
 __all__ = ["ColorTransform", "ivezicTransformsSDSS", "ivezicTransformsHSC", "straightTransforms",
            "NumStarLabeller", "ColorValueInFitRange", "ColorValueInPerpRange", "GalaxyColor",
-           "ColorAnalysisConfig", "ColorAnalysisRunner", "ColorAnalysisTask", "ColorColorDistance",
-           "SkyAnalysisRunner", "SkyAnalysisTask"]
+           "ColorAnalysisConfig", "ColorAnalysisRunner", "ColorAnalysisTask", "ColorColorDistance"]
 
 
 class ColorTransform(Config):
@@ -247,14 +246,44 @@ class ColorAnalysisConfig(Config):
                                                         "setting star/galaxy classification"))
     fluxFilterGeneric = Field(dtype=str, default="i", doc=("Filter to use for plotting against magnitude "
                                                            "and setting star/galaxy classification"))
+    minimalFluxList = ListField(dtype=str, doc="Minimal list of filters for color analysis to run.  "
+                                "These names are HSC-specific", default=["HSC-G", "HSC-R", "HSC-I"])
+    minimalFluxListGeneric = ListField(dtype=str, doc="Minimal list of filters for color analysis to run.  "
+                                       "These names are meant to be generic", default=["g", "r", "i"])
     srcSchemaMap = DictField(keytype=str, itemtype=str, default=None, optional=True,
                              doc="Mapping between different stack (e.g. HSC vs. LSST) schema names")
+    # We want the following to come from the *_meas catalogs as they reflect
+    # what happened in SFP calibration.
+    columnsToCopyFromMeas = ListField(dtype=str, default=["calib_", ],
+                                      doc="List of string \"prefixes\" to identify the columns to copy.  "
+                                      "All columns with names that start with one of these strings will be "
+                                      "copied from the *_meas catalogs into the *_forced_src catalogs "
+                                      "UNLESS the full column name contains one of the strings listed "
+                                      "in the notInColumnStrList config.")
+    # We want the following to come from the *_ref catalogs as they reflect
+    # the forced measurement states.
     columnsToCopyFromRef = ListField(dtype=str,
                                      default=["detect_", "merge_peak_", "merge_measurement_", ],
                                      doc="List of \"startswith\" strings of column names to copy from "
                                          "*_ref to *_forced_src catalog.  All columns that start with one "
                                          "of these strings will be copied from the *_ref into the "
                                          "*_forced_src catalog.")
+    baseColStrList = ListField(
+        dtype=str,
+        default=["coord", "tract", "patch", "base_PixelFlags", "base_PsfFlux", "modelfit_CModel",
+                 "slot_Centroid", "slot_Shape", "base_ClassificationExtendedness", "parent", "detect",
+                 "deblend_nChild", "base_InputCount", "merge_peak_sky", "merge_measurement", "calib"],
+        doc=("List of \"startswith\" strings of column names to load from deepCoadd_obj parquet table. "
+             "All columns that start with one of these strings will be loaded UNLESS the full column "
+             "name contains one of the strings listed in the notInColumnStrList config."))
+    notInColStrList = ListField(
+        dtype=str,
+        default=["flag_bad", "flag_no", "missingDetector_flag", "_region_", "Truncated", "_radius",
+                 "_bad_", "initial", "_exp_", "_dev_", "fracDev", "objective", "SdssCentroid_flag_",
+                 "SdssShape_flag_u", "SdssShape_flag_m", "_Cov", "_child_", "_parent_", "_rejected"],
+        doc=("List of substrings to select against when creating list of columns to load from the "
+             "deepCoadd_obj parquet table."))
+
     extinctionCoeffs = DictField(keytype=str, itemtype=float, default=None, optional=True,
                                  doc="Dictionary of extinction coefficients for conversion from E(B-V) "
                                      "to extinction, A_filter")
@@ -265,6 +294,9 @@ class ColorAnalysisConfig(Config):
     doPlotPrincipalColors = Field(dtype=bool, default=True,
                                   doc="Create the Ivezic Principal Color offset plots?")
     doPlotGalacticExtinction = Field(dtype=bool, default=True, doc="Create Galactic Extinction plots?")
+    doReadParquetTables = Field(dtype=bool, default=True,
+                                doc=("Read parquet tables from postprocessing (e.g. deepCoadd_obj) as "
+                                     "input data instead of afwTable catalogs."))
     writeParquetOnly = Field(dtype=bool, default=False,
                              doc="Only write out Parquet tables (i.e. do not produce any plots)?")
     doWriteParquetTables = Field(dtype=bool, default=True,
@@ -277,6 +309,7 @@ class ColorAnalysisConfig(Config):
                                     "izyX0": -0.5, "izyX1": 1.3, "izyY0": -0.4, "izyY1": 0.8,
                                     "z9yX0": -0.3, "z9yX1": 0.45, "z9yY0": -0.2, "z9yY1": 0.5},
                            doc="Plot Ranges for various color-color combinations")
+    doLabelRerun = Field(dtype=bool, default=True, doc="Include label indicating rerun direcotry on plots?")
 
     def setDefaults(self):
         Config.setDefaults(self)
@@ -286,6 +319,7 @@ class ColorAnalysisConfig(Config):
         self.analysis.magThreshold = 22.0  # RHL requested this limit
         if self.correctForGalacticExtinction:
             self.flags += ["galacticExtinction_flag"]
+        self.analysis.doLabelRerun = self.doLabelRerun
 
     def validate(self):
         Config.validate(self)
@@ -318,12 +352,13 @@ class ColorAnalysisRunner(TaskRunner):
     @staticmethod
     def getTargetList(parsedCmd, **kwargs):
         kwargs["subdir"] = parsedCmd.subdir
+        dataset = "obj" if parsedCmd.config.doReadParquetTables else "forced_src"
         FilterRefsDict = functools.partial(defaultdict, list)  # Dict for filter-->dataRefs
         tractFilterRefs = defaultdict(FilterRefsDict)  # tract-->filter-->dataRefs
         for patchRef in sum(parsedCmd.id.refList, []):
             # Make sure the actual input file requested exists (i.e. do not
             # follow the parent chain).
-            inputDataFile = patchRef.get("deepCoadd_forced_src_filename")[0]
+            inputDataFile = patchRef.get(parsedCmd.config.coaddName + "Coadd_" + dataset + "_filename")[0]
             if parsedCmd.input not in parsedCmd.output:
                 inputDataFile = inputDataFile.replace(parsedCmd.output, parsedCmd.input)
             if os.path.exists(inputDataFile):
@@ -397,28 +432,37 @@ class ColorAnalysisTask(CmdLineTask):
     def runDataRef(self, patchRefsByFilter, subdir=""):
         patchList = []
         repoInfo = None
-        self.fluxFilter = None
-        for patchRefList in patchRefsByFilter.values():
-            for dataRef in patchRefList:
-                if dataRef.dataId["filter"] == self.config.fluxFilter:
-                    self.fluxFilter = self.config.fluxFilter
-                    break
-                if dataRef.dataId["filter"] == self.config.fluxFilterGeneric:
-                    self.fluxFilter = self.config.fluxFilterGeneric
-                    break
-        if self.fluxFilter is None:
-            raise TaskError("Flux filter from config not found (neither {0:s} nor the generic {1:s}".
-                            format(self.config.fluxFilter, self.config.fluxFilterGeneric))
+        self.fullFilterList = list(patchRefsByFilter.keys())
+        dataset = "Coadd_obj" if self.config.doReadParquetTables else "Coadd_forced_src"
+        if (not set(self.config.minimalFluxList).intersection(set(self.fullFilterList))
+                == set(self.config.minimalFluxList)
+                and not set(self.config.minimalFluxListGeneric).intersection(set(patchRefsByFilter.keys()))
+                == set(self.config.minimalFluxListGeneric)):
+            raise TaskError("Minimal set of filters not provided in id list.  The valid lists are {0:} "
+                            "for HSC data or a more generic list {1:}".
+                            format(self.config.minimalFluxList, self.config.minimalFluxListGeneric))
+        if self.config.fluxFilter in patchRefsByFilter.keys():
+            self.fluxFilter = self.config.fluxFilter
+        elif self.config.fluxFilterGeneric in patchRefsByFilter.keys():
+            self.fluxFilter = self.config.fluxFilterGeneric
+        else:
+            raise TaskError("Flux filter from config not found (tried both {0:s} and the generic {1:s}. "
+                            "List provided was: {2:})".
+                            format(self.config.fluxFilter, self.config.fluxFilterGeneric,
+                                   list(patchRefsByFilter.keys())))
         self.log.info("Flux filter for plotting and primary star/galaxy classifiation is: {0:s}".
                       format(self.fluxFilter))
         for patchRefList in patchRefsByFilter.values():
             for dataRef in patchRefList:
-                if dataRef.dataId["filter"] == self.fluxFilter:
+                if (dataRef.dataId["filter"] == self.fluxFilter
+                        and dataRef.datasetExists(self.config.coaddName + dataset)):
                     patchList.append(dataRef.dataId["patch"])
-                if repoInfo is None:
-                    repoInfo = getRepoInfo(dataRef, coaddName=self.config.coaddName,
-                                           coaddDataset="Coadd_forced_src")
-        self.log.info("Size of patchList with full color coverage: {:d}".format(len(patchList)))
+                    if repoInfo is None:
+                        repoInfo = getRepoInfo(dataRef, coaddName=self.config.coaddName, coaddDataset=dataset)
+        if len(patchList) > 0:
+            self.log.info("Size of patchList with at least partial coverage: {0:}".format(len(patchList)))
+        else:
+            raise RuntimeError("No data exists for requested dataIds")
         uberCalLabel = determineExternalCalLabel(repoInfo, patchList[0], coaddName=self.config.coaddName)
         self.log.info(f"External calibration(s) used: {uberCalLabel}")
         subdir = "patch-" + str(patchList[0]) if len(patchList) == 1 else subdir
@@ -434,18 +478,31 @@ class ColorAnalysisTask(CmdLineTask):
             self.classificationColumn = self.config.srcSchemaMap[self.classificationColumn]
             self.flags = [self.config.srcSchemaMap[flag] for flag in self.flags]
 
+        self.skipPatchList = []
         byFilterForcedCats = {}
-        areaDictAll = {}
+        byFilterAreaDict = {}
+        fullCoveragePatchRefList = []
         for (filterName, patchRefList) in patchRefsByFilter.items():
-            coaddType = self.config.coaddName + "Coadd_forced_src"
-            cat, areaDict = self.readCatalogs(patchRefList, coaddType, repoInfo)
+            if self.config.doReadParquetTables:
+                dfDataset = "forced_src"
+                cat = self.readParquetTables(patchRefList, self.config.coaddName + dataset, repoInfo,
+                                             dfDataset=dfDataset)
+                fullCoveragePatchList = list(set(cat["patchId"].values))
+                if len(fullCoveragePatchRefList) == 0:
+                    for patchRef in patchRefList:
+                        if patchRef.dataId["patch"] in fullCoveragePatchList:
+                            fullCoveragePatchRefList.append(patchRef)
+                areaDict, _ = computeAreaDict(repoInfo, fullCoveragePatchRefList,
+                                              dataset=self.config.coaddName + "Coadd", fakeCat=None)
+            else:
+                cat, areaDict = self.readCatalogs(patchRefList, self.config.coaddName + dataset, repoInfo)
+                # Convert to pandas DataFrames
+                cat = cat.asAstropy().to_pandas().set_index("id", drop=False)
+                cat = calibrateSourceCatalog(cat, self.config.analysis.coaddZp)
             byFilterForcedCats[filterName] = cat
-            areaDictAll.update(areaDict)
+            byFilterAreaDict[filterName] = areaDict
 
         self.forcedStr = "forced"
-        for cat in byFilterForcedCats.values():
-            calibrateCoaddSourceCatalog(cat, self.config.analysis.coaddZp)
-
         geLabel = "None"
         doPlotGalacticExtinction = False
         if self.correctForGalacticExtinction:
@@ -464,17 +521,16 @@ class ColorAnalysisTask(CmdLineTask):
                 geLabel = "Per Field"
 
         plotInfoDict = getPlotInfo(repoInfo)
-        plotInfoDict.update(dict(patchList=patchList, plotType="plotColor", subdir=subdir,
+        plotInfoDict.update(dict(patchList=fullCoveragePatchList, plotType="plotColor", subdir=subdir,
                                  hscRun=repoInfo.hscRun, tractInfo=repoInfo.tractInfo,
                                  dataId=repoInfo.dataId))
 
         geLabel = "GalExt: " + geLabel
         plotList = []
         if self.config.doPlotGalacticExtinction and doPlotGalacticExtinction:
-            plotList.append(self.plotGalacticExtinction(byFilterForcedCats, plotInfoDict, areaDictAll,
+            plotList.append(self.plotGalacticExtinction(byFilterForcedCats, plotInfoDict, byFilterAreaDict,
                                                         geLabel=geLabel))
 
-            # self.plotGalaxyColors(catalogsByFilter, filenamer, dataId)
         principalColCatsPsf = self.transformCatalogs(byFilterForcedCats, self.config.transforms,
                                                      "base_PsfFlux_instFlux", hscRun=repoInfo.hscRun)
         principalColCatsCModel = self.transformCatalogs(byFilterForcedCats, self.config.transforms,
@@ -491,8 +547,8 @@ class ColorAnalysisTask(CmdLineTask):
             principalColCats = (principalColCatsCModel if "CModel" in self.fluxColumn else
                                 principalColCatsPsf)
             plotList.append(self.plotStarPrincipalColors(principalColCats, byFilterForcedCats, plotInfoDict,
-                                                         areaDict, NumStarLabeller(3), geLabel=geLabel,
-                                                         uberCalLabel=uberCalLabel))
+                                                         byFilterAreaDict, NumStarLabeller(3),
+                                                         geLabel=geLabel, uberCalLabel=uberCalLabel))
 
         for fluxColumn in ["base_PsfFlux_instFlux", "modelfit_CModel_instFlux"]:
             if fluxColumn == "base_PsfFlux_instFlux":
@@ -503,7 +559,7 @@ class ColorAnalysisTask(CmdLineTask):
                 raise RuntimeError("Have not computed transformations for: {:s}".format(fluxColumn))
 
             plotList.append(self.plotStarColorColor(principalColCats, byFilterForcedCats, plotInfoDict,
-                                                    areaDictAll, fluxColumn, forcedStr=self.forcedStr,
+                                                    byFilterAreaDict, fluxColumn, forcedStr=self.forcedStr,
                                                     geLabel=geLabel, uberCalLabel=uberCalLabel))
 
         self.allStats, self.allStatsHigh = savePlots(plotList, "plotColor", repoInfo.dataId,
@@ -521,6 +577,124 @@ class ColorAnalysisTask(CmdLineTask):
         verifyJobFilename = repoInfo.butler.get("colorAnalysis_verify_job_filename",
                                                 dataId=repoInfo.dataId)[0]
         self.verifyJob.write(verifyJobFilename)
+
+    def readParquetTables(self, dataRefList, dataset, repoInfo, dfDataset=None):
+        """Read in, calibrate, and concatenate parquet tables from a list of
+        dataRefs.
+
+        The calibration performed is based on config parameters.  For coadds,
+        the only option is the calibration zeropoint.  For visit, the options
+        include external calibrations for both photometry (e.g. fgcm) and wcs
+        (e.g. jointcal) or simply the zero point from single frame processing.
+
+        Parameters
+        ----------
+        dataRefList : `list` of
+                      `lsst.daf.persistence.butlerSubset.ButlerDataRef`
+            A list of butler data references whose catalogs of ``dataset``
+            are to be read in.
+        dataset : `str`
+            Name of the catalog ``dataset`` to be read in, e.g.
+            "deepCoadd_obj" (for coadds) or "source" (for visits).
+        repoInfo : `lsst.pipe.base.struct.Struct`
+            A struct containing elements with repo information needed to
+            determine if the catalog data is coadd or visit level and, if the
+            latter, to create appropriate dataIds to look for the external
+            calibration datasets.
+        dfDataset : `str`, optional
+            Name of the dataFrame \"dataset\" to be read in for multilevel
+            parquet tables.  For coadd catalogs, which are of type
+            `lsst.pipe.tasks.parquetTable.MultilevelParquetTable`, this is
+            actually not optional but must be one of, "forced_src", "meas", or
+            "ref".  This parameter is not relevant for visit-level catalogs,
+            which are of type `lsst.pipe.tasks.parquetTable.ParquetTable`.
+
+        Raises
+        ------
+        TaskError
+            If no data is read in for the ``dataRefList``.
+        RuntimeError
+            If catalog is of type
+            `lsst.pipe.tasks.parquetTable.MultilevelParquetTable` but no
+            ``dfDataset`` is provided.
+
+        Returns
+        -------
+        allCats : `pandas.core.frame.DataFrame`
+            The concatenated catalogs as a pandas DataFrame.
+        """
+        # It is much faster to concatenate a list of DataFrames than to
+        # concatenate successively within the for loop.
+        catList = []
+        colsToLoadList = None
+        dfLoadColumns = None
+        refColsToLoadList = None
+        measColsToLoadList = None
+        for dataRef in dataRefList:
+            if not dataRef.datasetExists(dataset):
+                self.log.info("Dataset does not exist: {0:r}, {1:s}".format(dataRef.dataId, dataset))
+                continue
+            parquetCat = dataRef.get(dataset, immediate=True)
+            # Some obj tables do not contain data for all filters
+            if isinstance(parquetCat, parquetTable.MultilevelParquetTable):
+                if not any(dfDataset == dfName for dfName in ["forced_src", "meas", "ref"]):
+                    raise RuntimeError("Must specify a dfDataset for multilevel parquet tables")
+                else:
+                    existsFilterList = parquetCat.columnLevelNames["filter"]
+                    if not (np.all([filt in existsFilterList for filt in self.fullFilterList])):
+                        if dataRef.dataId["patch"] not in self.skipPatchList:
+                            self.skipPatchList.append(dataRef.dataId["patch"])
+                            self.log.info("Full filter list requested {0:}\nnot in patch: {1:} "
+                                          "(it only has {2}).  Skipping... ".format(
+                                              self.fullFilterList, dataRef.dataId["patch"], existsFilterList))
+                        continue
+            if dfLoadColumns is None and isinstance(parquetCat, parquetTable.MultilevelParquetTable):
+                dfLoadColumns = {"dataset": dfDataset, "filter": dataRef.dataId["filter"]}
+            # On the first dataRef read in, create list of columns to load
+            # based on config lists and their existence in the catalog
+            # table.
+            if colsToLoadList is None:
+                catColumns = getParquetColumnsList(parquetCat, dfDataset=dfDataset,
+                                                   filterName=dataRef.dataId["filter"])
+                colsToLoadList = [col for col in catColumns if
+                                  (col.startswith(tuple(self.config.baseColStrList))
+                                   and not any(s in col for s in self.config.notInColStrList))]
+                if dfLoadColumns is None:
+                    dfLoadColumns = colsToLoadList
+                else:
+                    dfLoadColumns.update(column=colsToLoadList)
+            cat = parquetCat.toDataFrame(columns=dfLoadColumns)
+            cat = addElementIdColumn(cat, dataRef.dataId, repoInfo=repoInfo)
+            if dfDataset == "forced_src":  # insert some columns from the ref and meas cats for forced cats
+                if refColsToLoadList is None:
+                    refColumns = getParquetColumnsList(parquetCat, dfDataset="ref",
+                                                       filterName=dataRef.dataId["filter"])
+                    refColsToLoadList = [col for col in refColumns if
+                                         (col.startswith(tuple(self.config.columnsToCopyFromRef))
+                                          and not any(s in col for s in self.config.notInColStrList))]
+                ref = parquetCat.toDataFrame(columns={"dataset": "ref", "filter": dataRef.dataId["filter"],
+                                                      "column": refColsToLoadList})
+                cat = pd.concat([cat, ref], axis=1)
+                if measColsToLoadList is None:
+                    measColumns = getParquetColumnsList(parquetCat, dfDataset="meas",
+                                                        filterName=dataRef.dataId["filter"])
+                    measColsToLoadList = [col for col in measColumns if
+                                          (col.startswith(tuple(self.config.columnsToCopyFromMeas))
+                                           and not any(s in col for s in self.config.notInColStrList))]
+                meas = parquetCat.toDataFrame(columns={"dataset": "meas", "filter": dataRef.dataId["filter"],
+                                                       "column": measColsToLoadList})
+                cat = pd.concat([cat, meas], axis=1)
+            cat = calibrateSourceCatalog(cat, self.config.analysis.coaddZp)
+            catList.append(cat)
+
+        if not catList:
+            raise TaskError("No catalogs read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
+        allCats = pd.concat(catList, axis=0)
+        # The object "id" is associated with the dataframe index.  Add a
+        # column that is the id so that it is available for operations on it,
+        # e.g. cat["id"].
+        allCats["id"] = allCats.index
+        return allCats
 
     def readCatalogs(self, patchRefList, dataset, repoInfo):
         """Read in and concatenate catalogs of type dataset in lists of data
@@ -551,47 +725,49 @@ class ColorAnalysisTask(CmdLineTask):
             The concatenated catalog of all existing ``dataset``s in
             ``patchRefList``.
         areaDict : `dict`
-            A `dict` containing the area of each ccd and the locations of their
-            corners.
+            A `dict` of the area and corner locations of each patch.
         """
         catList = []
-        areaDict = {}
+        patchRefExistsList = []
         for patchRef in patchRefList:
             if patchRef.datasetExists(dataset):
-                cat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
-                if dataset != self.config.coaddName + "Coadd_meas":
-                    refCat = patchRef.get(self.config.coaddName + "Coadd_ref", immediate=True,
-                                          flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
-                    refColList = [s for s in refCat.schema.getNames() if
-                                  s.startswith(tuple(self.config.columnsToCopyFromRef))]
-                    cat = addColumnsToSchema(refCat, cat,
-                                             [col for col in refColList if col not in cat.schema
-                                              and col in refCat.schema])
+                patchRefExistsList.append(patchRef)
+        calexpPrefix = dataset[:dataset.find("_")] if "_" in dataset else ""
+        areaDict, _ = computeAreaDict(repoInfo, patchRefExistsList, dataset=calexpPrefix)
+        for patchRef in patchRefExistsList:
+            cat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+            schema = getSchema(cat)
+            if dataset != self.config.coaddName + "Coadd_meas":
+                refCat = patchRef.get(self.config.coaddName + "Coadd_ref", immediate=True,
+                                      flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+                refCatSchema = getSchema(refCat)
+                refColList = []
+                for strPrefix in self.config.columnsToCopyFromRef:
+                    refColList.extend(refCatSchema.extract(strPrefix + "*"))
+                refColsToCopy = [col for col in refColList if col not in schema
+                                 and not any(s in col for s in self.config.notInColStrList)
+                                 and col in refCatSchema]
+                cat = addColumnsToSchema(refCat, cat, refColsToCopy)
+                measCat = patchRef.get(self.config.coaddName + "Coadd_meas", immediate=True,
+                                       flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+                measCatSchema = getSchema(measCat)
+                measColList = []
+                for strPrefix in self.config.columnsToCopyFromMeas:
+                    measColList.extend(measCatSchema.extract(strPrefix + "*"))
+                measColsToCopy = [col for col in measColList if col not in schema
+                                  and not any(s in col for s in self.config.notInColStrList)
+                                  and col in measCatSchema]
+                cat = addColumnsToSchema(measCat, cat, measColsToCopy)
 
-                fname = repoInfo.butler.getUri("deepCoadd_calexp", patchRef.dataId)
-                reader = afwImage.ExposureFitsReader(fname)
-                wcs = reader.readWcs()
-                mask = reader.readMask()
-                maskBad = mask.array & 2**mask.getMaskPlaneDict()["BAD"]
-                maskNoData = mask.array & 2**mask.getMaskPlaneDict()["NO_DATA"]
-                maskedPixels = maskBad + maskNoData
-                numGoodPix = np.count_nonzero(maskedPixels == 0)
-                pixScale = wcs.getPixelScale(reader.readBBox().getCenter()).asArcseconds()
-                area = numGoodPix*pixScale**2
-                areaDict[patchRef.dataId["patch"]] = area
-
-                patchCorners = wcs.pixelToSky(geom.Box2D(reader.readBBox()).getCorners())
-                areaDict["corners_" + str(patchRef.dataId["patch"])] = patchCorners
-
-                if self.config.doWriteParquetTables:
-                    cat = addIntFloatOrStrColumn(cat, patchRef.dataId["patch"], "patchId",
-                                                 "Patch on which source was detected")
-                catList.append(cat)
+            if self.config.doWriteParquetTables:
+                cat = addIntFloatOrStrColumn(cat, patchRef.dataId["patch"], "patchId",
+                                             "Patch on which source was detected")
+            catList.append(cat)
         if not catList:
             raise TaskError("No catalogs read: %s" % ([patchRef.dataId for patchRef in patchRefList]))
         return concatenateCatalogs(catList), areaDict
 
-    def correctForGalacticExtinction(self, catalog, tractInfo):
+    def correctForGalacticExtinction(self, catalogDict, tractInfo):
         """Correct all fluxes for each object for Galactic Extinction.
 
         This function uses the EBVbase class from lsst.sims.catUtils.dust.EBV,
@@ -599,11 +775,12 @@ class ColorAnalysisTask(CmdLineTask):
 
         Parameters
         ----------
-        catalog : `lsst.afw.table.SourceCatalog`
-            The source ``catalog`` for which to apply the per-object Galactic
-            Extinction correction to all fluxes.  The ``catalog`` is corrected
-            in place and a Galactic Extinction applied and flag columns are
-            added.
+        catalogDict : `dict` of `lsst.afw.table.SourceCatalog` or
+                      `pandas.core.frame.DataFrame`
+            A dictionary keyed by filter and containing the source catalogs for
+            which to apply the per-object Galactic Extinction correction to all
+            fluxes.  The catalogs are corrected in place and a Galactic
+            Extinction applied and flag columns are added.
         tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
             TractInfo object associated with ``catalog``.
 
@@ -614,10 +791,12 @@ class ColorAnalysisTask(CmdLineTask):
 
         Returns
         -------
-        catalog : `lsst.afw.table.SourceCatalog`
-            The updated ``catalog`` with fluxes corrected for Galactic
-            Extinction with a column added indicating correction applied and a
-            flag indicating if the correction failed (in the context having a
+        catalogDict : `dict` of `lsst.afw.table.SourceCatalog` or
+                      `pandas.core.frame.DataFrame`
+            The updated dictionary of catalogs with all fluxes corrected (per
+            object) for Galactic Extinction with a column added to each catalog
+            in ``catalogDict`` indicating correction applied and a flag
+            indicating if the correction failed (in the context having a
             non-`numpy.isfinite` value).
         """
         try:
@@ -626,10 +805,10 @@ class ColorAnalysisTask(CmdLineTask):
             raise ImportError("lsst.sims.catUtils.dust.EBV could not be imported.  Cannot use "
                               "correctForGalacticExtinction function without it.")
 
-        for filterName in catalog.keys():
+        for filterName in catalogDict.keys():
             if filterName in self.config.extinctionCoeffs:
-                raList = catalog[filterName]["coord_ra"]
-                decList = catalog[filterName]["coord_dec"]
+                raList = catalogDict[filterName]["coord_ra"]
+                decList = catalogDict[filterName]["coord_dec"]
                 ebvObject = ebv()
                 ebvValues = ebvObject.calculateEbv(equatorialCoordinates=np.array([raList, decList]))
                 galacticExtinction = ebvValues*self.config.extinctionCoeffs[filterName]
@@ -639,29 +818,29 @@ class ColorAnalysisTask(CmdLineTask):
                                   "{1:d} out of {2:d} sources.  Flag will be set.".
                                   format(filterName, len(raList[bad]), len(raList)))
                 factor = 10.0**(0.4*galacticExtinction)
-                fluxKeys, errKeys = getFluxKeys(catalog[filterName].schema)
+                schema = getSchema(catalogDict[filterName])
+                fluxKeys, errKeys = getFluxKeys(schema)
                 self.log.info("Applying per-object Galactic Extinction correction for filter {0:s}.  "
                               "Catalog mean A_{0:s} = {1:.3f}".
                               format(filterName, galacticExtinction[~bad].mean()))
                 for name, key in list(fluxKeys.items()) + list(errKeys.items()):
-                    catalog[filterName][key] *= factor
+                    catalogDict[filterName][key] *= factor
             else:
                 self.log.warn("Do not have A_X/E(B-V) for filter {0:s}.  "
                               "No Galactic Extinction correction applied for that filter.  "
                               "Flag will be set".format(filterName))
-                bad = np.ones(len(catalog[list(catalog.keys())[0]]), dtype=bool)
+                bad = np.ones(len(catalogDict[list(catalogDict.keys())[0]]), dtype=bool)
             # Add column of Galactic Extinction value applied to the catalog
             # and a flag for the sources for which it could not be computed.
-            catalog[filterName] = addIntFloatOrStrColumn(catalog[filterName], galacticExtinction,
-                                                         "A_" + str(filterName),
-                                                         "Galactic Extinction (in mags) applied "
-                                                         "(based on SFD 1998 maps)")
-            catalog[filterName] = addFlag(catalog[filterName], bad, "galacticExtinction_flag",
-                                          "True if Galactic Extinction failed")
+            catalogDict[filterName] = addIntFloatOrStrColumn(catalogDict[filterName], galacticExtinction,
+                                                             "A_" + str(filterName),
+                                                             "Galactic Extinction (in mags) applied "
+                                                             "(based on SFD 1998 maps)")
+            catalogDict[filterName] = addFlag(catalogDict[filterName], bad, "galacticExtinction_flag",
+                                              "True if Galactic Extinction failed")
+        return catalogDict
 
-        return catalog
-
-    def correctFieldForGalacticExtinction(self, catalog, tractInfo):
+    def correctFieldForGalacticExtinction(self, catalogDict, tractInfo):
         """Apply a per-field correction for Galactic Extinction using
         hard-wired values.
 
@@ -672,6 +851,27 @@ class ColorAnalysisTask(CmdLineTask):
         Note that the only fields included are the 5 tracts in the RC + RC2
         datasets.  This is just a placeholder until a per-object implementation
         is added in DM-13519.
+
+        Parameters
+        ----------
+        catalogDict : `dict` of  `lsst.afw.table.SourceCatalog` or
+                      `pandas.core.frame.DataFrame`
+            A dictionary keyed by filter and containing the source catalogs for
+            which to apply the per-object Galactic Extinction correction to all
+            fluxes.  The catalogs are corrected in place and a Galactic
+            Extinction applied and flag columns are added.
+        tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`
+            TractInfo object associated with ``catalog``.
+
+        Returns
+        -------
+        catalogDict : `dict` of  `lsst.afw.table.SourceCatalog` or
+                      `pandas.core.frame.DataFrame`
+            The updated dictionary of catalogs with all fluxes corrected (per
+            field) for Galactic Extinction with a column added to each catalog
+            in ``catalogDict`` indicating correction applied and a flag
+            indicating if the correction failed (in the context having a
+            non-`numpy.isfinite` value).
         """
         ebvValues = {"UD_COSMOS_9813": {"centerCoord": geom.SpherePoint(150.25, 2.23, geom.degrees),
                                         "EBmV": 0.0165},
@@ -691,43 +891,48 @@ class ColorAnalysisTask(CmdLineTask):
                 geFound = True
                 break
         if geFound:
-            for filterName in catalog.keys():
+            for filterName in catalogDict.keys():
                 if filterName in self.config.extinctionCoeffs:
-                    fluxKeys, errKeys = getFluxKeys(catalog[filterName].schema)
+                    schema = getSchema(catalogDict[filterName])
+                    fluxKeys, errKeys = getFluxKeys(schema)
                     galacticExtinction = ebvValue*self.config.extinctionCoeffs[filterName]
                     self.log.info("Applying Per-Field Galactic Extinction correction A_{0:s} = {1:.3f}".
                                   format(filterName, galacticExtinction))
                     factor = 10.0**(0.4*galacticExtinction)
                     for name, key in list(fluxKeys.items()) + list(errKeys.items()):
-                        catalog[filterName][key] *= factor
+                        catalogDict[filterName][key] *= factor
                     # Add column of Galactic Extinction value applied to the
                     # catalog.
-                    catalog[filterName] = addIntFloatOrStrColumn(catalog[filterName], galacticExtinction,
-                                                                 "A_" + str(filterName),
-                                                                 "Galactic Extinction applied "
-                                                                 "(based on SFD 1998 maps)")
-                    bad = np.zeros(len(catalog[list(catalog.keys())[0]]), dtype=bool)
-                    catalog[filterName] = addFlag(catalog[filterName], bad, "galacticExtinction_flag",
-                                                  "True if Galactic Extinction not found (so not applied)")
+                    galacticExtinction = np.full(len(catalogDict[filterName]), galacticExtinction)
+                    catalogDict[filterName] = (
+                        addIntFloatOrStrColumn(catalogDict[filterName], galacticExtinction,
+                                               "A_" + str(filterName), "Galactic Extinction applied "
+                                               "(based on SFD 1998 maps)"))
+                    bad = np.zeros(len(catalogDict[list(catalogDict.keys())[0]]), dtype=bool)
+                    catalogDict[filterName] = addFlag(
+                        catalogDict[filterName], bad, "galacticExtinction_flag",
+                        "True if Galactic Extinction not found (so not applied)")
                 else:
                     self.log.warn("Do not have A_X/E(B-V) for filter {0:s}.  "
                                   "No Galactic Extinction correction applied for that filter".
                                   format(filterName))
-                    bad = np.ones(len(catalog[list(catalog.keys())[0]]), dtype=bool)
-                    catalog[filterName] = addFlag(catalog[filterName], bad, "galacticExtinction_flag",
-                                                  "True if Galactic Extinction not found (so not applied)")
+                    bad = np.ones(len(catalogDict[list(catalogDict.keys())[0]]), dtype=bool)
+                    catalogDict[filterName] = addFlag(catalogDict[filterName], bad, "galacticExtinction_flag",
+                                                      "True if Galactic Extinction not found (so not "
+                                                      "applied)")
         else:
             self.log.warn("Do not have Galactic Extinction for tract {0:d} at {1:s}.  "
                           "No Galactic Extinction correction applied".
                           format(tractInfo.getId(), str(tractInfo.getCtrCoord())))
-        return catalog
+        return catalogDict
 
-    def transformCatalogs(self, catalogs, transforms, fluxColumn, hscRun=None):
+    def transformCatalogs(self, catalogDict, transforms, fluxColumn, hscRun=None):
         """Transform catalog entries according to the color transform given.
 
         Parameters
         ----------
-        catalogs : `dict` of `lsst.afw.table.SourceCatalog`
+        catalogDict : `dict` of `lsst.afw.table.SourceCatalog` or
+                      `pandas.core.frame.DataFrame`
             One `dict` entry per filter.
         transforms : `dict` of
                      `lsst.pipe.analysis.colorAnalysis.ColorTransform`
@@ -736,69 +941,124 @@ class ColorAnalysisTask(CmdLineTask):
             A string representing "HSCPIPE_VERSION" fits header if the data
             were processed with the (now obsolete, but old reruns still exist)
             "HSC stack", `None` otherwise.
+
+        Returns
+        -------
+        new : `lsst.afw.table.SourceCatalog` or `pandas.core.frame.DataFrame`
+            The catalog of Principal Color transforms along with basic ID,
+            RA/Dec, parent, and deblend_nChild info in addition to a
+            "qaBad_flag" column indicating objects deemed unsuitible for the
+            stellar locus QA analysis and a "numStarFlags" column indicating
+            the number of filters in which the object was classified as a star.
         """
-        template = list(catalogs.values())[0]
+        template = list(catalogDict.values())[0]
         num = len(template)
-        assert all(len(cat) == num for cat in catalogs.values())
+        assert all(len(cat) == num for cat in catalogDict.values())
 
-        mapper = afwTable.SchemaMapper(template.schema)
-        mapper.addMinimalSchema(afwTable.SourceTable.makeMinimalSchema())
-        schema = mapper.getOutputSchema()
-
-        for col in transforms:
-            doAdd = True
-            for filterName in transforms[col].coeffs:
-                if filterName != "" and filterName not in catalogs:
-                    doAdd = False
-            if doAdd:
-                schema.addField(col, float, transforms[col].description + transforms[col].subDescription)
-        schema.addField("numStarFlags", type=np.int32, doc="Number of times source was flagged as star")
-        badKey = schema.addField("qaBad_flag", type="Flag", doc="Is this a bad source for color qa analyses?")
-        schema.addField(fluxColumn, type=np.float64, doc="Flux from filter " + self.fluxFilter)
-        schema.addField(fluxColumn + "Err", type=np.float64, doc="Flux error for flux from filter "
-                        + self.fluxFilter)
-        schema.addField("base_InputCount_value", type=np.int32,
-                        doc="Input visit count for " + self.fluxFilter)
-
-        # Copy basics (id, RA, Dec)
-        new = afwTable.SourceCatalog(schema)
-        new.reserve(num)
-        new.extend(template, mapper)
-
-        # Set transformed colors
-        for col, transform in transforms.items():
-            if col not in schema:
-                continue
-            value = np.ones(num)*transform.coeffs[""] if "" in transform.coeffs else np.zeros(num)
-            for filterName, coeff in transform.coeffs.items():
-                if filterName == "":  # Constant: already done
+        if isinstance(template, pd.DataFrame):
+            new = pd.DataFrame()
+            new["coord_ra"] = template["coord_ra"]
+            new["coord_dec"] = template["coord_dec"]
+            new["id"] = template["id"]
+            new["parent"] = template["parent"]
+            new["deblend_nChild"] = template["deblend_nChild"]
+            toAddList = []
+            for col in transforms:
+                doAdd = True
+                for filterName in transforms[col].coeffs:
+                    if filterName != "" and filterName not in catalogDict:
+                        doAdd = False
+                if doAdd:
+                    toAddList.append(col)
+            if not toAddList:
+                self.log.warn("No transforms found...")
+                return new
+            # Set transformed colors
+            for col, transform in transforms.items():
+                if col not in toAddList:
                     continue
-                cat = catalogs[filterName]
-                mag = -2.5*np.log10(cat[fluxColumn])
-                value += mag*coeff
-            new[col][:] = value
+                value = np.ones(num)*transform.coeffs[""] if "" in transform.coeffs else np.zeros(num)
+                for filterName, coeff in transform.coeffs.items():
+                    if filterName == "":  # Constant: already done
+                        continue
+                    mag = -2.5*np.log10(catalogDict[filterName][fluxColumn])
+                    value += mag*coeff
+                new[col] = value
+            # Flag bad values
+            bad = np.zeros(num, dtype=bool)
+            for dataCat in catalogDict.values():
+                bad |= makeBadArray(dataCat, flagList=self.flags)
+            new["qaBad_flag"] = bad
 
-        # Flag bad values
-        bad = np.zeros(num, dtype=bool)
-        for dataCat in catalogs.values():
-            bad |= makeBadArray(dataCat, flagList=self.flags)
-        # Can't set column for flags; do row-by-row
-        for row, badValue in zip(new, bad):
-            row.setFlag(badKey, bool(badValue))
+            # Star/galaxy
+            numStarFlags = np.zeros(num)
+            for cat in catalogDict.values():
+                numStarFlags += np.where(cat[self.classificationColumn] < 0.5, 1, 0)
+            new["numStarFlags"] = numStarFlags
+            new[fluxColumn] = catalogDict[self.fluxFilter][fluxColumn]
+            new[fluxColumn + "Err"] = catalogDict[self.fluxFilter][fluxColumn + "Err"]
+            new["base_InputCount_value"] = catalogDict[self.fluxFilter]["base_InputCount_value"]
+        else:
+            schema = getSchema(template)
+            mapper = afwTable.SchemaMapper(schema)
+            mapper.addMinimalSchema(afwTable.SourceTable.makeMinimalSchema())
+            schema = mapper.getOutputSchema()
 
-        # Star/galaxy
-        numStarFlags = np.zeros(num)
-        for cat in catalogs.values():
-            numStarFlags += np.where(cat[self.classificationColumn] < 0.5, 1, 0)
-        new["numStarFlags"][:] = numStarFlags
+            for col in transforms:
+                doAdd = True
+                for filterName in transforms[col].coeffs:
+                    if filterName != "" and filterName not in catalogDict:
+                        doAdd = False
+                if doAdd:
+                    schema.addField(col, float, transforms[col].description + transforms[col].subDescription)
+            schema.addField("numStarFlags", type=np.int32, doc="Number of times source was flagged as star")
+            badKey = schema.addField("qaBad_flag", type="Flag",
+                                     doc="Is this a bad source for color qa analyses?")
+            schema.addField(fluxColumn, type=np.float64, doc="Flux from filter " + self.fluxFilter)
+            schema.addField(fluxColumn + "Err", type=np.float64, doc="Flux error for flux from filter "
+                            + self.fluxFilter)
+            schema.addField("base_InputCount_value", type=np.int32,
+                            doc="Input visit count for " + self.fluxFilter)
 
-        new[fluxColumn][:] = catalogs[self.fluxFilter][fluxColumn]
-        new[fluxColumn + "Err"][:] = catalogs[self.fluxFilter][fluxColumn + "Err"]
-        new["base_InputCount_value"][:] = catalogs[self.fluxFilter]["base_InputCount_value"]
+            # Copy basics (id, RA, Dec)
+            new = afwTable.SourceCatalog(schema)
+            new.reserve(num)
+            new.extend(template, mapper)
+
+            # Set transformed colors
+            for col, transform in transforms.items():
+                if col not in schema:
+                    continue
+                value = np.ones(num)*transform.coeffs[""] if "" in transform.coeffs else np.zeros(num)
+                for filterName, coeff in transform.coeffs.items():
+                    if filterName == "":  # Constant: already done
+                        continue
+                    cat = catalogDict[filterName]
+                    mag = -2.5*np.log10(cat[fluxColumn])
+                    value += mag*coeff
+                new[col][:] = value
+
+            # Flag bad values
+            bad = np.zeros(num, dtype=bool)
+            for dataCat in catalogDict.values():
+                bad |= makeBadArray(dataCat, flagList=self.flags)
+            # Can't set column for flags; do row-by-row
+            for row, badValue in zip(new, bad):
+                row.setFlag(badKey, bool(badValue))
+
+            # Star/galaxy
+            numStarFlags = np.zeros(num)
+            for cat in catalogDict.values():
+                numStarFlags += np.where(cat[self.classificationColumn] < 0.5, 1, 0)
+            new["numStarFlags"][:] = numStarFlags
+
+            new[fluxColumn][:] = catalogDict[self.fluxFilter][fluxColumn]
+            new[fluxColumn + "Err"][:] = catalogDict[self.fluxFilter][fluxColumn + "Err"]
+            new["base_InputCount_value"][:] = catalogDict[self.fluxFilter]["base_InputCount_value"]
 
         return new
 
-    def plotGalacticExtinction(self, byFilterCats, plotInfoDict, areaDict, geLabel=None):
+    def plotGalacticExtinction(self, byFilterCats, plotInfoDict, byFilterAreaDict, geLabel=None):
         yield
         for filterName in byFilterCats:
             qMin = (np.nanmean(byFilterCats[filterName]["A_" + filterName])
@@ -812,49 +1072,24 @@ class ColorAnalysisTask(CmdLineTask):
                                           "%s (%s)" % ("Galactic Extinction:  A_" + filterName, "mag"),
                                           shortName, self.config.analysis, flags=["galacticExtinction_flag"],
                                           labeller=AllLabeller(), qMin=qMin, qMax=qMax,
-                                          magThreshold=99.0).plotAll(shortName, plotInfoDict, areaDict,
-                                                                     self.log, zpLabel=geLabel,
-                                                                     plotRunStats=False)
+                                          magThreshold=99.0).plotAll(
+                                              shortName, plotInfoDict, byFilterAreaDict[filterName],
+                                              self.log, zpLabel=geLabel, plotRunStats=False)
 
-    def plotGalaxyColors(self, catalogs, plotInfoDict, areaDict):
+    def plotStarPrincipalColors(self, principalColCats, byFilterCats, plotInfoDict, byFilterAreaDict,
+                                labeller, geLabel=None, uberCalLabel=None):
         yield
-        filters = set(catalogs.keys())
-        if filters.issuperset(set(("HSC-G", "HSC-I"))):
-            gg = catalogs["HSC-G"]
-            ii = catalogs["HSC-I"]
-            assert len(gg) == len(ii)
-            mapperList = afwTable.SchemaMapper.join([gg.schema, ii.schema],
-                                                    ["g_", "i_"])
-            catalog = afwTable.BaseCatalog(mapperList[0].getOutputSchema())
-            catalog.reserve(len(gg))
-            for gRow, iRow in zip(gg, ii):
-                row = catalog.addNew()
-                row.assign(gRow, mapperList[0])
-                row.assign(iRow, mapperList[1])
-
-            catalog.writeFits("gi.fits")
-            shortName = "galaxy-TEST"
-            self.log.info("shortName = {:s}".format(shortName))
-            yield from self.AnalysisClass(
-                catalog, GalaxyColor("modelfit_CModel_instFlux", "slot_CalibFlux_flux", "g_", "i_"),
-                "(g-i)_cmodel - (g-i)_CalibFlux", shortName, self.config.analysis,
-                flags=["modelfit_CModel_flag", "slot_CalibFlux_flag"], prefix="i_",
-                labeller=OverlapsStarGalaxyLabeller("g_", "i_"),
-                qMin=-0.5, qMax=0.5,).plotAll(shortName, plotInfoDict, areaDict, self.log)
-
-    def plotStarPrincipalColors(self, principalColCats, byFilterCats, plotInfoDict, areaDict, labeller,
-                                geLabel=None, uberCalLabel=None):
-        yield
+        schema = getSchema(principalColCats)
         mags = {filterName: -2.5*np.log10(byFilterCats[filterName]["base_PsfFlux_instFlux"]) for
                 filterName in byFilterCats}
-        fluxColumn = ("base_PsfFlux_instFlux" if "base_PsfFlux_instFlux" in principalColCats.schema else
+        fluxColumn = ("base_PsfFlux_instFlux" if "base_PsfFlux_instFlux" in schema else
                       "modelfit_CModel_instFlux")
         signalToNoise = {filterName:
                          byFilterCats[filterName][fluxColumn]/byFilterCats[filterName][fluxColumn + "Err"]
                          for filterName in byFilterCats}
         unitStr = "mmag" if self.config.toMilli else "mag"
         for col, transform in self.config.transforms.items():
-            if not transform.plot or col not in principalColCats.schema:
+            if not transform.plot or col not in schema:
                 continue
             if self.config.transforms == ivezicTransformsHSC:
                 if col == "wPerp" or col == "xPerp":
@@ -899,12 +1134,10 @@ class ColorAnalysisTask(CmdLineTask):
             yield from self.AnalysisClass(
                 principalColCats, colorsInRange, "%s (%s)" % (col + transform.subDescription, unitStr),
                 shortName, self.config.analysis, flags=["qaBad_flag"], labeller=labeller, qMin=-0.2, qMax=0.2,
-                magThreshold=self.config.analysis.magThreshold).plotAll(shortName, plotInfoDict,
-                                                                        areaDict, self.log,
-                                                                        zpLabel=geLabel, forcedStr=forcedStr,
-                                                                        plotRunStats=False,
-                                                                        extraLabels=principalColorStrs,
-                                                                        uberCalLabel=uberCalLabel)
+                magThreshold=self.config.analysis.magThreshold).plotAll(
+                    shortName, plotInfoDict, byFilterAreaDict[self.fluxFilter], self.log, zpLabel=geLabel,
+                    forcedStr=forcedStr, plotRunStats=False, extraLabels=principalColorStrs,
+                    uberCalLabel=uberCalLabel)
 
             # Plot selections of stars for different criteria
             if self.config.transforms == ivezicTransformsHSC:
@@ -912,7 +1145,8 @@ class ColorAnalysisTask(CmdLineTask):
                 qaGood = np.logical_and(np.logical_not(principalColCats["qaBad_flag"]),
                                         principalColCats["numStarFlags"] >= 3)
                 if self.config.analysis.useSignalToNoiseThreshold:
-                    if "base_InputCount_value" in byFilterCats[self.fluxFilter].schema:
+                    schema = getSchema(byFilterCats[self.fluxFilter])
+                    if "base_InputCount_value" in schema:
                         inputCounts = byFilterCats[self.fluxFilter]["base_InputCount_value"]
                         scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1,
                                                         floorFactor=10)
@@ -927,8 +1161,11 @@ class ColorAnalysisTask(CmdLineTask):
                     # mean magnitude of the lower 5% of the
                     # S/N > signalToNoiseThreshold subsample.
                     ptFrac = max(2, int(0.05*len(mags[self.fluxFilter][qaGood])))
-                    magThreshold = np.floor(mags[self.fluxFilter][qaGood][
-                        mags[self.fluxFilter][qaGood].argsort()[-ptFrac:]].mean()*10 + 0.5)/10
+                    if isinstance(mags[self.fluxFilter], (pd.Series, pd.DataFrame)):
+                        sortedMags = mags[self.fluxFilter][qaGood].sort_values()
+                    else:
+                        sortedMags = mags[self.fluxFilter][qaGood][mags[self.fluxFilter][qaGood].argsort()]
+                    magThreshold = np.floor(sortedMags[-ptFrac:].mean()*10 + 0.5)/10
                     thresholdStr = [r" [S/N$\geqslant$" + str(signalToNoiseThreshold) + "]",
                                     " [" + self.fluxFilter + r"$\lesssim$" + str(magThreshold) + "]"]
                 else:
@@ -993,23 +1230,28 @@ class ColorAnalysisTask(CmdLineTask):
                 axes.text(xLoc, yLoc, "NinPerpGood =", ha="left", color="red", **kwargs)
                 axes.text(xLoc + fdx*deltaX, yLoc, str(len(xColor[inPerpGood])), ha="right", color="red",
                           **kwargs)
+                xOff = 0.0
                 if plotInfoDict["cameraName"]:
-                    labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
+                    xOff = max(0.09, 0.03*len(plotInfoDict["cameraName"]))
+                    labelCamera(plotInfoDict, fig, axes, 0.5 - xOff, 1.04)
                 if catLabel:
                     plotText(catLabel, fig, axes, 0.91, -0.09, color="green", fontSize=10)
                 if geLabel:
                     plotText(geLabel, fig, axes, 0.11, -0.09, color="green", fontSize=10)
+                if self.config.doLabelRerun:
+                    plotText("rerun: " + plotInfoDict["rerun"], plt, axes, 0.5, 1.09, fontSize=7,
+                             color="purple")
                 if plotInfoDict["hscRun"]:
                     axes.set_title("HSC stack run: " + plotInfoDict["hscRun"], color="#800080")
 
                 tractStr = "tract: {:s}".format(plotInfoDict["tract"])
-                axes.annotate(tractStr, xy=(0.5, 1.04), xycoords="axes fraction", ha="center", va="center",
-                              fontsize=10, color="green")
+                axes.annotate(tractStr, xy=(0.5 + xOff, 1.04), xycoords="axes fraction", ha="center",
+                              va="center", fontsize=10, color="green")
 
                 yield Struct(fig=fig, description=description, stats=None, statsHigh=None,
                              style=col + "Selections")
 
-    def plotStarColorColor(self, principalColCats, byFilterCats, plotInfoDict, areaDict, fluxColumn,
+    def plotStarColorColor(self, principalColCats, byFilterCats, plotInfoDict, byFilterAreaDict, fluxColumn,
                            forcedStr=None, geLabel=None, uberCalLabel=None):
         yield
         num = len(list(byFilterCats.values())[0])
@@ -1026,7 +1268,8 @@ class ColorAnalysisTask(CmdLineTask):
         catLabel = "noDuplicates"
 
         if self.config.analysis.useSignalToNoiseThreshold:
-            if "base_InputCount_value" in byFilterCats[self.fluxFilter].schema:
+            schema = getSchema(byFilterCats[self.fluxFilter])
+            if "base_InputCount_value" in schema:
                 inputCounts = byFilterCats[self.fluxFilter]["base_InputCount_value"]
                 scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=10)
                 if scaleFactor == 0.0:
@@ -1038,8 +1281,11 @@ class ColorAnalysisTask(CmdLineTask):
             # Set self.magThreshold to represent approximately that which
             # corresponds to the S/N threshold.  Computed as the mean magnitude
             # of the lower 5% of the  S/N > signalToNoiseThreshold subsample.
-            magThreshold = np.floor(mags[self.fluxFilter][bright][
-                mags[self.fluxFilter][bright].argsort()[-ptFrac:]].mean()*10 + 0.5)/10
+            if isinstance(mags[self.fluxFilter], (pd.Series, pd.DataFrame)):
+                brightMags = mags[self.fluxFilter][bright].sort_values()
+            else:
+                brightMags = mags[self.fluxFilter][bright][mags[self.fluxFilter][bright].argsort()]
+            magThreshold = np.floor(brightMags[-ptFrac:].mean()*10 + 0.5)/10
             thresholdStr = [r" [S/N$\geqslant$" + str(signalToNoiseThreshold) + "]",
                             " [" + self.fluxFilter + r"$\lesssim$" + str(magThreshold) + "]"]
         else:
@@ -1075,7 +1321,11 @@ class ColorAnalysisTask(CmdLineTask):
         fluxColStr = fluxToPlotString(fluxColumn)
 
         polyFitKwargs = dict(thresholdStr=thresholdStr, catLabel=catLabel, geLabel=geLabel,
-                             uberCalLabel=uberCalLabel, unitScale=self.unitScale)
+                             uberCalLabel=uberCalLabel, unitScale=self.unitScale,
+                             doLabelRerun=self.config.doLabelRerun)
+        colorColorKwargs = dict(magThreshold=prettyBrightThreshold, geLabel=geLabel,
+                                uberCalLabel=uberCalLabel, unitScale=self.unitScale,
+                                doLabelRerun=self.config.doLabelRerun)
 
         if filters.issuperset(set(("HSC-G", "HSC-R", "HSC-I"))):
             # Do a linear fit to regions defined in Ivezic transforms
@@ -1151,8 +1401,7 @@ class ColorAnalysisTask(CmdLineTask):
                                           "g - r  [{0:s}]".format(fluxColStr),
                                           "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
                                           xRange=(xRange[0], xRange[1] + 0.6), yRange=yRange,
-                                          magThreshold=prettyBrightThreshold, geLabel=geLabel,
-                                          unitScale=self.unitScale, uberCalLabel=uberCalLabel)
+                                          **colorColorKwargs)
                 yield from colorColor4MagPlots(plotInfoDict, nameStr,
                                                self.log, catColors("HSC-G", "HSC-R", mags, decentStars),
                                                catColors("HSC-R", "HSC-I", mags, decentStars),
@@ -1162,9 +1411,7 @@ class ColorAnalysisTask(CmdLineTask):
                                                "g - r  [{0:s}]".format(fluxColStr),
                                                "r - i  [{0:s}]".format(fluxColStr), self.fluxFilter,
                                                fluxColStr, xRange=(xRange[0], xRange[1] + 0.6), yRange=yRange,
-                                               magThreshold=prettyBrightThreshold,
-                                               geLabel=geLabel, unitScale=self.unitScale,
-                                               uberCalLabel=uberCalLabel)
+                                               **colorColorKwargs)
 
             shortName = filtersStr + "Distance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
@@ -1176,12 +1423,11 @@ class ColorAnalysisTask(CmdLineTask):
                                           filtersStr + "Distance [%s] (%s)" % (fluxColStr, unitStr),
                                           shortName, self.config.analysis, flags=["qaBad_flag"], qMin=-0.1,
                                           qMax=0.1, magThreshold=prettyBrightThreshold,
-                                          labeller=NumStarLabeller(2)).plotAll(shortName, plotInfoDict,
-                                                                               areaDict, self.log,
-                                                                               stdevEnforcer,
-                                                                               forcedStr=forcedStr,
-                                                                               zpLabel=geLabel,
-                                                                               uberCalLabel=uberCalLabel)
+                                          labeller=NumStarLabeller(2)).plotAll(
+                                              shortName, plotInfoDict, byFilterAreaDict[self.fluxFilter],
+                                              self.log, stdevEnforcer, forcedStr=forcedStr, zpLabel=geLabel,
+                                              uberCalLabel=uberCalLabel)
+
         if filters.issuperset(set(("HSC-R", "HSC-I", "HSC-Z"))):
             # Do a linear fit to regions defined in Ivezic transforms
             transformPerp = self.config.transforms["yPerp"]
@@ -1232,9 +1478,7 @@ class ColorAnalysisTask(CmdLineTask):
                                           "r - i  [{0:s}]".format(fluxColStr),
                                           "i - z  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
                                           xRange=xRange, yRange=(yRange[0], yRange[1] + 0.2),
-                                          magThreshold=prettyBrightThreshold,
-                                          geLabel=geLabel, uberCalLabel=uberCalLabel,
-                                          unitScale=self.unitScale)
+                                          **colorColorKwargs)
                 yield from colorColor4MagPlots(plotInfoDict, nameStr,
                                                self.log, catColors("HSC-R", "HSC-I", mags, decentStars),
                                                catColors("HSC-I", "HSC-Z", mags, decentStars),
@@ -1244,9 +1488,7 @@ class ColorAnalysisTask(CmdLineTask):
                                                "r - i  [{0:s}]".format(fluxColStr),
                                                "i - z  [{0:s}]".format(fluxColStr), self.fluxFilter,
                                                fluxColStr, xRange=xRange, yRange=(yRange[0], yRange[1] + 0.2),
-                                               magThreshold=prettyBrightThreshold,
-                                               geLabel=geLabel, unitScale=self.unitScale,
-                                               uberCalLabel=uberCalLabel)
+                                               **colorColorKwargs)
             shortName = filtersStr + "Distance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
             stdevEnforcer = Enforcer(requireLess={"star": {"stdev": 0.03*self.unitScale}})
@@ -1257,12 +1499,10 @@ class ColorAnalysisTask(CmdLineTask):
                                           filtersStr + "Distance [%s] (%s)" % (fluxColStr, unitStr),
                                           shortName, self.config.analysis, flags=["qaBad_flag"], qMin=-0.1,
                                           qMax=0.1, magThreshold=prettyBrightThreshold,
-                                          labeller=NumStarLabeller(2)).plotAll(shortName, plotInfoDict,
-                                                                               areaDict, self.log,
-                                                                               stdevEnforcer,
-                                                                               forcedStr=forcedStr,
-                                                                               zpLabel=geLabel,
-                                                                               uberCalLabel=uberCalLabel)
+                                          labeller=NumStarLabeller(2)).plotAll(
+                                              shortName, plotInfoDict, byFilterAreaDict[self.fluxFilter],
+                                              self.log, stdevEnforcer, forcedStr=forcedStr, zpLabel=geLabel,
+                                              uberCalLabel=uberCalLabel)
         if filters.issuperset(set(("HSC-I", "HSC-Z", "HSC-Y"))):
             filtersStr = "izy"
             nameStr = filtersStr + fluxColStr
@@ -1295,9 +1535,7 @@ class ColorAnalysisTask(CmdLineTask):
                                           "i - z  [{0:s}]".format(fluxColStr),
                                           "z - y  [{0:s}]".format(fluxColStr), self.fluxFilter, fluxColStr,
                                           xRange=xRange, yRange=(yRange[0], yRange[1] + 0.2),
-                                          magThreshold=prettyBrightThreshold,
-                                          geLabel=geLabel, unitScale=self.unitScale,
-                                          uberCalLabel=uberCalLabel)
+                                          **colorColorKwargs)
                 yield from colorColor4MagPlots(plotInfoDict, nameStr,
                                                self.log, catColors("HSC-I", "HSC-Z", mags, decentStars),
                                                catColors("HSC-Z", "HSC-Y", mags, decentStars),
@@ -1307,9 +1545,7 @@ class ColorAnalysisTask(CmdLineTask):
                                                "i - z  [{0:s}]".format(fluxColStr),
                                                "z - y  [{0:s}]".format(fluxColStr), self.fluxFilter,
                                                fluxColStr, xRange=xRange, yRange=(yRange[0], yRange[1] + 0.2),
-                                               magThreshold=prettyBrightThreshold,
-                                               geLabel=geLabel, uberCalLabel=uberCalLabel,
-                                               unitScale=self.unitScale)
+                                               **colorColorKwargs)
             shortName = filtersStr + "Distance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
             stdevEnforcer = Enforcer(requireLess={"star": {"stdev": 0.03*self.unitScale}})
@@ -1320,12 +1556,10 @@ class ColorAnalysisTask(CmdLineTask):
                                           filtersStr + "Distance [%s] (%s)" % (fluxColStr, unitStr),
                                           shortName, self.config.analysis, flags=["qaBad_flag"], qMin=-0.1,
                                           qMax=0.1, magThreshold=prettyBrightThreshold,
-                                          labeller=NumStarLabeller(2)).plotAll(shortName, plotInfoDict,
-                                                                               areaDict, self.log,
-                                                                               stdevEnforcer,
-                                                                               forcedStr=forcedStr,
-                                                                               zpLabel=geLabel,
-                                                                               uberCalLabel=uberCalLabel)
+                                          labeller=NumStarLabeller(2)).plotAll(
+                                              shortName, plotInfoDict, byFilterAreaDict[self.fluxFilter],
+                                              self.log, stdevEnforcer, forcedStr=forcedStr, zpLabel=geLabel,
+                                              uberCalLabel=uberCalLabel)
 
         if filters.issuperset(set(("HSC-Z", "NB0921", "HSC-Y"))):
             filtersStr = "z9y"
@@ -1372,9 +1606,7 @@ class ColorAnalysisTask(CmdLineTask):
                                                "n921-y  [{0:s}]".format(fluxColStr), self.fluxFilter,
                                                fluxColStr, xRange=xRange,
                                                yRange=(yRange[0] - 0.05, yRange[1] + 0.05),
-                                               magThreshold=prettyBrightThreshold,
-                                               geLabel=geLabel, unitScale=self.unitScale,
-                                               uberCalLabel=uberCalLabel)
+                                               **colorColorKwargs)
             shortName = filtersStr + "Distance" + fluxColStr
             self.log.info("shortName = {:s}".format(shortName))
             stdevEnforcer = Enforcer(requireLess={"star": {"stdev": 0.03*self.unitScale}})
@@ -1385,12 +1617,10 @@ class ColorAnalysisTask(CmdLineTask):
                                           filtersStr + "Distance [%s] (%s)" % (fluxColStr, unitStr),
                                           shortName, self.config.analysis, flags=["qaBad_flag"], qMin=-0.1,
                                           qMax=0.1, magThreshold=prettyBrightThreshold,
-                                          labeller=NumStarLabeller(2)).plotAll(shortName, plotInfoDict,
-                                                                               areaDict, self.log,
-                                                                               stdevEnforcer,
-                                                                               forcedStr=forcedStr,
-                                                                               zpLabel=geLabel,
-                                                                               uberCalLabel=uberCalLabel)
+                                          labeller=NumStarLabeller(2)).plotAll(
+                                              shortName, plotInfoDict, byFilterAreaDict[self.fluxFilter],
+                                              self.log, stdevEnforcer, forcedStr=forcedStr, zpLabel=geLabel,
+                                              uberCalLabel=uberCalLabel)
 
     def _getConfigName(self):
         return None
@@ -1407,7 +1637,8 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
                           yRange=None, order=1, iterations=3, rej=3.0, xFitRange=None, yFitRange=None,
                           fitLineUpper=None, fitLineLower=None, numBins="auto", catLabel=None,
                           geLabel=None, uberCalLabel=None, logger=None, thresholdStr=None,
-                          unitScale=1.0, closeToVertical=False, verifyJob=None, verifyMetricName=None):
+                          unitScale=1.0, closeToVertical=False, doLabelRerun=True, verifyJob=None,
+                          verifyMetricName=None):
     fig, axes = plt.subplots(nrows=1, ncols=2, sharex=False, sharey=False)
     fig.subplots_adjust(wspace=0.46, bottom=0.15, left=0.11, right=0.96, top=0.9)
     axes[0].tick_params(which="both", direction="in", labelsize=9)
@@ -1505,8 +1736,12 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
     xyOther = np.vstack([xx[~keep], yy[~keep]])
     zOther = scipyStats.gaussian_kde(xyOther)(xyOther)
     idxHighDensity = np.argmax(zKeep)
-    xHighDensity = xx[keep][idxHighDensity]
-    yHighDensity = yy[keep][idxHighDensity]
+    if isinstance(xx[keep], (pd.Series, pd.DataFrame)):
+        xHighDensity = xx[keep].iloc[[idxHighDensity]].values[0]
+        yHighDensity = yy[keep].iloc[[idxHighDensity]].values[0]
+    else:
+        xHighDensity = xx[keep][idxHighDensity]
+        yHighDensity = yy[keep][idxHighDensity]
     log.info("Highest Density point x, y: {0:.4f} {1:.4f}".format(xHighDensity, yHighDensity))
 
     initialGuess = list(reversed(poly))
@@ -1902,6 +2137,9 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
         plotText(uberCalLabel, fig, axes[0], 0.13, -0.16, fontSize=7, color="green")
     if plotInfoDict["hscRun"]:
         axes[0].set_title("HSC stack run: " + plotInfoDict["hscRun"], color="#800080")
+    if doLabelRerun:
+        plotText("rerun: " + plotInfoDict["rerun"], plt, axes[1], 1.06, 0.5, fontSize=7, color="purple",
+                 rotation=-90)
 
     yield Struct(fig=fig, description=description, stats=None, statsHigh=None, dpi=120, style="fit")
 
@@ -1910,7 +2148,8 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
 
 def colorColorPlot(plotInfoDict, description, log, xStars, yStars, xGalaxies, yGalaxies, magStars,
                    magGalaxies, xLabel, yLabel, filterStr, fluxColStr, xRange=None, yRange=None,
-                   geLabel=None, uberCalLabel=None, logger=None, magThreshold=99.9, unitScale=1.0):
+                   geLabel=None, uberCalLabel=None, logger=None, magThreshold=99.9, unitScale=1.0,
+                   doLabelRerun=True):
     fig, axes = plt.subplots(1, 1)
     axes.tick_params(which="both", direction="in", labelsize=9)
 
@@ -1953,17 +2192,21 @@ def colorColorPlot(plotInfoDict, description, log, xStars, yStars, xGalaxies, yG
     axes.text(xLoc, 0.94*yLoc, "Nstars =", ha="left", color="blue", **kwargs)
     axes.text(xLoc + fdx*deltaX, 0.94*yLoc, str(len(xStars[goodStars]))
               + " [" + filterStr + "$<$" + str(magThreshold) + "]", ha="right", color="blue", **kwargs)
+    xOff = 0.0
     if plotInfoDict["cameraName"]:
-        labelCamera(plotInfoDict, fig, axes, 0.5, 1.09)
+        xOff = max(0.09, 0.03*len(plotInfoDict["cameraName"]))
+        labelCamera(plotInfoDict, fig, axes, 0.5 - xOff, 1.04)
     if geLabel:
         plotText(geLabel, fig, axes, 0.13, -0.09, fontSize=7, color="green")
     if uberCalLabel:
         plotText(uberCalLabel, fig, axes, 0.89, -0.09, fontSize=7, color="green")
     if plotInfoDict["hscRun"]:
         axes.set_title("HSC stack run: " + plotInfoDict["hscRun"], color="#800080")
+    if doLabelRerun:
+        plotText("rerun: " + plotInfoDict["rerun"], plt, axes, 0.5, 1.09, fontSize=7, color="purple")
 
     tractStr = "tract: {:s}".format(plotInfoDict["tract"])
-    axes.annotate(tractStr, xy=(0.5, 1.04), xycoords="axes fraction", ha="center", va="center",
+    axes.annotate(tractStr, xy=(0.5 + xOff, 1.04), xycoords="axes fraction", ha="center", va="center",
                   fontsize=10, color="green")
 
     mappableStars = plt.cm.ScalarMappable(cmap="winter", norm=plt.Normalize(vmin=vMin, vmax=vMax))
@@ -1982,7 +2225,8 @@ def colorColorPlot(plotInfoDict, description, log, xStars, yStars, xGalaxies, yG
 
 def colorColor4MagPlots(plotInfoDict, description, log, xStars, yStars, xGalaxies, yGalaxies, magStars,
                         magGalaxies, xLabel, yLabel, filterStr, fluxColStr, xRange=None, yRange=None,
-                        geLabel=None, uberCalLabel=None, logger=None, magThreshold=99.9, unitScale=1.0):
+                        geLabel=None, uberCalLabel=None, logger=None, magThreshold=99.9, unitScale=1.0,
+                        doLabelRerun=True):
     fig, axes = plt.subplots(nrows=2, ncols=2, sharex=True, sharey=True)
     fig.subplots_adjust(hspace=0, wspace=0, bottom=0.11, right=0.82, top=0.91)
 
@@ -2047,17 +2291,21 @@ def colorColor4MagPlots(plotInfoDict, description, log, xStars, yStars, xGalaxie
     cbGalaxies.set_ticks([])
     cbGalaxies.set_label(filterStr + " [" + fluxColStr + "]: galaxies", rotation=270, labelpad=-6, fontsize=9)
 
+    xOff = 0.0
     if plotInfoDict["cameraName"]:
-        labelCamera(plotInfoDict, fig, axes[0, 0], 1.05, 1.14)
+        xOff = max(0.2, 0.05*len(plotInfoDict["cameraName"]))
+        labelCamera(plotInfoDict, fig, axes[0, 0], 1.05 - xOff, 1.06)
     if geLabel:
         plotText(geLabel, fig, axes[0, 0], 0.12, -1.23, color="green")
     if uberCalLabel:
         plotText(uberCalLabel, fig, axes[0, 1], 0.89, -1.23, fontSize=7, color="green")
     if plotInfoDict["hscRun"]:
         axes.set_title("HSC stack run: " + plotInfoDict["hscRun"], color="#800080")
+    if doLabelRerun:
+        plotText("rerun: " + plotInfoDict["rerun"], plt, axes[0, 0], 1.05, 1.14, fontSize=7, color="purple")
 
     tractStr = "tract: {:s}".format(plotInfoDict["tract"])
-    axes[0, 0].annotate(tractStr, xy=(1.05, 1.06), xycoords="axes fraction", ha="center", va="center",
+    axes[0, 0].annotate(tractStr, xy=(1.05 + xOff, 1.06), xycoords="axes fraction", ha="center", va="center",
                         fontsize=9, color="green")
 
     yield Struct(fig=fig, description=description, stats=None, statsHigh=None, dpi=120, style="noFitMagBins")
@@ -2097,28 +2345,3 @@ class ColorColorDistance(object):
             distance2[i] = min(distanceSquaredToPoly(x, y, np.real(rr), self.poly) for
                                rr in roots if np.real(rr) == rr)
         return np.sqrt(distance2)*np.where(yy >= self.poly(xx), 1.0, -1.0)*self.unitScale
-
-
-class SkyAnalysisRunner(TaskRunner):
-    @staticmethod
-    def getTargetList(parsedCmd, **kwargs):
-        kwargs["cosmos"] = parsedCmd.cosmos
-
-        # Partition all inputs by filter
-        filterRefs = defaultdict(list)  # filter-->dataRefs
-        for patchRef in sum(parsedCmd.id.refList, []):
-            if patchRef.datasetExists("deepCoadd_meas"):
-                filterName = patchRef.dataId["filter"]
-                filterRefs[filterName].append(patchRef)
-
-        return [(refList, kwargs) for refList in filterRefs.values()]
-
-
-class SkyAnalysisTask(CoaddAnalysisTask):
-    """Version of CoaddAnalysisTask that runs on all inputs simultaneously.
-
-    This is most useful for utilising overlaps between tracts.
-    """
-    _DefaultName = "skyAnalysis"
-    RunnerClass = SkyAnalysisRunner
-    outputDataset = "plotSky"
