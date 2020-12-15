@@ -499,6 +499,11 @@ class ColorAnalysisTask(CmdLineTask):
                 # Convert to pandas DataFrames
                 cat = cat.asAstropy().to_pandas().set_index("id", drop=False)
                 cat = calibrateSourceCatalog(cat, self.config.analysis.coaddZp)
+                fullCoveragePatchList = list(set(cat["patchId"].values))
+                if len(fullCoveragePatchRefList) == 0:
+                    for patchRef in patchRefList:
+                        if patchRef.dataId["patch"] in fullCoveragePatchList:
+                            fullCoveragePatchRefList.append(patchRef)
             byFilterForcedCats[filterName] = cat
             byFilterAreaDict[filterName] = areaDict
 
