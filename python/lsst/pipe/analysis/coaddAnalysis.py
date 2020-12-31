@@ -2119,6 +2119,7 @@ class CompareCoaddAnalysisTask(CoaddAnalysisTask):
 
         repoInfo1 = getRepoInfo(patchRefList1[0], coaddName=self.config.coaddName, coaddDataset=dataset1)
         repoInfo2 = getRepoInfo(patchRefList2[0], coaddName=self.config.coaddName, coaddDataset=dataset2)
+        hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
         # Find a visit/ccd input so that you can check for meas_mosaic input
         # (i.e. to set uberCalLabel).
         self.uberCalLabel1 = determineExternalCalLabel(repoInfo1, patchList1[0],
@@ -2149,7 +2150,6 @@ class CompareCoaddAnalysisTask(CoaddAnalysisTask):
                 unforced2 = self.calibrateCatalogs(unforced2, wcs=repoInfo2.wcs)
 
         if not self.config.doReadParquetTables1 or not self.config.doReadParquetTables2:
-            hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
             aliasDictList = [self.config.flagsToAlias, ]
             if hscRun and self.config.srcSchemaMap is not None:
                 aliasDictList += [self.config.srcSchemaMap]
