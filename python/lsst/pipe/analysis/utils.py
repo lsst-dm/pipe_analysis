@@ -23,6 +23,7 @@ import re
 import operator
 
 import astropy.coordinates as coord
+import astropy.time
 import astropy.units as units
 import matplotlib.pyplot as plt
 import logging
@@ -2875,11 +2876,13 @@ def loadRefCat(packedMatches, refObjLoader, padRadiusFactor=1.05):
     version = matchmeta.getInt("SMATCHV")
     if version != 1:
         raise ValueError("SourceMatchVector version number is {:}, not 1.".format(version))
-    filterName = matchmeta.getString("FILTER").strip()
+    filterName = "g" if "gaia" in refObjLoader.ref_dataset_name else matchmeta.getString("FILTER").strip()
     try:
         epoch = matchmeta.getDouble("EPOCH")
     except (pexExceptions.NotFoundError, pexExceptions.TypeError):
         epoch = None  # Not present, or not correct type means it's not set
+    mjd = 56744.4686568296
+    epoch = astropy.time.Time(mjd, format="mjd", scale="tai")
     if "RADIUS" in matchmeta:
         # This is a circle style metadata, call loadSkyCircle
         ctrCoord = geom.SpherePoint(matchmeta.getDouble("RA"), matchmeta.getDouble("DEC"), geom.degrees)
