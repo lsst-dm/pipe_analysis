@@ -417,7 +417,13 @@ class Analysis(object):
                 galMin = np.round(2.5*np.log10(self.config.coaddClassFluxRatio) - 0.08, 2)*self.unitScale
                 deltaMin = max(0.0, self.qMin - galMin)
 
-        if self.magThreshold > 90.0 or "matches" in self.shortName and "calib_" not in self.shortName:
+        if "matches" in self.shortName and not tractLevelPlot:
+            magMin = self.magMin + 1.0  # the -1.5 shift above is a bit much in this case
+            if "gaia" in forcedStr:
+                magMax = min(self.config.magPlotStarMax[plotInfoDict["filter"]], self.magMax)
+            else:
+                magMax = max(self.config.magPlotStarMax[plotInfoDict["filter"]], self.magMax)
+        elif self.magThreshold > 90.0:
             magMin, magMax = self.config.magPlotMin, self.config.magPlotMax
         else:
             magMin, magMax = self.magMin, self.magMax

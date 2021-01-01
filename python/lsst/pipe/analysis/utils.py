@@ -23,6 +23,7 @@ import re
 import operator
 
 import astropy.coordinates as coord
+import astropy.time
 import astropy.units as units
 import matplotlib.pyplot as plt
 import logging
@@ -2845,8 +2846,8 @@ def getSchema(catalog):
 
 
 def loadRefCat(packedMatches, refObjLoader, padRadiusFactor=1.05):
-    """Function to load a reference catalog using the information stored in the
-    persisted packed match catalog.
+    """Function to load a reference catalog based on search coordinates
+    stored in the meta data provided.
 
     During single frame processing calibration, a list of reference-to-source
     matches list is persisted as a "normalized" catalog of IDs produced by
@@ -2857,17 +2858,16 @@ def loadRefCat(packedMatches, refObjLoader, padRadiusFactor=1.05):
 
     When loading in reference objects for a region defined by an image's
     current WCS estimate, the reference object loader grows the bbox by the
-    config parameter pixelMargin.  This is set to 50 by default but this is not
-    reflected by the radius parameter set in the metadata, so some matches may
-    reside outside the circle searched within this radius.  Thus, we increase
-    the radius set in the metadata by the factor ``padRadiusFactor`` to
-    accommodate.
+    config parameter pixelMargin.  This is set to 300 by default but this is
+    not reflected by the radius parameter set in the metadata, so some matches
+    may reside outside the circle searched within this radius.  Thus, we
+    increase the radius set in the metadata by the factor ``padRadiusFactor``
+    to accommodate.
 
     Parameters
     ----------
-    packedMatches : `lsst.afw.table.BaseCatalog`
-        Catalog of packed matches to be denormalized (i.e. load in associated
-        reference catalogs with full column information).
+    matchMeta : `lsst.daf.base.propertyContainer.PropertyList`
+        Metadata providing the search center and radius parameters.
     refObjLoader :
            `lsst.meas.algorithms.loadReferenceObjects.LoadReferenceObjectsTask`
         Reference object loader to read in the reference catalogs.
@@ -2880,21 +2880,21 @@ def loadRefCat(packedMatches, refObjLoader, padRadiusFactor=1.05):
     refCat : `lsst.afw.table.SimpleCatalog`
         The loaded catalog of reference sources.
     """
-    matchmeta = packedMatches.table.getMetadata()
-    version = matchmeta.getInt("SMATCHV")
+    version = matchMeta.getInt("SMATCHV")
     if version != 1:
         raise ValueError("SourceMatchVector version number is {:}, not 1.".format(version))
-    filterName = matchmeta.getString("FILTER").strip()
+    filterName = "g" if "gaia" in refObjLoader.ref_dataset_name else matchmeta.getString("FILTER").strip()
     try:
         epoch = matchmeta.getDouble("EPOCH")
     except (pexExceptions.NotFoundError, pexExceptions.TypeError):
         epoch = None  # Not present, or not correct type means it's not set
-    if "RADIUS" in matchmeta:
+    epoch = astropy.time.Time(epoch, format="mjd", scale="tai") if epoch is not None else None
+    if "RADIUS" in matchMeta:
         # This is a circle style metadata, call loadSkyCircle
-        ctrCoord = geom.SpherePoint(matchmeta.getDouble("RA"), matchmeta.getDouble("DEC"), geom.degrees)
-        rad = matchmeta.getDouble("RADIUS")*padRadiusFactor*geom.degrees
+        ctrCoord = geom.SpherePoint(matchMeta.getDouble("RA"), matchMeta.getDouble("DEC"), geom.degrees)
+        rad = matchMeta.getDouble("RADIUS")*padRadiusFactor*geom.degrees
         refCat = refObjLoader.loadSkyCircle(ctrCoord, rad, filterName, epoch=epoch).refCat
-    elif "INNER_UPPER_LEFT_RA" in matchmeta:
+    elif "INNER_UPPER_LEFT_RA" in matchMeta:
         # This is the sky box type (only triggers in the LoadReferenceObject
         # class, not task).  Only the outer box is required to be loaded to get
         # the maximum region, all filtering will be done below on the
@@ -2902,15 +2902,16 @@ def loadRefCat(packedMatches, refObjLoader, padRadiusFactor=1.05):
         # the refObjLoader.
         box = []
         for place in ("UPPER_LEFT", "UPPER_RIGHT", "LOWER_LEFT", "LOWER_RIGHT"):
-            coord = geom.SpherePoint(matchmeta.getDouble(f"OUTER_{place}_RA"),
-                                     matchmeta.getDouble(f"OUTER_{place}_DEC"), geom.degrees).getVector()
+            coord = geom.SpherePoint(matchMeta.getDouble(f"OUTER_{place}_RA"),
+                                     matchMeta.getDouble(f"OUTER_{place}_DEC"), geom.degrees).getVector()
             box.append(coord)
         outerBox = sphgeom.ConvexPolygon(box)
         refCat = refObjLoader.loadRegion(outerBox, filterName=filterName, epoch=epoch).refCat
     return refCat
 
 
-def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, padRadiusFactor=1.05, log=None):
+def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, padRadiusFactor=1.05,
+                                    calibKey="calib_astrometry_used", log=None):
     """Function to load and denormalize a catalog of packed matches.
 
     A match list is persisted and unpersisted as a catalog of IDs produced by
@@ -2918,6 +2919,9 @@ def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, padRad
     tasks) in the catalog's metadata attribute. This method converts such a
     match catalog into a match list, with links to source records and reference
     object records.
+
+    NOTE: the refObjLoader.ref_dataset_name here must match that which was used
+    in processing.
 
     Parameters
     ----------
@@ -2931,7 +2935,11 @@ def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, padRad
         Reference object loader to read in the reference catalogs.
     padRadiusFactor : `float`, optional
         Factor by which to "pad" (increase) the sky circle radius to be loaded
-        from that stored in the metadata.
+        from that stored in the metadata associated with `packedMatches`.
+    calibKey : `str`, optional
+       The packed matches persisted in srcMatch represent those that were used
+       in the SFM astrometric calibration, so we may as well clip the src
+       catalog to just those with that flag set before joining the catalogs.
     log : `lsst.log.Log`, optional
         Logger object for logging messages.
 
@@ -2942,18 +2950,31 @@ def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, padRad
         source and external reference catalogs (but with "src_" and "ref_"
         prefixes on the column names).
     """
-    refCat = loadRefCat(packedMatches, refObjLoader, padRadiusFactor=padRadiusFactor)
+    matchMeta = packedMatches.table.getMetadata()
+    refCat = loadRefCat(matchMeta, refObjLoader, padRadiusFactor=padRadiusFactor)
     refCat = refCat.asAstropy().to_pandas().set_index("id")
     packedMatches = packedMatches.asAstropy().to_pandas().set_index("first")
-    denormMatches = packedMatches.join(refCat)
+    denormMatches = pd.merge(packedMatches, refCat, left_index=True, right_index=True)
+    # Raise if no matches were found
+    if denormMatches.empty:
+        if log is not None:
+            logStr = ("No matches were found.  You are using {} as the reference catalog.  Are you "
+                      "sure this is the same as the one used in the processing that produced the "
+                      "[src/deepCoadd]Match catlogs?  Any plots based on the calib_astrometry_used flags "
+                      "will use the generic matched catalog.".format(refObjLoader.ref_dataset_name))
+            log.warn(logStr)
+        return None
     # Check that matches were found for all obects in patchedMatches catalog
-    numUnmatched = denormMatches.coord_ra.isnull().sum()
+    numUnmatched = len(packedMatches.index) - len(denormMatches)
     if numUnmatched > 0 and log is not None:
-        logStr = ("No match found for N={0:} objects in the packedMatch catalog. "
-                  "Try increasing padRadiusFactor (currently = {1:}) to load "
-                  "sources over a wider area?".format(numUnmatched, padRadiusFactor))
+        logStr = ("No match found for N={} objects (out of {}) in the packedMatch catalog. "
+                  "Try increasing padRadiusFactor (currently = {}) to load sources over a "
+                  "wider area?".format(numUnmatched, len(packedMatches.index), padRadiusFactor))
         log.warn(logStr)
-    catalogCopy = catalog.copy(deep=True)
+    if calibKey is not None:
+        catalogCopy = catalog[catalog[calibKey]].copy(deep=True)
+    else:
+        catalogCopy = catalog.copy(deep=True)
     catalogCopy.rename(columns=lambda x: "src_" + x, inplace=True)
     denormMatches.rename(columns=lambda x: "ref_" + x if x != "distance" else x, inplace=True)
     unpackedMatches = catalogCopy.join(denormMatches.set_index("ref_second"), on="src_id")
@@ -2962,25 +2983,24 @@ def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, padRad
     return unpackedMatches
 
 
-def loadReferencesAndMatchToCatalog(catalog, packedMatches, refObjLoader, padRadiusFactor=1.05,
-                                    matchRadius=0.5, matchFlagList=[], log=None):
+def loadReferencesAndMatchToCatalog(catalog, matchMeta, refObjLoader, padRadiusFactor=1.05,
+                                    matchRadius=0.5, matchFlagList=[], goodFlagList=[], log=None):
     """Function to load a reference catalog and match it to a source catalog.
 
     When loading in reference objects for a region defined by an image's
     current WCS estimate, the reference object loader grows the bbox by the
-    config parameter pixelMargin.  This is set to 50 by default but this is not
-    reflected by the radius parameter set in the metadata, so some matches may
-    reside outside the circle searched within this radius.  Thus, we increase
-    the radius set in the metadata by the factor ``padRadiusFactor`` to
-    accommodate.
+    config parameter pixelMargin.  This is set to 300 by default but this is
+    not reflected by the radius parameter set in the metadata, so some matches
+    may reside outside the circle searched within this radius.  Thus, we
+    increase the radius set in the metadata by the factor ``padRadiusFactor``
+    to accommodate.
 
     Parameters
     ----------
     catalog : `'pandas.core.frame.DataFrame`
-        The source catalog linked to the ``packedMatches`` catalog.
-    packedMatches : `lsst.afw.table.BaseCatalog`
-        Catalog of packed matches to be denormalized (i.e. load in associated
-        reference catalogs with full column information).
+        The source catalog to which the maching will be done.
+    matchMeta : `lsst.daf.base.propertyContainer.PropertyList`
+        Metadata providing the search center and radius parameters.
     refObjLoader :
            `lsst.meas.algorithms.loadReferenceObjects.LoadReferenceObjectsTask`
         Reference object loader to read in the reference catalogs.
@@ -2996,6 +3016,11 @@ def loadReferencesAndMatchToCatalog(catalog, packedMatches, refObjLoader, padRad
         for any sources that were used in the SFM calibration (identified by
         the "calib_*_used" flags).  The later are all retained for matching
         regardless of any other flags being set.
+    goodFlagList : `list` of `str`, optional
+        List of column flag names for which to retain catalog sources having
+        any one of them set to `True`, regardless of any other flags being set.
+        For example, it may be desireable to keep all sources that were used in
+        the SFM calibration (identified by the "calib_*_used" flags).
     log : `lsst.log.Log`, optional
         Logger object for logging messages.
 
@@ -3006,7 +3031,7 @@ def loadReferencesAndMatchToCatalog(catalog, packedMatches, refObjLoader, padRad
         from the original source and external reference catalogs (but with
         "src_" and "ref_" prefixes on the column names).
     """
-    refCat = loadRefCat(packedMatches, refObjLoader, padRadiusFactor=padRadiusFactor)
+    refCat = loadRefCat(matchMeta, refObjLoader, padRadiusFactor=padRadiusFactor)
     refCat = refCat.asAstropy().to_pandas().set_index("id")
     schema = getSchema(catalog)
     flagList = []
@@ -3018,13 +3043,14 @@ def loadReferencesAndMatchToCatalog(catalog, packedMatches, refObjLoader, padRad
                 log.warn("Did not find column {:} in catalog so it will not be added to the list of "
                          "flags for culling the source catalog prior to the generic matching.".format(flag))
     # Cull on bad sources from the catalogs as these should not be
-    # considered in our match-to-reference catalog metric.  However, we do not
-    # cull out those that were actually used in any of the calibrations
-    # (astrometry, photometry, psf modelling) to allow for subselection on the
-    # complete list of thos subsets.
+    # considered in our match-to-reference catalog metric.  However, we allow
+    # an option to explicitly leave in sources for which any of the flags in
+    # goodFlagList are set to True.
     bad = makeBadArray(catalog, flagList=flagList)
-    good = catalog["calib_astrometry_used"] | catalog["calib_photometry_used"] | catalog["calib_psf_used"]
-    good = good.values | ~bad
+    bad |= catalog["base_PsfFlux_instFlux"].values/catalog["base_PsfFlux_instFluxErr"].values < minSrcSn
+    good = ~bad
+    for goodFlag in goodFlagList:
+        good |= catalog[goodFlag].values
     goodCatalog = catalog[good].copy(deep=True)
     matches = matchAndJoinCatalogs(goodCatalog, refCat, matchRadius, prefix1="src_", prefix2="ref_", log=log)
     return matches
