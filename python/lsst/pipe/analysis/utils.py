@@ -2957,7 +2957,7 @@ def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, padRad
 
 
 def loadReferencesAndMatchToCatalog(catalog, packedMatches, refObjLoader, padRadiusFactor=1.05,
-                                    matchRadius=0.5, matchFlagList=[], log=None):
+                                    matchRadius=0.5, matchFlagList=[], minCatSrcSn=30.0, log=None):
     """Function to load a reference catalog and match it to a source catalog.
 
     When loading in reference objects for a region defined by an image's
@@ -2986,10 +2986,13 @@ def loadReferencesAndMatchToCatalog(catalog, packedMatches, refObjLoader, padRad
         arcsec.
     matchFlagList : `list` of `str`, optional
         List of column flag names for which to cull sources before matching to
-        the reference catlago if any are set to `True`.  An exception is made
+        the reference catalag if any are set to `True`.  An exception is made
         for any sources that were used in the SFM calibration (identified by
         the "calib_*_used" flags).  The later are all retained for matching
         regardless of any other flags being set.
+    minCatSrcSn : `float`, optional
+        Minimum signal-to-noise ratio for sources in `catalog` to be considered
+        in matching.
     log : `lsst.log.Log`, optional
         Logger object for logging messages.
 
@@ -3017,6 +3020,7 @@ def loadReferencesAndMatchToCatalog(catalog, packedMatches, refObjLoader, padRad
     # (astrometry, photometry, psf modelling) to allow for subselection on the
     # complete list of thos subsets.
     bad = makeBadArray(catalog, flagList=flagList)
+    bad |= catalog["base_PsfFlux_instFlux"].values/catalog["base_PsfFlux_instFluxErr"].values < minCatSrcSn
     good = catalog["calib_astrometry_used"] | catalog["calib_photometry_used"] | catalog["calib_psf_used"]
     good = good.values | ~bad
     goodCatalog = catalog[good].copy(deep=True)

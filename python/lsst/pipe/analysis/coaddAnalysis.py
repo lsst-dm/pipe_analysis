@@ -87,6 +87,11 @@ class CoaddAnalysisConfig(Config):
     analysisPhotomMatches = ConfigField(dtype=AnalysisConfig,
                                         doc="Analysis plotting options for photometric reference matches")
     matchesMaxDistance = Field(dtype=float, default=0.15, doc="Maximum plotting distance for matches")
+    minSignalToNoiseForMatches = Field(dtype=float, default=30, doc="Minimum signal to noise level of "
+                                       "pipeline catalog sources to be considered when matching to an "
+                                       "external reference catalog.  Eliminating very low S/N sources "
+                                       "before matching is beneficial for speed and avoiding erroneous "
+                                       "matches.")
     externalCatalogs = ConfigDictField(keytype=str, itemtype=AstrometryConfig, default={},
                                        doc="Additional external catalogs for matching")
     astromRefCat = Field(dtype=str, default="gaia", doc="Name of reference catalog for astrometry. "
@@ -1262,7 +1267,8 @@ class CoaddAnalysisTask(CmdLineTask):
                 refObjLoader = refObjLoader.apply(butler=butler)
             matches = loadReferencesAndMatchToCatalog(
                 catalog, packedMatches, refObjLoader, matchRadius=self.matchRadius,
-                matchFlagList=self.config.analysis.flags, log=self.log)
+                matchFlagList=self.config.analysis.flags, minCatSrcSn=self.config.minSignalToNoiseForMatches,
+                log=self.log)
             # LSST reads in reference catalogs with flux in "nanojanskys", so
             # must convert to AB.
             matches = matchNanojanskyToAB(matches)
