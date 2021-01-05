@@ -2984,7 +2984,8 @@ def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, padRad
 
 
 def loadReferencesAndMatchToCatalog(catalog, matchMeta, refObjLoader, padRadiusFactor=1.05,
-                                    matchRadius=0.5, matchFlagList=[], goodFlagList=[], log=None):
+                                    matchRadius=0.5, matchFlagList=[], goodFlagList=[], minSrcSn=30.0,
+                                    log=None):
     """Function to load a reference catalog and match it to a source catalog.
 
     When loading in reference objects for a region defined by an image's
@@ -3012,7 +3013,7 @@ def loadReferencesAndMatchToCatalog(catalog, matchMeta, refObjLoader, padRadiusF
         arcsec.
     matchFlagList : `list` of `str`, optional
         List of column flag names for which to cull sources before matching to
-        the reference catlago if any are set to `True`.  An exception is made
+        the reference catalag if any are set to `True`.  An exception is made
         for any sources that were used in the SFM calibration (identified by
         the "calib_*_used" flags).  The later are all retained for matching
         regardless of any other flags being set.
@@ -3021,6 +3022,9 @@ def loadReferencesAndMatchToCatalog(catalog, matchMeta, refObjLoader, padRadiusF
         any one of them set to `True`, regardless of any other flags being set.
         For example, it may be desireable to keep all sources that were used in
         the SFM calibration (identified by the "calib_*_used" flags).
+    minSrcSn : `float`, optional
+        Minimum signal-to-noise ratio for sources in `catalog` to be considered
+        in matching.
     log : `lsst.log.Log`, optional
         Logger object for logging messages.
 
