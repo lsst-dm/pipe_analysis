@@ -2836,7 +2836,7 @@ def getSchema(catalog):
     return schema
 
 
-def loadRefCat(packedMatches, refObjLoader, padRadiusFactor=1.05):
+def loadRefCat(packedMatches, refObjLoader, padRadiusFactor=1.05, epoch=None):
     """Function to load a reference catalog using the information stored in the
     persisted packed match catalog.
 
@@ -2877,12 +2877,12 @@ def loadRefCat(packedMatches, refObjLoader, padRadiusFactor=1.05):
     if version != 1:
         raise ValueError("SourceMatchVector version number is {:}, not 1.".format(version))
     filterName = "g" if "gaia" in refObjLoader.ref_dataset_name else matchmeta.getString("FILTER").strip()
-    try:
-        epoch = matchmeta.getDouble("EPOCH")
-    except (pexExceptions.NotFoundError, pexExceptions.TypeError):
-        epoch = None  # Not present, or not correct type means it's not set
-    mjd = 56744.4686568296
-    epoch = astropy.time.Time(mjd, format="mjd", scale="tai")
+    if epoch is None:
+        try:
+            epoch = matchmeta.getDouble("EPOCH")
+        except (pexExceptions.NotFoundError, pexExceptions.TypeError):
+            epoch = None  # Not present, or not correct type means it's not set
+    epoch = astropy.time.Time(epoch, format="mjd", scale="tai") if epoch is not None else None
     if "RADIUS" in matchmeta:
         # This is a circle style metadata, call loadSkyCircle
         ctrCoord = geom.SpherePoint(matchmeta.getDouble("RA"), matchmeta.getDouble("DEC"), geom.degrees)
@@ -2904,7 +2904,8 @@ def loadRefCat(packedMatches, refObjLoader, padRadiusFactor=1.05):
     return refCat
 
 
-def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, padRadiusFactor=1.05, log=None):
+def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, epoch=None, padRadiusFactor=1.05,
+                                    log=None):
     """Function to load and denormalize a catalog of packed matches.
 
     A match list is persisted and unpersisted as a catalog of IDs produced by
@@ -2936,7 +2937,7 @@ def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, padRad
         source and external reference catalogs (but with "src_" and "ref_"
         prefixes on the column names).
     """
-    refCat = loadRefCat(packedMatches, refObjLoader, padRadiusFactor=padRadiusFactor)
+    refCat = loadRefCat(packedMatches, refObjLoader, epoch=epoch, padRadiusFactor=padRadiusFactor)
     refCat = refCat.asAstropy().to_pandas().set_index("id")
     packedMatches = packedMatches.asAstropy().to_pandas().set_index("first")
     denormMatches = packedMatches.join(refCat)
@@ -2956,7 +2957,7 @@ def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, padRad
     return unpackedMatches
 
 
-def loadReferencesAndMatchToCatalog(catalog, packedMatches, refObjLoader, padRadiusFactor=1.05,
+def loadReferencesAndMatchToCatalog(catalog, packedMatches, refObjLoader, epoch=None, padRadiusFactor=1.05,
                                     matchRadius=0.5, matchFlagList=[], minCatSrcSn=30.0, log=None):
     """Function to load a reference catalog and match it to a source catalog.
 
@@ -3003,7 +3004,7 @@ def loadReferencesAndMatchToCatalog(catalog, packedMatches, refObjLoader, padRad
         from the original source and external reference catalogs (but with
         "src_" and "ref_" prefixes on the column names).
     """
-    refCat = loadRefCat(packedMatches, refObjLoader, padRadiusFactor=padRadiusFactor)
+    refCat = loadRefCat(packedMatches, refObjLoader, epoch=epoch, padRadiusFactor=padRadiusFactor)
     refCat = refCat.asAstropy().to_pandas().set_index("id")
     schema = getSchema(catalog)
     flagList = []

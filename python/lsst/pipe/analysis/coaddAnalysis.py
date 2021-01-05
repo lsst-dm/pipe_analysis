@@ -1255,10 +1255,29 @@ class CoaddAnalysisTask(CmdLineTask):
                     areaDict = catStruct.areaDict
             # Set boolean array indicating sources deemed unsuitable for qa
             # analyses.
-            if dataset.startswith("deepCoadd_"):
-                packedMatches = butler.get("deepCoadd_measMatch", dataRef.dataId)
+            mdjList = []
+            if "Coadd" in dataset:
+                packedMatches = butler.get(self.config.coaddName + "Coadd_measMatch", dataRef.dataId)
+                coaddUri = butler.getUri(self.config.coaddName + "Coadd_calexp", dataRef.dataId)
+                coaddReader = afwImage.ExposureFitsReader(coaddUri)
+                for visit in coaddReader.readCoaddInputs().visits["id"]:
+                    try:
+                        rawUri = butler.getUri("raw", visit=int(visit), ccd=repoInfo.camera[0])
+                        rawReader = afwImage.ExposureFitsReader(rawUri)
+                        mjd = rawReader.readMetadata().getDouble("MJD")
+                    except:
+                        mjd = np.nan
+                    mdjList.append(mjd)
             else:
                 packedMatches = butler.get(dataset + "Match", dataRef.dataId)
+                try:
+                    rawUri = butler.getUri("raw", dataRef.dataId)
+                    rawReader = afwImage.ExposureFitsReader(rawUri)
+                    mjd = rawReader.readMetadata().getDouble("MJD")
+                except:
+                    mjd = np.nan
+                mdjList.append(mjd)
+            epoch = np.nanmean(mdjList) if not all(np.isnan(mdjList)) else None
 
             if not packedMatches:
                 self.log.warn("No good matches for %s" % (dataRef.dataId,))
@@ -1266,7 +1285,7 @@ class CoaddAnalysisTask(CmdLineTask):
             if hasattr(refObjLoader, "apply"):
                 refObjLoader = refObjLoader.apply(butler=butler)
             matches = loadReferencesAndMatchToCatalog(
-                catalog, packedMatches, refObjLoader, matchRadius=self.matchRadius,
+                catalog, packedMatches, refObjLoader, epoch=epoch, matchRadius=self.matchRadius,
                 matchFlagList=self.config.analysis.flags, minCatSrcSn=self.config.minSignalToNoiseForMatches,
                 log=self.log)
             # LSST reads in reference catalogs with flux in "nanojanskys", so
