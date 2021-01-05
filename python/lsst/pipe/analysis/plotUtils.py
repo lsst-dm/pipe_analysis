@@ -586,7 +586,8 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
         cbar.set_label(label=metricStr, size=fontSize + 1)
 
 
-def plotCcdOutline(axes, areaDict, ccdList, tractInfo=None, zpLabel=None, fontSize=8):
+def plotCcdOutline(axes, areaDict, ccdList, tractInfo=None, zpLabel=None, fontSize=8, lineStyle="-",
+                   color="k", labelStr=None, doPlotCcdId=True):
     """Plot the outlines of the ccds in ccdList on a given axis.
 
     Parameters
@@ -600,8 +601,6 @@ def plotCcdOutline(axes, areaDict, ccdList, tractInfo=None, zpLabel=None, fontSi
         A list of the ccds used in this analysis.
     tractInfo : `lsst.skymap.tractInfo.ExplicitTractInfo`, optional
         The information about the tract.
-    zpLabel : `str`, optional
-        The label for the zero point.
     fontSize : `int`, optional
         The fontsize to use for the ccd labels.
     """
@@ -631,8 +630,10 @@ def plotCcdOutline(axes, areaDict, ccdList, tractInfo=None, zpLabel=None, fontSi
                     break
 
         if not tractInfo or inTract:
-            axes.plot(ras, decs, "k-", linewidth=1)
-            axes.text(cenX, cenY, "{}".format(ccd), ha="center", va="center", fontsize=fontSize)
+            axes.plot(ras, decs, linestyle=lineStyle, color=color, linewidth=1, label=labelStr)
+            if doPlotCcdId:
+                axes.text(cenX, cenY, "{}".format(ccd), ha="center", va="center", fontsize=fontSize,
+                          color=color)
 
 
 def plotPatchOutline(axes, tractInfo, patchList, plotUnits="deg", idFontSize=None):
