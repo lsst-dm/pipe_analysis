@@ -27,6 +27,7 @@ import functools
 
 from collections import defaultdict
 
+from lsst.daf.base import DateTime
 from lsst.daf.persistence.butler import Butler
 from lsst.pex.config import (Config, Field, ConfigField, ListField, DictField, ConfigDictField,
                              ConfigurableField)
@@ -52,6 +53,7 @@ from .utils import (Enforcer, MagDiff, MagDiffMatches, MagDiffCompare, Astrometr
 from .plotUtils import (CosmosLabeller, AllLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
                         MatchesStarGalaxyLabeller, determineExternalCalLabel, getPlotInfo)
 
+import lsst.afw.cameraGeom as cameraGeom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 import lsst.geom as geom
@@ -1274,10 +1276,39 @@ class CoaddAnalysisTask(CmdLineTask):
                     areaDict = catStruct.areaDict
             # Set boolean array indicating sources deemed unsuitable for qa
             # analyses.
-            if dataset.startswith("deepCoadd_"):
-                packedMatches = butler.get("deepCoadd_measMatch", dataRef.dataId)
+            mdjList = []
+            if "Coadd" in dataset:
+                packedMatches = butler.get(self.config.coaddName + "Coadd_measMatch", dataRef.dataId)
+                coaddUri = butler.getUri(self.config.coaddName + "Coadd_calexp", dataRef.dataId)
+                coaddReader = afwImage.ExposureFitsReader(coaddUri)
+                for visit in coaddReader.readCoaddInputs().visits["id"]:
+                    try:
+                        for ccd in repoInfo.camera:
+                            if ccd.getType() == cameraGeom.DetectorType.SCIENCE:
+                                if dataRef.datasetExists("calexp", visit=int(visit), ccd=ccd.getId()):
+                                    ccdExists = ccd
+                                    break
+                        calexpUri = butler.getUri("calexp", visit=int(visit), ccd=ccdExists.getId())
+                        calexpReader = afwImage.ExposureFitsReader(calexpUri)
+                        mjd = calexpReader.readVisitInfo.getDate().get(system=DateTime.MJD,
+                                                                       scale=DateTime.TAI)
+                    except Exception:
+                        mjd = np.nan
+                    mdjList.append(mjd)
             else:
                 packedMatches = butler.get(dataset + "Match", dataRef.dataId)
+                matchMeta = packedMatches.table.getMetadata()
+                try:
+                    mjd = matchMeta.getDouble("EPOCH")
+                except Exception:
+                    try:
+                        rawUri = butler.getUri("calexp", dataRef.dataId)
+                        rawReader = afwImage.ExposureFitsReader(rawUri)
+                        mjd = rawReader.readMetadata().getDouble("MJD")
+                    except Exception:
+                        mjd = np.nan
+                mdjList.append(mjd)
+            epoch = np.nanmean(mdjList) if not all(np.isnan(mdjList)) else None
 
             if not packedMatches:
                 self.log.warn("No good matches for %s" % (dataRef.dataId,))
@@ -1286,14 +1317,14 @@ class CoaddAnalysisTask(CmdLineTask):
                 refObjLoader = refObjLoader.apply(butler=butler)
             if readPackedMatchesOnly:
                 calibKey = "calib_astrometry_used" if "patch" not in repoInfo.dataId else None
-                matches = loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader,
+                matches = loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, epoch=epoch,
                                                           calibKey=calibKey, log=self.log)
                 if matches is None:
                     return None
             else:
                 matchMeta = packedMatches.table.getMetadata()
                 matches = loadReferencesAndMatchToCatalog(
-                    catalog, matchMeta, refObjLoader, matchRadius=self.matchRadius,
+                    catalog, matchMeta, refObjLoader, epoch=epoch, matchRadius=self.matchRadius,
                     matchFlagList=self.config.analysis.flags, goodFlagList=goodFlagList,
                     minSrcSn=self.config.minSrcSignalToNoiseForMatches, log=self.log)
             # LSST reads in reference catalogs with flux in "nanojanskys", so

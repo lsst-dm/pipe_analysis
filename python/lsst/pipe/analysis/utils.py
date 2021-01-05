@@ -2845,7 +2845,7 @@ def getSchema(catalog):
     return schema
 
 
-def loadRefCat(packedMatches, refObjLoader, padRadiusFactor=1.05):
+def loadRefCat(matchMeta, refObjLoader, padRadiusFactor=1.05, epoch=None):
     """Function to load a reference catalog based on search coordinates
     stored in the meta data provided.
 
@@ -2874,6 +2874,15 @@ def loadRefCat(packedMatches, refObjLoader, padRadiusFactor=1.05):
     padRadiusFactor : `float`, optional
         Factor by which to "pad" (increase) the sky circle radius to be loaded
         from that stored in the metadata.
+    epoch : `astropy.time.Time`, optional
+        Epoch in MJD to which to correct the reference catalog coordinates for
+        proper motions, or `None`.  If `None`, an attempt will be made to
+        derive the epoch to use from `matchMeta`.  If none is found, `epoch`
+        will default to `None` and no corrections will be applied.  Note that
+        even if an epoch is provided, corrections can only be made for
+        reference catalogs that have proper motions (this is currently only
+        true for the Gaia reference catalogs of those that are in regular use
+        with LSST pipelines processing).
 
     Returns
     -------
@@ -2883,11 +2892,12 @@ def loadRefCat(packedMatches, refObjLoader, padRadiusFactor=1.05):
     version = matchMeta.getInt("SMATCHV")
     if version != 1:
         raise ValueError("SourceMatchVector version number is {:}, not 1.".format(version))
-    filterName = "g" if "gaia" in refObjLoader.ref_dataset_name else matchmeta.getString("FILTER").strip()
-    try:
-        epoch = matchmeta.getDouble("EPOCH")
-    except (pexExceptions.NotFoundError, pexExceptions.TypeError):
-        epoch = None  # Not present, or not correct type means it's not set
+    filterName = "g" if "gaia" in refObjLoader.ref_dataset_name else matchMeta.getString("FILTER").strip()
+    if epoch is None:
+        try:
+            epoch = matchMeta.getDouble("EPOCH")
+        except (pexExceptions.NotFoundError, pexExceptions.TypeError):
+            epoch = None  # Not present, or not correct type means it's not set
     epoch = astropy.time.Time(epoch, format="mjd", scale="tai") if epoch is not None else None
     if "RADIUS" in matchMeta:
         # This is a circle style metadata, call loadSkyCircle
@@ -2910,7 +2920,7 @@ def loadRefCat(packedMatches, refObjLoader, padRadiusFactor=1.05):
     return refCat
 
 
-def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, padRadiusFactor=1.05,
+def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, epoch=None, padRadiusFactor=1.05,
                                     calibKey="calib_astrometry_used", log=None):
     """Function to load and denormalize a catalog of packed matches.
 
@@ -2951,7 +2961,7 @@ def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, padRad
         prefixes on the column names).
     """
     matchMeta = packedMatches.table.getMetadata()
-    refCat = loadRefCat(matchMeta, refObjLoader, padRadiusFactor=padRadiusFactor)
+    refCat = loadRefCat(matchMeta, refObjLoader, epoch=epoch, padRadiusFactor=padRadiusFactor)
     refCat = refCat.asAstropy().to_pandas().set_index("id")
     packedMatches = packedMatches.asAstropy().to_pandas().set_index("first")
     denormMatches = pd.merge(packedMatches, refCat, left_index=True, right_index=True)
@@ -2983,7 +2993,7 @@ def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, padRad
     return unpackedMatches
 
 
-def loadReferencesAndMatchToCatalog(catalog, matchMeta, refObjLoader, padRadiusFactor=1.05,
+def loadReferencesAndMatchToCatalog(catalog, matchMeta, refObjLoader, epoch=None, padRadiusFactor=1.05,
                                     matchRadius=0.5, matchFlagList=[], goodFlagList=[], minSrcSn=30.0,
                                     log=None):
     """Function to load a reference catalog and match it to a source catalog.
@@ -3035,7 +3045,7 @@ def loadReferencesAndMatchToCatalog(catalog, matchMeta, refObjLoader, padRadiusF
         from the original source and external reference catalogs (but with
         "src_" and "ref_" prefixes on the column names).
     """
-    refCat = loadRefCat(matchMeta, refObjLoader, padRadiusFactor=padRadiusFactor)
+    refCat = loadRefCat(matchMeta, refObjLoader, epoch=epoch, padRadiusFactor=padRadiusFactor)
     refCat = refCat.asAstropy().to_pandas().set_index("id")
     schema = getSchema(catalog)
     flagList = []
