@@ -5,7 +5,8 @@ import numpy as np
 import lsst.pipe.base as pipeBase
 import lsst.pex.config as pexConfig
 
-from .qaUtils import (addMagnitudes, addColors, stellarLocusFits, addUseForQAFlag, addUseForStatsColumn)
+from .qaUtils import (addMagnitudes, addColors, stellarLocusFits, addUseForQAFlag, addUseForStatsColumn,
+                      addSNColumn, addDeconvMoments)
 
 class AddQAColumnsTaskConnections(pipeBase.PipelineTaskConnections, dimensions=("tract", "skymap")):
 
@@ -41,7 +42,11 @@ class AddQAColumnsTask(pipeBase.PipelineTask):
         cat = addColors(cat, magColName="CModelMag")
         cat = stellarLocusFits(cat)
         cat = stellarLocusFits(cat, magColName="CModelMag")
+        cat = addSNColumn(cat)
         cat = addUseForQAFlag(cat)
         cat = addUseForStatsColumn(cat)
+
+        # TODO: Maybe split into different functions for each pipeline
+        cat = addDeconvMoments(cat)
 
         return pipeBase.Struct(qaCat=cat)

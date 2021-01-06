@@ -25,7 +25,7 @@ class ScatterPlotWithTwoHistsTaskConnections(pipeBase.PipelineTaskConnections,
 
     scatterPlot = pipeBase.connectionTypes.Output(doc="A scatter plot with histograms for both axes.",
                                                  storageClass="Plot",
-                                                 name="scatterTwoHist_{plotName}",
+                                                 name="scatterTwoHistPlot_{plotName}",
                                                  dimensions=("tract", "skymap"))
 
     skymap = pipeBase.connectionTypes.Input(doc="The skymap for the tract",
@@ -358,13 +358,14 @@ class ScatterPlotWithTwoHistsTask(pipeBase.PipelineTask):
         # Side histogram
         sideHist = plt.gcf().add_subplot(gs[1:, -1], sharey=ax)
         finiteObjs = np.isfinite(catPlot[self.config.yColName].values)
-        sideHist.hist(catPlot[self.config.yColName].values[finiteObjs], bins=100, color="grey", alpha=0.3,
+        bins = np.linspace(plotMed - numSig*sigMadYs, plotMed + numSig*sigMadYs)
+        sideHist.hist(catPlot[self.config.yColName].values[finiteObjs], bins=bins, color="grey", alpha=0.3,
                       orientation="horizontal", log=True)
         if self.config.objectsToPlot == "galaxies" or self.config.objectsToPlot == "all":
-            sideHist.hist(ysGalaxies[np.isfinite(ysGalaxies)], bins=100, color="C3", histtype="step",
+            sideHist.hist(ysGalaxies[np.isfinite(ysGalaxies)], bins=bins, color="C3", histtype="step",
                           orientation="horizontal", log=True)
         if self.config.objectsToPlot == "stars" or self.config.objectsToPlot == "all":
-            sideHist.hist(ysStars[np.isfinite(ysStars)], bins=100, color="C0", histtype="step",
+            sideHist.hist(ysStars[np.isfinite(ysStars)], bins=bins, color="C0", histtype="step",
                           orientation="horizontal", log=True)
         sideHist.axes.get_yaxis().set_visible(False)
         sideHist.set_xlabel("Number")

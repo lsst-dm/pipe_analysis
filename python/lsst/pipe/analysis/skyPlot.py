@@ -210,7 +210,7 @@ class SkyPlotTask(pipeBase.PipelineTask):
             galStatsText = ("Median: {:0.2f}\n".format(lowSnGalMed) + r"$\sigma_{MAD}$: "
                             + "{:0.2f}".format(lowSnGalMad))
             # Add statistics
-            bbox = dict(facecolor="C2", alpha=0.3, edgecolor="none")
+            bbox = dict(facecolor="C1", alpha=0.3, edgecolor="none")
             ax.text(0.7, 0.92, galStatsText, transform=fig.transFigure, fontsize=8, bbox=bbox)
 
         if self.config.objectsToPlot == "stars" or self.config.objectsToPlot == "all":

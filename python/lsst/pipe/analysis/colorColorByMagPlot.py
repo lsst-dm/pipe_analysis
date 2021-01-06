@@ -20,7 +20,7 @@ class ColorColorByMagPlotTaskConnections(pipeBase.PipelineTaskConnections,
 
     colorColorByMagPlot = pipeBase.connectionTypes.Output(doc="A scatter plot with histograms for both axes.",
                                                           storageClass="Plot",
-                                                          name="colorColorByMag_{plotName}",
+                                                          name="colorColorByMagPlot_{plotName}",
                                                           dimensions=("tract", "skymap"))
 
     skymap = pipeBase.connectionTypes.Input(doc="The skymap for the tract",

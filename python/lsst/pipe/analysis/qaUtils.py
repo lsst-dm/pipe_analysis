@@ -87,12 +87,39 @@ def addGalacticExtinction(cat):
 def addUseForQAFlag(cat):
     """Add a flag to say if the source should be used for QA purposes
     """
+    for col in cat.columns:
+        if "lag" in col:
+            print(col)
+
     use = ((np.isfinite(cat["gPsMag"])) & (np.isfinite(cat["rPsMag"]))
            & (np.isfinite(cat["iPsMag"])) & (np.isfinite(cat["zPsMag"]))
            & (np.isfinite(cat["zPsMag"])) & (np.isfinite(cat["gCModelMag"]))
            & (np.isfinite(cat["rCModelMag"])) & (np.isfinite(cat["iCModelMag"]))
            & (np.isfinite(cat["zCModelMag"])) & (np.isfinite(cat["yCModelMag"])))
+
+    for band in ["g", "r", "i", "z", "y"]:
+        print(cat[band + "Centroid_flag_notAtMaximum"])
+        print(cat[band + "Shape_flag"].values[0])
+        print(cat[band + "PsfFlux_flag"].values[0], type(cat[band + "PsfFlux_flag"].values[0]))
+        usePerBand = ((cat[band + "Centroid_flag_notAtMaximum"] == 0) & (cat[band + "Shape_flag"] == 0)
+                      & (cat[band + "PsfFlux_flag"] == 0)
+                      & (cat[band + "PixelFlags_saturatedCenter"] == 0)
+                      & (cat[band + "Extendedness_flag"] == 0))
+        use = use & usePerBand
     cat["useForQAFlag"] = use
+    return cat
+
+
+def addSNColumn(cat):
+    """Add a S/N column for each band
+    """
+    for band in ["g", "r", "i", "z", "y"]:
+        SN = cat[band + "PsFlux"].values / cat[band + "PsFluxErr"].values
+        cat[band + "SnPsFlux"] = SN
+
+    for col in cat.columns:
+        if "xx" in col:
+            print(col)
     return cat
 
 
@@ -100,6 +127,8 @@ def addUseForStatsColumn(cat):
     """Add a column to indicate if a source should be used in
     calculating statistics.
     """
+    # Can potentially get rid of this as S/N is needed 
+    # as its own column for other plots
     useForStats = np.zeros(len(cat))
     SN = cat["iPsFlux"].values / cat["iPsFluxErr"].values
 
@@ -110,4 +139,16 @@ def addUseForStatsColumn(cat):
     useForStats[highSn] = 1
 
     cat["useForStats"] = useForStats
+    return cat
+
+
+def addDeconvMoments(cat):
+    """Add moments to the catalog
+    """
+    for band in ["g", "r", "i", "z", "y"]:
+        shape = cat[band + "ShapeRound_xx"].values + cat[band + "ShapeRound_yy"].values
+        psfShape = cat[band + "IxxPsf"].values + cat[band + "IyyPsf"].values
+        cat[band + "DeconvMoments"] = shape
+        cat[band + "PsDeconvMoments"] = psfShape
+
     return cat

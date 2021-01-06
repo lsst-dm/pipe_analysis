@@ -18,7 +18,7 @@ class ColorColorPlotTaskConnections(pipeBase.PipelineTaskConnections,
 
     colorColorPlot = pipeBase.connectionTypes.Output(doc="A scatter plot with histograms for both axes.",
                                                      storageClass="Plot",
-                                                     name="colorColor_{plotName}",
+                                                     name="colorColorPlot_{plotName}",
                                                      dimensions=("tract", "skymap"))
 
     skymap = pipeBase.connectionTypes.Input(doc="The skymap for the tract",

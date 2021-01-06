@@ -21,7 +21,7 @@ class ColorColorFitPlotTaskConnections(pipeBase.PipelineTaskConnections,
 
     colorColorFitPlot = pipeBase.connectionTypes.Output(doc="A scatter plot with histograms for both axes.",
                                                         storageClass="Plot",
-                                                        name="colorColor_{plotName}",
+                                                        name="colorColorFitPlot_{plotName}",
                                                         dimensions=("tract", "skymap"))
 
     skymap = pipeBase.connectionTypes.Input(doc="The skymap for the tract",
@@ -29,6 +29,10 @@ class ColorColorFitPlotTaskConnections(pipeBase.PipelineTaskConnections,
                                             name="{inputCoaddName}Coadd_skyMap",
                                             dimensions=("skymap",))
 
+    fitParams = pipeBase.connectionTypes.Input(doc="The parameters from the fit to the stellar locus.",
+                                               storageClass="StructuredDataDict",
+                                               name="stellarLocusParams_{plotName}",
+                                               dimensions=("tract", "skymap"))
 
 class ColorColorFitPlotTaskConfig(pipeBase.PipelineTaskConfig,
                                   pipelineConnections=ColorColorFitPlotTaskConnections):
@@ -85,7 +89,7 @@ class ColorColorFitPlotTask(pipeBase.PipelineTask):
         outputs = self.run(**inputs)
         butlerQC.put(outputs, outputRefs)
 
-    def run(self, catPlot, dataId, runName, skymap):
+    def run(self, catPlot, dataId, runName, skymap, fitParams):
 
         xLabel = self.config.xLabel
         yLabel = self.config.yLabel
@@ -93,11 +97,12 @@ class ColorColorFitPlotTask(pipeBase.PipelineTask):
 
         plotInfo = parsePlotInfo(dataId, runName)
         sumStats = generateSummaryStats(catPlot, self.config.yColName, skymap, plotInfo)
-        fig = self.colorColorFitPlot(catPlot, xLabel, yLabel, title, plotInfo, sumStats)
+        fig = self.colorColorFitPlot(catPlot, xLabel, yLabel, title, plotInfo, sumStats, fitParams)
 
         return pipeBase.Struct(colorColorFitPlot=fig)
 
-    def colorColorFitPlot(self, catPlot, xLabel, yLabel, name, plotInfo, sumStats, yLims=False, xLims=False):
+    def colorColorFitPlot(self, catPlot, xLabel, yLabel, name, plotInfo, sumStats, fitParams,
+                          yLims=False, xLims=False):
         # TODO: Should the fitting stuff be here or is it done elsewhere?
         # TODO: Propogate the fit details from elsewhere?
         # TODO: This is slow, improve it once we figure out what it should do.
@@ -108,16 +113,6 @@ class ColorColorFitPlotTask(pipeBase.PipelineTask):
                        "used for calculating the stellar locus fits marked.".format(
                        self.config.connections.plotName, self.config.xColName, self.config.yColName)))
 
-        if name == "yFit":
-            xBoxLims = (0.8, 2.1)
-            yBoxLims = (0.3, 0.9)
-        elif name == "wFit":
-            xBoxLims = (0.1, 1.0)
-            yBoxLims = (0.0, 0.5)
-        elif name == "xFit":
-            xBoxLims = (1.0, 1.4)
-            yBoxLims = (0.6, 1.6)
-
         fig = plt.figure()
         ax = fig.add_axes([0.12, 0.11, 0.3, 0.75])
         axHist = fig.add_axes([0.65, 0.11, 0.3, 0.75])
@@ -126,7 +121,7 @@ class ColorColorFitPlotTask(pipeBase.PipelineTask):
         catPlot = catPlot[catPlot["useForQAFlag"].values]
 
         # Only use sources brighter than 26th
-        catPlot = catPlot[(catPlot["iCModelMag"] < 26.0)]
+        catPlot = catPlot[(catPlot["iCModelMag"] < fitParams["magLim"])]
 
         # Need to separate stars and galaxies
         stars = (catPlot[self.config.sourceTypeColName] == 0.0)
@@ -136,10 +131,10 @@ class ColorColorFitPlotTask(pipeBase.PipelineTask):
         ysStars = catPlot[self.config.yColName].values[stars]
 
         # Points to use for the fit
-        fitPoints = np.where((xsStars > xBoxLims[0]) & (xsStars < xBoxLims[1])
-                             & (ysStars > yBoxLims[0]) & (ysStars < yBoxLims[1]))[0]
-        ax.plot([xBoxLims[0], xBoxLims[1], xBoxLims[1], xBoxLims[0], xBoxLims[0]],
-                [yBoxLims[0], yBoxLims[0], yBoxLims[1], yBoxLims[1], yBoxLims[0]], "k")
+        fitPoints = np.where((xsStars > fitParams["x1"]) & (xsStars < fitParams["x2"])
+                             & (ysStars > fitParams["y1"]) & (ysStars < fitParams["y2"]))[0]
+        ax.plot([fitParams["x1"], fitParams["x2"], fitParams["x2"], fitParams["x1"], fitParams["x1"]],
+                [fitParams["y1"], fitParams["y1"], fitParams["y2"], fitParams["y2"], fitParams["y1"]], "k")
 
         bbox = dict(alpha=0.9, facecolor="white", edgecolor="none")
         ax.text(0.05, 0.95, "N Used: {}".format(len(fitPoints)), color="k", transform=ax.transAxes,
@@ -150,9 +145,9 @@ class ColorColorFitPlotTask(pipeBase.PipelineTask):
         zStars = starsKde(xyStars)
 
         starPoints = ax.scatter(xsStars[~fitPoints], ysStars[~fitPoints], c=zStars[~fitPoints],
-                                cmap="Greys_r", label="Stars", s=0.5)
+                                cmap="Greys_r", label="Stars", s=0.3)
         starFitPoints = ax.scatter(xsStars[fitPoints], ysStars[fitPoints], c=zStars[fitPoints], cmap="winter",
-                                   label="Used for Fit", s=0.5)
+                                   label="Used for Fit", s=0.3)
 
         # Add colorbar
         starCbAx = fig.add_axes([0.43, 0.11, 0.04, 0.75])
@@ -164,16 +159,27 @@ class ColorColorFitPlotTask(pipeBase.PipelineTask):
         ax.set_ylabel(self.config.yLabel)
 
         # Set useful axis limits
-        starPercsX = np.nanpercentile(xsStars, [1, 99.5])
-        starPercsY = np.nanpercentile(ysStars, [1, 99.5])
+        starPercsX = np.nanpercentile(xsStars, [0.5, 100])
+        starPercsY = np.nanpercentile(ysStars, [0.5, 100])
         ax.set_xlim(starPercsX[0], starPercsX[1])
         ax.set_ylim(starPercsY[0], starPercsY[1])
 
         # Fit a line to the points in the box
-        (m, b) = np.polyfit(xsStars, ysStars, 1)
-        xsFitLine = [xBoxLims[0], xBoxLims[1]]
-        ysFitLine = [m*xsFitLine[0] + b, m*xsFitLine[1] + b]
-        ax.plot(xsFitLine, ysFitLine, "w", lw=3, ls="--")
+        print(fitParams)
+        xsFitLine = [fitParams["x1"], fitParams["x2"]]
+        #ysFitLine = [fitParams["m"]*xsFitLine[0] + fitParams["b"],
+        #             fitParams["m"]*xsFitLine[1] + fitParams["b"]]
+        #ax.plot(xsFitLine, ysFitLine, "w", lw=3, ls="--")
+        #ax.plot(xsFitLine, ysFitLine, "k", lw=1, ls="--")
+
+        ysFitLine = [fitParams["b_odr"]*xsFitLine[0] + fitParams["m_odr"],
+                     fitParams["b_odr"]*xsFitLine[1] + fitParams["m_odr"]]
+        ax.plot(xsFitLine, ysFitLine, "g", lw=3, ls="--")
+        ax.plot(xsFitLine, ysFitLine, "w", lw=1, ls="--")
+
+        ysFitLine = [fitParams["b_odr2"]*xsFitLine[0] + fitParams["m_odr2"],
+                     fitParams["b_odr2"]*xsFitLine[1] + fitParams["m_odr2"]]
+        ax.plot(xsFitLine, ysFitLine, "w", lw=3)
         ax.plot(xsFitLine, ysFitLine, "k", lw=1, ls="--")
 
         p1 = np.array([xsFitLine[0], ysFitLine[0]])
