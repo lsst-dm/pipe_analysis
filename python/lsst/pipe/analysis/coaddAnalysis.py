@@ -369,6 +369,11 @@ class CoaddAnalysisTask(CmdLineTask):
                 forced = catalogStruct.forced
                 areaDict = catalogStruct.areaDict
 
+            patchExistsList = []
+            for patchRef in patchRefExistsList:
+                patchExistsList.append(patchRef.dataId["patch"])
+            plotInfoDict.update(dict(patchList=patchExistsList))
+
             plotKwargs.update(dict(zpLabel=self.zpLabel))
             unforcedSchema = getSchema(unforced)
             if haveForced:
@@ -389,13 +394,13 @@ class CoaddAnalysisTask(CmdLineTask):
             # matching takes a fair amount of time, so only plot for one
             # catalog, favoring the forced catalog if it exists.
             if self.config.doPlotOverlaps:
-                # Determine if any patches in the patchList actually overlap
+                # Determine if any patches in patchExistsList actually overlap
                 overlappingPatches = checkPatchOverlap(plotInfoDict["patchList"], plotInfoDict["tractInfo"])
                 if not overlappingPatches:
                     self.log.info("No overlapping patches...skipping overlap plots")
                 else:
                     if haveForced:
-                        forcedOverlaps = self.overlaps(forced, patchList, repoInfo.tractInfo)
+                        forcedOverlaps = self.overlaps(forced, patchExistsList, repoInfo.tractInfo)
                         if forcedOverlaps is not None:
                             plotList.append(self.plotOverlaps(forcedOverlaps, plotInfoDict, areaDict,
                                                               matchRadius=self.config.matchOverlapRadius,
@@ -408,7 +413,7 @@ class CoaddAnalysisTask(CmdLineTask):
                         else:
                             self.log.info("No forced overlap objects matched. Overlap plots skipped.")
                     else:
-                        unforcedOverlaps = self.overlaps(unforced, patchList, repoInfo.tractInfo)
+                        unforcedOverlaps = self.overlaps(unforced, patchExistsList, repoInfo.tractInfo)
                         if unforcedOverlaps is not None:
                             plotList.append(
                                 self.plotOverlaps(unforcedOverlaps, plotInfoDict, areaDict,
@@ -641,7 +646,9 @@ class CoaddAnalysisTask(CmdLineTask):
         dataRefList : `list` of
                       `lsst.daf.persistence.butlerSubset.ButlerDataRef`
             A list of butler data references whose catalogs of ``dataset``
-            are to be read in.
+            are to be read in.  NOTE: if the filter under consideration does
+            not exist in the coadd obj parquet table for any given patch,
+            that patch will be removed in place from this list.
         dataset : `str`
             Name of the catalog ``dataset`` to be read in, e.g.
             "deepCoadd_obj" (for coadds) or "source" (for visits).
@@ -695,14 +702,23 @@ class CoaddAnalysisTask(CmdLineTask):
         dfLoadColumns = None
         refColsToLoadList = None
         measColsToLoadList = None
+        dataRefToRemoveList = []
         for dataRef in dataRefList:
             if not dataRef.datasetExists(dataset):
-                self.log.info("Dataset does not exist: {0:r}, {1:s}".format(dataRef.dataId, dataset))
+                self.log.info("Dataset does not exist: {}, {}".format(dataRef.dataId, dataset))
                 continue
             parquetCat = dataRef.get(dataset, immediate=True)
             if isinstance(parquetCat, MultilevelParquetTable) and not any(
                     dfDataset == dfName for dfName in ["forced_src", "meas", "ref"]):
                 raise RuntimeError("Must specify a dfDataset for multilevel parquet tables")
+            if isinstance(parquetCat, MultilevelParquetTable):
+                # Some obj tables do not contain data for all filters
+                existsFilterList = parquetCat.columnLevelNames["filter"]
+                if dataRef.dataId["filter"] not in existsFilterList:
+                    self.log.info("Filter {} does not exist for: {}, {}.  Skipping patch...".
+                                  format(dataRef.dataId["filter"], dataRef.dataId, dataset))
+                    dataRefToRemoveList.append(dataRef)
+                    continue
             if dfLoadColumns is None and isinstance(parquetCat, MultilevelParquetTable):
                 dfLoadColumns = {"dataset": dfDataset, "filter": dataRef.dataId["filter"]}
             # On the first dataRef read in, create list of columns to load
@@ -761,6 +777,11 @@ class CoaddAnalysisTask(CmdLineTask):
                                              doApplyExternalSkyWcs, useMeasMosaic, iCat=iCat)
                 catList.append(cat)
                 commonZpCatList.append(commonZpCat)
+
+        # Remove any non-existent patches from dataRefList
+        for dataRef in dataRefToRemoveList:
+            dataRefList.remove(dataRef)
+
         if not catList:
             raise TaskError("No catalogs read: %s" % ([dataRef.dataId for dataRef in dataRefList]))
         allCats = pd.concat(catList, axis=0)
@@ -2098,6 +2119,7 @@ class CompareCoaddAnalysisTask(CoaddAnalysisTask):
 
         repoInfo1 = getRepoInfo(patchRefList1[0], coaddName=self.config.coaddName, coaddDataset=dataset1)
         repoInfo2 = getRepoInfo(patchRefList2[0], coaddName=self.config.coaddName, coaddDataset=dataset2)
+        hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
         # Find a visit/ccd input so that you can check for meas_mosaic input
         # (i.e. to set uberCalLabel).
         self.uberCalLabel1 = determineExternalCalLabel(repoInfo1, patchList1[0],
@@ -2128,7 +2150,6 @@ class CompareCoaddAnalysisTask(CoaddAnalysisTask):
                 unforced2 = self.calibrateCatalogs(unforced2, wcs=repoInfo2.wcs)
 
         if not self.config.doReadParquetTables1 or not self.config.doReadParquetTables2:
-            hscRun = repoInfo1.hscRun if repoInfo1.hscRun else repoInfo2.hscRun
             aliasDictList = [self.config.flagsToAlias, ]
             if hscRun and self.config.srcSchemaMap is not None:
                 aliasDictList += [self.config.srcSchemaMap]
