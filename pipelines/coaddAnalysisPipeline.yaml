@@ -1,0 +1,29 @@
+description: Make coadd analysis plots
+tasks:
+  addQAColumns:
+    class: lsst.pipe.analysis.addQAColumns.AddQAColumnsTask
+  plot_wPerp_psfMag:
+    class: lsst.pipe.analysis.scatterPlot.ScatterPlotWithTwoHistsTask
+    config:
+      xColName: iCModelMag
+      yColName: iDeconvMoments
+      xLabel: "CModel Mag i (mag)"
+      yLabel: "Deconvolved Moments [HSC-I]"
+      connections.plotName: deconvMoments_iCModelMag
+      objectsToPlot: "all"
+  plot_iSN_sky:
+    class: lsst.pipe.analysis.skyPlot.SkyPlotTask
+    config:
+      colorCodeValueColName: iSnPsFlux
+      connections.plotName: iSN_sky
+  plot_iDeconvMoms_gals_sky:
+    class: lsst.pipe.analysis.skyPlot.SkyPlotTask
+    config:
+      colorCodeValueColName: iDeconvMoments
+      connections.plotName: iDeconvMoms_gals_sky
+      objectsToPlot: "galaxies"
+  plot_iDeconvMoms_stars_sky:
+    class: lsst.pipe.analysis.skyPlot.SkyPlotTask
+    config:
+      colorCodeValueColName: iDeconvMoments
+      connections.plotName: iDeconvMoms_stars_sky
