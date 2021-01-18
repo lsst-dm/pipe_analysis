@@ -1915,7 +1915,7 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
     unitStr = "mmag" if unitScale == 1000 else "mag"
     axes[1].set_xlabel("Dist to poly fit or Pincp Color ({:s})".format(unitStr))
     axes[1].set_ylabel("Number")
-    axes[1].set_yscale("log", nonposy="clip")
+    axes[1].set_yscale("log", nonpositive="clip")
 
     # Label orthogonal polynomial fit parameters to 2 decimal places
     xLoc = xRange[0] + 0.045*deltaX
