@@ -947,9 +947,19 @@ def plotRhoStats(axes, rhoStats):
         colorStr = "C{}".format(rhoIndex)
         xi = rho.xip if rhoIndex > 0 else rho.xi
         isPositive = xi > 0
-        ax.errorbar(rho.meanr[isPositive], xi[isPositive], yerr=np.sqrt(rho.varxi)[isPositive],
+        #  KK/GGCorrelation objects have different entries for variance in x
+        if hasattr(rho, "varxi"):
+            yErrPositive = np.sqrt(rho.varxi)[isPositive]
+            yErrNotPositive = np.sqrt(rho.varxi)[~isPositive]
+        elif hasattr(rho, "varxip"):
+            yErrPositive = np.sqrt(rho.varxip)[isPositive]
+            yErrNotPositive = np.sqrt(rho.varxip)[~isPositive]
+        else:
+            yErrPositive = None
+            yErrNotPositive = None
+        ax.errorbar(rho.meanr[isPositive], xi[isPositive], yerr=yErrPositive,
                     color=colorStr, fmt="o", label=r"$\rho_{0}(\theta)$".format(rhoIndex))
-        ax.errorbar(rho.meanr[~isPositive], -xi[~isPositive], yerr=np.sqrt(rho.varxi)[~isPositive],
+        ax.errorbar(rho.meanr[~isPositive], -xi[~isPositive], yerr=yErrNotPositive,
                     color=colorStr, fillstyle="none", fmt="o", label=None)
 
     for ax in axes:

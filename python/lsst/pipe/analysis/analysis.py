@@ -438,8 +438,8 @@ class Analysis(object):
         yBins = np.arange((axScatterY1 - deltaMin) - 0.5*yBinwidth, axScatterY2 + 0.55*yBinwidth, yBinwidth)
         axHistx.set_xlim(axScatter.get_xlim())
         axHisty.set_ylim(axScatter.get_ylim())
-        axHistx.set_yscale("log", nonposy="clip")
-        axHisty.set_xscale("log", nonposx="clip")
+        axHistx.set_yscale("log", nonpositive="clip")
+        axHisty.set_xscale("log", nonpositive="clip")
         nTotal = 0
         fullSampleMag = []
         fullSampleQuantity = []
@@ -590,7 +590,7 @@ class Analysis(object):
         yLabel = r"%s %s" % (self.quantityName, filterLabelStr)
         fontSize = min(11, max(6, 11 - int(np.log(max(1, len(yLabel) - 45)))))
 
-        axScatter.set_xlabel("%s mag %s" % (fluxToPlotString(self.fluxColumn), filterLabelStr), fontSize=11)
+        axScatter.set_xlabel("%s mag %s" % (fluxToPlotString(self.fluxColumn), filterLabelStr), fontsize=11)
         axScatter.set_ylabel(yLabel, fontsize=fontSize)
 
         if stats is not None and "foot" not in description:
@@ -727,7 +727,7 @@ class Analysis(object):
             filterStr = ""
         axes.set_xlabel("{0:s} [{1:s}]".format(self.quantityName, filterStr), fontsize=9)
         axes.set_ylabel("Number", fontsize=9)
-        axes.set_yscale("log", nonposy="clip")
+        axes.set_yscale("log", nonpositive="clip")
         x0, y0 = 0.03, 0.97
         if self.qMin == 0.0:
             x0, y0 = 0.68, 0.81
@@ -1614,13 +1614,13 @@ class Analysis(object):
         yLim = max(0.0015, np.round(1.25*countMax, 3))
         yChiLim = np.round(1.25*countChiMax, 2)
 
-        axes[0].set_xlabel("%s %.0e [%s]" % ("flux *", fluxScale, filterStr), fontSize=8)
-        axes[0].set_ylabel("Normalized Counts", fontSize=8)
+        axes[0].set_xlabel("%s %.0e [%s]" % ("flux *", fluxScale, filterStr), fontsize=8)
+        axes[0].set_ylabel("Normalized Counts", fontsize=8)
         axes[0].set_xlim(-xLim, xLim)
         axes[0].set_ylim(bottom=0.0, top=yLim)
         axes[0].axvline(x=0.0, color="black", linestyle="--")
 
-        axes[1].set_xlabel("chi = %s [%s]" % ("flux/fluxErr", filterStr), fontSize=8)
+        axes[1].set_xlabel("chi = %s [%s]" % ("flux/fluxErr", filterStr), fontsize=8)
         axes[1].set_xlim(-xLimChi, xLimChi)
         axes[1].set_ylim(bottom=0.0, top=yChiLim)
         axes[1].axvline(x=0.0, color="black", linestyle="--")
