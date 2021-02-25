@@ -387,6 +387,10 @@ def getDataRefInfo(dataRef, camera, log=None):
     airmass = raw.getInfo().getVisitInfo().getBoresightAirmass()
     try:
         calexpWcs = dataRef.get("calexp_wcs")
+        calexpMd = dataRef.get("calexp_md")
+        boreRotAng = calexpMd.getScalar("BORE-ROTANG")
+        # print(boreRotAng)
+        # input()
     except NoResults:
         if log is not None:
             log.info("No calexp wcs found for tract: {} visit: {} filter: {} ccd: {}".
