@@ -1811,7 +1811,8 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, catDataset="src", do
           (`lsst.daf.persistence.DataId`).
         - ``filterName`` : the name of the filter associated with ``dataRef``
           (`str`).
-        - ``genericFilterName`` : a generic form for ``filterName`` (`str`).
+        - ``genericBandName`` : the generic band name for ``filterName``
+          (`str`).
         - ``ccdKey`` : the ccd key associated with ``dataId`` (`str` or
           `None`).
         - ``metadata`` : the metadata associated with ``butler`` and ``dataId``
@@ -1845,7 +1846,15 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, catDataset="src", do
         else:
             filterName = butler.get("calexp_filter", dataId)
         dataId["filter"] = filterName
-    genericFilterName = afwImage.Filter(afwImage.Filter(filterName).getId()).getName()
+    if isCoadd:
+        bbox = butler.get(coaddName + "Coadd_bbox", dataId)
+        subBbox = geom.BoxI(geom.PointI(bbox.beginX, bbox.beginY), geom.ExtentI(1, 1))
+        expInfo = butler.get(coaddName + "Coadd_calexp_sub", dataId=dataId, bbox=subBbox).getInfo()
+    else:
+        bbox = butler.get("calexp_bbox", dataId)
+        subBbox = geom.BoxI(geom.PointI(bbox.beginX, bbox.beginY), geom.ExtentI(1, 1))
+        expInfo = butler.get("calexp_sub", dataId=dataId, bbox=subBbox).getInfo()
+    genericBandName = expInfo.getFilterLabel().bandLabel
     ccdKey = None if isCoadd else findCcdKey(dataId)
     try:  # Check metadata to see if stack used was HSC
         metaStr = coaddName + coaddDataset + "_md" if coaddName else "calexp_md"
@@ -1877,7 +1886,7 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, catDataset="src", do
         camera=camera,
         dataId=dataId,
         filterName=filterName,
-        genericFilterName=genericFilterName,
+        genericBandName=genericBandName,
         ccdKey=ccdKey,
         metadata=metadata,
         hscRun=hscRun,

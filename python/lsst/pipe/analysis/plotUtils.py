@@ -987,8 +987,8 @@ def getPlotInfo(repoInfo):
                 (`lsst.daf.persistence.DataId`).
             ``filterName``
                 The name of the filter associated with the data (`str`).
-            ``genericFilterName``
-                A generic form of the ``filterName`` (`str`).
+            ``genericBandName``
+                The generic band name associated with ``filterName`` (`str`).
             ``metadata``
                 The metadata associated with the data
                 (`lsst.daf.base.propertyContainer.PropertyList`).
