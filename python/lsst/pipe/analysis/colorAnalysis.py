@@ -20,12 +20,10 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import matplotlib
-matplotlib.use("Agg")  # noqa #402
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FormatStrFormatter
 import numpy as np
 import pandas as pd
-np.seterr(all="ignore")  # noqa #402
 import functools
 import os
 import scipy.stats as scipyStats
@@ -50,6 +48,9 @@ from .plotUtils import (AllLabeller, plotText, labelCamera, setPtSize, determine
 import lsst.geom as geom
 import lsst.afw.table as afwTable
 import lsst.verify as verify
+
+matplotlib.use("Agg")
+np.seterr(all="ignore")
 
 __all__ = ["ColorTransform", "ivezicTransformsSDSS", "ivezicTransformsHSC", "straightTransforms",
            "NumStarLabeller", "ColorValueInFitRange", "ColorValueInPerpRange", "GalaxyColor",

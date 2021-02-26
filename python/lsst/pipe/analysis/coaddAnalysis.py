@@ -23,7 +23,6 @@ import os
 import astropy.units as u
 import numpy as np
 import pandas as pd
-np.seterr(all="ignore")  # noqa E402
 import functools
 
 from collections import defaultdict
@@ -57,6 +56,8 @@ import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 import lsst.geom as geom
 import lsst.verify as verify
+
+np.seterr(all="ignore")
 
 __all__ = ["CoaddAnalysisConfig", "CoaddAnalysisRunner", "CoaddAnalysisTask", "CompareCoaddAnalysisConfig",
            "CompareCoaddAnalysisRunner", "CompareCoaddAnalysisTask"]
@@ -880,7 +881,7 @@ class CoaddAnalysisTask(CmdLineTask):
             # _forced_src catalog.
             refCat = self.readCatalogs(dataRefList, self.config.coaddName + "Coadd_ref", repoInfo).catalog
             if len(forced) != len(refCat):
-                raise RuntimeError(("Lengths of forced (N = {0:d}) and ref (N = {0:d}) cats "
+                raise RuntimeError(("Lengths of forced (N = {:d}) and ref (N = {:d}) cats "
                                     "don't match").format(len(forced), len(refCat)))
             refCatSchema = getSchema(refCat)
             refColList = []
