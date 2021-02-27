@@ -23,7 +23,6 @@ import os
 import astropy.units as u
 import numpy as np
 import pandas as pd
-np.seterr(all="ignore")  # noqa E402
 import functools
 
 from collections import defaultdict
@@ -57,6 +56,8 @@ import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 import lsst.geom as geom
 import lsst.verify as verify
+
+np.seterr(all="ignore")
 
 __all__ = ["CoaddAnalysisConfig", "CoaddAnalysisRunner", "CoaddAnalysisTask", "CompareCoaddAnalysisConfig",
            "CompareCoaddAnalysisRunner", "CompareCoaddAnalysisTask"]
@@ -528,7 +529,7 @@ class CoaddAnalysisTask(CmdLineTask):
                                               postFix="_unforced", **plotKwargs))
                 if haveForced:
                     plotKwargs.update(dict(highlightList=highlightList
-                                           + [("merge_measurement_" + repoInfo.genericFilterName, 0,
+                                           + [("merge_measurement_" + repoInfo.genericBandName, 0,
                                                "yellow")]))
 
                     plotList.append(self.plotMags(forced, plotInfoDict, areaDict, forcedStr=forcedStr,
@@ -713,19 +714,27 @@ class CoaddAnalysisTask(CmdLineTask):
                 raise RuntimeError("Must specify a dfDataset for multilevel parquet tables")
             if isinstance(parquetCat, MultilevelParquetTable):
                 # Some obj tables do not contain data for all filters
-                existsFilterList = parquetCat.columnLevelNames["filter"]
-                if dataRef.dataId["filter"] not in existsFilterList:
+                try:
+                    existsBandList = parquetCat.columnLevelNames["band"]
+                    filterLevelStr = "band"
+                    bandName = repoInfo.genericBandName
+                except KeyError:
+                    existsBandList = parquetCat.columnLevelNames["filter"]
+                    filterLevelStr = "filter"
+                    bandName = dataRef.dataId["filter"]
+                if bandName not in existsBandList:
                     self.log.info("Filter {} does not exist for: {}, {}.  Skipping patch...".
                                   format(dataRef.dataId["filter"], dataRef.dataId, dataset))
                     dataRefToRemoveList.append(dataRef)
                     continue
+            else:
+                bandName = dataRef.dataId["filter"]
             if dfLoadColumns is None and isinstance(parquetCat, MultilevelParquetTable):
-                dfLoadColumns = {"dataset": dfDataset, "filter": dataRef.dataId["filter"]}
+                dfLoadColumns = {"dataset": dfDataset, filterLevelStr: bandName}
             # On the first dataRef read in, create list of columns to load
             # based on config lists and their existence in the catalog table.
             if colsToLoadList is None:
-                catColumns = getParquetColumnsList(parquetCat, dfDataset=dfDataset,
-                                                   filterName=dataRef.dataId["filter"])
+                catColumns = getParquetColumnsList(parquetCat, dfDataset=dfDataset, filterName=bandName)
                 colsToLoadList = [col for col in catColumns if
                                   (col.startswith(tuple(self.config.baseColStrList))
                                    and not any(s in col for s in self.config.notInColStrList))]
@@ -737,21 +746,19 @@ class CoaddAnalysisTask(CmdLineTask):
             cat = addElementIdColumn(cat, dataRef.dataId, repoInfo=repoInfo)
             if dfDataset == "forced_src":  # insert some columns from the ref and meas cats for forced cats
                 if refColsToLoadList is None:
-                    refColumns = getParquetColumnsList(parquetCat, dfDataset="ref",
-                                                       filterName=dataRef.dataId["filter"])
+                    refColumns = getParquetColumnsList(parquetCat, dfDataset="ref", filterName=bandName)
                     refColsToLoadList = [col for col in refColumns if
                                          (col.startswith(tuple(self.config.columnsToCopyFromRef))
                                           and not any(s in col for s in self.config.notInColStrList))]
-                ref = parquetCat.toDataFrame(columns={"dataset": "ref", "filter": dataRef.dataId["filter"],
+                ref = parquetCat.toDataFrame(columns={"dataset": "ref", filterLevelStr: bandName,
                                                       "column": refColsToLoadList})
                 cat = pd.concat([cat, ref], axis=1)
                 if measColsToLoadList is None:
-                    measColumns = getParquetColumnsList(parquetCat, dfDataset="meas",
-                                                        filterName=dataRef.dataId["filter"])
+                    measColumns = getParquetColumnsList(parquetCat, dfDataset="meas", filterName=bandName)
                     measColsToLoadList = [col for col in measColumns if
                                           (col.startswith(tuple(self.config.columnsToCopyFromMeas))
                                            and not any(s in col for s in self.config.notInColStrList))]
-                meas = parquetCat.toDataFrame(columns={"dataset": "meas", "filter": dataRef.dataId["filter"],
+                meas = parquetCat.toDataFrame(columns={"dataset": "meas", filterLevelStr: bandName,
                                                        "column": measColsToLoadList})
                 cat = pd.concat([cat, meas], axis=1)
 
@@ -874,7 +881,7 @@ class CoaddAnalysisTask(CmdLineTask):
             # _forced_src catalog.
             refCat = self.readCatalogs(dataRefList, self.config.coaddName + "Coadd_ref", repoInfo).catalog
             if len(forced) != len(refCat):
-                raise RuntimeError(("Lengths of forced (N = {0:d}) and ref (N = {0:d}) cats "
+                raise RuntimeError(("Lengths of forced (N = {:d}) and ref (N = {:d}) cats "
                                     "don't match").format(len(forced), len(refCat)))
             refCatSchema = getSchema(refCat)
             refColList = []

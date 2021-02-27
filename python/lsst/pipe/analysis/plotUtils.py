@@ -523,7 +523,7 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
     yMax = min(max(tractDec), patchBoundary.decMax) + buff
     xlim = xMin, xMax
     ylim = yMin, yMax
-    axes.fill(tractRa, tractDec, fill=False, edgecolor="k", lw=0.5, linestyle="solid", color="k", alpha=0.3)
+    axes.fill(tractRa, tractDec, fill=False, color="k", edgecolor="k", lw=0.5, linestyle="solid", alpha=0.3)
     prop_cycle = plt.rcParams["axes.prop_cycle"]
     colors = prop_cycle.by_key()["color"]
     colors.pop(colors.index("#7f7f7f"))  # get rid of the gray one as that's our no-data colour
@@ -987,8 +987,8 @@ def getPlotInfo(repoInfo):
                 (`lsst.daf.persistence.DataId`).
             ``filterName``
                 The name of the filter associated with the data (`str`).
-            ``genericFilterName``
-                A generic form of the ``filterName`` (`str`).
+            ``genericBandName``
+                The generic band name associated with ``filterName`` (`str`).
             ``metadata``
                 The metadata associated with the data
                 (`lsst.daf.base.propertyContainer.PropertyList`).

@@ -20,12 +20,10 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import matplotlib
-matplotlib.use("Agg")  # noqa E402
 import matplotlib.pyplot as plt
 from matplotlib.ticker import NullFormatter, AutoMinorLocator, FormatStrFormatter
 import numpy as np
 import pandas as pd
-np.seterr(all="ignore")  # noqa E402
 import re
 import astropy.units as u
 
@@ -40,6 +38,9 @@ from .utils import (Data, Stats, E1Resids, E2Resids, fluxToPlotString, computeMe
 from .plotUtils import (annotateAxes, AllLabeller, setPtSize, labelVisit, plotText, plotCameraOutline,
                         plotTractOutline, plotPatchOutline, plotCcdOutline, labelCamera, getQuiver,
                         plotRhoStats, getRaDecMinMaxPatchList, bboxToXyCoordLists, makeAlphaCmap)
+
+matplotlib.use("Agg")
+np.seterr(all="ignore")
 
 __all__ = ["AnalysisConfig", "Analysis"]
 

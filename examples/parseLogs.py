@@ -203,7 +203,7 @@ def printStatsSum(analysisStr, lsstLogFile, hscLogFile, tracts, band, outLogFile
             for lsstVisitEntry, hscVisitEntry in zip(lsstVisitEntryList, hscVisitEntryList):
                 if lsstVisitEntry.quantityName != hscVisitEntry.quantityName:
                     raise RuntimeError("Quantity names for visit {0:d} do not match! {1:s} vs {2:s}".
-                                       format(lsstVisitEntry.visit, lsstVisitEntry.quantityName, band,
+                                       format(lsstVisitEntry.visit, lsstVisitEntry.quantityName,
                                               hscVisitEntry.quantityName))
                 # outFile.write("# {:s}".format(lsstVisitEntry.field)
                 formatStr = ("{0:6d} {1:7d} {2:>7s} {3:>7.3F} [{4:7.3F}] {5:>7.3F} [{6:7.3F}] "

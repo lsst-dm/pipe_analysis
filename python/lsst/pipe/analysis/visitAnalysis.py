@@ -21,11 +21,9 @@
 
 import os
 import matplotlib
-matplotlib.use("Agg")  # noqa 402
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-np.seterr(all="ignore")  # noqa 402
 
 from collections import defaultdict
 
@@ -46,6 +44,9 @@ from .fakesAnalysis import (addDegreePositions, matchCatalogs, addNearestNeighbo
                             calcFakesAreaDepth, plotFakesAreaDepth, fakesMagnitudeCompare,
                             fakesMagnitudeNearestNeighbor, fakesMagnitudeBlendedness, fakesCompletenessPlot,
                             fakesMagnitudePositionError)
+
+matplotlib.use("Agg")
+np.seterr(all="ignore")
 
 
 class CcdAnalysis(Analysis):

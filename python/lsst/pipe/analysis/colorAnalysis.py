@@ -20,12 +20,10 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import matplotlib
-matplotlib.use("Agg")  # noqa #402
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FormatStrFormatter
 import numpy as np
 import pandas as pd
-np.seterr(all="ignore")  # noqa #402
 import functools
 import os
 import scipy.stats as scipyStats
@@ -50,6 +48,9 @@ from .plotUtils import (AllLabeller, plotText, labelCamera, setPtSize, determine
 import lsst.geom as geom
 import lsst.afw.table as afwTable
 import lsst.verify as verify
+
+matplotlib.use("Agg")
+np.seterr(all="ignore")
 
 __all__ = ["ColorTransform", "ivezicTransformsSDSS", "ivezicTransformsHSC", "straightTransforms",
            "NumStarLabeller", "ColorValueInFitRange", "ColorValueInPerpRange", "GalaxyColor",
@@ -283,7 +284,8 @@ class ColorAnalysisConfig(Config):
                  "SdssShape_flag_u", "SdssShape_flag_m", "_Cov", "_child_", "_parent_", "_rejected"],
         doc=("List of substrings to select against when creating list of columns to load from the "
              "deepCoadd_obj parquet table."))
-
+    physicalToBandFilterMap = DictField(keytype=str, itemtype=str, optional=True, default={},
+                                        doc="Mapping from physicalFilter label to generic band name.")
     extinctionCoeffs = DictField(keytype=str, itemtype=float, default=None, optional=True,
                                  doc="Dictionary of extinction coefficients for conversion from E(B-V) "
                                      "to extinction, A_filter")
@@ -433,6 +435,8 @@ class ColorAnalysisTask(CmdLineTask):
         patchList = []
         repoInfo = None
         self.fullFilterList = list(patchRefsByFilter.keys())
+        self.fullBandList = [self.config.physicalToBandFilterMap[physicalFilter]
+                             for physicalFilter in self.fullFilterList]
         dataset = "Coadd_obj" if self.config.doReadParquetTables else "Coadd_forced_src"
         if (not set(self.config.minimalFluxList).intersection(set(self.fullFilterList))
                 == set(self.config.minimalFluxList)
@@ -485,8 +489,8 @@ class ColorAnalysisTask(CmdLineTask):
         for (filterName, patchRefList) in patchRefsByFilter.items():
             if self.config.doReadParquetTables:
                 dfDataset = "forced_src"
-                cat = self.readParquetTables(patchRefList, self.config.coaddName + dataset, repoInfo,
-                                             dfDataset=dfDataset)
+                cat = self.readParquetTables(patchRefList, self.config.coaddName + dataset, filterName,
+                                             repoInfo, dfDataset=dfDataset)
                 fullCoveragePatchList = list(set(cat["patchId"].values))
                 if len(fullCoveragePatchRefList) == 0:
                     for patchRef in patchRefList:
@@ -583,7 +587,7 @@ class ColorAnalysisTask(CmdLineTask):
                                                 dataId=repoInfo.dataId)[0]
         self.verifyJob.write(verifyJobFilename)
 
-    def readParquetTables(self, dataRefList, dataset, repoInfo, dfDataset=None):
+    def readParquetTables(self, dataRefList, dataset, filterName, repoInfo, dfDataset=None):
         """Read in, calibrate, and concatenate parquet tables from a list of
         dataRefs.
 
@@ -645,22 +649,29 @@ class ColorAnalysisTask(CmdLineTask):
                 if not any(dfDataset == dfName for dfName in ["forced_src", "meas", "ref"]):
                     raise RuntimeError("Must specify a dfDataset for multilevel parquet tables")
                 else:
-                    existsFilterList = parquetCat.columnLevelNames["filter"]
-                    if not (np.all([filt in existsFilterList for filt in self.fullFilterList])):
+                    try:
+                        existsBandList = parquetCat.columnLevelNames["band"]
+                        filterLevelStr = "band"
+                        bandName = self.config.physicalToBandFilterMap[filterName]
+                    except KeyError:
+                        existsBandList = parquetCat.columnLevelNames["filter"]
+                        filterLevelStr = "filter"
+                        bandName = filterName
+                        self.fullBandList = self.fullFilterList
+                    if not (np.all([band in existsBandList for band in self.fullBandList])):
                         if dataRef.dataId["patch"] not in self.skipPatchList:
                             self.skipPatchList.append(dataRef.dataId["patch"])
-                            self.log.info("Full filter list requested {0:}\nnot in patch: {1:} "
+                            self.log.info("Full band list requested {0:}\nnot in patch: {1:} "
                                           "(it only has {2}).  Skipping... ".format(
-                                              self.fullFilterList, dataRef.dataId["patch"], existsFilterList))
+                                              self.fullBandList, dataRef.dataId["patch"], existsBandList))
                         continue
             if dfLoadColumns is None and isinstance(parquetCat, parquetTable.MultilevelParquetTable):
-                dfLoadColumns = {"dataset": dfDataset, "filter": dataRef.dataId["filter"]}
+                dfLoadColumns = {"dataset": dfDataset, filterLevelStr: bandName}
             # On the first dataRef read in, create list of columns to load
             # based on config lists and their existence in the catalog
             # table.
             if colsToLoadList is None:
-                catColumns = getParquetColumnsList(parquetCat, dfDataset=dfDataset,
-                                                   filterName=dataRef.dataId["filter"])
+                catColumns = getParquetColumnsList(parquetCat, dfDataset=dfDataset, filterName=bandName)
                 colsToLoadList = [col for col in catColumns if
                                   (col.startswith(tuple(self.config.baseColStrList))
                                    and not any(s in col for s in self.config.notInColStrList))]
@@ -672,21 +683,19 @@ class ColorAnalysisTask(CmdLineTask):
             cat = addElementIdColumn(cat, dataRef.dataId, repoInfo=repoInfo)
             if dfDataset == "forced_src":  # insert some columns from the ref and meas cats for forced cats
                 if refColsToLoadList is None:
-                    refColumns = getParquetColumnsList(parquetCat, dfDataset="ref",
-                                                       filterName=dataRef.dataId["filter"])
+                    refColumns = getParquetColumnsList(parquetCat, dfDataset="ref", filterName=bandName)
                     refColsToLoadList = [col for col in refColumns if
                                          (col.startswith(tuple(self.config.columnsToCopyFromRef))
                                           and not any(s in col for s in self.config.notInColStrList))]
-                ref = parquetCat.toDataFrame(columns={"dataset": "ref", "filter": dataRef.dataId["filter"],
+                ref = parquetCat.toDataFrame(columns={"dataset": "ref", filterLevelStr: bandName,
                                                       "column": refColsToLoadList})
                 cat = pd.concat([cat, ref], axis=1)
                 if measColsToLoadList is None:
-                    measColumns = getParquetColumnsList(parquetCat, dfDataset="meas",
-                                                        filterName=dataRef.dataId["filter"])
+                    measColumns = getParquetColumnsList(parquetCat, dfDataset="meas", filterName=bandName)
                     measColsToLoadList = [col for col in measColumns if
                                           (col.startswith(tuple(self.config.columnsToCopyFromMeas))
                                            and not any(s in col for s in self.config.notInColStrList))]
-                meas = parquetCat.toDataFrame(columns={"dataset": "meas", "filter": dataRef.dataId["filter"],
+                meas = parquetCat.toDataFrame(columns={"dataset": "meas", filterLevelStr: bandName,
                                                        "column": measColsToLoadList})
                 cat = pd.concat([cat, meas], axis=1)
             cat = calibrateSourceCatalog(cat, self.config.analysis.coaddZp)
