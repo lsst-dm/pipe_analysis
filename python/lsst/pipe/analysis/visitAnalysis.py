@@ -233,7 +233,8 @@ class VisitAnalysisConfig(CoaddAnalysisConfig):
     def setDefaults(self):
         CoaddAnalysisConfig.setDefaults(self)
         self.analysis.fluxColumn = "base_PsfFlux_instFlux"
-        self.analysisMatches.fluxColumn = "base_PsfFlux_instFlux"
+        self.analysisAstromMatches.fluxColumn = "base_PsfFlux_instFlux"
+        self.analysisPhotomMatches.fluxColumn = "base_PsfFlux_instFlux"
 
     def validate(self):
         CoaddAnalysisConfig.validate(self)
@@ -543,36 +544,64 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     plotList.append(self.plotCentroidXY(catalog, plotInfoDict, areaDict, **plotKwargs))
 
             if self.config.doPlotMatches or self.config.doWriteParquetTables:
+                # Read in and unpack just the persisted srcMatch from SFM
+                # (which still uses ps1 for astrometric calibration).
+                sfmUnpackedMatches, _ = self.readSrcMatches(
+                    repoInfo, dataRefListTract, dataset="src", refObjLoader=self.config.photomRefObjLoader,
+                    aliasDictList=aliasDictList, readPackedMatchesOnly=True,
+                    doApplyExternalPhotoCalib=False, doApplyExternalSkyWcs=False)
+                self.zpLabelPacked = self.zpLabel  # not doing external calibration for this sample
+                self.zpLabel = None
+                if sfmUnpackedMatches is not None:
+                    self.unpackedMatchLabel = ("unpackedMatches: \n"
+                                               + self.config.photomRefObjLoader.ref_dataset_name)
+                else:
+                    self.unpackedMatchLabel = ("matches also used in SFM astrom: \n"
+                                               + self.config.astromRefObjLoader.ref_dataset_name)
+
                 matchAreaDict = {}
                 externalCalKwargs = dict(doApplyExternalPhotoCalib=self.config.doApplyExternalPhotoCalib,
                                          doApplyExternalSkyWcs=self.config.doApplyExternalSkyWcs,
                                          useMeasMosaic=self.config.useMeasMosaic)
-                matches, matchAreaDict = self.readSrcMatches(repoInfo, dataRefListTract, dataset="src",
-                                                             aliasDictList=aliasDictList, **externalCalKwargs)
+                astromMatches, astromMatchAreaDict = self.readSrcMatches(
+                    repoInfo, dataRefListTract, dataset="src", refObjLoader=self.config.astromRefObjLoader,
+                    aliasDictList=aliasDictList, **externalCalKwargs)
+                photomMatches, photomMatchAreaDict = self.readSrcMatches(
+                    repoInfo, dataRefListTract, dataset="src", refObjLoader=self.config.photomRefObjLoader,
+                    aliasDictList=aliasDictList, **externalCalKwargs)
                 if self.config.doWriteParquetTables:
-                    matchesDataRef = repoInfo.butler.dataRef("analysisMatchFullRefVisitTable",
-                                                             dataId=repoInfo.dataId)
-                    writeParquet(matchesDataRef, matches, badArray=None, prefix="src_")
+                    for calibType, calibMatches in [("Astrom", astromMatches), ("Photom", photomMatches)]:
+                        matchesDataRef = repoInfo.butler.dataRef(
+                            "analysis" + calibType + "MatchFullRefVisitTable", dataId=repoInfo.dataId)
+                        writeParquet(matchesDataRef, calibMatches, badArray=None, prefix="src_")
                 if self.config.writeParquetOnly:
                     self.log.info("Exiting after writing Parquet tables.  No plots generated.")
                     return
 
                 if self.config.doPlotMatches:
-                    matchLabel = "matched to\n" + self.config.refObjLoader.ref_dataset_name
-                    matchLabel = (matchLabel + "\n     (noApCorr)" if self.config.doBackoutApCorr
-                                  else matchLabel)
-                    plotKwargs = dict(zpLabel=self.zpLabel, forcedStr=matchLabel)
+                    plotKwargs = dict(zpLabel=self.zpLabel)
                     # Dict of all parameters common to plot* functions
                     matchHighlightList = [
                         ("src_" + self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0,
-                         "turquoise"), ("src_deblend_nChild", 0, "lime"), ("src_parent", 0, "orange")]
+                         "turquoise"), ("src_deblend_nChild", 0, "lime")]
                     for ih, flagName in enumerate(list(self.config.analysis.flags)):
                         flagName = "src_" + flagName
                         if not any(flagName in highlight for highlight in matchHighlightList):
                             matchHighlightList += [(flagName, 0, FLAGCOLORS[ih%len(FLAGCOLORS)]), ]
                     plotKwargs.update(dict(highlightList=matchHighlightList, matchRadius=self.matchRadius,
                                            matchRadiusUnitStr=self.matchRadiusUnitStr))
-                    plotList.append(self.plotMatches(matches, plotInfoDict, matchAreaDict, **plotKwargs))
+                    matchLabel = "matched to\n" + self.config.astromRefObjLoader.ref_dataset_name
+                    matchLabel = (matchLabel + "\n     (noApCorr)" if self.config.doBackoutApCorr
+                                  else matchLabel)
+                    plotList.append(self.plotAstromMatches(
+                        astromMatches, plotInfoDict, astromMatchAreaDict, self.config.astromRefObjLoader,
+                        unpackedMatches=sfmUnpackedMatches, forcedStr=matchLabel, **plotKwargs))
+                    matchLabel = "matched to\n" + self.config.photomRefObjLoader.ref_dataset_name
+                    matchLabel = (matchLabel + "\n     (noApCorr)" if self.config.doBackoutApCorr
+                                  else matchLabel)
+                    plotList.append(self.plotPhotomMatches(photomMatches, plotInfoDict, photomMatchAreaDict,
+                                                           self.config.photomRefObjLoader,
+                                                           forcedStr=matchLabel, **plotKwargs))
 
                 for cat in self.config.externalCatalogs:
                     if self.config.photoCatName not in cat:

@@ -27,6 +27,7 @@ import functools
 
 from collections import defaultdict
 
+from lsst.daf.base import DateTime
 from lsst.daf.persistence.butler import Butler
 from lsst.pex.config import (Config, Field, ConfigField, ListField, DictField, ConfigDictField,
                              ConfigurableField)
@@ -47,11 +48,12 @@ from .utils import (Enforcer, MagDiff, MagDiffMatches, MagDiffCompare, Astrometr
                     addFootprintArea, makeBadArray, addElementIdColumn, addIntFloatOrStrColumn,
                     calibrateSourceCatalog, backoutApCorr, matchNanojanskyToAB, fluxToPlotString,
                     andCatalog, writeParquet, getRepoInfo, addAliasColumns, addPreComputedColumns,
-                    computeMeanOfFrac, savePlots, updateVerifyJob, getSchema, loadReferencesAndMatchToCatalog,
-                    computeAreaDict, getParquetColumnsList)
+                    computeMeanOfFrac, savePlots, updateVerifyJob, getSchema, loadDenormalizeAndUnpackMatches,
+                    loadReferencesAndMatchToCatalog, computeAreaDict, getParquetColumnsList)
 from .plotUtils import (CosmosLabeller, AllLabeller, StarGalaxyLabeller, OverlapsStarGalaxyLabeller,
                         MatchesStarGalaxyLabeller, determineExternalCalLabel, getPlotInfo)
 
+import lsst.afw.cameraGeom as cameraGeom
 import lsst.afw.image as afwImage
 import lsst.afw.table as afwTable
 import lsst.geom as geom
@@ -82,11 +84,29 @@ class CoaddAnalysisConfig(Config):
                                   "to the reference catalog."))
     doApplyColorTerms = Field(dtype=bool, default=True, doc="Apply colorterms to reference magnitudes?")
     analysis = ConfigField(dtype=AnalysisConfig, doc="Analysis plotting options")
-    analysisMatches = ConfigField(dtype=AnalysisConfig, doc="Analysis plotting options for matches")
+    analysisAstromMatches = ConfigField(dtype=AnalysisConfig,
+                                        doc="Analysis plotting options for astrometric reference matches")
+    analysisPhotomMatches = ConfigField(dtype=AnalysisConfig,
+                                        doc="Analysis plotting options for photometric reference matches")
     matchesMaxDistance = Field(dtype=float, default=0.15, doc="Maximum plotting distance for matches")
+    minSrcSignalToNoiseForMatches = Field(dtype=float, default=30, doc="Minimum signal to noise level of "
+                                          "pipeline catalog sources to be considered when matching to an "
+                                          "external reference catalog.  Eliminating very low S/N sources "
+                                          "before matching is beneficial for speed and avoiding erroneous "
+                                          "matches.")
     externalCatalogs = ConfigDictField(keytype=str, itemtype=AstrometryConfig, default={},
                                        doc="Additional external catalogs for matching")
-    refObjLoader = ConfigurableField(target=LoadIndexedReferenceObjectsTask, doc="Reference object loader")
+    astromRefCat = Field(dtype=str, default="gaia", doc="Name of reference catalog for astrometry. "
+                         "Can be either gaia or ps1, in which case the default version will be used, "
+                         "or the full name including the version can be specified "
+                         "(e.g. gaia_dr2_20200414 or ps1_pv3_3pi_20170110)")
+    photomRefCat = Field(dtype=str, default="ps1", doc="Name of reference catalog for photometry. "
+                         "Can be ps1, in which case the default version will be used, or the full "
+                         "name including the version can be specified (e.g. ps1_pv3_3pi_20170110)")
+    astromRefObjLoader = ConfigurableField(target=LoadIndexedReferenceObjectsTask,
+                                           doc="Reference object loader for astrometry")
+    photomRefObjLoader = ConfigurableField(target=LoadIndexedReferenceObjectsTask,
+                                           doc="Reference object loader for photometry")
     doPlotMags = Field(dtype=bool, default=True, doc="Plot magnitudes? (ignored if plotMatchesOnly is True)")
     doPlotSizes = Field(dtype=bool, default=True, doc="Plot PSF sizes? (ignored if plotMatchesOnly is True)")
     doPlotCentroids = Field(dtype=bool, default=True, doc=("Plot centroids? "
@@ -197,9 +217,6 @@ class CoaddAnalysisConfig(Config):
 
     def setDefaults(self):
         Config.setDefaults(self)
-        # self.externalCatalogs = {"sdss-dr9-fink-v5b": astrom}
-        self.analysisMatches.magThreshold = 21.0  # External catalogs like PS1 & SDSS used smaller telescopes
-        self.refObjLoader.ref_dataset_name = "ps1_pv3_3pi_20170110"
 
     def validate(self):
         Config.validate(self)
@@ -224,6 +241,33 @@ class CoaddAnalysisConfig(Config):
             self.doPlotStarGalaxy = False
             self.doPlotSizes = False
             self.doPlotCentroids = False
+
+        # Set the astrometry reference catalog parameters based on configs
+        if "gaia" in self.astromRefCat:
+            if len(self.astromRefCat) == len("gaia"):
+                self.astromRefObjLoader.ref_dataset_name = "gaia_dr2_20200414"
+            else:
+                self.refAstromObjLoader.ref_dataset_name = self.astromRefCat
+            self.astromRefObjLoader.anyFilterMapsToThis = "phot_g_mean"
+            self.astromRefObjLoader.requireProperMotion = True
+        elif "ps1" in self.astromRefCat:
+            if len(self.astromRefCat) == len("ps1"):
+                self.astromRefObjLoader.ref_dataset_name = "ps1_pv3_3pi_20170110"
+            else:
+                self.astromRefObjLoader.ref_dataset_name = self.astromRefCat
+        else:
+            raise RuntimeError("Unknown astrometry reference catatlog name.  Can be either gaia "
+                               "(or gaia_version_date) or ps1 (or ps1_version_date), but got {}".
+                               format(self.astromRefCat))
+        # Set the photometry reference catalog parameters based on configs
+        if "ps1" in self.photomRefCat:
+            if len(self.photomRefCat) == len("ps1"):
+                self.photomRefObjLoader.ref_dataset_name = "ps1_pv3_3pi_20170110"
+            else:
+                self.photomRefObjLoader.ref_dataset_name = self.photomRefCat
+        else:
+            raise RuntimeError("Unknown photometry reference catatlog name.  Must be ps1 or "
+                               "ps1_version_date, but got {}".format(self.photomRefCat))
 
 
 class CoaddAnalysisRunner(TaskRunner):
@@ -565,46 +609,62 @@ class CoaddAnalysisTask(CmdLineTask):
         if self.config.doPlotMatches or self.config.doWriteParquetTables:
             matchAreaDict = {}
             # First write out unforced match parquet tables
-            matches, matchAreaDict = self.readSrcMatches(repoInfo, patchRefExistsList,
-                                                         self.config.coaddName + "Coadd_meas",
-                                                         aliasDictList=aliasDictList, haveForced=False)
+            astromMatches, matchAreaDict = self.readSrcMatches(
+                repoInfo, patchRefExistsList, self.config.coaddName + "Coadd_meas",
+                self.config.astromRefObjLoader, aliasDictList=aliasDictList, haveForced=False)
+            unpackedMatches = None
+            self.zpLabelPacked = self.zpLabel
+            photomMatches, matchAreaDict = self.readSrcMatches(
+                repoInfo, patchRefExistsList, self.config.coaddName + "Coadd_meas",
+                self.config.photomRefObjLoader, aliasDictList=aliasDictList, haveForced=False)
             qaTableSuffix = "_unforced"
             if self.config.doWriteParquetTables:
-                matchesDataRef = repoInfo.butler.dataRef("analysisMatchFullRefCoaddTable" + qaTableSuffix,
-                                                         dataId=repoInfo.dataId)
-                writeParquet(matchesDataRef, matches, badArray=None, prefix="src_")
+                for calibType, calibMatches in [("Astrom", astromMatches), ("Photom", photomMatches)]:
+                    matchesDataRef = repoInfo.butler.dataRef(
+                        "analysis" + calibType + "MatchFullRefCoaddTable" + qaTableSuffix,
+                        dataId=repoInfo.dataId)
+                    writeParquet(matchesDataRef, calibMatches, badArray=None, prefix="src_")
             # Now write out forced match parquet tables, if present
             if haveForced:
-                matches, matchAreaDict = self.readSrcMatches(repoInfo, patchRefExistsList,
-                                                             self.config.coaddName + "Coadd_forced_src",
-                                                             aliasDictList=aliasDictList,
-                                                             haveForced=haveForced)
+                astromMatches, astromMatchAreaDict = self.readSrcMatches(
+                    repoInfo, patchRefExistsList, self.config.coaddName + "Coadd_forced_src",
+                    self.config.astromRefObjLoader, aliasDictList=aliasDictList, haveForced=haveForced)
+                photomMatches, photomMatchAreaDict = self.readSrcMatches(
+                    repoInfo, patchRefExistsList, self.config.coaddName + "Coadd_forced_src",
+                    self.config.photomRefObjLoader, aliasDictList=aliasDictList, haveForced=haveForced)
                 qaTableSuffix = "_forced"
                 if self.config.doWriteParquetTables:
-                    matchesDataRef = repoInfo.butler.dataRef("analysisMatchFullRefCoaddTable" + qaTableSuffix,
-                                                             dataId=repoInfo.dataId)
-                    writeParquet(matchesDataRef, matches, badArray=None, prefix="src_")
+                    for calibType, calibMatches in [("Astrom", astromMatches), ("Photom", photomMatches)]:
+                        matchesDataRef = repoInfo.butler.dataRef(
+                            "analysis" + calibType + "MatchFullRefCoaddTable" + qaTableSuffix,
+                            dataId=repoInfo.dataId)
+                        writeParquet(matchesDataRef, calibMatches, badArray=None, prefix="src_")
 
             if self.config.writeParquetOnly:
                 self.log.info("Exiting after writing Parquet tables.  No plots generated.")
                 return
 
             if self.config.doPlotMatches:
-                matchLabel = "matched to\n" + self.config.refObjLoader.ref_dataset_name
-                matchLabel = matchLabel + "\n     (noApCorr)" if self.config.doBackoutApCorr else matchLabel
-
                 plotKwargs.update(dict(zpLabel=self.zpLabel))
                 matchHighlightList = [
                     ("src_" + self.config.analysis.fluxColumn.replace("_instFlux", "_flag"), 0,
-                     "turquoise"), ("src_deblend_nChild", 0, "lime"), ("src_parent", 0, "orange")]
+                     "turquoise"), ("src_deblend_nChild", 0, "lime")]
                 for ih, flagName in enumerate(list(self.config.analysis.flags)):
                     flagName = "src_" + flagName
                     if not any(flagName in highlight for highlight in matchHighlightList):
                         matchHighlightList += [(flagName, 0, FLAGCOLORS[ih%len(FLAGCOLORS)]), ]
                 plotKwargs.update(dict(highlightList=matchHighlightList, matchRadius=self.matchRadius,
                                        matchRadiusUnitStr=self.matchRadiusUnitStr))
-                plotList.append(self.plotMatches(matches, plotInfoDict, matchAreaDict, forcedStr=matchLabel,
-                                                 **plotKwargs))
+                matchLabel = "matched to\n" + self.config.astromRefObjLoader.ref_dataset_name
+                matchLabel = matchLabel + "\n     (noApCorr)" if self.config.doBackoutApCorr else matchLabel
+                plotList.append(self.plotAstromMatches(
+                    astromMatches, plotInfoDict, astromMatchAreaDict, self.config.astromRefObjLoader,
+                    unpackedMatches=unpackedMatches, forcedStr=matchLabel, **plotKwargs))
+                matchLabel = "matched to\n" + self.config.photomRefObjLoader.ref_dataset_name
+                matchLabel = matchLabel + "\n     (noApCorr)" if self.config.doBackoutApCorr else matchLabel
+                plotList.append(self.plotPhotomMatches(
+                    photomMatches, plotInfoDict, photomMatchAreaDict, self.config.photomRefObjLoader,
+                    forcedStr=matchLabel, **plotKwargs))
 
                 for cat in self.config.externalCatalogs:
                     with andCatalog(cat):
@@ -1049,7 +1109,8 @@ class CoaddAnalysisTask(CmdLineTask):
                 # Compute Focal Plane coordinates for each source if not
                 # already there.
                 if (self.config.doPlotCentroids or self.config.analysis.doPlotFP
-                        or self.config.analysisMatches.doPlotFP):
+                        or self.config.analysisAstromMatches.doPlotFP
+                        or self.config.analysisPhotomMatches.doPlotFP):
                     if "base_FPPosition_x" not in schema and "focalplane_x" not in schema:
                         det = repoInfo.butler.get("calexp_detector", dataRef.dataId)
                         cat = addFpPoint(det, cat)
@@ -1092,8 +1153,9 @@ class CoaddAnalysisTask(CmdLineTask):
         return Struct(commonZpCatalog=concatenateCatalogs(commonZpCatList),
                       catalog=concatenateCatalogs(catList), areaDict=areaDict, fakeCat=fakeCat)
 
-    def readSrcMatches(self, repoInfo, dataRefList, dataset, aliasDictList=None, haveForced=False,
-                       doApplyExternalPhotoCalib=False, doApplyExternalSkyWcs=False, useMeasMosaic=False):
+    def readSrcMatches(self, repoInfo, dataRefList, dataset, refObjLoader, aliasDictList=None,
+                       goodFlagList=[], haveForced=False, doApplyExternalPhotoCalib=False,
+                       doApplyExternalSkyWcs=False, useMeasMosaic=False, readPackedMatchesOnly=False):
         """Read in full records from the reference catalog used in calibration
         and match them to the source catalog.
 
@@ -1102,8 +1164,10 @@ class CoaddAnalysisTask(CmdLineTask):
         (RA/Dec) match to the source catalog, regardless of whether the objects
         were used in any calibration step.  Culling of the source catalog based
         on flags (set in config.analysis.flags) can be performed prior to
-        matching with the exception that any source used as a calibarion source
-        will be retained for further (sub)selection and analysis.
+        matching.  Exceptions can be made with flags in goodFlagList, i.e.
+        sources that have any of the flags in this list set will be retained
+        for further (sub)selection and analysis, regardless of other flags
+        being set.
 
         Parameters
         ----------
@@ -1119,9 +1183,19 @@ class CoaddAnalysisTask(CmdLineTask):
         dataset : `str`
             Name of the catalog ``dataset`` to be read in, e.g.
             "deepCoadd_obj" (for coadds) or "source" (for visits).
+        refObjLoader :
+              `lsst.pex.config.configurableField.ConfigurableInstance` of
+           `lsst.meas.algorithms.loadReferenceObjects.LoadReferenceObjectsTask`
+            Reference object loader to read in the reference catalogs.
         aliasDictList : `dict` or `None`, optional
             A `dict` of alias columns to add for backwards compatibility with
             old repositories.
+        goodFlagList : `list` of `str`, optional
+            List of column flag names for which to retain catalog sources
+            having any one of them set to `True`, regardless of any other flags
+            being set.  For example, it may be desirable to keep all sources
+            that were used in the SFM calibration (identified by the
+            "calib_*_used" flags).
         haveForced : `bool`, optional
             A boolean indicating if a forced_src catalog exists in the
             repository associated with ``repoInfo``.
@@ -1138,6 +1212,10 @@ class CoaddAnalysisTask(CmdLineTask):
             Use meas_mosaic's applyMosaicResultsCatalog for the external
             calibration (even if photoCalib object exists).  For testing
             implementations.
+        readPackedMatchesOnly : `bool`, optional
+            If `True`, simply read in and denormalize the persisted srcMatch
+            tables, i.e. those that record the matches used in the SFM
+            astrometric calibration and return the result.
 
         Raises
         ------
@@ -1160,9 +1238,10 @@ class CoaddAnalysisTask(CmdLineTask):
                 self.log.info("Dataset does not exist: {0:r}, {1:s}".format(dataRef.dataId, dataset))
                 continue
             butler = repoInfo.butler
-            # Generate unnormalized match list (from normalized persisted
-            # one)  with loadDenormalizeAndUnpackMatches (which requires a
-            # refObjLoader to be initialized).
+            # Generate unnormalized match list (using load center and radius
+            # obtained from the normalized persisted srcMatch catalog) with
+            # loadReferencesAndMatchToCatalog (which requires a refObjLoader to
+            # be initialized).
             if self.config.doReadParquetTables:
                 if "Coadd" in dataset:
                     datasetType = dataset[:dataset.find("Coadd_") + len("Coadd_")] + "obj"
@@ -1197,18 +1276,57 @@ class CoaddAnalysisTask(CmdLineTask):
                     areaDict = catStruct.areaDict
             # Set boolean array indicating sources deemed unsuitable for qa
             # analyses.
-            if dataset.startswith("deepCoadd_"):
-                packedMatches = butler.get("deepCoadd_measMatch", dataRef.dataId)
+            mdjList = []
+            if "Coadd" in dataset:
+                packedMatches = butler.get(self.config.coaddName + "Coadd_measMatch", dataRef.dataId)
+                coaddUri = butler.getUri(self.config.coaddName + "Coadd_calexp", dataRef.dataId)
+                coaddReader = afwImage.ExposureFitsReader(coaddUri)
+                for visit in coaddReader.readCoaddInputs().visits["id"]:
+                    try:
+                        for ccd in repoInfo.camera:
+                            if ccd.getType() == cameraGeom.DetectorType.SCIENCE:
+                                if dataRef.datasetExists("calexp", visit=int(visit), ccd=ccd.getId()):
+                                    ccdExists = ccd
+                                    break
+                        calexpUri = butler.getUri("calexp", visit=int(visit), ccd=ccdExists.getId())
+                        calexpReader = afwImage.ExposureFitsReader(calexpUri)
+                        mjd = calexpReader.readVisitInfo.getDate().get(system=DateTime.MJD,
+                                                                       scale=DateTime.TAI)
+                    except Exception:
+                        mjd = np.nan
+                    mdjList.append(mjd)
             else:
                 packedMatches = butler.get(dataset + "Match", dataRef.dataId)
+                matchMeta = packedMatches.table.getMetadata()
+                try:
+                    mjd = matchMeta.getDouble("EPOCH")
+                except Exception:
+                    try:
+                        rawUri = butler.getUri("calexp", dataRef.dataId)
+                        rawReader = afwImage.ExposureFitsReader(rawUri)
+                        mjd = rawReader.readMetadata().getDouble("MJD")
+                    except Exception:
+                        mjd = np.nan
+                mdjList.append(mjd)
+            epoch = np.nanmean(mdjList) if not all(np.isnan(mdjList)) else None
 
             if not packedMatches:
                 self.log.warn("No good matches for %s" % (dataRef.dataId,))
                 continue
-            refObjLoader = self.config.refObjLoader.apply(butler=butler)
-            matches = loadReferencesAndMatchToCatalog(
-                catalog, packedMatches, refObjLoader, matchRadius=self.matchRadius,
-                matchFlagList=self.config.analysis.flags, log=self.log)
+            if hasattr(refObjLoader, "apply"):  # Need to/can only do this once per loader
+                refObjLoader = refObjLoader.apply(butler=butler)
+            if readPackedMatchesOnly:
+                calibKey = "calib_astrometry_used" if "patch" not in repoInfo.dataId else None
+                matches = loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, epoch=epoch,
+                                                          calibKey=calibKey, log=self.log)
+                if matches is None:
+                    return None
+            else:
+                matchMeta = packedMatches.table.getMetadata()
+                matches = loadReferencesAndMatchToCatalog(
+                    catalog, matchMeta, refObjLoader, epoch=epoch, matchRadius=self.matchRadius,
+                    matchFlagList=self.config.analysis.flags, goodFlagList=goodFlagList,
+                    minSrcSn=self.config.minSrcSignalToNoiseForMatches, log=self.log)
             # LSST reads in reference catalogs with flux in "nanojanskys", so
             # must convert to AB.
             matches = matchNanojanskyToAB(matches)
@@ -1758,9 +1876,9 @@ class CoaddAnalysisTask(CmdLineTask):
             unitScale=self.unitScale).plotAll(shortName, plotInfoDict, areaDict, self.log,
                                               enforcer=distEnforcer, doPrintMedian=True, **plotAllKwargs)
 
-    def plotMatches(self, matches, plotInfoDict, areaDict, description="matches", matchRadius=None,
-                    matchRadiusUnitStr=None, zpLabel=None, forcedStr=None, highlightList=None,
-                    uberCalLabel=None):
+    def plotPhotomMatches(self, matches, plotInfoDict, areaDict, refObjLoader, description="matches",
+                          matchRadius=None, matchRadiusUnitStr=None, zpLabel=None, forcedStr=None,
+                          highlightList=None, uberCalLabel=None):
         yield
         schema = getSchema(matches)
         unitStr = "mmag" if self.config.toMilli else "mag"
@@ -1769,18 +1887,18 @@ class CoaddAnalysisTask(CmdLineTask):
         plotAllKwargs = dict(zpLabel=zpLabel, forcedStr=forcedStr, uberCalLabel=uberCalLabel,
                              highlightList=highlightList)
         if self.config.doApplyColorTerms:
-            ct = self.config.colorterms.getColorterm(plotInfoDict["filter"],
-                                                     self.config.refObjLoader.ref_dataset_name)
+            ct = self.config.colorterms.getColorterm(plotInfoDict["filter"], refObjLoader.ref_dataset_name)
         else:
             # Pass in a null colorterm.
             # Obtain the filter name from the reference loader filter map, if
             # present, otherwise set to the canonical filter name.
-            refFilterName = (self.config.refObjLoader.filterMap[plotInfoDict["filter"]] if
-                             plotInfoDict["filter"] in self.config.refObjLoader.filterMap.keys() else
-                             afwImage.Filter(afwImage.Filter(plotInfoDict["filter"]).getId()).getName())
+            if plotInfoDict["filter"] in refObjLoader.filterMap.keys():
+                refFilterName = refObjLoader.filterMap[plotInfoDict["filter"]]
+            else:
+                refFilterName = afwImage.Filter(afwImage.Filter(plotInfoDict["filter"]).getId()).getName()
             ct = Colorterm(primary=refFilterName, secondary=refFilterName)
             self.log.warn("Note: no colorterms loaded for {:s}, thus no colorterms will be applied to "
-                          "the reference catalog".format(self.config.refObjLoader.ref_dataset_name))
+                          "the photometry reference catalog".format(refObjLoader.ref_dataset_name))
 
         # Magnitude difference plots
         for flux in fluxToPlotList:
@@ -1795,7 +1913,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 yield from self.AnalysisClass(
                     matches, MagDiffMatches(fluxName, ct, zp=0.0, unitScale=self.unitScale),
                     "%s - ref (calib_psf_used) (%s)" % (fluxToPlotString(fluxName), unitStr), shortName,
-                    self.config.analysisMatches, prefix="src_", goodKeys=["calib_psf_used"],
+                    self.config.analysisPhotomMatches, prefix="src_", goodKeys=["calib_psf_used"],
                     labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale).plotAll(
                         shortName, plotInfoDict, areaDict, self.log, enforcer=enforcer, **plotAllKwargs)
             if "src_calib_photometry_used" in schema:
@@ -1804,106 +1922,127 @@ class CoaddAnalysisTask(CmdLineTask):
                 yield from self.AnalysisClass(
                     matches, MagDiffMatches(fluxName, ct, zp=0.0, unitScale=self.unitScale),
                     "   %s - ref (calib_photom_used) (%s)" % (fluxToPlotString(fluxName), unitStr),
-                    shortName, self.config.analysisMatches, prefix="src_", goodKeys=["calib_photometry_used"],
-                    labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale).plotAll(
-                        shortName, plotInfoDict, areaDict, self.log, enforcer=enforcer, **plotAllKwargs)
-            if "src_calib_astrometry_used" in schema:
-                shortName = description + "_" + fluxToPlotString(fluxName) + "_mag_calib_astrometry_used"
-                self.log.info("shortName = {:s}".format(shortName))
-                yield from self.AnalysisClass(
-                    matches, MagDiffMatches(fluxName, ct, zp=0.0, unitScale=self.unitScale),
-                    "   %s - ref (calib_astrom_used) (%s)" % (fluxToPlotString(fluxName), unitStr),
-                    shortName, self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
-                    labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale).plotAll(
+                    shortName, self.config.analysisPhotomMatches, prefix="src_",
+                    goodKeys=["calib_photometry_used"], labeller=MatchesStarGalaxyLabeller(),
+                    unitScale=self.unitScale).plotAll(
                         shortName, plotInfoDict, areaDict, self.log, enforcer=enforcer, **plotAllKwargs)
             shortName = description + "_" + fluxToPlotString(fluxName)
             self.log.info("shortName = {:s}".format(shortName))
             yield from self.AnalysisClass(
                 matches, MagDiffMatches(fluxName, ct, zp=0.0, unitScale=self.unitScale),
                 "   %s - ref (%s)" % (fluxToPlotString(fluxName), unitStr), shortName,
-                self.config.analysisMatches, prefix="src_", labeller=MatchesStarGalaxyLabeller(),
+                self.config.analysisPhotomMatches, prefix="src_", labeller=MatchesStarGalaxyLabeller(),
                 unitScale=self.unitScale).plotAll(shortName, plotInfoDict, areaDict, self.log,
                                                   enforcer=enforcer, matchRadius=matchRadius,
                                                   matchRadiusUnitStr=matchRadiusUnitStr, **plotAllKwargs)
 
             plotAllKwargs.update(highlightList=highlightList)
+
+    def plotAstromMatches(self, matches, plotInfoDict, areaDict, refObjLoader, unpackedMatches=None,
+                          description="matches", matchRadius=None, matchRadiusUnitStr=None, zpLabel=None,
+                          forcedStr=None, highlightList=None, uberCalLabel=None):
+        yield
+        if unpackedMatches is None:
+            if "patch" not in plotInfoDict["dataId"]:
+                self.log.info("The denormalizing of the persisted srcMatch failed (or was not done).  "
+                              "Thus, the plots associated with the calib_astrometry_used flag will only "
+                              "include those that made it into the generically matched catalogs (which "
+                              "may not included all of those sources that were used in SFM astrometric "
+                              "calibration.")
+            unpackedMatches = matches
+            self.unpackedMatchLabel = forcedStr
+        unpackedSchema = getSchema(unpackedMatches)
+        unitStr = "mmag" if self.config.toMilli else "mag"
+        enforcer = None  # Enforcer(requireLess={"star": {"stdev": 0.030*self.unitScale}}),
+        plotAllKwargs = dict(uberCalLabel=uberCalLabel, highlightList=highlightList)
+
         # Astrometry (positional) difference plots
         unitStr = "mas" if self.config.toMilli else "arcsec"
         qMatchScale = matchRadius if matchRadius else self.matchRadius
-        if "src_calib_astrometry_used" in schema:
+        if "src_calib_astrometry_used" in unpackedSchema:
             shortName = description + "_distance_calib_astrometry_used"
             self.log.info("shortName = {:s}".format(shortName))
 
             yield from self.AnalysisClass(
-                matches, lambda cat: cat["distance"]*(1.0*geom.radians).asArcseconds()*self.unitScale,
-                "Distance (%s) (calib_astrom_used)" % unitStr, shortName,
-                self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
+                unpackedMatches, lambda cat: cat["distance"]*(1.0*geom.radians).asArcseconds()*self.unitScale,
+                "Distance (%s) (calib_astrom_used in SFM)" % unitStr, shortName,
+                self.config.analysisAstromMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
                 qMin=-0.02*qMatchScale, qMax=0.6*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
                 unitScale=self.unitScale).plotAll(shortName, plotInfoDict, areaDict, self.log,
-                                                  enforcer=enforcer, doPrintMedian=True, **plotAllKwargs)
+                                                  enforcer=enforcer, doPrintMedian=True,
+                                                  forcedStr=self.unpackedMatchLabel,
+                                                  zpLabel=self.zpLabelPacked, **plotAllKwargs)
         shortName = description + "_distance"
         self.log.info("shortName = {:s}".format(shortName))
         stdevEnforcer = Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}})
         yield from self.AnalysisClass(
             matches, lambda cat: cat["distance"]*(1.0*geom.radians).asArcseconds()*self.unitScale,
-            "Distance (%s)" % unitStr, shortName, self.config.analysisMatches, prefix="src_",
+            "Distance (%s)" % unitStr, shortName, self.config.analysisAstromMatches, prefix="src_",
             qMin=-0.02*qMatchScale, qMax=0.6*qMatchScale, labeller=MatchesStarGalaxyLabeller(),
             forcedMean=0.0, unitScale=self.unitScale).plotAll(
                 shortName, plotInfoDict, areaDict, self.log, enforcer=stdevEnforcer, doPrintMedian=True,
-                matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr, **plotAllKwargs)
-        if "src_calib_astrometry_used" in schema:
+                matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr, forcedStr=forcedStr,
+                zpLabel=zpLabel, **plotAllKwargs)
+        if "src_calib_astrometry_used" in unpackedSchema:
             shortName = description + "_raCosDec_calib_astrometry_used"
             self.log.info("shortName = {:s}".format(shortName))
             yield from self.AnalysisClass(
-                matches, AstrometryDiff("src_coord_ra", "ref_coord_ra", declination1="src_coord_dec",
-                                        declination2="ref_coord_dec", unitScale=self.unitScale),
-                r"      $\delta_{RA}$ = $\Delta$RA*cos(Dec) (%s) (calib_astrom_used)" % unitStr,
-                shortName, self.config.analysisMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
-                labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale).plotAll(
-                    shortName, plotInfoDict, areaDict, self.log, enforcer=enforcer, **plotAllKwargs)
+                unpackedMatches, AstrometryDiff("src_coord_ra", "ref_coord_ra", declination1="src_coord_dec",
+                                                declination2="ref_coord_dec", unitScale=self.unitScale),
+                r"      $\delta_{RA}$ = $\Delta$RA*cos(Dec) (%s) (calib_astrom_used in SFM)" % unitStr,
+                shortName, self.config.analysisAstromMatches, prefix="src_",
+                goodKeys=["calib_astrometry_used"], labeller=MatchesStarGalaxyLabeller(),
+                unitScale=self.unitScale).plotAll(
+                    shortName, plotInfoDict, areaDict, self.log, enforcer=enforcer,
+                    forcedStr=self.unpackedMatchLabel, zpLabel=self.zpLabelPacked, **plotAllKwargs)
         shortName = description + "_raCosDec"
         self.log.info("shortName = {:s}".format(shortName))
         stdevEnforcer = Enforcer(requireLess={"star": {"stdev": 0.050*self.unitScale}})
         yield from self.AnalysisClass(
             matches, AstrometryDiff("src_coord_ra", "ref_coord_ra", declination1="src_coord_dec",
                                     declination2="ref_coord_dec", unitScale=self.unitScale),
-            r"$\delta_{RA}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr, shortName, self.config.analysisMatches,
-            prefix="src_", labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale).plotAll(
+            r"$\delta_{RA}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr, shortName,
+            self.config.analysisAstromMatches, prefix="src_", labeller=MatchesStarGalaxyLabeller(),
+            unitScale=self.unitScale).plotAll(
                 shortName, plotInfoDict, areaDict, self.log, enforcer=stdevEnforcer,
-                matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr, **plotAllKwargs)
-        if "src_calib_astrometry_used" in schema:
+                matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr, forcedStr=forcedStr,
+                zpLabel=zpLabel, **plotAllKwargs)
+        if "src_calib_astrometry_used" in unpackedSchema:
             shortName = description + "_ra_calib_astrometry_used"
             self.log.info("shortName = {:s}".format(shortName))
             yield from self.AnalysisClass(
-                matches, AstrometryDiff("src_coord_ra", "ref_coord_ra", unitScale=self.unitScale),
-                r"$\Delta$RA (%s) (calib_astrom_used)" % unitStr, shortName, self.config.analysisMatches,
-                prefix="src_", goodKeys=["calib_astrometry_used"], labeller=MatchesStarGalaxyLabeller(),
-                unitScale=self.unitScale).plotAll(shortName, plotInfoDict, areaDict, self.log,
-                                                  enforcer=enforcer, **plotAllKwargs)
+                unpackedMatches, AstrometryDiff("src_coord_ra", "ref_coord_ra", unitScale=self.unitScale),
+                r"$\Delta$RA (%s) (calib_astrom_used in SFM)" % unitStr, shortName,
+                self.config.analysisAstromMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
+                labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale).plotAll(
+                    shortName, plotInfoDict, areaDict, self.log, enforcer=enforcer,
+                    forcedStr=self.unpackedMatchLabel, zpLabel=self.zpLabelPacked, **plotAllKwargs)
         shortName = description + "_ra"
         self.log.info("shortName = {:s}".format(shortName))
         yield from self.AnalysisClass(
             matches, AstrometryDiff("src_coord_ra", "ref_coord_ra", unitScale=self.unitScale),
-            r"$\Delta$RA (%s)" % unitStr, shortName, self.config.analysisMatches, prefix="src_",
+            r"$\Delta$RA (%s)" % unitStr, shortName, self.config.analysisAstromMatches, prefix="src_",
             labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale).plotAll(
                 shortName, plotInfoDict, areaDict, self.log, enforcer=stdevEnforcer, matchRadius=matchRadius,
-                matchRadiusUnitStr=matchRadiusUnitStr, **plotAllKwargs)
-        shortName = description + "_dec_calib_astrometry_used"
-        self.log.info("shortName = {:s}".format(shortName))
-        yield from self.AnalysisClass(
-            matches, AstrometryDiff("src_coord_dec", "ref_coord_dec", unitScale=self.unitScale),
-            r"$\delta_{Dec}$ (%s) (calib_astrom_used)" % unitStr, shortName, self.config.analysisMatches,
-            prefix="src_", goodKeys=["calib_astrometry_used"], labeller=MatchesStarGalaxyLabeller(),
-            unitScale=self.unitScale).plotAll(shortName, plotInfoDict, areaDict, self.log,
-                                              enforcer=enforcer, **plotAllKwargs)
+                matchRadiusUnitStr=matchRadiusUnitStr, forcedStr=forcedStr, zpLabel=zpLabel, **plotAllKwargs)
+        if "src_calib_astrometry_used" in unpackedSchema:
+            shortName = description + "_dec_calib_astrometry_used"
+            self.log.info("shortName = {:s}".format(shortName))
+            yield from self.AnalysisClass(
+                unpackedMatches, AstrometryDiff("src_coord_dec", "ref_coord_dec", unitScale=self.unitScale),
+                r"$\delta_{Dec}$ (%s) (calib_astrom_used in SFM)" % unitStr, shortName,
+                self.config.analysisAstromMatches, prefix="src_", goodKeys=["calib_astrometry_used"],
+                labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale).plotAll(
+                    shortName, plotInfoDict, areaDict, self.log, enforcer=enforcer,
+                    forcedStr=self.unpackedMatchLabel, zpLabel=self.zpLabelPacked, **plotAllKwargs)
         shortName = description + "_dec"
         self.log.info("shortName = {:s}".format(shortName))
         yield from self.AnalysisClass(
             matches, AstrometryDiff("src_coord_dec", "ref_coord_dec", unitScale=self.unitScale),
-            r"$\delta_{Dec}$ (%s)" % unitStr, shortName, self.config.analysisMatches, prefix="src_",
+            r"$\delta_{Dec}$ (%s)" % unitStr, shortName, self.config.analysisAstromMatches, prefix="src_",
             labeller=MatchesStarGalaxyLabeller(), unitScale=self.unitScale).plotAll(
                 shortName, plotInfoDict, areaDict, self.log, enforcer=stdevEnforcer, matchRadius=matchRadius,
-                matchRadiusUnitStr=matchRadiusUnitStr, **plotAllKwargs)
+                matchRadiusUnitStr=matchRadiusUnitStr, forcedStr=forcedStr, zpLabel=zpLabel, **plotAllKwargs)
 
     def plotCosmos(self, catalog, plotInfoDict, areaDict, cosmos):
         labeller = CosmosLabeller(cosmos, self.config.matchRadiusRaDec*geom.arcseconds)
@@ -2318,16 +2457,16 @@ class CompareCoaddAnalysisTask(CoaddAnalysisTask):
                                                     declination2="second_coord_dec",
                                                     unitScale=self.unitScale),
                             r"   Run Comparison: $\delta_{RA}$ = $\Delta$RA*cos(Dec) (%s)" % unitStr,
-                            shortName, self.config.analysisMatches, prefix="first_", qMin=-0.2*matchRadius,
-                            qMax=0.2*matchRadius, labeller=OverlapsStarGalaxyLabeller(),
-                            unitScale=self.unitScale,
+                            shortName, self.config.analysisAstromMatches, prefix="first_",
+                            qMin=-0.2*matchRadius, qMax=0.2*matchRadius,
+                            labeller=OverlapsStarGalaxyLabeller(), unitScale=self.unitScale,
                             ).plotAll(shortName, plotInfoDict, areaDict, self.log, **plotAllKwargs)
         shortName = "diff_ra"
         self.log.info("shortName = {:s}".format(shortName))
         yield from Analysis(catalog, AstrometryDiff("first_coord_ra", "second_coord_ra", declination1=None,
                                                     declination2=None, unitScale=self.unitScale),
                             r"Run Comparison: $\Delta$RA (%s)" % unitStr, shortName,
-                            self.config.analysisMatches, prefix="first_", qMin=-0.25*matchRadius,
+                            self.config.analysisAstromMatches, prefix="first_", qMin=-0.25*matchRadius,
                             qMax=0.25*matchRadius, labeller=OverlapsStarGalaxyLabeller(),
                             unitScale=self.unitScale,
                             ).plotAll(shortName, plotInfoDict, areaDict, self.log, **plotAllKwargs)
@@ -2335,7 +2474,7 @@ class CompareCoaddAnalysisTask(CoaddAnalysisTask):
         self.log.info("shortName = {:s}".format(shortName))
         yield from Analysis(catalog, AstrometryDiff("first_coord_dec", "second_coord_dec",
                                                     unitScale=self.unitScale),
-                            r"$\delta_{Dec}$ (%s)" % unitStr, shortName, self.config.analysisMatches,
+                            r"$\delta_{Dec}$ (%s)" % unitStr, shortName, self.config.analysisAstromMatches,
                             prefix="first_", qMin=-0.3*matchRadius, qMax=0.3*matchRadius,
                             labeller=OverlapsStarGalaxyLabeller(),
                             unitScale=self.unitScale,
