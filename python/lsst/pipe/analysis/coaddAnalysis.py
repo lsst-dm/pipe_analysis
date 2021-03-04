@@ -247,7 +247,7 @@ class CoaddAnalysisConfig(Config):
             if len(self.astromRefCat) == len("gaia"):
                 self.astromRefObjLoader.ref_dataset_name = "gaia_dr2_20200414"
             else:
-                self.refAstromObjLoader.ref_dataset_name = self.astromRefCat
+                self.astromRefObjLoader.ref_dataset_name = self.astromRefCat
             self.astromRefObjLoader.anyFilterMapsToThis = "phot_g_mean"
             self.astromRefObjLoader.requireProperMotion = True
         elif "ps1" in self.astromRefCat:
@@ -1290,8 +1290,8 @@ class CoaddAnalysisTask(CmdLineTask):
                                     break
                         calexpUri = butler.getUri("calexp", visit=int(visit), ccd=ccdExists.getId())
                         calexpReader = afwImage.ExposureFitsReader(calexpUri)
-                        mjd = calexpReader.readVisitInfo.getDate().get(system=DateTime.MJD,
-                                                                       scale=DateTime.TAI)
+                        mjd = calexpReader.readVisitInfo().getDate().get(system=DateTime.MJD,
+                                                                         scale=DateTime.TAI)
                     except Exception:
                         mjd = np.nan
                     mdjList.append(mjd)

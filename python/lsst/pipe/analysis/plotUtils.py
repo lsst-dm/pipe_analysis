@@ -586,8 +586,8 @@ def plotTractOutline(axes, tractInfo, patchList, fontSize=5, maxDegBeyondPatch=1
         cbar.set_label(label=metricStr, size=fontSize + 1)
 
 
-def plotCcdOutline(axes, areaDict, ccdList, tractInfo=None, zpLabel=None, fontSize=8, lineStyle="-",
-                   color="k", labelStr=None, doPlotCcdId=True):
+def plotCcdOutline(axes, areaDict, ccdList, tractInfo=None, fontSize=8, lineStyle="-", color="k",
+                   labelStr=None, doPlotCcdId=True):
     """Plot the outlines of the ccds in ccdList on a given axis.
 
     Parameters
@@ -603,6 +603,14 @@ def plotCcdOutline(axes, areaDict, ccdList, tractInfo=None, zpLabel=None, fontSi
         The information about the tract.
     fontSize : `int`, optional
         The fontsize to use for the ccd labels.
+    lineStyle : `str`, optional
+        The matplotlib-style line style string.
+    color : `str`, optional
+        The matplotlib-style color in which to plot the outlines.
+    labelStr : `str` or `None`, optional
+        An optional string to use for the legend entry of the CCD outlines.
+    doPlotCcdId : `bool`, optional
+        Whetther to plot the CCD Id label in the middle of each outline.
     """
     for ccd in ccdList:
         # Use the precomputed corners to make lists of RA and Dec to plot
