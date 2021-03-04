@@ -1213,7 +1213,8 @@ def addRotPoint(catalog, width, height, nQuarter, prefix=""):
     return newCatalog
 
 
-def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True, tractInnerOnly=False):
+def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True, tractInnerOnly=False,
+                 excludeIsolatedModel=False, excludeIsolatedNotModel=True, excludeSkipped=True):
     """Create a boolean array indicating sources deemed unsuitable for qa
     analyses.
 
@@ -1254,41 +1255,43 @@ def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True,
     Returns
     -------
     badArray : `numpy.ndarray`
-       Boolean array with same length as catalog whose values indicate whether
-       the source was deemed inappropriate for qa analyses.
+        Boolean array with same length as catalog whose values indicate whether
+        the source was deemed inappropriate for qa analyses.
     """
     schema = getSchema(catalog)
     bad = np.zeros(len(catalog), dtype=bool)
-    if isinstance(catalog, pd.DataFrame):
-        if "detect_isPatchInner" in schema and patchInnerOnly:
-            bad |= ~catalog["detect_isPatchInner"].values
-        if "detect_isTractInner" in schema and tractInnerOnly:
-            bad |= ~catalog["detect_isTractInner"].values
-        bad |= catalog["deblend_nChild"].values > 0  # Exclude non-deblended (i.e. parents)
-        # Exclude "sky" objects from catalogs (column names differ for visit
-        # and coadd catalogs).
-        for skyObjectCol in ["merge_peak_sky", "sky_source"]:
-            if skyObjectCol in schema:
-                bad |= catalog[skyObjectCol].values
-        for flag in flagList:
-            bad |= catalog[flag].values
-        if onlyReadStars and "base_ClassificationExtendedness_value" in schema:
-            bad |= catalog["base_ClassificationExtendedness_value"].values > 0.5
+    if "detect_isPatchInner" in schema and patchInnerOnly:
+        bad |= ~catalog["detect_isPatchInner"]
+    if "detect_isTractInner" in schema and tractInnerOnly:
+        bad |= ~catalog["detect_isTractInner"]
+    if "deblend_scarletFlux" in schema:
+        # Exclude parents that are blends of multiple sources
+        bad |= ((catalog["parent"] == 0) & (catalog["deblend_nChild"] > 1))
+        # Exclude isolated sources not passed to deblender
+        if excludeIsolatedNotModel:
+            bad |= ((catalog["parent"] == 0) & (catalog["deblend_nChild"] == 1))
+        # Exclude isolated sources that were passed to deblender
+        if excludeIsolatedModel:
+            # TODO: remove this raise once DM-28542 lands and reverse
+            # True/False settings for excludeIsolatedNotModel/
+            # excludeIsolatedModel.
+            raise RuntimeError("Can't select against isolated scarlet model sources "
+                               "until DM-28542 lands")
+            bad |= ((catalog["parent"] != 0) & (catalog["deblend_parentNPeaks"] == 1))
+        # Exclude parent blends that were skipped
+        if excludeSkipped:
+            bad |= catalog["deblend_skipped"]
     else:
-        if "detect_isPatchInner" in schema and patchInnerOnly:
-            bad |= ~catalog["detect_isPatchInner"]
-        if "detect_isTractInner" in schema and tractInnerOnly:
-            bad |= ~catalog["detect_isTractInner"]
         bad |= catalog["deblend_nChild"] > 0  # Exclude non-deblended (i.e. parents)
-        # Exclude "sky" objects from catalogs (column names differ for visit
-        # and coadd catalogs).
-        for skyObjectCol in ["merge_peak_sky", "sky_source"]:
-            if skyObjectCol in schema:
-                bad |= catalog[skyObjectCol]
-        for flag in flagList:
-            bad |= catalog[flag]
-        if onlyReadStars and "base_ClassificationExtendedness_value" in schema:
-            bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
+    # Exclude "sky" objects from catalogs (column names differ for visit
+    # and coadd catalogs).
+    for skyObjectCol in ["merge_peak_sky", "sky_source"]:
+        if skyObjectCol in schema:
+            bad |= catalog[skyObjectCol]
+    for flag in flagList:
+        bad |= catalog[flag]
+    if onlyReadStars and "base_ClassificationExtendedness_value" in schema:
+        bad |= catalog["base_ClassificationExtendedness_value"] > 0.5
     return bad
 
 

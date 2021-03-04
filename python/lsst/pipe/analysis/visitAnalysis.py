@@ -413,7 +413,23 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 skySrcCat = None
                 if self.config.doPlotSkyObjects:
                     if "sky_source" in schema:
-                        skySrcCat = catalog[catalog["sky_source"]].copy(deep=True)
+                        baseGoodSky = catalog["sky_source"]
+                        skySrcCat = catalog[baseGoodSky].copy(deep=True)
+                        if "deblend_scarletFlux" in schema:
+                            # Only include the non-model (i.e. not deblended)
+                            # scarlet sources.  Note that the we include the
+                            # "deblend_skipped" sky sources since they are
+                            # equivalent to the scarlet isolated non-model
+                            # (i.e. not deblended) sources.
+                            # TODO: edit this selection to use
+                            #       isDeblenderPrimary once DM-28542 lands.
+                            goodSky = ((skySrcCat["parent"] == 0) & (skySrcCat["deblend_nChild"] == 1))
+                            goodSky |= ((skySrcCat["parent"] == 0) & (skySrcCat["deblend_nChild"] == 0)
+                                        & skySrcCat["deblend_skipped"])
+                        else:
+                            goodSky = skySrcCat["deblend_nChild"] == 0
+
+                        skySrcCat = skySrcCat[goodSky].copy(deep=True)
                     else:
                         self.log.warn("doPlotSkyObjects is True, but the \"sky_source\" "
                                       "column does not exist in the catalog schema.  Skipping "

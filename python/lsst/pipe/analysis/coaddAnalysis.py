@@ -149,7 +149,8 @@ class CoaddAnalysisConfig(Config):
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(fluxColumn)")
     # We want the following to come from the *_meas catalogs as they reflect
     # what happened in SFP calibration.
-    columnsToCopyFromMeas = ListField(dtype=str, default=["calib_", ],
+    columnsToCopyFromMeas = ListField(dtype=str, default=["calib_", "deblend_parentNPeask", "deblend_nPeaks",
+                                                          "deblend_scarletFlux", "deblend_skipped"],
                                       doc="List of string \"prefixes\" to identify the columns to copy.  "
                                       "All columns with names that start with one of these strings will be "
                                       "copied from the *_meas catalogs into the *_forced_src catalogs "
@@ -172,6 +173,7 @@ class CoaddAnalysisConfig(Config):
                  "base_Sdss", "slot_Centroid", "slot_Shape", "ext_shapeHSM_HsmSourceMoments_",
                  "ext_shapeHSM_HsmPsfMoments_", "ext_shapeHSM_HsmShapeRegauss_", "base_Footprint",
                  "base_FPPosition", "base_ClassificationExtendedness", "parent", "detect", "deblend_nChild",
+                 "deblend_parentNPeaks", "deblend_nPeaks", "deblend_scarletFlux", "deblend_skipped",
                  "base_Blendedness_abs", "base_Blendedness_flag", "base_InputCount",
                  "merge_peak_sky", "merge_measurement", "calib", "sky_source"],
         doc=("List of \"startswith\" strings of column names to load from deepCoadd_obj parquet table. "
@@ -430,9 +432,22 @@ class CoaddAnalysisTask(CmdLineTask):
             if self.config.doPlotSkyObjectsSky:
                 skyObjCatAll = unforced[unforced["merge_peak_sky"]].copy(deep=True)
             if self.config.doPlotSkyObjects:
-                goodSky = (unforced["merge_peak_sky"] & (unforced["base_InputCount_value"] > 0)
-                           & (unforced["deblend_nChild"] == 0) & ~unforced["base_PixelFlags_flag_edge"])
-                skyObjCat = unforced[goodSky].copy(deep=True)
+                baseGoodSky = (unforced["merge_peak_sky"] & (unforced["base_InputCount_value"] > 0)
+                               & ~unforced["base_PixelFlags_flag_edge"])
+                skyObjCat = unforced[baseGoodSky].copy(deep=True)
+                if "deblend_scarletFlux" in unforcedSchema:
+                    # Only include the non-model (i.e. not deblended) scarlet
+                    # sources.  Note that we include the "deblend_skipped" sky
+                    # sources since they are equivalent to the scarlet isolated
+                    # non-model (i.e. not deblended) sources.
+                    # TODO: edit this selection to use isDeblenderPrimary once
+                    #       DM-28542 lands.
+                    goodSky = ((skyObjCat["parent"] == 0) & (skyObjCat["deblend_nChild"] == 1))
+                    goodSky |= ((skyObjCat["parent"] == 0) & (skyObjCat["deblend_nChild"] == 0)
+                                & skyObjCat["deblend_skipped"])
+                else:
+                    goodSky = unforced["deblend_nChild"] == 0
+                skyObjCat = skyObjCat[goodSky].copy(deep=True)
 
             # Must do the overlaps before purging the catalogs of non-primary
             # sources.  We only really need one set of these plots and the
@@ -512,7 +527,7 @@ class CoaddAnalysisTask(CmdLineTask):
                     forced = forced[~badForced].copy(deep=True)
                 else:
                     forced = unforced
-                self.catLabel = " nChild = 0"
+                self.catLabel = " scarlet" if "deblend_scarletFlux" in unforcedSchema else " nChild = 0"
                 strIndex = forcedStr.find("\n")
                 if strIndex < 0:
                     forcedStr = forcedStr + self.catLabel
