@@ -853,9 +853,9 @@ class Analysis(object):
             else:
                 ccdList = plotInfoDict["ccdList"]
             if any(ss in description for ss in ["commonZp", "_raw"]):
-                plotCcdOutline(axes, areaDict, ccdList, zpLabel=zpLabel)
+                plotCcdOutline(axes, areaDict, ccdList)
             else:
-                plotCcdOutline(axes, areaDict, ccdList, tractInfo=plotInfoDict["tractInfo"], zpLabel=zpLabel)
+                plotCcdOutline(axes, areaDict, ccdList, tractInfo=plotInfoDict["tractInfo"])
             if plotInfoDict["tractInfo"] is not None:
                 tractBBox = plotInfoDict["tractInfo"].getBBox()
                 tractWcs = plotInfoDict["tractInfo"].getWcs()
@@ -1102,8 +1102,7 @@ class Analysis(object):
         axes.tick_params(which="both", direction="in", top=True, right=True, labelsize=8)
 
         if plotInfoDict["plotType"] == "plotVisit":
-            plotCcdOutline(axes, areaDict, plotInfoDict["ccdList"], tractInfo=plotInfoDict["tractInfo"],
-                           zpLabel=zpLabel)
+            plotCcdOutline(axes, areaDict, plotInfoDict["ccdList"], tractInfo=plotInfoDict["tractInfo"])
 
         if plotInfoDict["tractInfo"] is not None and "Coadd" in plotInfoDict["plotType"]:
             for ip, patch in enumerate(plotInfoDict["tractInfo"]):
