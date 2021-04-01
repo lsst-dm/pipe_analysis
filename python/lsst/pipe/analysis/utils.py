@@ -48,6 +48,8 @@ import lsst.sphgeom as sphgeom
 import lsst.verify as verify
 import treecorr
 
+from deprecated.sphinx import deprecated
+
 try:
     from lsst.meas.mosaic.updateExposure import applyMosaicResultsCatalog
 except ImportError:
@@ -519,6 +521,8 @@ class E2Resids(object):
         return e2Resids
 
 
+@deprecated(reason="This operation is ill-defined and must not be used. This functor will be removed without "
+            "a replacement when ported to Gen3. Use `E1Resids()` for HSM shapes.", category=FutureWarning)
 class E1ResidsHsmRegauss(object):
     """Functor to calculate HSM e1 ellipticity residuals from a given star
     catalog and PSF model.
@@ -535,6 +539,8 @@ class E1ResidsHsmRegauss(object):
         return np.array(e1Resids)*self.unitScale
 
 
+@deprecated(reason="This operation is ill-defined and must not be used. This functor will be removed without "
+            "a replacement when ported to Gen3. Use `E2Resids()` for HSM shapes.", category=FutureWarning)
 class E2ResidsHsmRegauss(object):
     """Functor to calculate HSM e1 ellipticity residuals from a given star
     catalog and PSF model.
