@@ -455,7 +455,7 @@ class E1Resids(object):
     Parameters
     ----------
     column : `str`
-        The name of the shape measuremet algorithm ("SdssShape" or
+        The name of the shape measurement algorithm ("SdssShape" or
         "HsmRegauss").
     psfColumn : `str`
         The name used for PSF shape measurements from the same algorithm.
@@ -491,7 +491,7 @@ class E2Resids(object):
     Parameters
     ----------
     column : `str`
-        The name of the shape measuremet algorithm (SdssShape or HsmRegauss).
+        The name of the shape measurement algorithm (SdssShape or HsmRegauss).
     psfColumn : `str`
         The name used for PSF shape measurements from the same algorithm.
     unitScale : `float`, optional
