@@ -404,8 +404,10 @@ class E1(object):
     Parameters
     ----------
     column : `str`
-        The name of the shape measurement algorithm ("SdssShape" or
-        "HsmRegauss").
+        The name of the shape measurement algorithm. It should be one of
+        ("base_SdssShape", "ext_shapeHSM_HsmSourceMoments") or
+        ("base_SdssShape_psf", "ext_shapeHSM_HsmPsfMoments") for corresponding
+        PSF ellipticities.
     unitScale : `float`, optional
         A numerical scaling factor to multiply the ellipticity.
 
@@ -431,8 +433,10 @@ class E2(object):
     Parameters
     ----------
     column : `str`
-        The name of the shape measurement algorithm ("SdssShape" or
-        "HsmRegauss").
+        The name of the shape measurement algorithm. It should be one of
+        ("base_SdssShape", "ext_shapeHSM_HsmSourceMoments") or
+        ("base_SdssShape_psf", "ext_shapeHSM_HsmPsfMoments") for corresponding
+        PSF ellipticities.
     unitScale : `float`, optional
         A numerical scaling factor to multiply the ellipticity.
 
@@ -457,10 +461,12 @@ class E1Resids(object):
     Parameters
     ----------
     column : `str`
-        The name of the shape measurement algorithm ("SdssShape" or
-        "HsmRegauss").
+        The name of the shape measurement algorithm. It should be one of
+        ("base_SdssShape", "ext_shapeHSM_HsmSourceMoments").
     psfColumn : `str`
         The name used for PSF shape measurements from the same algorithm.
+        It must be one of ("base_SdssShape_psf", "ext_shapeHSM_HsmPsfMoments")
+        and correspond to the algorithm name specified for ``column``.
     unitScale : `float`, optional
         A numerical scaling factor to multiply both the object and PSF
         ellipticities.
@@ -493,9 +499,12 @@ class E2Resids(object):
     Parameters
     ----------
     column : `str`
-        The name of the shape measurement algorithm (SdssShape or HsmRegauss).
+        The name of the shape measurement algorithm. It should be one of
+        ("base_SdssShape", "ext_shapeHSM_HsmSourceMoments").
     psfColumn : `str`
         The name used for PSF shape measurements from the same algorithm.
+        It must be one of ("base_SdssShape_psf", "ext_shapeHSM_HsmPsfMoments")
+        and correspond to the algorithm name specified for ``column``.
     unitScale : `float`, optional
         A numerical scaling factor to multiply both the object and PSF
         ellipticities.
@@ -565,10 +574,12 @@ class RhoStatistics(object):
     Parameters
     ----------
     column : `str`
-        The name of the shape measurement algorithm ("SdssShape" or
-        "HsmRegauss").
+        The name of the shape measurement algorithm. It should be one of
+        ("base_SdssShape", "ext_shapeHSM_HsmSourceMoments").
     psfColumn : `str`
         The name used for PSF shape measurements from the same algorithm.
+        It must be one of ("base_SdssShape_psf", "ext_shapeHSM_HsmPsfMoments")
+        and correspond to the algorithm name specified for ``column``.
     **kwargs
         Additional keyword arguments passed to treecorr. See
         https://rmjarvis.github.io/TreeCorr/_build/html/gg.html for details.
@@ -2470,7 +2481,7 @@ def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=No
             e2Resids = parameterFunc(catalog)
             catalog = addIntFloatOrStrColumn(catalog, e2Resids, fieldName, fieldDoc)
 
-    # HSM Regauss E1/E2 resids
+    # HSM Regauss E1/E2 resids (deprecated and will be removed in Gen3)
     fieldUnits = " (milli)" if toMilli else ""
     if "ext_shapeHSM_HsmShapeRegauss_e1" in schema:
         fieldName = "e1ResidsHsmRegauss_" + fieldUnits.strip(" ()")
