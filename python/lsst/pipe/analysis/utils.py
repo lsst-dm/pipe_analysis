@@ -1231,7 +1231,7 @@ def addRotPoint(catalog, width, height, nQuarter, prefix=""):
 
 
 def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True, tractInnerOnly=False,
-                 excludeIsolatedModel=False, excludeIsolatedNotModel=True, excludeSkipped=True):
+                 useScarletModelForIsolated=False, excludeSkipped=True):
     """Create a boolean array indicating sources deemed unsuitable for qa
     analyses.
 
@@ -1268,6 +1268,15 @@ def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True,
         so we do not need to filter out sources for which detect_isTractInner
         is `False` as, with only one tract, there are no duplicated tract
         inner/outer sources.
+    useScarletModelForIsolated : `bool`, optional
+        For isolated sources, select the "model leaf" versions of the scarlet
+        output if `True`.  If `False`, select the non-model, or "simple leaf"
+        versions of the scarlet output for isolated sources.  Ignored if the
+        ``catalog`` provided was not created using the scarlet deblender.
+    excludeSkipped : `bool`, optional
+        Whether to exclude objects marked as "deblend_skipped", i.e. those that
+        were skipped by the deblender (e.g. because they were too big, did not
+        have full-band coverage, no flux at the center of the source, etc.)
 
     Returns
     -------
@@ -1281,25 +1290,38 @@ def makeBadArray(catalog, flagList=[], onlyReadStars=False, patchInnerOnly=True,
         bad |= ~catalog["detect_isPatchInner"]
     if "detect_isTractInner" in schema and tractInnerOnly:
         bad |= ~catalog["detect_isTractInner"]
+
     if "deblend_scarletFlux" in schema:
-        # Exclude parents that are blends of multiple sources
-        bad |= ((catalog["parent"] == 0) & (catalog["deblend_nChild"] > 1))
-        # Exclude isolated sources not passed to deblender
-        if excludeIsolatedNotModel:
+        # TODO: The following if/else is just for backwards compatibility with
+        # older scarlet catalogs that did not add the detect_isDeblendedSource
+        # column.  Remove this condition when the few old catalogs in existence
+        # become obsolete.
+        if "detect_isDeblendedSource" in schema:
+            if useScarletModelForIsolated:  # use the scarlet model-based results
+                bad |= ~catalog["detect_isDeblendedModelSource"]
+            else:  # use the non-model scarlet results
+                bad |= ~catalog["detect_isDeblendedSource"]
+                # Exclude isolated sources not passed to deblender as these
+                # indicate regions where there are no scarlet models for
+                # fromBlend objects in this area (because scarlet skips
+                # deblending for  objects that do not have full band coverage).
+                bad |= ((catalog["parent"] == 0) & (catalog["deblend_nChild"] == 0))
+        else:
+            # This is a pre-DM-29087 scarlet schema
+            # Exclude parents that are blends of multiple sources
+            bad |= ((catalog["parent"] == 0) & (catalog["deblend_nChild"] > 1))
+            # Exclude isolated sources not passed to deblender
             bad |= ((catalog["parent"] == 0) & (catalog["deblend_nChild"] == 1))
-        # Exclude isolated sources that were passed to deblender
-        if excludeIsolatedModel:
-            # TODO: remove this raise once DM-28542 lands and reverse
-            # True/False settings for excludeIsolatedNotModel/
-            # excludeIsolatedModel.
-            raise RuntimeError("Can't select against isolated scarlet model sources "
-                               "until DM-28542 lands")
-            bad |= ((catalog["parent"] != 0) & (catalog["deblend_parentNPeaks"] == 1))
-        # Exclude parent blends that were skipped
-        if excludeSkipped:
-            bad |= catalog["deblend_skipped"]
     else:
-        bad |= catalog["deblend_nChild"] > 0  # Exclude non-deblended (i.e. parents)
+        # TODO: again, this if/else is just for compatibility with older
+        # catalogs that do not have the detect_isDeblendedSource column set.
+        if "detect_isDeblendedSource" in schema:
+            bad |= ~catalog["detect_isDeblendedSource"]
+        else:
+            bad |= catalog["deblend_nChild"] > 0  # Exclude non-deblended (i.e. parents)
+    # Exclude parent blends that were skipped
+    if excludeSkipped:
+        bad |= catalog["deblend_skipped"]
     # Exclude "sky" objects from catalogs (column names differ for visit
     # and coadd catalogs).
     for skyObjectCol in ["merge_peak_sky", "sky_source"]:

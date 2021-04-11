@@ -255,7 +255,8 @@ class ColorAnalysisConfig(Config):
                              doc="Mapping between different stack (e.g. HSC vs. LSST) schema names")
     # We want the following to come from the *_meas catalogs as they reflect
     # what happened in SFP calibration.
-    columnsToCopyFromMeas = ListField(dtype=str, default=["calib_", ],
+    columnsToCopyFromMeas = ListField(dtype=str, default=["calib_", "deblend_scarletFlux",
+                                                          "deblend_skipped", ],
                                       doc="List of string \"prefixes\" to identify the columns to copy.  "
                                       "All columns with names that start with one of these strings will be "
                                       "copied from the *_meas catalogs into the *_forced_src catalogs "
@@ -273,7 +274,8 @@ class ColorAnalysisConfig(Config):
         dtype=str,
         default=["coord", "tract", "patch", "base_PixelFlags", "base_PsfFlux", "modelfit_CModel",
                  "slot_Centroid", "slot_Shape", "base_ClassificationExtendedness", "parent", "detect",
-                 "deblend_nChild", "base_InputCount", "merge_peak_sky", "merge_measurement", "calib"],
+                 "deblend_nChild", "deblend_scarletFlux", "deblend_skipped", "base_InputCount",
+                 "merge_peak_sky", "merge_measurement", "calib"],
         doc=("List of \"startswith\" strings of column names to load from deepCoadd_obj parquet table. "
              "All columns that start with one of these strings will be loaded UNLESS the full column "
              "name contains one of the strings listed in the notInColumnStrList config."))
@@ -970,12 +972,17 @@ class ColorAnalysisTask(CmdLineTask):
         assert all(len(cat) == num for cat in catalogDict.values())
 
         if isinstance(template, pd.DataFrame):
+            schema = getSchema(template)
             new = pd.DataFrame()
             new["coord_ra"] = template["coord_ra"]
             new["coord_dec"] = template["coord_dec"]
             new["id"] = template["id"]
             new["parent"] = template["parent"]
             new["deblend_nChild"] = template["deblend_nChild"]
+            if "deblend_scarletFlux" in schema:
+                new["deblend_scarletFlux"] = template["deblend_scarletFlux"]
+            if "detect_isDeblendedSource" in schema:
+                new["detect_isDeblendedSource"] = template["detect_isDeblendedSource"]
             toAddList = []
             for col in transforms:
                 doAdd = True
@@ -1141,7 +1148,7 @@ class ColorAnalysisTask(CmdLineTask):
             else:
                 raise RuntimeError("Unknown transformation: {:s}".format(self.config.transforms))
 
-            catLabel = "noDuplicates"
+            catLabel = " scarlet" if "deblend_scarletFlux" in schema else " noDuplicates"
             forcedStr = self.forcedStr + " " + catLabel
             shortName = "color_" + col
             self.log.info("shortName = {:s}".format(shortName + transform.subDescription))
@@ -1279,10 +1286,10 @@ class ColorAnalysisTask(CmdLineTask):
         bad = np.zeros(num, dtype=bool)
         for cat in byFilterCats.values():
             bad |= makeBadArray(cat, flagList=self.flags)
-        catLabel = "noDuplicates"
+        schema = getSchema(byFilterCats[self.fluxFilter])
+        catLabel = " scarlet" if "deblend_scarletFlux" in schema else " noDuplicates"
 
         if self.config.analysis.useSignalToNoiseThreshold:
-            schema = getSchema(byFilterCats[self.fluxFilter])
             if "base_InputCount_value" in schema:
                 inputCounts = byFilterCats[self.fluxFilter]["base_InputCount_value"]
                 scaleFactor = computeMeanOfFrac(inputCounts, tailStr="upper", fraction=0.1, floorFactor=10)
