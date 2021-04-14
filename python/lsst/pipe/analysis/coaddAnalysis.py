@@ -1835,9 +1835,16 @@ class CoaddAnalysisTask(CmdLineTask):
             patchPair = list(patchPair)
             patchCat1 = goodCat[goodCat["patchId"] == patchPair[0]].copy(deep=True)
             patchCat2 = goodCat[goodCat["patchId"] == patchPair[1]].copy(deep=True)
-            patchPairMatches = matchAndJoinCatalogs(patchCat1, patchCat2, matchRadius, log=self.log)
-            if not patchPairMatches.empty:
-                matchList.append(patchPairMatches)
+            if len(patchCat1) > 0 and len(patchCat2) > 0:
+                patchPairMatches = matchAndJoinCatalogs(patchCat1, patchCat2, matchRadius, log=self.log)
+                if not patchPairMatches.empty:
+                    matchList.append(patchPairMatches)
+                else:
+                    self.log.info("No \"good\" overlapping objects between patches {} and {}".
+                                  format(patchPair[0], patchPair[1]))
+            else:
+                self.log.info("No \"good\" overlapping objects between patches {} and {}".
+                              format(patchPair[0], patchPair[1]))
         if matchList:
             matches = pd.concat(matchList, axis=0)
         else:
