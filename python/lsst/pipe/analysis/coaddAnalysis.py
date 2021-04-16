@@ -149,7 +149,7 @@ class CoaddAnalysisConfig(Config):
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(fluxColumn)")
     # We want the following to come from the *_meas catalogs as they reflect
     # what happened in SFP calibration.
-    columnsToCopyFromMeas = ListField(dtype=str, default=["calib_", "deblend_parentNPeask", "deblend_nPeaks",
+    columnsToCopyFromMeas = ListField(dtype=str, default=["calib_", "deblend_parentNPeaks", "deblend_nPeaks",
                                                           "deblend_scarletFlux", "deblend_skipped"],
                                       doc="List of string \"prefixes\" to identify the columns to copy.  "
                                       "All columns with names that start with one of these strings will be "
@@ -434,20 +434,9 @@ class CoaddAnalysisTask(CmdLineTask):
             if self.config.doPlotSkyObjects:
                 baseGoodSky = (unforced["merge_peak_sky"] & (unforced["base_InputCount_value"] > 0)
                                & ~unforced["base_PixelFlags_flag_edge"])
+                if "detect_isDeblendedSource" in unforcedSchema:
+                    baseGoodSky &= unforced["detect_isDeblendedSource"]
                 skyObjCat = unforced[baseGoodSky].copy(deep=True)
-                if "deblend_scarletFlux" in unforcedSchema:
-                    # Only include the non-model (i.e. not deblended) scarlet
-                    # sources.  Note that we include the "deblend_skipped" sky
-                    # sources since they are equivalent to the scarlet isolated
-                    # non-model (i.e. not deblended) sources.
-                    # TODO: edit this selection to use isDeblenderPrimary once
-                    #       DM-28542 lands.
-                    goodSky = ((skyObjCat["parent"] == 0) & (skyObjCat["deblend_nChild"] == 1))
-                    goodSky |= ((skyObjCat["parent"] == 0) & (skyObjCat["deblend_nChild"] == 0)
-                                & skyObjCat["deblend_skipped"])
-                else:
-                    goodSky = unforced["deblend_nChild"] == 0
-                skyObjCat = skyObjCat[goodSky].copy(deep=True)
 
             # Must do the overlaps before purging the catalogs of non-primary
             # sources.  We only really need one set of these plots and the
@@ -1846,9 +1835,16 @@ class CoaddAnalysisTask(CmdLineTask):
             patchPair = list(patchPair)
             patchCat1 = goodCat[goodCat["patchId"] == patchPair[0]].copy(deep=True)
             patchCat2 = goodCat[goodCat["patchId"] == patchPair[1]].copy(deep=True)
-            patchPairMatches = matchAndJoinCatalogs(patchCat1, patchCat2, matchRadius, log=self.log)
-            if not patchPairMatches.empty:
-                matchList.append(patchPairMatches)
+            if len(patchCat1) > 0 and len(patchCat2) > 0:
+                patchPairMatches = matchAndJoinCatalogs(patchCat1, patchCat2, matchRadius, log=self.log)
+                if not patchPairMatches.empty:
+                    matchList.append(patchPairMatches)
+                else:
+                    self.log.info("No \"good\" overlapping objects between patches {} and {}".
+                                  format(patchPair[0], patchPair[1]))
+            else:
+                self.log.info("No \"good\" overlapping objects between patches {} and {}".
+                              format(patchPair[0], patchPair[1]))
         if matchList:
             matches = pd.concat(matchList, axis=0)
         else:
@@ -2361,7 +2357,7 @@ class CompareCoaddAnalysisTask(CoaddAnalysisTask):
                              len(unforced), int(100*len(unforced)/len(unforced1)),
                              len(forced), int(100*len(forced)/len(forced1))))
 
-        self.catLabel = "nChild = 0"
+        self.catLabel = " scarlet" if "first_deblend_scarletFlux" in getSchema(unforced) else " nChild = 0"
         forcedStr = forcedStr + " " + self.catLabel
         schema = getSchema(forced)
 
