@@ -42,7 +42,7 @@ from lsst.meas.algorithms import LoadIndexedReferenceObjectsTask
 from .analysis import AnalysisConfig, Analysis
 from .utils import (Enforcer, MagDiff, MagDiffMatches, MagDiffCompare, AstrometryDiff, AngularDistance,
                     TraceSize, PsfTraceSizeDiff, TraceSizeCompare, PercentDiff, E1Resids, E2Resids,
-                    E1ResidsHsmRegauss, E2ResidsHsmRegauss, FootAreaDiffCompare, MagDiffCompareErr,
+                    FootAreaDiffCompare, MagDiffCompareErr,
                     CentroidDiff, deconvMom, deconvMomStarGal, concatenateCatalogs, joinMatches,
                     matchAndJoinCatalogs, checkPatchOverlap, addColumnsToSchema, addFpPoint,
                     addFootprintArea, makeBadArray, addElementIdColumn, addIntFloatOrStrColumn,
@@ -1587,28 +1587,6 @@ class CoaddAnalysisTask(CmdLineTask):
                                                   unitScale=self.unitScale),
                                                   "   HSM e2 resids (psf_used - PSFmodel)%s" % unitStr,
                                                   shortName, self.config.analysis,
-                                                  goodKeys=["calib_psf_used"], qMin=-0.05, qMax=0.05,
-                                                  labeller=StarGalaxyLabeller(),
-                                                  unitScale=self.unitScale).plotAll(shortName, plotInfoDict,
-                                                                                    areaDict, self.log,
-                                                                                    **plotAllKwargs)
-
-                    shortName = "e1ResidsHsmRegauss" + postFix
-                    self.log.info("shortName = {:s}".format(shortName))
-                    yield from self.AnalysisClass(catalog, E1ResidsHsmRegauss(unitScale=self.unitScale),
-                                                  "       HsmRegauss e1 resids (psf_used - HsmPsfMoments)%s" %
-                                                  unitStr, shortName, self.config.analysis,
-                                                  goodKeys=["calib_psf_used"], qMin=-0.05, qMax=0.05,
-                                                  labeller=StarGalaxyLabeller(),
-                                                  unitScale=self.unitScale).plotAll(shortName, plotInfoDict,
-                                                                                    areaDict, self.log,
-                                                                                    **plotAllKwargs)
-
-                    shortName = "e2ResidsHsmRegauss" + postFix
-                    self.log.info("shortName = {:s}".format(shortName))
-                    yield from self.AnalysisClass(catalog, E2ResidsHsmRegauss(unitScale=self.unitScale),
-                                                  "       HsmRegauss e2 resids (psf_used - HsmPsfMoments)%s" %
-                                                  unitStr, shortName, self.config.analysis,
                                                   goodKeys=["calib_psf_used"], qMin=-0.05, qMax=0.05,
                                                   labeller=StarGalaxyLabeller(),
                                                   unitScale=self.unitScale).plotAll(shortName, plotInfoDict,

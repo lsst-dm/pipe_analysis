@@ -2505,21 +2505,6 @@ def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=No
             e2Resids = parameterFunc(catalog)
             catalog = addIntFloatOrStrColumn(catalog, e2Resids, fieldName, fieldDoc)
 
-    # HSM Regauss E1/E2 resids (deprecated and will be removed in Gen3)
-    fieldUnits = " (milli)" if toMilli else ""
-    if "ext_shapeHSM_HsmShapeRegauss_e1" in schema:
-        fieldName = "e1ResidsHsmRegauss_" + fieldUnits.strip(" ()")
-        fieldDoc = fieldName + " = src(e1) - hsmPsfMoments(e1), e1 = (Ixx - Iyy)/(Ixx + Iyy)" + fieldUnits
-        parameterFunc = E1ResidsHsmRegauss(unitScale=unitScale)
-        e1ResidsHsmRegauss = parameterFunc(catalog)
-        catalog = addIntFloatOrStrColumn(catalog, e1ResidsHsmRegauss, fieldName, fieldDoc)
-    if "ext_shapeHSM_HsmShapeRegauss_e2" in schema:
-        fieldName = "e2ResidsHsmRegauss_" + fieldUnits.strip(" ()")
-        fieldDoc = fieldName + " = src(e2) - hsmPsfMoments(e2), e2 = (Ixx - Iyy)/(Ixx + Iyy)" + fieldUnits
-        parameterFunc = E2ResidsHsmRegauss(unitScale=unitScale)
-        e2ResidsHsmRegauss = parameterFunc(catalog)
-        catalog = addIntFloatOrStrColumn(catalog, e2ResidsHsmRegauss, fieldName, fieldDoc)
-
     if "base_SdssShape_xx" in schema:
         fieldName = "deconvMoments"
         fieldDoc = "Deconvolved moments"
