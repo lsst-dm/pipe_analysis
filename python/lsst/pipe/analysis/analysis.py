@@ -1047,10 +1047,11 @@ class Analysis(object):
         schema = getSchema(catalog)
         # Use HSM algorithm results if present, if not, use SDSS Shape
         if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
-            compareCol = "ext_shapeHSM_HsmSourceMoments"
+            compareCol = "ext_shapeHSM_HsmPsfMoments"
             psfCompareCol = "ext_shapeHSM_HsmPsfMomentsDebiased"
             shapeAlgorithm = "HSM"
-            flags = ["ext_shapeHSM_HsmSourceMoments_flag", "ext_shapeHSM_HsmPsfMomentsDebiased_flag"]
+            flags = ["ext_shapeHSM_HsmSourceMoments_flag", "ext_shapeHSM_HsmPsfMomentsDebiased_flag",
+                     "ext_shapeHSM_HsmPsfMoments_flag"]
         else:
             compareCol = "base_SdssShape"
             psfCompareCol = "base_SdssShape_psf"
@@ -1234,12 +1235,12 @@ class Analysis(object):
             figs, axes = list(zip(*figAxes))
 
             description = description.replace("Rho", "hsmRho")
-            compareCol = "ext_shapeHSM_HsmSourceMoments"
+            compareCol = "ext_shapeHSM_HsmPsfMoments"
             psfCompareCol = "ext_shapeHSM_HsmPsfMomentsDebiased"
             shapeAlgorithm = "HSM"
             flags = list(self.config.flags) + ["ext_shapeHSM_HsmSourceMoments_flag",
                                                "ext_shapeHSM_HsmPsfMomentsDebiased_flag"]
-
+            import pdb; pdb.set_trace()
             # Cull the catalog of flagged sources
             bad = np.zeros(len(self.catalog), dtype=bool)
             bad |= self.catalog["deblend_nChild"] > 0
@@ -1279,7 +1280,7 @@ class Analysis(object):
                                                      measureRhoMetrics(rhoStats[rhoId], 1, ">"),
                                                      measExtrasDictList=measExtrasDictList)
 
-            shapeAlgorithm = "HSM (Debiased)"
+            shapeAlgorithm = "HSM (Psf - Psf Debiased)"
             for figId, figax in enumerate(figAxes):
                 fig, ax = figax
                 figDescription = description + str(figId + 1)
