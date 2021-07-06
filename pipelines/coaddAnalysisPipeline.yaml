@@ -27,3 +27,13 @@ tasks:
     config:
       colorCodeValueColName: iDeconvMoments
       connections.plotName: iDeconvMoms_stars_sky
+  plot_skyObjects_sky_r:
+    class: lsst.pipe.analysis.skyPlot.SkyPlotTask
+    config:
+      colorCodeValueColName: rApFlux
+      connections.plotName: skyObjects_sky_r
+  plot_skyObjects_sky_i:
+    class: lsst.pipe.analysis.skyPlot.SkyPlotTask
+    config:
+      colorCodeValueColName: iApFlux
+      connections.plotName: skyObjects_sky_i

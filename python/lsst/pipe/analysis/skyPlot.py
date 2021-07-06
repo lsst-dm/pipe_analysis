@@ -62,7 +62,8 @@ class SkyPlotTaskConfig(pipeBase.PipelineTaskConfig, pipelineConnections=SkyPlot
     )
 
     objectsToPlot = pexConfig.Field(
-        doc="Which types of objects to include on the plot, should be one of 'stars', 'galaxies' or 'all'.",
+        doc=("Which types of objects to include on the plot, should be one of 'stars', 'galaxies', 'all'"
+             "or 'sky'."),
         dtype=str,
         default="stars",
     )
@@ -175,7 +176,9 @@ class SkyPlotTask(pipeBase.PipelineTask):
         ("jointcal" or not), it is used to add information to the
         plot.  Returns the median and sigma MAD for the x and y values.
         """
-
+        for col in catPlot.columns:
+            if 'Calib' in col:
+                print(col)
         self.log.info("Plotting {}: the values of {} for {} on a sky plot.".format(
                       self.config.connections.plotName, self.config.colorCodeValueColName,
                       self.config.objectsToPlot))
@@ -190,6 +193,7 @@ class SkyPlotTask(pipeBase.PipelineTask):
         # Need to separate stars and galaxies
         stars = (catPlot[self.config.sourceTypeColName] == 0.0)
         galaxies = (catPlot[self.config.sourceTypeColName] == 1.0)
+        skyObjects = (catPlot['iApFlux_flag'] == 1.0)
 
         # For galaxies
         xsGalaxies = catPlot[self.config.xColName].values[galaxies]
@@ -200,6 +204,11 @@ class SkyPlotTask(pipeBase.PipelineTask):
         xsStars = catPlot[self.config.xColName].values[stars]
         ysStars = catPlot[self.config.yColName].values[stars]
         colorValsStars = catPlot[self.config.colorCodeValueColName].values[stars]
+
+        # For sky objects
+        xsSkyObjects = catPlot[self.config.xColName].values[skyObjects]
+        ysSkyObjects = catPlot[self.config.yColName].values[skyObjects]
+        colorValsSkyObjects = catPlot[self.config.colorCodeValueColName].values[skyObjects]
 
         # Calculate some statistics
         if self.config.objectsToPlot == "galaxies" or self.config.objectsToPlot == "all":
@@ -213,7 +222,8 @@ class SkyPlotTask(pipeBase.PipelineTask):
             bbox = dict(facecolor="C1", alpha=0.3, edgecolor="none")
             ax.text(0.7, 0.92, galStatsText, transform=fig.transFigure, fontsize=8, bbox=bbox)
 
-        if self.config.objectsToPlot == "stars" or self.config.objectsToPlot == "all":
+        if (self.config.objectsToPlot == "stars" or self.config.objectsToPlot == "sky" or
+            self.config.objectsToPlot == "all"):
 
             lowSnStars = (((catPlot["useForStats"] == 1) | (catPlot["useForStats"] == 2)) & stars)
             lowSnStarMed = np.nanmedian(catPlot[self.config.yColName].values[lowSnStars])
@@ -230,6 +240,8 @@ class SkyPlotTask(pipeBase.PipelineTask):
             toPlotList = [(xsStars, ysStars, colorValsStars, "winter_r", "Stars")]
         elif self.config.objectsToPlot == "galaxies":
             toPlotList = [(xsGalaxies, ysGalaxies, colorValsGalaxies, "autumn_r", "Galaxies")]
+        elif self.config.objectsToPlot == "skyObject":
+            toPlotList = [(xsSkyObjects, ysSkyObjects, colorValsSkyObjects, "winter_r", "Sky Objects")]
         elif self.config.objectsToPlot == "all":
             toPlotList = [(xsGalaxies, ysGalaxies, colorValsGalaxies, "autumn_r", "Galaxies"),
                           (xsStars, ysStars, colorValsStars, "winter_r", "Stars")]

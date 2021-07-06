@@ -143,4 +143,4 @@ tasks:
       yLabel: "i - z [CModel] (mag)"
       name: "yFit"
       connections.plotName: "CModel_yFit"
-  
+
