@@ -169,7 +169,7 @@ tempTransformsImSim = {
                                        requireGreater={"xPara": 0.8}, requireLess={"xPara": 1.6},
                                        fitLineSlope=-1/13.35, fitLineUpperIncpt=1.73, fitLineLowerIncpt=0.87),
     "yPerp": ColorTransform.fromValues("Temporary y perpendicular", " (rizRed)", True,
-                                       {"r": -0.227, "i": 0.793, "HSC-Z": -0.566, "": -0.017},
+                                       {"r": -0.227, "i": 0.793, "z": -0.566, "": -0.017},
                                        x0=1.2219, y0=0.5183,
                                        requireGreater={"yPara": 0.1}, requireLess={"yPara": 1.2},
                                        fitLineSlope=-1/0.40, fitLineUpperIncpt=5.5, fitLineLowerIncpt=2.6),
@@ -180,7 +180,7 @@ tempTransformsImSim = {
     "xPara": ColorTransform.fromValues("Temporary x parallel", " (griRed)", False,
                                        {"g": 0.075, "r": 0.922, "i": -0.997, "": -1.442}),
     "yPara": ColorTransform.fromValues("Temporary y parallel", " (rizRed)", False,
-                                       {"r": 0.928, "i": -0.557, "HSC-Z": -0.372, "": -1.332}),
+                                       {"r": 0.928, "i": -0.557, "z": -0.372, "": -1.332}),
     # The following three entries were derived in the process of calibrating
     # the above coeffs (all three RC2 tracts gave effectively the same fits).
     # May remove later if deemed no longer useful.
@@ -870,7 +870,15 @@ class ColorAnalysisTask(CmdLineTask):
                 try:
                     existsBandList = parquetCat.columnLevelNames["band"]
                     filterLevelStr = "band"
-                    bandName = self.config.physicalToBandFilterMap[filterName]
+                    if filterName in self.config.physicalToBandFilterMap:
+                        bandName = self.config.physicalToBandFilterMap[filterName]
+                    else:
+                        bandName = filterName
+                        if len(bandName) > 1:
+                            self.log.warning("The bandName %s has a length greater than would be expected "
+                                             "for canonical/generic band name designations.  If this is "
+                                             "incorrect, a physicalToBandFilterMap must be provided "
+                                             "for this obs package.", bandName)
                 except KeyError:
                     existsBandList = parquetCat.columnLevelNames["filter"]
                     filterLevelStr = "filter"

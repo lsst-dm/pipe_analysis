@@ -2469,8 +2469,15 @@ class CompareCoaddAnalysisRunner(TaskRunner):
                 gen3PidCopy = copy.deepcopy(gen3Pid)
                 if "filter" in gen3PidCopy:
                     gen3PidCopy["physical_filter"] = gen3PidCopy.pop("filter")
-                    gen3PidCopy["band"] = filterToBandMap[gen3PidCopy["physical_filter"]]
-                    gen3PidCopy["skymap"] = "hsc_rings_v1"
+                    if parsedCmd.instrument == "HSC":
+                        gen3PidCopy["band"] = filterToBandMap[gen3PidCopy["physical_filter"]]
+                        gen3PidCopy["skymap"] = "hsc_rings_v1"
+                    elif parsedCmd.instrument == "LSSTCam-imSim":
+                        gen3PidCopy["band"] = gen3PidCopy["physical_filter"]
+                        gen3PidCopy["skymap"] = "DC2"
+                    else:
+                        raise RuntimeError("Unknown instrument {}. Currently only know HSC and "
+                                           "LSSTCam-imSim.".format(parsedCmd.instrument))
                     gen3PidCopy["dataId"] = gen3PidCopy.copy()
                     gen3PidCopy["butler"] = butler2
                 gen3PidCopy["dataId"]["patch"] = patchIdToGen3Map[patchId]
