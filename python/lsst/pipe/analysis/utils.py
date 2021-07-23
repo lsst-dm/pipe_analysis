@@ -1787,7 +1787,13 @@ def fluxToPlotString(fluxToPlot):
                   "base_CircularApertureFlux_9_0_instFlux": "CircApRad9pix",
                   "base_CircularApertureFlux_9_0": "CircApRad9pix",
                   "base_CircularApertureFlux_25_0_instFlux": "CircApRad25pix",
-                  "base_CircularApertureFlux_25_0": "CircApRad25pix"}
+                  "base_CircularApertureFlux_25_0": "CircApRad25pix",
+                  "ext_gaap_GaapFlux_1_15x_Optimal_instFlux": "GaapOptimal",
+                  "ext_gaap_GaapFlux_1_15x_Optimal_flux": "GaapOptimal",
+                  "ext_gaap_GaapFlux_1_15x_Optimal": "GaapOptimal",
+                  "ext_gaap_GaapFlux_1_15x_PsfFlux_instFlux": "GaapPsf",
+                  "ext_gaap_GaapFlux_1_15x_PsfFlux_flux": "GaapPsf",
+                  "ext_gaap_GaapFlux_1_15x_PsfFlux": "GaapPsf"}
     if fluxToPlot in fluxStrMap:
         return fluxStrMap[fluxToPlot]
     else:

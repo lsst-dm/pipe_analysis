@@ -138,8 +138,6 @@ ivezicTransformsHSC = {
                                        x0=1.2219, y0=0.5183,
                                        requireGreater={"yPara": 0.1}, requireLess={"yPara": 1.2},
                                        fitLineSlope=-1/0.40, fitLineUpperIncpt=5.5, fitLineLowerIncpt=2.6),
-    # The following still default to the SDSS values.  HSC coeffs will be
-    # derived on a subsequent commit.
     "wPara": ColorTransform.fromValues("Ivezic w parallel", " (griBlue)", False,
                                        {"HSC-G": 0.888, "HSC-R": -0.427, "HSC-I": -0.461, "": -0.478}),
     "xPara": ColorTransform.fromValues("Ivezic x parallel", " (griRed)", False,
@@ -158,32 +156,34 @@ ivezicTransformsHSC = {
 }
 
 tempTransformsImSim = {
+    # wPerp/Para values have been tuned to tract 3828
     "wPerp": ColorTransform.fromValues("Temporary w perpendicular", " (griBlue)", True,
-                                       {"g": -0.274, "r": 0.803, "i": -0.529, "": 0.041},
-                                       x0=0.4481, y0=0.1546,
+                                       {"g": -0.242, "r": 0.796, "i": -0.554, "": 0.016},
+                                       x0=0.3566, y0=0.1270,
                                        requireGreater={"wPara": -0.2}, requireLess={"wPara": 0.6},
-                                       fitLineSlope=-1/0.52, fitLineUpperIncpt=2.40, fitLineLowerIncpt=0.68),
-    "xPerp": ColorTransform.fromValues("Temporary x perpendicular", " (griRed)", True,
+                                       fitLineSlope=-1/0.44, fitLineUpperIncpt=2.78, fitLineLowerIncpt=0.79),
+    # xPerp/Para values are still set to Ivezic HSC values (not used for any
+    # diagnostic purposes at present and too finicky to spend time and effort
+    # calibrating for now).
+    "xPerp": ColorTransform.fromValues("Temp x perpendicular", " (griRed)", True,
                                        {"g": -0.680, "r": 0.731, "i": -0.051, "": 0.792},
                                        x0=1.2654, y0=1.3675,
                                        requireGreater={"xPara": 0.8}, requireLess={"xPara": 1.6},
                                        fitLineSlope=-1/13.35, fitLineUpperIncpt=1.73, fitLineLowerIncpt=0.87),
     "yPerp": ColorTransform.fromValues("Temporary y perpendicular", " (rizRed)", True,
-                                       {"r": -0.227, "i": 0.793, "z": -0.566, "": -0.017},
-                                       x0=1.2219, y0=0.5183,
+                                       {"r": -0.211, "i": 0.789, "z": -0.578, "": -0.046},
+                                       x0=1.2065, y0=0.5251,
                                        requireGreater={"yPara": 0.1}, requireLess={"yPara": 1.2},
-                                       fitLineSlope=-1/0.40, fitLineUpperIncpt=5.5, fitLineLowerIncpt=2.6),
-    # The following still default to the SDSS values.  HSC coeffs will be
-    # derived on a subsequent commit.
+                                       fitLineSlope=-1/0.37, fitLineUpperIncpt=5.9, fitLineLowerIncpt=2.8),
     "wPara": ColorTransform.fromValues("Temporary w parallel", " (griBlue)", False,
-                                       {"g": 0.888, "r": -0.427, "i": -0.461, "": -0.478}),
-    "xPara": ColorTransform.fromValues("Temporary x parallel", " (griRed)", False,
+                                       {"g": 0.917, "r": -0.517, "i": -0.400, "": -0.378}),
+    "xPara": ColorTransform.fromValues("Temp x parallel", " (griRed)", False,
                                        {"g": 0.075, "r": 0.922, "i": -0.997, "": -1.442}),
     "yPara": ColorTransform.fromValues("Temporary y parallel", " (rizRed)", False,
-                                       {"r": 0.928, "i": -0.557, "z": -0.372, "": -1.332}),
-    # The following three entries were derived in the process of calibrating
-    # the above coeffs (all three RC2 tracts gave effectively the same fits).
-    # May remove later if deemed no longer useful.
+                                       {"r": 0.939, "i": -0.596, "z": -0.343, "": -1.324}),
+    # The following three entries are still set to Ivezic HSC values (they
+    # are not used for any diagnostic purposes at present, so not worth taking
+    # the time to calibrate).
     "wFit": ColorTransform.fromValues("Straight line fit for wPerp range", " (griBlue)", False,
                                       {"g": 0.52, "r": -0.52, "": -0.08}),
     "xFit": ColorTransform.fromValues("Straight line fit for xperp range", " (griRed)", False,
@@ -325,7 +325,8 @@ class ColorAnalysisConfig(Config):
         default=["coord", "tract", "patch", "base_PixelFlags", "base_PsfFlux", "modelfit_CModel",
                  "slot_Centroid", "slot_Shape", "base_ClassificationExtendedness", "parent", "detect",
                  "deblend_nChild", "deblend_scarletFlux", "deblend_skipped", "base_InputCount",
-                 "merge_peak_sky", "merge_measurement", "calib"],
+                 "merge_peak_sky", "merge_measurement", "calib", "ext_gaap_GaapFlux_1_15x_Optimal",
+                 "ext_gaap_GaapFlux_1_15x_PsfFlux"],
         doc=("List of \"startswith\" strings of column names to load from deepCoadd_obj parquet table. "
              "All columns that start with one of these strings will be loaded UNLESS the full column "
              "name contains one of the strings listed in the notInColumnStrList config."))
@@ -403,9 +404,9 @@ class ColorAnalysisConfig(Config):
                     # round-off error.
                     if (np.abs((p1p2Lines.mP1 - p1p2Lines.mP2)*transformPerp.x0
                                + (p1p2Lines.bP1 - p1p2Lines.bP2)) > 2e-2):
-                        raise ValueError(("Wired origin for {} does not lie on line associated with wired "
-                                          "PCA coefficients.  Check that the wired values are correct.").
-                                         format(col))
+                        print("NOTE: Wired origin for {} does not lie on line associated with wired "
+                              "PCA coefficients.  Check that the wired values are correct.".
+                              format(col))
 
 
 class ColorAnalysisRunner(TaskRunner):
@@ -742,6 +743,18 @@ class ColorAnalysisTask(CmdLineTask):
                                                      "base_PsfFlux_instFlux", hscRun=repoInfo.hscRun)
         principalColCatsCModel = self.transformCatalogs(byFilterForcedCats, self.config.transforms,
                                                         "modelfit_CModel_instFlux", hscRun=repoInfo.hscRun)
+
+        haveGaapOpt = "ext_gaap_GaapFlux_1_15x_Optimal_instFlux" in byFilterForcedCats[self.fluxFilter]
+        if haveGaapOpt:
+            principalColCatsGaapOpt = self.transformCatalogs(byFilterForcedCats, self.config.transforms,
+                                                             "ext_gaap_GaapFlux_1_15x_Optimal_instFlux",
+                                                             hscRun=repoInfo.hscRun)
+        haveGaapPsf = "ext_gaap_GaapFlux_1_15x_PsfFlux_instFlux" in byFilterForcedCats[self.fluxFilter]
+        if haveGaapPsf:
+            principalColCatsGaapPsf = self.transformCatalogs(byFilterForcedCats, self.config.transforms,
+                                                             "ext_gaap_GaapFlux_1_15x_PsfFlux_instFlux",
+                                                             hscRun=repoInfo.hscRun)
+
         # Create and write parquet tables
         if self.config.doWriteParquetTables:
             if repoInfo.isGen3:
@@ -754,17 +767,36 @@ class ColorAnalysisTask(CmdLineTask):
                 return
 
         if self.config.doPlotPrincipalColors:
-            principalColCats = (principalColCatsCModel if "CModel" in self.fluxColumn else
-                                principalColCatsPsf)
+            if "base_PsfFlux" in self.fluxColumn:
+                principalColCats = principalColCatsPsf
+            elif "CModel" in self.fluxColumn:
+                principalColCats = principalColCatsCModel
+            elif "gaap" in self.fluxColumn:
+                if "Optimal" in self.fluxColumn:
+                    principalColCats = principalColCatsGaapOpt
+                if "PsfFlux" in self.fluxColumn:
+                    principalColCats = principalColCatsGaapPsf
+            else:
+                raise RuntimeError("Unknown self.fluxColumn {}".format(self.fluxColumn))
             plotList.append(self.plotStarPrincipalColors(principalColCats, byFilterForcedCats, plotInfoDict,
                                                          byFilterAreaDict, NumStarLabeller(3),
                                                          geLabel=geLabel, uberCalLabel=uberCalLabel))
 
-        for fluxColumn in ["base_PsfFlux_instFlux", "modelfit_CModel_instFlux"]:
+        fluxColumnList = ["base_PsfFlux_instFlux", "modelfit_CModel_instFlux"]
+        if haveGaapOpt:
+            fluxColumnList.append("ext_gaap_GaapFlux_1_15x_Optimal_instFlux")
+        if haveGaapPsf:
+            fluxColumnList.append("ext_gaap_GaapFlux_1_15x_PsfFlux_instFlux")
+
+        for fluxColumn in fluxColumnList:
             if fluxColumn == "base_PsfFlux_instFlux":
                 principalColCats = principalColCatsPsf
             elif fluxColumn == "modelfit_CModel_instFlux":
                 principalColCats = principalColCatsCModel
+            elif fluxColumn == "ext_gaap_GaapFlux_1_15x_Optimal_instFlux":
+                principalColCats = principalColCatsGaapOpt
+            elif fluxColumn == "ext_gaap_GaapFlux_1_15x_PsfFlux_instFlux":
+                principalColCats = principalColCatsGaapPsf
             else:
                 raise RuntimeError("Have not computed transformations for: {:s}".format(fluxColumn))
 
@@ -1381,8 +1413,14 @@ class ColorAnalysisTask(CmdLineTask):
         schema = getSchema(principalColCats)
         mags = {filterName: -2.5*np.log10(byFilterCats[filterName]["base_PsfFlux_instFlux"]) for
                 filterName in byFilterCats}
-        fluxColumn = ("base_PsfFlux_instFlux" if "base_PsfFlux_instFlux" in schema else
-                      "modelfit_CModel_instFlux")
+        if "base_PsfFlux_instFlux" in schema:
+            fluxColumn = "base_PsfFlux_instFlux"
+        elif "modelfit_CModel_instFlux" in schema:
+            fluxColumn = "modelfit_CModel_instFlux"
+        elif "ext_gaap_GaapFlux_1_15x_Optimal_instFlux" in schema:
+            fluxColumn = "ext_gaap_GaapFlux_1_15x_Optimal_instFlux"
+        else:
+            raise RuntimeError("Have not computed Principal Colors for: {:s}".format(fluxColumn))
         signalToNoise = {filterName:
                          byFilterCats[filterName][fluxColumn]/byFilterCats[filterName][fluxColumn + "Err"]
                          for filterName in byFilterCats}
@@ -1736,7 +1774,7 @@ class ColorAnalysisTask(CmdLineTask):
             yield from self.AnalysisClass(combined,
                                           ColorColorDistance("g", "r", "i", poly, unitScale=self.unitScale,
                                                              fitLineUpper=fitLineUpper,
-                                                             fitLineLower=fitLineLower),
+                                                             fitLineLower=fitLineLower, log=self.log),
                                           filtersStr + "Distance [%s] (%s)" % (fluxColStr, unitStr),
                                           shortName, self.config.analysis, flags=["qaBad_flag"], qMin=-0.1,
                                           qMax=0.1, magThreshold=prettyBrightThreshold,
@@ -1813,7 +1851,8 @@ class ColorAnalysisTask(CmdLineTask):
             yield from self.AnalysisClass(combined, ColorColorDistance("r", "i", "z", poly,
                                                                        unitScale=self.unitScale,
                                                                        fitLineUpper=fitLineUpper,
-                                                                       fitLineLower=fitLineLower),
+                                                                       fitLineLower=fitLineLower,
+                                                                       log=self.log),
                                           filtersStr + "Distance [%s] (%s)" % (fluxColStr, unitStr),
                                           shortName, self.config.analysis, flags=["qaBad_flag"], qMin=-0.1,
                                           qMax=0.1, magThreshold=prettyBrightThreshold,
@@ -1870,7 +1909,7 @@ class ColorAnalysisTask(CmdLineTask):
             yield from self.AnalysisClass(combined,
                                           ColorColorDistance("i", "z", "y", poly, unitScale=self.unitScale,
                                                              fitLineUpper=fitLineUpper,
-                                                             fitLineLower=fitLineLower),
+                                                             fitLineLower=fitLineLower, log=self.log),
                                           filtersStr + "Distance [%s] (%s)" % (fluxColStr, unitStr),
                                           shortName, self.config.analysis, flags=["qaBad_flag"], qMin=-0.1,
                                           qMax=0.1, magThreshold=prettyBrightThreshold,
@@ -1931,7 +1970,7 @@ class ColorAnalysisTask(CmdLineTask):
             yield from self.AnalysisClass(combined,
                                           ColorColorDistance("z", "n921", "y", poly, unitScale=self.unitScale,
                                                              fitLineUpper=fitLineUpper,
-                                                             fitLineLower=fitLineLower),
+                                                             fitLineLower=fitLineLower, log=self.log),
                                           filtersStr + "Distance [%s] (%s)" % (fluxColStr, unitStr),
                                           shortName, self.config.analysis, flags=["qaBad_flag"], qMin=-0.1,
                                           qMax=0.1, magThreshold=prettyBrightThreshold,
@@ -2025,8 +2064,9 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
             keep &= select
             nKeep = np.sum(keep)
             if nKeep < order:
-                raise RuntimeError("Not enough good data points ({0:d}) for polynomial fit of order {1:d}".
-                                   format(nKeep, order))
+                log.warn("Not enough good data points ({0:d}) for polynomial fit of order {1:d}  "
+                         "Returning None and plot will be skipped.".format(nKeep, order))
+                return None
             poly = np.polyfit(xx[keep], yy[keep], order)
             dy = yy - np.polyval(poly, xx)
             clippedStats = calcQuartileClippedStats(dy[keep], nSigmaToClip=rej)
@@ -2043,15 +2083,17 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
         keep &= select
         nKeep = np.sum(keep)
         if nKeep < order:
-            raise RuntimeError(
-                "Not enough good data points ({0:d}) for polynomial fit of order {1:d}".format(nKeep, order))
+            log.warn("Not enough good data points ({0:d}) for polynomial fit of order {1:d}.  "
+                     "Returning None and plot will be skipped.".format(nKeep, order))
+            return None
 
         poly = np.polyfit(xx[keep], yy[keep], order)
 
     nKeep = np.sum(keep)
     if nKeep < order:
-        raise RuntimeError("Not enough good data points ({0:d}) for polynomial fit of order {1:d}".
-                           format(nKeep, order))
+        log.warn("Not enough good data points ({0:d}) for polynomial fit of order {1:d}.  "
+                 "Returning None and plot will be skipped.".format(nKeep, order))
+        return None
 
     # Calculate the point density
     xyKeep = np.vstack([xx[keep], yy[keep]])
@@ -2084,9 +2126,9 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
                 keepOdr &= sel
         nKeepOdr = np.sum(keepOdr)
         if nKeepOdr < order:
-            raise RuntimeError(
-                "Not enough good data points ({0:d}) for polynomial fit of order {1:d}".
-                format(nKeepOdr, order))
+            log.warn("Not enough good data points ({0:d}) for polynomial fit of order {1:d}.  "
+                     "Returning None and plot will be skipped.".format(nKeepOdr, order))
+            return None
         orthRegCoeffs = orthogonalRegression(xx[keepOdr], yy[keepOdr], order, initialGuess)
     yOrthLine = np.polyval(orthRegCoeffs, xLine)
 
@@ -2638,7 +2680,7 @@ class ColorColorDistance(object):
     """Functor to calculate distance from stellar locus in color-color plot.
     """
     def __init__(self, band1, band2, band3, poly, unitScale=1.0, xMin=None, xMax=None,
-                 fitLineUpper=None, fitLineLower=None):
+                 fitLineUpper=None, fitLineLower=None, log=None):
         self.band1 = band1
         self.band2 = band2
         self.band3 = band3
@@ -2651,6 +2693,7 @@ class ColorColorDistance(object):
         self.xMax = xMax
         self.fitLineUpper = fitLineUpper
         self.fitLineLower = fitLineLower
+        self.log = log
 
     def __call__(self, catalog):
         xx = catalog[self.band1] - catalog[self.band2]
@@ -2664,7 +2707,13 @@ class ColorColorDistance(object):
                     or (self.fitLineLower and y < self.fitLineLower[0] + self.fitLineLower[1]*x)):
                 distance2[i] = np.nan
                 continue
-            roots = np.roots(np.poly1d((1, -x)) + (self.poly - y)*polyDeriv)
+            try:
+                roots = np.roots(np.poly1d((1, -x)) + (self.poly - y)*polyDeriv)
+            except TypeError as e:
+                if self.log is not None:
+                    self.log.warn("Could not compute roots for distance calculation (with error: %s).  "
+                                  "Returning None and skipping plot.", e)
+                return None
             distance2[i] = min(distanceSquaredToPoly(x, y, np.real(rr), self.poly) for
                                rr in roots if np.real(rr) == rr)
         return np.sqrt(distance2)*np.where(yy >= self.poly(xx), 1.0, -1.0)*self.unitScale
