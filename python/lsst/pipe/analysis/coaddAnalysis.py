@@ -151,6 +151,9 @@ class CoaddAnalysisConfig(Config):
     fluxToPlotList = ListField(dtype=str, default=["base_GaussianFlux", "base_CircularApertureFlux_12_0",
                                                    "ext_photometryKron_KronFlux", "modelfit_CModel"],
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(fluxColumn)")
+    gaapFluxList = ListField(dtype=str, default=["ext_gaap_GaapFlux_1_15x_Optimal",
+                                                 "ext_gaap_GaapFlux_1_15x_PsfFlux"],
+                             doc="List of possible GAaP fluxes to add to fluxToPlotList")
     # We want the following to come from the *_meas catalogs as they reflect
     # what happened in SFP calibration.
     columnsToCopyFromMeas = ListField(dtype=str, default=["calib_", "deblend_parentNPeaks", "deblend_nPeaks",
@@ -179,7 +182,8 @@ class CoaddAnalysisConfig(Config):
                  "base_FPPosition", "base_ClassificationExtendedness", "parent", "detect", "deblend_nChild",
                  "deblend_parentNPeaks", "deblend_nPeaks", "deblend_scarletFlux", "deblend_skipped",
                  "base_Blendedness_abs", "base_Blendedness_flag", "base_InputCount",
-                 "merge_peak_sky", "merge_measurement", "calib", "sky_source"],
+                 "merge_peak_sky", "merge_measurement", "calib", "sky_source",
+                 "ext_gaap_GaapFlux_1_15x_Optimal_", "ext_gaap_GaapFlux_1_15x_PsfFlux_"],
         doc=("List of \"startswith\" strings of column names to load from deepCoadd_obj parquet table. "
              "All columns that start with one of these strings will be loaded UNLESS the full column "
              "name contains one of the strings listed in the notInColumnStrList config."))
@@ -700,10 +704,16 @@ class CoaddAnalysisTask(CmdLineTask):
                     plotKwargs.update(dict(highlightList=highlightList
                                            + [("merge_measurement_" + repoInfo.genericBandName, 0,
                                                "yellow")]))
-
+                    fluxToPlotList = [flux for flux in self.config.fluxToPlotList]
+                    for gaapFlux in self.config.gaapFluxList:
+                        haveGaap = gaapFlux + "_instFlux" in forcedSchema
+                        if haveGaap:
+                            fluxToPlotList.append(gaapFlux)
                     plotList.append(self.plotMags(forced, plotInfoDict, areaDict, forcedStr=forcedStr,
-                                                  postFix="_forced", **plotKwargs))
+                                                  fluxToPlotList=fluxToPlotList, postFix="_forced",
+                                                  **plotKwargs))
                     plotKwargs.update(dict(highlightList=highlightList))
+
             if self.config.doPlotStarGalaxy:
                 if "ext_shapeHSM_HsmSourceMoments_xx" in unforcedSchema:
                     plotList.append(self.plotStarGal(unforced, plotInfoDict, areaDict,
@@ -2688,8 +2698,13 @@ class CompareCoaddAnalysisTask(CoaddAnalysisTask):
                                  rerun2=rerun2Str))
 
         if self.config.doPlotMags:
+            fluxToPlotList = [flux for flux in self.config.fluxToPlotList]
+            for gaapFlux in self.config.gaapFluxList:
+                haveGaap = gaapFlux + "_instFlux" in schema
+                if haveGaap:
+                    fluxToPlotList.append(gaapFlux)
             plotList.append(self.plotMags(forced, plotInfoDict, areaDict1, forcedStr=forcedStr,
-                                          **plotKwargs1))
+                                          fluxToPlotList=fluxToPlotList, **plotKwargs1))
 
         if self.config.doPlotSizes:
             if ("first_base_SdssShape_psf_xx" in schema and "second_base_SdssShape_psf_xx" in schema):

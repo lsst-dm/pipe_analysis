@@ -1730,7 +1730,7 @@ class Analysis(object):
 
         if "galaxy" in self.data and (not any(ss in self.shortName for ss in
                                               ["pStar", "race", "Xx", "Yy", "Resids", "gri", "riz", "izy",
-                                               "z9y", "color_"])):
+                                               "z9y", "color_", "gaap"])):
             styleStr = "sky-gals"
             dataName = "galaxy"
             if self.checkGoodDataExists(dataName, stats, log, styleStr):
