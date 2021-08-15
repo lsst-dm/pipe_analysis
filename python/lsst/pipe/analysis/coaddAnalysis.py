@@ -2527,7 +2527,22 @@ class CompareCoaddAnalysisTask(CoaddAnalysisTask):
                                patchRef1.datasetExists(self.config.coaddName + dataset1)]
         dataset2 = "Coadd_obj" if self.config.doReadParquetTables2 else "Coadd_forced_src"
 
-        repoInfo2 = getRepoInfo(patchRefList2[0], coaddName=self.config.coaddName, coaddDataset=dataset2)
+        repoInfo2 = None
+        for patchRef2 in patchRefList2:  # Find an existing rerun2 dataset to assess if gen3
+            try:
+                repoInfo2 = getRepoInfo(patchRef2, coaddName=self.config.coaddName, coaddDataset=dataset2)
+                break
+            except Exception:
+                if hasattr(patchRef2, "dataId"):
+                    dataId = patchRef2.dataId
+                else:
+                    dataId = patchRef2["dataId"]
+                self.log.info("No patch found for {} in rerun2.  Continuing search down patchRefList2.".
+                              format(dataId))
+                continue
+        if repoInfo2 is None:
+            raise TaskError("No data exists in patRefList2...")
+
         if not repoInfo2.isGen3:
             patchRefExistsList2 = [patchRef2 for patchRef2 in patchRefList2 if
                                    patchRef2.datasetExists(self.config.coaddName + dataset2)]
