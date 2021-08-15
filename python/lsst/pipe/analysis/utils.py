@@ -2054,7 +2054,7 @@ def getCcdNameRefList(dataRefList):
     return ccdNameRefList
 
 
-def getDataExistsRefList(dataRefList, dataset):
+def getDataExistsRefList(dataRefList, dataset, doCheckPhotoCalibNotNone=False, log=None):
     dataExistsRefList = []
     dataExistsCcdList = []
     dataRefTemp = dataRefList[0]
@@ -2085,6 +2085,30 @@ def getDataExistsRefList(dataRefList, dataset):
                 if dataId["detector"] != 999:
                     print("Could not find {} dataset for dataId {}".format(dataset, dataId))
                 continue
+
+    if doCheckPhotoCalibNotNone:
+        delimiterStr = "." if isGen3 else "_"
+        newRefList = []
+        for dataRef in dataExistsRefList:
+            dataId = dataRef["dataId"] if isGen3 else dataRef.dataId
+            ccdKey = findCcdKey(dataId)
+            if isGen3:
+                photoCalib = dataRef["butler"].get("calexp" + delimiterStr + "photoCalib", dataId=dataId)
+            else:
+                photoCalib = dataRef.get("calexp" + delimiterStr + "photoCalib")
+            if photoCalib is not None:
+                newRefList.append(dataRef)
+            else:
+                if log is not None:
+                    log.warning("photoCalib is None for %s.  Skipping...", dataId)
+        dataExistsRefList = newRefList
+        newCcdList = []
+        for dataRef in dataExistsRefList:
+            if isGen3:
+                newCcdList.append(dataRef["dataId"][ccdKey])
+            else:
+                newCcdList.append(dataRef.dataId[ccdKey])
+        dataExistsCcdList = newCcdList
 
     if len(dataExistsRefList) == 0:
         raise RuntimeError("dataExistsRef list is empty")
