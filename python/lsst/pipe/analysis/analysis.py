@@ -1416,8 +1416,8 @@ class Analysis(object):
             alphaCmap.set_under("r")
             alphaCmap.set_over("r")
         else:
-            log.warn("plotInputCounts: Unknown extend string for matplotlib colorbar: {:}.  Setting to "
-                     "\"neither\"".format(cbarExtend))
+            log.warning("plotInputCounts: Unknown extend string for matplotlib colorbar: {:}.  Setting to "
+                        "\"neither\"".format(cbarExtend))
             cbarExtend = "neither"
 
         ellipsePatchList = [matplotlib.patches.Ellipse(xy=xy, width=diamA, height=diamB, angle=theta)
@@ -1691,12 +1691,12 @@ class Analysis(object):
         try:
             stats = self.stats
         except AttributeError:
-            log.warn("plotAll: no self.stats attribute for {:}.  Skipping plots...".format(self.shortName))
+            log.warning("plotAll: no self.stats attribute for {:}.  Skipping plots...".format(self.shortName))
             return
         # Make sure you have some good data to plot
         if all(stats[stat].num == 0 for stat in stats):
-            log.warn("plotAll: No good data points to plot for: {:}.  Skipping plots...".
-                     format(self.shortName))
+            log.warning("plotAll: No good data points to plot for: {:}.  Skipping plots...".
+                        format(self.shortName))
             return
         # Dict of all parameters common to plot* functions
         plotKwargs = dict(stats=stats, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
@@ -1959,8 +1959,8 @@ class Analysis(object):
             ``dataName``, else `False`.
         """
         if stats[dataName].num == 0:
-            log.warn("No good data points to plot for: {:} {:}.  Skipping {:} plot.".
-                     format(self.shortName, dataName, styleStr))
+            log.warning("No good data points to plot for: {:} {:}.  Skipping {:} plot.".
+                        format(self.shortName, dataName, styleStr))
             answer = False
         else:
             answer = True

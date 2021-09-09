@@ -196,7 +196,7 @@ class Enforcer(object):
                 if value <= self.requireGreater[label][ss]:
                     text = ("%s %s = %.2f exceeds minimum limit of %.2f: %s" %
                             (description, ss, value, self.requireGreater[label][ss], dataId))
-                    log.warn(text)
+                    log.warning(text)
                     if self.doRaise:
                         raise AssertionError(text)
         for label in self.requireLess:
@@ -205,7 +205,7 @@ class Enforcer(object):
                 if value >= self.requireLess[label][ss]:
                     text = ("%s %s = %.2f exceeds maximum limit of %.2f: %s" %
                             (description, ss, value, self.requireLess[label][ss], dataId))
-                    log.warn(text)
+                    log.warning(text)
                     if self.doRaise:
                         raise AssertionError(text)
 
@@ -888,8 +888,8 @@ def matchAndJoinCatalogs(catalog1, catalog2, matchRadius, raColStr="coord_ra", d
     if nthNeighbor > 1:
         selfMatches = [i == ind for i, ind in enumerate(inds)]
         if sum(selfMatches) > 0 and log is not None:
-            log.warn("There were {} objects self-matched by "
-                     "astropy.coordinates.match_coordinates_sky()").format(sum(selfMatches))
+            log.warning("There were {} objects self-matched by "
+                        "astropy.coordinates.match_coordinates_sky()").format(sum(selfMatches))
     matchedIds = dists < matchRadius*units.arcsec
     matchedIndices = inds[matchedIds]
     matchedDistances = dists[matchedIds]
@@ -3110,7 +3110,7 @@ def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, epoch=
                       "sure this is the same as the one used in the processing that produced the "
                       "[src/deepCoadd]Match catlogs?  Any plots based on the calib_astrometry_used flags "
                       "will use the generic matched catalog.".format(refObjLoader.ref_dataset_name))
-            log.warn(logStr)
+            log.warning(logStr)
         return None
     # Check that matches were found for all obects in patchedMatches catalog
     numUnmatched = len(packedMatches.index) - len(denormMatches)
@@ -3118,7 +3118,7 @@ def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, epoch=
         logStr = ("No match found for N={} objects (out of {}) in the packedMatch catalog. "
                   "Try increasing padRadiusFactor (currently = {}) to load sources over a "
                   "wider area?".format(numUnmatched, len(packedMatches.index), padRadiusFactor))
-        log.warn(logStr)
+        log.warning(logStr)
     if calibKey is not None:
         catalogCopy = catalog[catalog[calibKey]].copy(deep=True)
     else:
@@ -3192,8 +3192,9 @@ def loadReferencesAndMatchToCatalog(catalog, matchMeta, refObjLoader, epoch=None
             flagList.append(flag)
         else:
             if log is not None:
-                log.warn("Did not find column {:} in catalog so it will not be added to the list of "
-                         "flags for culling the source catalog prior to the generic matching.".format(flag))
+                log.warning("Did not find column {:} in catalog so it will not be added to the list of "
+                            "flags for culling the source catalog prior to the generic matching.".
+                            format(flag))
     # Cull on bad sources from the catalogs as these should not be
     # considered in our match-to-reference catalog metric.  However, we allow
     # an option to explicitly leave in sources for which any of the flags in

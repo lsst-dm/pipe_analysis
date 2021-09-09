@@ -422,12 +422,12 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                    "--config doApplyExternalSkywcs=False")
             if self.config.doApplyExternalPhotoCalib:
                 if set(ccdListPerTract) != set(ccdPhotoCalibListPerTract):
-                    self.log.warn(f"Did not find {repoInfo.photoCalibDataset} external calibrations for "
-                                  f"all dataIds that do have {repoInfo.catDataset} catalogs.")
+                    self.log.warning(f"Did not find {repoInfo.photoCalibDataset} external calibrations for "
+                                     f"all dataIds that do have {repoInfo.catDataset} catalogs.")
             if self.config.doApplyExternalSkyWcs:
                 if set(ccdListPerTract) != set(ccdSkyWcsListPerTract):
-                    self.log.warn(f"Did not find {repoInfo.skyWcsDataset} external calibrations for "
-                                  f"all dataIds that do have {repoInfo.catDataset} catalogs.")
+                    self.log.warning(f"Did not find {repoInfo.skyWcsDataset} external calibrations for "
+                                     f"all dataIds that do have {repoInfo.catDataset} catalogs.")
 
             # Create list of alias mappings for differing schema naming
             # conventions (if any).
@@ -490,9 +490,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                             baseGoodSky &= catalog["detect_isDeblendedSource"]
                         skySrcCat = catalog[baseGoodSky].copy(deep=True)
                     else:
-                        self.log.warn("doPlotSkyObjects is True, but the \"sky_source\" "
-                                      "column does not exist in the catalog schema.  Skipping "
-                                      "skyObjects plot.")
+                        self.log.warning("doPlotSkyObjects is True, but the \"sky_source\" "
+                                         "column does not exist in the catalog schema.  Skipping "
+                                         "skyObjects plot.")
 
                 # Set boolean arrays indicating sources deemed unsuitable for
                 # qa analyses.
@@ -612,13 +612,14 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
                         plotList.append(self.plotStarGal(catalog, plotInfoDict, areaDict, **plotKwargs))
                     else:
-                        self.log.warn("Cannot run plotStarGal: "
-                                      "ext_shapeHSM_HsmSourceMoments_xx not in the catalog schema")
+                        self.log.warning("Cannot run plotStarGal: "
+                                         "ext_shapeHSM_HsmSourceMoments_xx not in the catalog schema")
                 if self.config.doPlotSizes:
                     if "base_SdssShape_psf_xx" in schema:
                         plotList.append(self.plotSizes(catalog, plotInfoDict, areaDict, **plotKwargs))
                     else:
-                        self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in the catalog schema")
+                        self.log.warning("Cannot run plotSizes: base_SdssShape_psf_xx not in the "
+                                         "catalog schema")
                 if self.config.doPlotCentroids and self.haveFpCoords:
                     plotList.append(self.plotCentroidXY(catalog, plotInfoDict, areaDict, **plotKwargs))
 
@@ -1288,7 +1289,7 @@ class CompareVisitAnalysisTask(VisitAnalysisTask, CompareCoaddAnalysisTask):
                 if ("first_base_SdssShape_psf_xx" in schema and "second_base_SdssShape_psf_xx" in schema):
                     plotList.append(self.plotSizes(catalog, plotInfoDict, areaDict1, **plotKwargs1))
                 else:
-                    self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in the catalog schema")
+                    self.log.warning("Cannot run plotSizes: base_SdssShape_psf_xx not in the catalog schema")
             if self.config.doApCorrs:
                 plotList.append(self.plotApCorrs(catalog, plotInfoDict, areaDict1, **plotKwargs1))
             if self.config.doPlotCentroids:

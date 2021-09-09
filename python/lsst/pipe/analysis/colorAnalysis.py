@@ -502,7 +502,7 @@ class ColorAnalysisRunner(TaskRunner):
                 patchesForFilters = [set(patchRef.dataId["patch"] for patchRef in patchRefList) for
                                      patchRefList in filterRefs.values()]
             if not patchesForFilters:
-                parsedCmd.log.warn("No input data found for tract {:d}".format(tract))
+                parsedCmd.log.warning("No input data found for tract {:d}".format(tract))
                 bad.append(tract)
                 continue
             keep = set.intersection(*patchesForFilters)  # Patches with full colour coverage
@@ -528,12 +528,12 @@ class ColorAnalysisRunner(TaskRunner):
                 if filterName in tractFilterRefs[tract].keys():
                     numFilters += 1
                 else:
-                    parsedCmd.log.warn("No input data found for filter {0:s} of tract {1:d}".
-                                       format(filterName, tract))
+                    parsedCmd.log.warning("No input data found for filter {0:s} of tract {1:d}".
+                                          format(filterName, tract))
             if numFilters < 3:
-                parsedCmd.log.warn("Must have at least 3 filters with data existing in the input repo. "
-                                   "Only {0:d} exist of those requested ({1:}) for tract {2:d}. "
-                                   "Skipping tract.".format(numFilters, set(parsedFilterList), tract))
+                parsedCmd.log.warning("Must have at least 3 filters with data existing in the input repo. "
+                                      "Only {0:d} exist of those requested ({1:}) for tract {2:d}. "
+                                      "Skipping tract.".format(numFilters, set(parsedFilterList), tract))
                 del tractFilterRefs[tract]
             if not tractFilterRefs[tract]:
                 raise RuntimeError("No suitable datasets found.")
@@ -696,8 +696,8 @@ class ColorAnalysisTask(CmdLineTask):
                 cat = cat.sort_index()
                 numDupes = sum(cat.index.duplicated())
                 if numDupes > 0:
-                    self.log.warn("There were {} duplicate id entries...deduplicating catalog".
-                                  format(numDupes))
+                    self.log.warning("There were {} duplicate id entries...deduplicating catalog".
+                                     format(numDupes))
                     cat = cat.loc[~cat.index.duplicated(), :]
                 cat = calibrateSourceCatalog(cat, self.config.analysis.coaddZp)
                 fullCoveragePatchList = list(set(cat["patchId"].values))
@@ -1140,9 +1140,9 @@ class ColorAnalysisTask(CmdLineTask):
                 galacticExtinction = ebvValues*self.config.extinctionCoeffs[filterName]
                 bad = ~np.isfinite(galacticExtinction)
                 if ~np.isfinite(galacticExtinction).all():
-                    self.log.warn("Could not compute {0:s} band Galactic Extinction for "
-                                  "{1:d} out of {2:d} sources.  Flag will be set.".
-                                  format(filterName, len(raList[bad]), len(raList)))
+                    self.log.warning("Could not compute {0:s} band Galactic Extinction for "
+                                     "{1:d} out of {2:d} sources.  Flag will be set.".
+                                     format(filterName, len(raList[bad]), len(raList)))
                 factor = 10.0**(0.4*galacticExtinction)
                 schema = getSchema(catalogDict[filterName])
                 fluxKeys, errKeys = getFluxKeys(schema)
@@ -1152,9 +1152,9 @@ class ColorAnalysisTask(CmdLineTask):
                 for name, key in list(fluxKeys.items()) + list(errKeys.items()):
                     catalogDict[filterName][key] *= factor
             else:
-                self.log.warn("Do not have A_X/E(B-V) for filter {0:s}.  "
-                              "No Galactic Extinction correction applied for that filter.  "
-                              "Flag will be set".format(filterName))
+                self.log.warning("Do not have A_X/E(B-V) for filter {0:s}.  "
+                                 "No Galactic Extinction correction applied for that filter.  "
+                                 "Flag will be set".format(filterName))
                 bad = np.ones(len(catalogDict[list(catalogDict.keys())[0]]), dtype=bool)
             # Add column of Galactic Extinction value applied to the catalog
             # and a flag for the sources for which it could not be computed.
@@ -1239,17 +1239,17 @@ class ColorAnalysisTask(CmdLineTask):
                         catalogDict[filterName], bad, "galacticExtinction_flag",
                         "True if Galactic Extinction not found (so not applied)")
                 else:
-                    self.log.warn("Do not have A_X/E(B-V) for filter {0:s}.  "
-                                  "No Galactic Extinction correction applied for that filter".
-                                  format(filterName))
+                    self.log.warning("Do not have A_X/E(B-V) for filter {0:s}.  "
+                                     "No Galactic Extinction correction applied for that filter".
+                                     format(filterName))
                     bad = np.ones(len(catalogDict[list(catalogDict.keys())[0]]), dtype=bool)
                     catalogDict[filterName] = addFlag(catalogDict[filterName], bad, "galacticExtinction_flag",
                                                       "True if Galactic Extinction not found (so not "
                                                       "applied)")
         else:
-            self.log.warn("Do not have Galactic Extinction for tract {0:d} at {1:s}.  "
-                          "No Galactic Extinction correction applied".
-                          format(tractInfo.getId(), str(tractInfo.getCtrCoord())))
+            self.log.warning("Do not have Galactic Extinction for tract {0:d} at {1:s}.  "
+                             "No Galactic Extinction correction applied".
+                             format(tractInfo.getId(), str(tractInfo.getCtrCoord())))
         return catalogDict
 
     def transformCatalogs(self, catalogDict, transforms, fluxColumn, hscRun=None):
@@ -1302,7 +1302,7 @@ class ColorAnalysisTask(CmdLineTask):
                 if doAdd:
                     toAddList.append(col)
             if not toAddList:
-                self.log.warn("No transforms found...")
+                self.log.warning("No transforms found...")
                 return new
             # Set transformed colors
             for col, transform in transforms.items():
@@ -2064,8 +2064,8 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
             keep &= select
             nKeep = np.sum(keep)
             if nKeep < order:
-                log.warn("Not enough good data points ({0:d}) for polynomial fit of order {1:d}  "
-                         "Returning None and plot will be skipped.".format(nKeep, order))
+                log.warning("Not enough good data points ({0:d}) for polynomial fit of order {1:d}  "
+                            "Returning None and plot will be skipped.".format(nKeep, order))
                 return None
             poly = np.polyfit(xx[keep], yy[keep], order)
             dy = yy - np.polyval(poly, xx)
@@ -2083,16 +2083,16 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
         keep &= select
         nKeep = np.sum(keep)
         if nKeep < order:
-            log.warn("Not enough good data points ({0:d}) for polynomial fit of order {1:d}.  "
-                     "Returning None and plot will be skipped.".format(nKeep, order))
+            log.warning("Not enough good data points ({0:d}) for polynomial fit of order {1:d}.  "
+                        "Returning None and plot will be skipped.".format(nKeep, order))
             return None
 
         poly = np.polyfit(xx[keep], yy[keep], order)
 
     nKeep = np.sum(keep)
     if nKeep < order:
-        log.warn("Not enough good data points ({0:d}) for polynomial fit of order {1:d}.  "
-                 "Returning None and plot will be skipped.".format(nKeep, order))
+        log.warning("Not enough good data points ({0:d}) for polynomial fit of order {1:d}.  "
+                    "Returning None and plot will be skipped.".format(nKeep, order))
         return None
 
     # Calculate the point density
@@ -2126,8 +2126,8 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
                 keepOdr &= sel
         nKeepOdr = np.sum(keepOdr)
         if nKeepOdr < order:
-            log.warn("Not enough good data points ({0:d}) for polynomial fit of order {1:d}.  "
-                     "Returning None and plot will be skipped.".format(nKeepOdr, order))
+            log.warning("Not enough good data points ({0:d}) for polynomial fit of order {1:d}.  "
+                        "Returning None and plot will be skipped.".format(nKeepOdr, order))
             return None
         orthRegCoeffs = orthogonalRegression(xx[keepOdr], yy[keepOdr], order, initialGuess)
     yOrthLine = np.polyval(orthRegCoeffs, xLine)
@@ -2140,12 +2140,12 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
     try:
         crossIdxUpper = (np.argwhere(np.diff(np.sign(yOrthLine - yLineUpper)) != 0).reshape(-1) + 0)[0]
     except Exception:
-        log.warnf(message, "Upper", xFitRange[1])
+        log.warningf(message, "Upper", xFitRange[1])
         crossIdxUpper = (np.abs(xLine - xFitRange[1])).argmin()
     try:
         crossIdxLower = (np.argwhere(np.diff(np.sign(yOrthLine - yLineLower)) != 0).reshape(-1) + 0)[0]
     except Exception:
-        log.warnf(message, "Lower", xFitRange[0])
+        log.warningf(message, "Lower", xFitRange[0])
         crossIdxLower = (np.abs(xLine - xFitRange[0])).argmin()
 
     # Compute the slope of the two pixels +/-1% of line length from crossing
@@ -2169,10 +2169,10 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
                "(Line crosses fit at x = {4:.2f})")
     if (abs(200*(fitLineUpper[0] - bUpper)/(fitLineUpper[0] + bUpper)) > 5.0
             or abs(200*(fitLineUpper[1] - mUpper)/(fitLineUpper[1] + mUpper)) > 5.0):
-        log.warn(message.format("Upper", fitLineUpper, bUpper, mUpper, xLine[crossIdxUpper]))
+        log.warning(message.format("Upper", fitLineUpper, bUpper, mUpper, xLine[crossIdxUpper]))
     if (abs(200*(fitLineLower[0] - bLower)/(fitLineLower[0] + bLower)) > 5.0
             or abs(200*(fitLineLower[1] - mLower)/(fitLineLower[1] + mLower)) > 5.0):
-        log.warn(message.format("Lower", fitLineLower, bLower, mLower, xLine[crossIdxLower]))
+        log.warning(message.format("Lower", fitLineLower, bLower, mLower, xLine[crossIdxLower]))
     deltaX = abs(xRange[1] - xRange[0])
     deltaY = abs(yRange[1] - yRange[0])
 
@@ -2473,7 +2473,7 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
                                     perpIndexStr))
         if verifyJob:
             if not verifyMetricName:
-                log.warn("A verifyJob was specified, but the metric name was not...skipping metric job")
+                log.warning("A verifyJob was specified, but the metric name was not...skipping metric job")
             else:
                 log.info("Adding verify job with metric name: {:}".format(verifyMetricName))
                 measExtrasDictList = [{"name": "nUsedInFit", "value": len(fitP2kept[good]),
@@ -2711,8 +2711,8 @@ class ColorColorDistance(object):
                 roots = np.roots(np.poly1d((1, -x)) + (self.poly - y)*polyDeriv)
             except TypeError as e:
                 if self.log is not None:
-                    self.log.warn("Could not compute roots for distance calculation (with error: %s).  "
-                                  "Returning None and skipping plot.", e)
+                    self.log.warning("Could not compute roots for distance calculation (with error: %s).  "
+                                     "Returning None and skipping plot.", e)
                 return None
             distance2[i] = min(distanceSquaredToPoly(x, y, np.real(rr), self.poly) for
                                rr in roots if np.real(rr) == rr)
