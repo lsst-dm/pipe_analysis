@@ -151,6 +151,9 @@ class CoaddAnalysisConfig(Config):
     fluxToPlotList = ListField(dtype=str, default=["base_GaussianFlux", "base_CircularApertureFlux_12_0",
                                                    "ext_photometryKron_KronFlux", "modelfit_CModel"],
                                doc="List of fluxes to plot: mag(flux)-mag(base_PsfFlux) vs mag(fluxColumn)")
+    gaapFluxList = ListField(dtype=str, default=["ext_gaap_GaapFlux_1_15x_Optimal",
+                                                 "ext_gaap_GaapFlux_1_15x_PsfFlux"],
+                             doc="List of possible GAaP fluxes to add to fluxToPlotList")
     # We want the following to come from the *_meas catalogs as they reflect
     # what happened in SFP calibration.
     columnsToCopyFromMeas = ListField(dtype=str, default=["calib_", "deblend_parentNPeaks", "deblend_nPeaks",
@@ -179,7 +182,8 @@ class CoaddAnalysisConfig(Config):
                  "base_FPPosition", "base_ClassificationExtendedness", "parent", "detect", "deblend_nChild",
                  "deblend_parentNPeaks", "deblend_nPeaks", "deblend_scarletFlux", "deblend_skipped",
                  "base_Blendedness_abs", "base_Blendedness_flag", "base_InputCount",
-                 "merge_peak_sky", "merge_measurement", "calib", "sky_source"],
+                 "merge_peak_sky", "merge_measurement", "calib", "sky_source",
+                 "ext_gaap_GaapFlux_1_15x_Optimal_", "ext_gaap_GaapFlux_1_15x_PsfFlux_"],
         doc=("List of \"startswith\" strings of column names to load from deepCoadd_obj parquet table. "
              "All columns that start with one of these strings will be loaded UNLESS the full column "
              "name contains one of the strings listed in the notInColumnStrList config."))
@@ -429,8 +433,8 @@ class CoaddAnalysisTask(CmdLineTask):
                 try:
                     patchRef["butler"].getURI(self.config.coaddName + dataset, dataId=dataId)
                 except LookupError:
-                    self.log.warn("No {} found for {}.  Skipping patch... ".
-                                  format(self.config.coaddName + dataset, dataId))
+                    self.log.warning("No {} found for {}.  Skipping patch... ".
+                                     format(self.config.coaddName + dataset, dataId))
                     continue
                 if "_obj" in dataset:
                     cat = patchRef["butler"].get(self.config.coaddName + dataset, dataId=dataId)
@@ -445,8 +449,8 @@ class CoaddAnalysisTask(CmdLineTask):
         if len(patchRefExistsList) > 0:
             haveForced = True
         else:
-            self.log.warn("No forced dataset exists for, e.g.,: {:} (only showing first dataId in "
-                          "patchRefList).\nPlotting unforced results only.".format(dataId))
+            self.log.warning("No forced dataset exists for, e.g.,: {:} (only showing first dataId in "
+                             "patchRefList).\nPlotting unforced results only.".format(dataId))
             dataset = "Coadd_meas"
             if not patchRefList[0].datasetExists(self.config.coaddName + dataset):
                 raise TaskError("No data exists in patRefList: %s" %
@@ -700,18 +704,24 @@ class CoaddAnalysisTask(CmdLineTask):
                     plotKwargs.update(dict(highlightList=highlightList
                                            + [("merge_measurement_" + repoInfo.genericBandName, 0,
                                                "yellow")]))
-
+                    fluxToPlotList = [flux for flux in self.config.fluxToPlotList]
+                    for gaapFlux in self.config.gaapFluxList:
+                        haveGaap = gaapFlux + "_instFlux" in forcedSchema
+                        if haveGaap:
+                            fluxToPlotList.append(gaapFlux)
                     plotList.append(self.plotMags(forced, plotInfoDict, areaDict, forcedStr=forcedStr,
-                                                  postFix="_forced", **plotKwargs))
+                                                  fluxToPlotList=fluxToPlotList, postFix="_forced",
+                                                  **plotKwargs))
                     plotKwargs.update(dict(highlightList=highlightList))
+
             if self.config.doPlotStarGalaxy:
                 if "ext_shapeHSM_HsmSourceMoments_xx" in unforcedSchema:
                     plotList.append(self.plotStarGal(unforced, plotInfoDict, areaDict,
                                                      forcedStr=forcedStr.replace("forced", "unforced"),
                                                      **plotKwargs))
                 else:
-                    self.log.warn("Cannot run plotStarGal: ext_shapeHSM_HsmSourceMoments_xx not "
-                                  "in forcedSchema")
+                    self.log.warning("Cannot run plotStarGal: ext_shapeHSM_HsmSourceMoments_xx not "
+                                     "in forcedSchema")
 
             if self.config.doPlotSizes:
                 if all(ss in unforcedSchema for ss in ["base_SdssShape_psf_xx", "calib_psf_used"]):
@@ -719,15 +729,15 @@ class CoaddAnalysisTask(CmdLineTask):
                                                    forcedStr=forcedStr.replace("forced", "unforced"),
                                                    postFix="_unforced", **plotKwargs))
                 else:
-                    self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx and/or calib_psf_used "
-                                  "not in unforcedSchema")
+                    self.log.warning("Cannot run plotSizes: base_SdssShape_psf_xx and/or calib_psf_used "
+                                     "not in unforcedSchema")
                 if haveForced:
                     if all(ss in forcedSchema for ss in ["base_SdssShape_psf_xx", "calib_psf_used"]):
                         plotList.append(self.plotSizes(forced, plotInfoDict, areaDict,
                                                        forcedStr=forcedStr, **plotKwargs))
                     else:
-                        self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx and/or calib_psf_used "
-                                      "not in forcedSchema")
+                        self.log.warning("Cannot run plotSizes: base_SdssShape_psf_xx and/or calib_psf_used "
+                                         "not in forcedSchema")
             if cosmos:
                 plotList.append(self.plotCosmos(forced, plotInfoDict, areaDict, cosmos, repoInfo.dataId))
 
@@ -801,8 +811,8 @@ class CoaddAnalysisTask(CmdLineTask):
                         plotList.append(self.plotMatches(matches, plotInfoDict, matchAreaDict,
                                                          forcedStr=matchLabel, **plotKwargs))
                     else:
-                        self.log.warn("Could not create match catalog for {:}.  Is "
-                                      "lsst.meas.extensions.astrometryNet setup?".format(cat))
+                        self.log.warning("Could not create match catalog for {:}.  Is "
+                                         "lsst.meas.extensions.astrometryNet setup?".format(cat))
 
         if not repoInfo.isGen3:
             self.allStats, self.allStatsHigh = savePlots(plotList, "plotCoadd", repoInfo.dataId,
@@ -1296,10 +1306,10 @@ class CoaddAnalysisTask(CmdLineTask):
             if (self.config.doPlotFootprintArea and "base_FootprintArea_value" not in schema
                     and len(schema.extract("merge_footprint*")) > 0):  # to not bother for forced cats
                 if self.config.readFootprintsAs != "heavy":
-                    self.log.warn("config.doPlotFootprintArea is True, but do not have "
-                                  "base_FootprintArea_value in schema.  If reading in an older afw "
-                                  "src catalog, may need to run with config.readFootprintsAs=\"heavy\""
-                                  "to be able to read in the footprints and compute their area.")
+                    self.log.warning("config.doPlotFootprintArea is True, but do not have "
+                                     "base_FootprintArea_value in schema.  If reading in an older afw "
+                                     "src catalog, may need to run with config.readFootprintsAs=\"heavy\""
+                                     "to be able to read in the footprints and compute their area.")
                 else:
                     cat = addFootprintArea(cat)
             # Set some "aliases" for differing schema naming conventions.
@@ -1554,7 +1564,7 @@ class CoaddAnalysisTask(CmdLineTask):
             epoch = np.nanmean(mdjList) if not all(np.isnan(mdjList)) else None
 
             if not packedMatches:
-                self.log.warn("No good matches for %s" % (dataId,))
+                self.log.warning("No good matches for %s" % (dataId,))
                 continue
             if hasattr(refObjLoader, "apply"):  # Need to/can only do this once per loader
                 refObjLoader = refObjLoader.apply(butler=butler)
@@ -1575,7 +1585,7 @@ class CoaddAnalysisTask(CmdLineTask):
             matches = matchNanojanskyToAB(matches)
             matchAreaDict.update(areaDict)
             if matches.empty:
-                self.log.warn("No matches for %s" % (dataId,))
+                self.log.warning("No matches for %s" % (dataId,))
             else:
                 if "patch" not in dataId:  # This is a visit catalog
                     if self.config.doApplyExternalSkyWcs:
@@ -1609,7 +1619,7 @@ class CoaddAnalysisTask(CmdLineTask):
         # and Dec (see DM-9556).
         if np.all(np.isnan(catalog["coord_ra"])):
             if wcs is None:
-                self.log.warn("Bad RA, Dec entries but can't update because wcs is None")
+                self.log.warning("Bad RA, Dec entries but can't update because wcs is None")
             else:
                 afwTable.updateSourceCoords(wcs, catalog)
         calibrated = calibrateSourceCatalog(catalog, self.config.analysis.coaddZp)
@@ -2129,8 +2139,8 @@ class CoaddAnalysisTask(CmdLineTask):
             else:
                 refFilterName = afwImage.Filter(afwImage.Filter(plotInfoDict["filter"]).getId()).getName()
             ct = Colorterm(primary=refFilterName, secondary=refFilterName)
-            self.log.warn("Note: no colorterms loaded for {:s}, thus no colorterms will be applied to "
-                          "the photometry reference catalog".format(refObjLoader.ref_dataset_name))
+            self.log.warning("Note: no colorterms loaded for {:s}, thus no colorterms will be applied to "
+                             "the photometry reference catalog".format(refObjLoader.ref_dataset_name))
 
         # Magnitude difference plots
         for flux in fluxToPlotList:
@@ -2469,8 +2479,15 @@ class CompareCoaddAnalysisRunner(TaskRunner):
                 gen3PidCopy = copy.deepcopy(gen3Pid)
                 if "filter" in gen3PidCopy:
                     gen3PidCopy["physical_filter"] = gen3PidCopy.pop("filter")
-                    gen3PidCopy["band"] = filterToBandMap[gen3PidCopy["physical_filter"]]
-                    gen3PidCopy["skymap"] = "hsc_rings_v1"
+                    if parsedCmd.instrument == "HSC":
+                        gen3PidCopy["band"] = filterToBandMap[gen3PidCopy["physical_filter"]]
+                        gen3PidCopy["skymap"] = "hsc_rings_v1"
+                    elif parsedCmd.instrument == "LSSTCam-imSim":
+                        gen3PidCopy["band"] = gen3PidCopy["physical_filter"]
+                        gen3PidCopy["skymap"] = "DC2"
+                    else:
+                        raise RuntimeError("Unknown instrument {}. Currently only know HSC and "
+                                           "LSSTCam-imSim.".format(parsedCmd.instrument))
                     gen3PidCopy["dataId"] = gen3PidCopy.copy()
                     gen3PidCopy["butler"] = butler2
                 gen3PidCopy["dataId"]["patch"] = patchIdToGen3Map[patchId]
@@ -2520,7 +2537,22 @@ class CompareCoaddAnalysisTask(CoaddAnalysisTask):
                                patchRef1.datasetExists(self.config.coaddName + dataset1)]
         dataset2 = "Coadd_obj" if self.config.doReadParquetTables2 else "Coadd_forced_src"
 
-        repoInfo2 = getRepoInfo(patchRefList2[0], coaddName=self.config.coaddName, coaddDataset=dataset2)
+        repoInfo2 = None
+        for patchRef2 in patchRefList2:  # Find an existing rerun2 dataset to assess if gen3
+            try:
+                repoInfo2 = getRepoInfo(patchRef2, coaddName=self.config.coaddName, coaddDataset=dataset2)
+                break
+            except Exception:
+                if hasattr(patchRef2, "dataId"):
+                    dataId = patchRef2.dataId
+                else:
+                    dataId = patchRef2["dataId"]
+                self.log.info("No patch found for {} in rerun2.  Continuing search down patchRefList2.".
+                              format(dataId))
+                continue
+        if repoInfo2 is None:
+            raise TaskError("No data exists in patRefList2...")
+
         if not repoInfo2.isGen3:
             patchRefExistsList2 = [patchRef2 for patchRef2 in patchRefList2 if
                                    patchRef2.datasetExists(self.config.coaddName + dataset2)]
@@ -2540,9 +2572,9 @@ class CompareCoaddAnalysisTask(CoaddAnalysisTask):
             haveForced = False
         forcedStr = "forced" if haveForced else "unforced"
         if not haveForced:
-            self.log.warn("Forced datasets do not exist for both input1 and input2 for tract: {0:d} "
-                          "filter: {1:s}.  Plotting unforced results only.".
-                          format(patchRefList1[0].dataId["tract"], patchRefList1[0].dataId["filter"]))
+            self.log.warning("Forced datasets do not exist for both input1 and input2 for tract: {0:d} "
+                             "filter: {1:s}.  Plotting unforced results only.".
+                             format(patchRefList1[0].dataId["tract"], patchRefList1[0].dataId["filter"]))
             dataset1 = "Coadd_meas"
             dataset2 = "Coadd_meas"
             patchRefExistsList1 = [patchRef1 for patchRef1 in patchRefList1 if
@@ -2666,15 +2698,20 @@ class CompareCoaddAnalysisTask(CoaddAnalysisTask):
                                  rerun2=rerun2Str))
 
         if self.config.doPlotMags:
+            fluxToPlotList = [flux for flux in self.config.fluxToPlotList]
+            for gaapFlux in self.config.gaapFluxList:
+                haveGaap = gaapFlux + "_instFlux" in schema
+                if haveGaap:
+                    fluxToPlotList.append(gaapFlux)
             plotList.append(self.plotMags(forced, plotInfoDict, areaDict1, forcedStr=forcedStr,
-                                          **plotKwargs1))
+                                          fluxToPlotList=fluxToPlotList, **plotKwargs1))
 
         if self.config.doPlotSizes:
             if ("first_base_SdssShape_psf_xx" in schema and "second_base_SdssShape_psf_xx" in schema):
                 plotList.append(self.plotSizes(forced, plotInfoDict, areaDict1, forcedStr=forcedStr,
                                                **plotKwargs1))
             else:
-                self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in schema")
+                self.log.warning("Cannot run plotSizes: base_SdssShape_psf_xx not in schema")
 
         if self.config.doApCorrs:
             plotList.append(self.plotApCorrs(unforced, plotInfoDict, areaDict1,
@@ -2957,7 +2994,8 @@ class CompareCoaddAnalysisTask(CoaddAnalysisTask):
                                                   + [(col + "_flag_apCorr", 0, "lime"), ],
                                                   uberCalLabel=uberCalLabel)
                 else:
-                    self.log.warn("No valid data points for shortName = {:s}.  Skipping...".format(shortName))
+                    self.log.warning("No valid data points for shortName = {:s}.  Skipping...".
+                                     format(shortName))
 
     def _getConfigName(self):
         return None

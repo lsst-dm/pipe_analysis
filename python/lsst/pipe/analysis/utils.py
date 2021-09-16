@@ -196,7 +196,7 @@ class Enforcer(object):
                 if value <= self.requireGreater[label][ss]:
                     text = ("%s %s = %.2f exceeds minimum limit of %.2f: %s" %
                             (description, ss, value, self.requireGreater[label][ss], dataId))
-                    log.warn(text)
+                    log.warning(text)
                     if self.doRaise:
                         raise AssertionError(text)
         for label in self.requireLess:
@@ -205,7 +205,7 @@ class Enforcer(object):
                 if value >= self.requireLess[label][ss]:
                     text = ("%s %s = %.2f exceeds maximum limit of %.2f: %s" %
                             (description, ss, value, self.requireLess[label][ss], dataId))
-                    log.warn(text)
+                    log.warning(text)
                     if self.doRaise:
                         raise AssertionError(text)
 
@@ -888,8 +888,8 @@ def matchAndJoinCatalogs(catalog1, catalog2, matchRadius, raColStr="coord_ra", d
     if nthNeighbor > 1:
         selfMatches = [i == ind for i, ind in enumerate(inds)]
         if sum(selfMatches) > 0 and log is not None:
-            log.warn("There were {} objects self-matched by "
-                     "astropy.coordinates.match_coordinates_sky()").format(sum(selfMatches))
+            log.warning("There were {} objects self-matched by "
+                        "astropy.coordinates.match_coordinates_sky()").format(sum(selfMatches))
     matchedIds = dists < matchRadius*units.arcsec
     matchedIndices = inds[matchedIds]
     matchedDistances = dists[matchedIds]
@@ -1787,7 +1787,13 @@ def fluxToPlotString(fluxToPlot):
                   "base_CircularApertureFlux_9_0_instFlux": "CircApRad9pix",
                   "base_CircularApertureFlux_9_0": "CircApRad9pix",
                   "base_CircularApertureFlux_25_0_instFlux": "CircApRad25pix",
-                  "base_CircularApertureFlux_25_0": "CircApRad25pix"}
+                  "base_CircularApertureFlux_25_0": "CircApRad25pix",
+                  "ext_gaap_GaapFlux_1_15x_Optimal_instFlux": "GaapOptimal",
+                  "ext_gaap_GaapFlux_1_15x_Optimal_flux": "GaapOptimal",
+                  "ext_gaap_GaapFlux_1_15x_Optimal": "GaapOptimal",
+                  "ext_gaap_GaapFlux_1_15x_PsfFlux_instFlux": "GaapPsf",
+                  "ext_gaap_GaapFlux_1_15x_PsfFlux_flux": "GaapPsf",
+                  "ext_gaap_GaapFlux_1_15x_PsfFlux": "GaapPsf"}
     if fluxToPlot in fluxStrMap:
         return fluxStrMap[fluxToPlot]
     else:
@@ -2048,7 +2054,7 @@ def getCcdNameRefList(dataRefList):
     return ccdNameRefList
 
 
-def getDataExistsRefList(dataRefList, dataset):
+def getDataExistsRefList(dataRefList, dataset, doCheckPhotoCalibNotNone=False, log=None):
     dataExistsRefList = []
     dataExistsCcdList = []
     dataRefTemp = dataRefList[0]
@@ -2079,6 +2085,30 @@ def getDataExistsRefList(dataRefList, dataset):
                 if dataId["detector"] != 999:
                     print("Could not find {} dataset for dataId {}".format(dataset, dataId))
                 continue
+
+    if doCheckPhotoCalibNotNone:
+        delimiterStr = "." if isGen3 else "_"
+        newRefList = []
+        for dataRef in dataExistsRefList:
+            dataId = dataRef["dataId"] if isGen3 else dataRef.dataId
+            ccdKey = findCcdKey(dataId)
+            if isGen3:
+                photoCalib = dataRef["butler"].get("calexp" + delimiterStr + "photoCalib", dataId=dataId)
+            else:
+                photoCalib = dataRef.get("calexp" + delimiterStr + "photoCalib")
+            if photoCalib is not None:
+                newRefList.append(dataRef)
+            else:
+                if log is not None:
+                    log.warning("photoCalib is None for %s.  Skipping...", dataId)
+        dataExistsRefList = newRefList
+        newCcdList = []
+        for dataRef in dataExistsRefList:
+            if isGen3:
+                newCcdList.append(dataRef["dataId"][ccdKey])
+            else:
+                newCcdList.append(dataRef.dataId[ccdKey])
+        dataExistsCcdList = newCcdList
 
     if len(dataExistsRefList) == 0:
         raise RuntimeError("dataExistsRef list is empty")
@@ -3080,7 +3110,7 @@ def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, epoch=
                       "sure this is the same as the one used in the processing that produced the "
                       "[src/deepCoadd]Match catlogs?  Any plots based on the calib_astrometry_used flags "
                       "will use the generic matched catalog.".format(refObjLoader.ref_dataset_name))
-            log.warn(logStr)
+            log.warning(logStr)
         return None
     # Check that matches were found for all obects in patchedMatches catalog
     numUnmatched = len(packedMatches.index) - len(denormMatches)
@@ -3088,7 +3118,7 @@ def loadDenormalizeAndUnpackMatches(catalog, packedMatches, refObjLoader, epoch=
         logStr = ("No match found for N={} objects (out of {}) in the packedMatch catalog. "
                   "Try increasing padRadiusFactor (currently = {}) to load sources over a "
                   "wider area?".format(numUnmatched, len(packedMatches.index), padRadiusFactor))
-        log.warn(logStr)
+        log.warning(logStr)
     if calibKey is not None:
         catalogCopy = catalog[catalog[calibKey]].copy(deep=True)
     else:
@@ -3162,8 +3192,9 @@ def loadReferencesAndMatchToCatalog(catalog, matchMeta, refObjLoader, epoch=None
             flagList.append(flag)
         else:
             if log is not None:
-                log.warn("Did not find column {:} in catalog so it will not be added to the list of "
-                         "flags for culling the source catalog prior to the generic matching.".format(flag))
+                log.warning("Did not find column {:} in catalog so it will not be added to the list of "
+                            "flags for culling the source catalog prior to the generic matching.".
+                            format(flag))
     # Cull on bad sources from the catalogs as these should not be
     # considered in our match-to-reference catalog metric.  However, we allow
     # an option to explicitly leave in sources for which any of the flags in

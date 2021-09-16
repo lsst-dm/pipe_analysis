@@ -250,7 +250,7 @@ class Analysis(object):
         self.magMax = (computeMeanOfFrac(self.mag[goodSn0], tailStr="upper", fraction=0.05, floorFactor=1)
                        + 0.5)
 
-        if labeller is not None:
+        if labeller is not None and self.quantity is not None:
             labels = labeller(catalog, compareCat) if compareCat is not None else labeller(catalog)
             self.data = {name: Data(catalog, self.quantity, self.mag, self.signalToNoise,
                                     self.good & (labels == value),
@@ -1416,8 +1416,8 @@ class Analysis(object):
             alphaCmap.set_under("r")
             alphaCmap.set_over("r")
         else:
-            log.warn("plotInputCounts: Unknown extend string for matplotlib colorbar: {:}.  Setting to "
-                     "\"neither\"".format(cbarExtend))
+            log.warning("plotInputCounts: Unknown extend string for matplotlib colorbar: {:}.  Setting to "
+                        "\"neither\"".format(cbarExtend))
             cbarExtend = "neither"
 
         ellipsePatchList = [matplotlib.patches.Ellipse(xy=xy, width=diamA, height=diamB, angle=theta)
@@ -1670,8 +1670,9 @@ class Analysis(object):
 
         tractLevelPlot = "Coadd" in plotInfoDict["plotType"] or "Color" in plotInfoDict["plotType"]
         if self.config.doPlotTractOutline and tractLevelPlot:
-            if "patchIdList" in plotInfoDict and plotInfoDict["patchIdList"] != plotInfoDict["patchList"]:
-                # Hack for gen3 patch ids
+            if "patchIdList" in plotInfoDict and not str(unitList[0]).find(",") > 0:
+                # Hack for gen3 patch ids: patchId is the N,N representation
+                # and patch is N.  Want metricPerUnitDict to have N,N mapping.
                 for patchId, patch in zip(plotInfoDict["patchIdList"], plotInfoDict["patchList"]):
                     metricPerUnitDict[patchId] = metricPerUnitDict.pop(str(patch))
             if plotInfoDict["tractInfo"] is not None and len(plotInfoDict["patchIdList"]) > 0:
@@ -1687,11 +1688,15 @@ class Analysis(object):
                 highlightList=None, extraLabels=None, uberCalLabel=None, doPrintMedian=False):
         """Make all plots.
         """
-        stats = self.stats
+        try:
+            stats = self.stats
+        except AttributeError:
+            log.warning("plotAll: no self.stats attribute for {:}.  Skipping plots...".format(self.shortName))
+            return
         # Make sure you have some good data to plot
         if all(stats[stat].num == 0 for stat in stats):
-            log.warn("plotAll: No good data points to plot for: {:}.  Skipping plots...".
-                     format(self.shortName))
+            log.warning("plotAll: No good data points to plot for: {:}.  Skipping plots...".
+                        format(self.shortName))
             return
         # Dict of all parameters common to plot* functions
         plotKwargs = dict(stats=stats, matchRadius=matchRadius, matchRadiusUnitStr=matchRadiusUnitStr,
@@ -1725,7 +1730,7 @@ class Analysis(object):
 
         if "galaxy" in self.data and (not any(ss in self.shortName for ss in
                                               ["pStar", "race", "Xx", "Yy", "Resids", "gri", "riz", "izy",
-                                               "z9y", "color_"])):
+                                               "z9y", "color_", "gaap"])):
             styleStr = "sky-gals"
             dataName = "galaxy"
             if self.checkGoodDataExists(dataName, stats, log, styleStr):
@@ -1954,8 +1959,8 @@ class Analysis(object):
             ``dataName``, else `False`.
         """
         if stats[dataName].num == 0:
-            log.warn("No good data points to plot for: {:} {:}.  Skipping {:} plot.".
-                     format(self.shortName, dataName, styleStr))
+            log.warning("No good data points to plot for: {:} {:}.  Skipping {:} plot.".
+                        format(self.shortName, dataName, styleStr))
             answer = False
         else:
             answer = True

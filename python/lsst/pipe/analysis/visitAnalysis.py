@@ -361,8 +361,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 else:
                     self.log.info("No data found for tract: {:d}".format(tractList[i]))
                     continue
-            _, ccdListPerTract = getDataExistsRefList(dataRefListTract, dataset)
-            repoInfo = getRepoInfo(dataRefListTract[ccdListPerTract[0]], catDataset=dataset,
+            dataRefExistsList, ccdListPerTract = getDataExistsRefList(dataRefListTract, dataset,
+                                                                      doCheckPhotoCalibNotNone=True,
+                                                                      log=self.log)
+
+            repoInfo = getRepoInfo(dataRefExistsList[0], catDataset=dataset,
                                    doApplyExternalPhotoCalib=self.config.doApplyExternalPhotoCalib,
                                    externalPhotoCalibName=self.config.externalPhotoCalibName,
                                    doApplyExternalSkyWcs=self.config.doApplyExternalSkyWcs,
@@ -381,16 +384,17 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 raise RuntimeError("No datasets found for datasetType = {:s}".format(repoInfo.catDataset))
             if self.config.doApplyExternalPhotoCalib:
                 _, ccdPhotoCalibListPerTract = getDataExistsRefList(dataRefListTract,
-                                                                    repoInfo.photoCalibDataset)
+                                                                    repoInfo.photoCalibDataset, log=self.log)
                 if not ccdPhotoCalibListPerTract:
                     self.log.fatal(f"No data found for {repoInfo.photoCalibDataset} dataset...are you sure "
                                    "you ran the external photometric calibration?  If not, run with "
                                    "--config doApplyExternalPhotoCalib=False")
             if self.config.doApplyExternalSkyWcs:
                 # Check for wcs for compatibility with old dataset naming
-                _, ccdSkyWcsListPerTract = getDataExistsRefList(dataRefListTract, repoInfo.skyWcsDataset)
+                _, ccdSkyWcsListPerTract = getDataExistsRefList(dataRefListTract, repoInfo.skyWcsDataset,
+                                                                log=self.log)
                 if not ccdSkyWcsListPerTract:
-                    _, ccdSkyWcsListPerTract = getDataExistsRefList(dataRefListTract, "wcs")
+                    _, ccdSkyWcsListPerTract = getDataExistsRefList(dataRefListTract, "wcs", log=self.log)
                     if ccdSkyWcsListPerTract:
                         repoInfo.skyWcsDataset = "wcs"
                         self.log.info("Old meas_mosaic dataset naming: wcs (new name is jointcal_wcs)")
@@ -418,12 +422,12 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                    "--config doApplyExternalSkywcs=False")
             if self.config.doApplyExternalPhotoCalib:
                 if set(ccdListPerTract) != set(ccdPhotoCalibListPerTract):
-                    self.log.warn(f"Did not find {repoInfo.photoCalibDataset} external calibrations for "
-                                  f"all dataIds that do have {repoInfo.catDataset} catalogs.")
+                    self.log.warning(f"Did not find {repoInfo.photoCalibDataset} external calibrations for "
+                                     f"all dataIds that do have {repoInfo.catDataset} catalogs.")
             if self.config.doApplyExternalSkyWcs:
                 if set(ccdListPerTract) != set(ccdSkyWcsListPerTract):
-                    self.log.warn(f"Did not find {repoInfo.skyWcsDataset} external calibrations for "
-                                  f"all dataIds that do have {repoInfo.catDataset} catalogs.")
+                    self.log.warning(f"Did not find {repoInfo.skyWcsDataset} external calibrations for "
+                                     f"all dataIds that do have {repoInfo.catDataset} catalogs.")
 
             # Create list of alias mappings for differing schema naming
             # conventions (if any).
@@ -458,11 +462,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                          doApplyExternalSkyWcs=self.config.doApplyExternalSkyWcs,
                                          useMeasMosaic=self.config.useMeasMosaic)
                 if self.config.doReadParquetTables:
-                    catalog, commonZpCat = self.readParquetTables(dataRefListTract, datasetType, repoInfo,
+                    catalog, commonZpCat = self.readParquetTables(dataRefExistsList, datasetType, repoInfo,
                                                                   **externalCalKwargs)
-                    areaDict, _ = computeAreaDict(repoInfo, dataRefListTract, dataset="", fakeCat=None)
+                    areaDict, _ = computeAreaDict(repoInfo, dataRefExistsList, dataset="", fakeCat=None)
                 else:
-                    catStruct = self.readCatalogs(dataRefListTract, datasetType, repoInfo,
+                    catStruct = self.readCatalogs(dataRefExistsList, datasetType, repoInfo,
                                                   aliasDictList=aliasDictList, fakeCat=inputFakes,
                                                   readFootprintsAs=self.config.readFootprintsAs,
                                                   **externalCalKwargs)
@@ -486,9 +490,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                             baseGoodSky &= catalog["detect_isDeblendedSource"]
                         skySrcCat = catalog[baseGoodSky].copy(deep=True)
                     else:
-                        self.log.warn("doPlotSkyObjects is True, but the \"sky_source\" "
-                                      "column does not exist in the catalog schema.  Skipping "
-                                      "skyObjects plot.")
+                        self.log.warning("doPlotSkyObjects is True, but the \"sky_source\" "
+                                         "column does not exist in the catalog schema.  Skipping "
+                                         "skyObjects plot.")
 
                 # Set boolean arrays indicating sources deemed unsuitable for
                 # qa analyses.
@@ -608,13 +612,14 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                     if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
                         plotList.append(self.plotStarGal(catalog, plotInfoDict, areaDict, **plotKwargs))
                     else:
-                        self.log.warn("Cannot run plotStarGal: "
-                                      "ext_shapeHSM_HsmSourceMoments_xx not in the catalog schema")
+                        self.log.warning("Cannot run plotStarGal: "
+                                         "ext_shapeHSM_HsmSourceMoments_xx not in the catalog schema")
                 if self.config.doPlotSizes:
                     if "base_SdssShape_psf_xx" in schema:
                         plotList.append(self.plotSizes(catalog, plotInfoDict, areaDict, **plotKwargs))
                     else:
-                        self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in the catalog schema")
+                        self.log.warning("Cannot run plotSizes: base_SdssShape_psf_xx not in the "
+                                         "catalog schema")
                 if self.config.doPlotCentroids and self.haveFpCoords:
                     plotList.append(self.plotCentroidXY(catalog, plotInfoDict, areaDict, **plotKwargs))
 
@@ -623,7 +628,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 # Read in and unpack just the persisted srcMatch from SFM
                 # (which still uses ps1 for astrometric calibration).
                 sfmUnpackedMatches, _ = self.readSrcMatches(
-                    repoInfo, dataRefListTract, dataset="src", refObjLoader=self.config.photomRefObjLoader,
+                    repoInfo, dataRefExistsList, dataset="src", refObjLoader=self.config.photomRefObjLoader,
                     aliasDictList=aliasDictList, readPackedMatchesOnly=True,
                     doApplyExternalPhotoCalib=False, doApplyExternalSkyWcs=False)
                 self.zpLabelPacked = self.zpLabel  # not doing external calibration for this sample
@@ -640,10 +645,10 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                                          doApplyExternalSkyWcs=self.config.doApplyExternalSkyWcs,
                                          useMeasMosaic=self.config.useMeasMosaic)
                 astromMatches, astromMatchAreaDict = self.readSrcMatches(
-                    repoInfo, dataRefListTract, dataset="src", refObjLoader=self.config.astromRefObjLoader,
+                    repoInfo, dataRefExistsList, dataset="src", refObjLoader=self.config.astromRefObjLoader,
                     aliasDictList=aliasDictList, **externalCalKwargs)
                 photomMatches, photomMatchAreaDict = self.readSrcMatches(
-                    repoInfo, dataRefListTract, dataset="src", refObjLoader=self.config.photomRefObjLoader,
+                    repoInfo, dataRefExistsList, dataset="src", refObjLoader=self.config.photomRefObjLoader,
                     aliasDictList=aliasDictList, **externalCalKwargs)
                 if self.config.doWriteParquetTables:
                     for calibType, calibMatches in [("Astrom", astromMatches), ("Photom", photomMatches)]:
@@ -816,9 +821,11 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 dataId = dataRef["dataId"]
                 externalSkyWcsCatalog = dataRef["butler"].get(repoInfo.skyWcsDataset, dataId=dataId)
                 row = externalSkyWcsCatalog.find(dataId["detector"])
-                wcs = row.getWcs()
+                wcs = None if row is None else row.getWcs()
             if wcs is None:
-                self.log.warn("No wcs found for dataset {} dataId{}".format(repoInfo.skyWcsDataset, dataId))
+                raise RuntimeError("No WCS found for dataset {} dataId{} (this dataId should "
+                                   "not have made it into the dataExists list".
+                                   format(repoInfo.skyWcsDataset, dataId))
             if isinstance(calibrated, pd.DataFrame):
                 xPixelArray = np.array(calibrated["slot_Centroid_x"])
                 yPixelArray = np.array(calibrated["slot_Centroid_y"])
@@ -1099,8 +1106,10 @@ class CompareVisitAnalysisTask(VisitAnalysisTask, CompareCoaddAnalysisTask):
                                     externalSkyWcsName=self.config.externalSkyWcsName2)
             fullCameraCcdList1 = getCcdNameRefList(dataRefListTract1)
 
-            existsRefList1, existsCcdList1 = getDataExistsRefList(dataRefListTract1, repoInfo1.catDataset)
-            existsRefList2, existsCcdList2 = getDataExistsRefList(dataRefListTract2, repoInfo2.catDataset)
+            existsRefList1, existsCcdList1 = getDataExistsRefList(
+                dataRefListTract1, repoInfo1.catDataset, doCheckPhotoCalibNotNone=True, log=self.log)
+            existsRefList2, existsCcdList2 = getDataExistsRefList(
+                dataRefListTract2, repoInfo2.catDataset, doCheckPhotoCalibNotNone=True, log=self.log)
             if not existsCcdList1:
                 raise RuntimeError(f"No datasets found for datasetType = {repoInfo1.catDataset}")
             if not existsCcdList2:
@@ -1280,7 +1289,7 @@ class CompareVisitAnalysisTask(VisitAnalysisTask, CompareCoaddAnalysisTask):
                 if ("first_base_SdssShape_psf_xx" in schema and "second_base_SdssShape_psf_xx" in schema):
                     plotList.append(self.plotSizes(catalog, plotInfoDict, areaDict1, **plotKwargs1))
                 else:
-                    self.log.warn("Cannot run plotSizes: base_SdssShape_psf_xx not in the catalog schema")
+                    self.log.warning("Cannot run plotSizes: base_SdssShape_psf_xx not in the catalog schema")
             if self.config.doApCorrs:
                 plotList.append(self.plotApCorrs(catalog, plotInfoDict, areaDict1, **plotKwargs1))
             if self.config.doPlotCentroids:
