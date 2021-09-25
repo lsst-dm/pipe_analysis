@@ -69,7 +69,7 @@ __all__ = ["CoaddAnalysisConfig", "CoaddAnalysisRunner", "CoaddAnalysisTask", "C
 NANOJANSKYS_PER_AB_FLUX = (0*u.ABmag).to_value(u.nJy)
 FLAGCOLORS = ["yellow", "greenyellow", "aquamarine", "orange", "fuchsia", "gold", "lightseagreen", "lime"]
 filterToBandMap = {"HSC-G": "g", "HSC-R": "r", "HSC-R2": "r", "HSC-I": "i", "HSC-I2": "i",
-                   "HSC-Z": "z", "HSC-Y": "y", "NB0921": "z"}
+                   "HSC-Z": "z", "HSC-Y": "y", "NB0921": "N921"}
 
 
 class CoaddAnalysisConfig(Config):
@@ -926,14 +926,14 @@ class CoaddAnalysisTask(CmdLineTask):
                 parquetCat = dataRef.get(dataset, immediate=True)
             else:
                 butler = dataRef["butler"]
-                if parquetCat is None or not isMulti:
-                    parquetCat = butler.get(dataset, dataId=dataId, immediate=True)
+                parquetCat = butler.get(dataset, dataId=dataId, immediate=True)
             isMulti = (isinstance(parquetCat, MultilevelParquetTable)
                        or isinstance(parquetCat.columns, pd.MultiIndex))
             if isMulti and not any(dfDataset == dfName for dfName in ["forced_src", "meas", "ref"]):
                 raise RuntimeError("Must specify a dfDataset for multilevel parquet tables")
             bandName = repoInfo.genericBandName
             filterLevelStr = "band"
+            physicalFilterStr = "physical_filter" if repoInfo.isGen3 else "filter"
 
             if isMulti:
                 if isinstance(parquetCat.columns, pd.MultiIndex):
@@ -947,7 +947,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 # Some obj tables do not contain data for all filters
                 if bandName not in existsBandList:
                     self.log.info("Filter {} does not exist for: {}, {}.  Skipping patch...".
-                                  format(dataId["filter"], dataId, dataset))
+                                  format(dataId[physicalFilterStr], dataId, dataset))
                     dataRefToRemoveList.append(dataRef)
                     continue
 
