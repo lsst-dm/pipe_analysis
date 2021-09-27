@@ -1235,12 +1235,11 @@ class Analysis(object):
             figs, axes = list(zip(*figAxes))
 
             description = description.replace("Rho", "hsmRho")
-            compareCol = "ext_shapeHSM_HsmPsfMoments"
+            compareCol = "ext_shapeHSM_HsmSourceMoments"
             psfCompareCol = "ext_shapeHSM_HsmPsfMomentsDebiased"
             shapeAlgorithm = "HSM"
             flags = list(self.config.flags) + ["ext_shapeHSM_HsmSourceMoments_flag",
                                                "ext_shapeHSM_HsmPsfMomentsDebiased_flag"]
-            import pdb; pdb.set_trace()
             # Cull the catalog of flagged sources
             bad = np.zeros(len(self.catalog), dtype=bool)
             bad |= self.catalog["deblend_nChild"] > 0
@@ -1280,7 +1279,7 @@ class Analysis(object):
                                                      measureRhoMetrics(rhoStats[rhoId], 1, ">"),
                                                      measExtrasDictList=measExtrasDictList)
 
-            shapeAlgorithm = "HSM (Psf - Psf Debiased)"
+            shapeAlgorithm = "HSM (Source - Psf Debiased)"
             for figId, figax in enumerate(figAxes):
                 fig, ax = figax
                 figDescription = description + str(figId + 1)
