@@ -1047,7 +1047,7 @@ class Analysis(object):
         schema = getSchema(catalog)
         # Use HSM algorithm results if present, if not, use SDSS Shape
         if "ext_shapeHSM_HsmSourceMoments_xx" in schema:
-            compareCol = "ext_shapeHSM_HsmPsfMoments"
+            compareCol = "ext_shapeHSM_HsmSourceMoments"
             psfCompareCol = "ext_shapeHSM_HsmPsfMomentsDebiased"
             shapeAlgorithm = "HSM"
             flags = ["ext_shapeHSM_HsmSourceMoments_flag", "ext_shapeHSM_HsmPsfMomentsDebiased_flag",
