@@ -2143,12 +2143,12 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
     try:
         crossIdxUpper = (np.argwhere(np.diff(np.sign(yOrthLine - yLineUpper)) != 0).reshape(-1) + 0)[0]
     except Exception:
-        log.warningf(message, "Upper", xFitRange[1])
+        log.warning(message.format("Upper", xFitRange[1]))
         crossIdxUpper = (np.abs(xLine - xFitRange[1])).argmin()
     try:
         crossIdxLower = (np.argwhere(np.diff(np.sign(yOrthLine - yLineLower)) != 0).reshape(-1) + 0)[0]
     except Exception:
-        log.warningf(message, "Lower", xFitRange[0])
+        log.warning(message.format("Lower", xFitRange[0]))
         crossIdxLower = (np.abs(xLine - xFitRange[0])).argmin()
 
     # Compute the slope of the two pixels +/-1% of line length from crossing
