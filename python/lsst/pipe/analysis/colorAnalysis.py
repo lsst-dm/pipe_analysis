@@ -60,7 +60,7 @@ __all__ = ["ColorTransform", "NumStarLabeller", "ColorValueInFitRange", "ColorVa
            "ColorColorDistance"]
 
 filterToBandMap = {"HSC-G": "g", "HSC-R": "r", "HSC-R2": "r", "HSC-I": "i", "HSC-I2": "i",
-                   "HSC-Z": "z", "HSC-Y": "y", "NB0921": "z"}
+                   "HSC-Z": "z", "HSC-Y": "y", "NB0921": "N921"}
 
 
 class ColorTransform(Config):
@@ -452,7 +452,11 @@ class ColorAnalysisRunner(TaskRunner):
             gen3PidList = idParser.idList.copy()
 
             if len(gen3PidList) < len(patchList):
-                gen3PidList = gen3PidList*len(patchList)
+                numPatch = int(len(patchList)/len(gen3PidList))
+                gen3PidListNew = []
+                for gen3Pid in gen3PidList:
+                    gen3PidListNew.extend([gen3Pid]*numPatch)
+                gen3PidList = gen3PidListNew
             # Using patchId for the gen2 N,N naming scheme and just patch for
             # the gen3 numerical equivalent.
             for physical_filter in filterList:
@@ -462,7 +466,6 @@ class ColorAnalysisRunner(TaskRunner):
                         gen3PidCopy = copy.deepcopy(gen3Pid)
                         if "filter" in gen3PidCopy:
                             gen3PidCopy["physical_filter"] = gen3PidCopy["filter"]
-                            physical_filter = gen3PidCopy["physical_filter"]
                             if parsedCmd.instrument == "HSC":
                                 gen3PidCopy["band"] = filterToBandMap[gen3PidCopy["physical_filter"]]
                                 gen3PidCopy["skymap"] = "hsc_rings_v1"
@@ -477,7 +480,7 @@ class ColorAnalysisRunner(TaskRunner):
                         gen3PidCopy["dataId"]["patchId"] = patchId
                         gen3PidCopy["camera"] = parsedCmd.instrument
                         gen3RefList.append(gen3PidCopy)
-                        tractFilterRefs[tract][physical_filter] = gen3RefList
+                tractFilterRefs[tract][physical_filter] = gen3RefList
         else:
             for patchRef in sum(parsedCmd.id.refList, []):
                 # Make sure the actual input file requested exists (i.e. do not
@@ -2140,12 +2143,12 @@ def colorColorPolyFitPlot(plotInfoDict, description, log, xx, yy, xLabel, yLabel
     try:
         crossIdxUpper = (np.argwhere(np.diff(np.sign(yOrthLine - yLineUpper)) != 0).reshape(-1) + 0)[0]
     except Exception:
-        log.warningf(message, "Upper", xFitRange[1])
+        log.warning(message.format("Upper", xFitRange[1]))
         crossIdxUpper = (np.abs(xLine - xFitRange[1])).argmin()
     try:
         crossIdxLower = (np.argwhere(np.diff(np.sign(yOrthLine - yLineLower)) != 0).reshape(-1) + 0)[0]
     except Exception:
-        log.warningf(message, "Lower", xFitRange[0])
+        log.warning(message.format("Lower", xFitRange[0]))
         crossIdxLower = (np.abs(xLine - xFitRange[0])).argmin()
 
     # Compute the slope of the two pixels +/-1% of line length from crossing
