@@ -111,9 +111,9 @@ class CoaddAnalysisConfig(Config):
                                            doc="Reference object loader for astrometry")
     photomRefObjLoader = ConfigurableField(target=LoadIndexedReferenceObjectsTask,
                                            doc="Reference object loader for photometry")
-    doPlotMags = Field(dtype=bool, default=True, doc="Plot magnitudes? (ignored if plotMatchesOnly is True)")
-    doPlotSizes = Field(dtype=bool, default=True, doc="Plot PSF sizes? (ignored if plotMatchesOnly is True)")
-    doPlotCentroids = Field(dtype=bool, default=True, doc=("Plot centroids? "
+    doPlotMags = Field(dtype=bool, default=False, doc="Plot magnitudes? (ignored if plotMatchesOnly is True)")
+    doPlotSizes = Field(dtype=bool, default=False, doc="Plot PSF sizes? (ignored if plotMatchesOnly is True)")
+    doPlotCentroids = Field(dtype=bool, default=False, doc=("Plot centroids? "
                                                            "(ignored if plotMatchesOnly is True)"))
     doApCorrs = Field(dtype=bool, default=True, doc=("Plot aperture corrections? "
                                                      "(ignored if plotMatchesOnly is True)"))
@@ -122,11 +122,11 @@ class CoaddAnalysisConfig(Config):
                              doc="Add a field containing 12 pix circular aperture flux to HSC table?")
     doPlotStarGalaxy = Field(dtype=bool, default=True, doc=("Plot star/galaxy? "
                                                             "(ignored if plotMatchesOnly is True)"))
-    doPlotOverlaps = Field(dtype=bool, default=True, doc=("Plot overlaps? "
+    doPlotOverlaps = Field(dtype=bool, default=False, doc=("Plot overlaps? "
                                                           "(ignored if plotMatchesOnly is True)"))
     plotMatchesOnly = Field(dtype=bool, default=False, doc=("Only make plots related to reference cat"
                                                             "matches?"))
-    doPlotMatches = Field(dtype=bool, default=True, doc="Plot matches?")
+    doPlotMatches = Field(dtype=bool, default=False, doc="Plot matches?")
     doPlotCompareUnforced = Field(dtype=bool, default=True, doc=("Plot difference between forced and unforced"
                                                                  "? (ignored if plotMatchesOnly is True)"))
     doPlotRhoStatistics = Field(dtype=bool, default=True, doc=("Plot Rho statistics?"))
@@ -138,11 +138,11 @@ class CoaddAnalysisConfig(Config):
     doPlotQuiver = Field(dtype=bool, default=True, doc=("Plot ellipticity residuals quiver plot? "
                                                         "(ignored if plotMatchesOnly is True)"))
     doPlotPsfFluxSnHists = Field(dtype=bool, default=True, doc="Plot histograms of raw PSF fluxes and S/N?")
-    doPlotFootprintArea = Field(dtype=bool, default=True, doc=("Plot histogram of footprint area? "
+    doPlotFootprintArea = Field(dtype=bool, default=False, doc=("Plot histogram of footprint area? "
                                                                "(ignored if plotMatchesOnly is True)"))
-    doPlotInputCounts = Field(dtype=bool, default=True, doc=("Make input counts plot? "
+    doPlotInputCounts = Field(dtype=bool, default=False, doc=("Make input counts plot? "
                                                              "(ignored if plotMatchesOnly is True)"))
-    doPlotSkyObjects = Field(dtype=bool, default=True, doc="Make sky object plots?")
+    doPlotSkyObjects = Field(dtype=bool, default=False, doc="Make sky object plots?")
     doPlotSkyObjectsSky = Field(dtype=bool, default=False, doc="Make sky projection sky object plots?")
     onlyReadStars = Field(dtype=bool, default=False, doc="Only read stars (to save memory)?")
     toMilli = Field(dtype=bool, default=True, doc="Print stats in milli units (i.e. mas, mmag)?")
@@ -178,8 +178,9 @@ class CoaddAnalysisConfig(Config):
                  "base_PsfFlux", "base_CircularApertureFlux_9_0_instFlux", "base_CircularApertureFlux_12_0",
                  "base_CircularApertureFlux_25_0", "ext_photometryKron_KronFlux", "modelfit_CModel",
                  "base_Sdss", "slot_Centroid", "slot_Shape", "ext_shapeHSM_HsmSourceMoments_",
-                 "ext_shapeHSM_HsmPsfMoments_", "ext_shapeHSM_HsmShapeRegauss_", "base_Footprint",
-                 "base_FPPosition", "base_ClassificationExtendedness", "parent", "detect", "deblend_nChild",
+                 "ext_shapeHSM_HsmPsfMoments_", "ext_shapeHSM_HsfPsfMomentsDebiased_",
+                 "ext_shapeHSM_HsmShapeRegauss_", "base_Footprint", "base_FPPosition",
+                 "base_ClassificationExtendedness", "parent", "detect", "deblend_nChild",
                  "deblend_parentNPeaks", "deblend_nPeaks", "deblend_scarletFlux", "deblend_skipped",
                  "base_Blendedness_abs", "base_Blendedness_flag", "base_InputCount",
                  "merge_peak_sky", "merge_measurement", "calib", "sky_source",

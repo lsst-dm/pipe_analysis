@@ -2576,7 +2576,7 @@ def addPreComputedColumns(catalog, fluxToPlotList, toMilli=False, unforcedCat=No
 
     for compareCol, psfCompareCol, compareStr in [["base_SdssShape", "base_SdssShape_psf", "Sdss"],
                                                   ["ext_shapeHSM_HsmSourceMoments",
-                                                   "ext_shapeHSM_HsmPsfMoments", "Hsm"]]:
+                                                   "ext_shapeHSM_HsmPsfMomentsDebiased", "Hsm"]]:
         if compareCol + "_xx" in schema:
             # Source Trace
             fieldUnits = " (pixel)"
