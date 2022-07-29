@@ -715,7 +715,9 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             verifyJobFilename = repoInfo.butler.get("visitAnalysis_verify_job_filename",
                                                     dataId=repoInfo.dataId)[0]
         # else:
-        #     verifyJobFilename = butlerGen2.get("visitAnalysis_verify_job_filename", dataId=repoInfo.dataId)[0]
+        #     verifyJobFilename =
+        #              butlerGen2.get("visitAnalysis_verify_job_filename",
+        #              dataId=repoInfo.dataId)[0]
         if plotList:
             if repoInfo.isGen3:
                 repoInfo.dataId["filter"] = repoInfo.dataId["band"]
@@ -759,7 +761,7 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 cat = butler.get(dataset, dataId=dataId)
                 wcs = butler.get("icExp.wcs", dataId=dataId)
             afwTable.updateSourceCoords(wcs, cat)
-            schema = getSchema(cat)
+            # schema = getSchema(cat)
             cat = addIntFloatOrStrColumn(cat, dataId[repoInfo.ccdKey], "ccdId",
                                          "Id of CCD on which source was detected")
             catList.append(cat)
@@ -767,7 +769,6 @@ class VisitAnalysisTask(CoaddAnalysisTask):
             raise TaskError("No catalogs read: %s" % ([dataId for dataRef in dataRefList]))
 
         return concatenateCatalogs(catList)
-
 
     def calibrateCatalogs(self, dataRef, catalog, fluxMag0, repoInfo, doApplyExternalPhotoCalib,
                           doApplyExternalSkyWcs, useMeasMosaic, iCat=None):

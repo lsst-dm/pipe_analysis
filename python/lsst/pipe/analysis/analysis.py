@@ -725,7 +725,7 @@ class Analysis(object):
                           log=logPlot, color=addColors[i], alpha=0.5, label=addDataLabelList[i],
                           histtype="step", hatch=hatches[i%4])
                 axes.hist(extraData, bins=numBins, range=(self.qMin, self.qMax), density=density,
-                          log=logPlot, color=addColors[i], alpha=1, # label=addDataLabelList[i],
+                          log=logPlot, color=addColors[i], alpha=1,  # label=addDataLabelList[i],
                           histtype="step")
 
         axes.tick_params(axis="both", which="both", direction="in", labelsize=8)

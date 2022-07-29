@@ -928,7 +928,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 parquetCat = dataRef.get(dataset, immediate=True)
             else:
                 butler = dataRef["butler"]
-                parquetCat = butler.get(dataset, dataId=dataId) # , immediate=True)
+                parquetCat = butler.get(dataset, dataId=dataId)  # , immediate=True)
             isMulti = (isinstance(parquetCat, MultilevelParquetTable)
                        or isinstance(parquetCat.columns, pd.MultiIndex))
             if isMulti and not any(dfDataset == dfName for dfName in ["forced_src", "meas", "ref"]):

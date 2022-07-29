@@ -18,7 +18,8 @@ else:
     # subFieldNameList = ["DUD_ELAIS", "DUD_XMM", "DUD_COSMOS", "DUD_DEEP"]
     filterList = ["HSC-I", "HSC-I2", "HSC-R", "HSC-R2", "HSC-G", "HSC-Z", "HSC-Y",
                   "NB0921", "NB0387", "NB0816"]
-    # rootDir = "/datasets/hsc/repo/rerun/private/lauren/DM-24024/" + fieldName + "/" + subFieldName
+    # rootDir = "/datasets/hsc/repo/rerun/private/lauren/DM-24024/"
+    #           + fieldName + "/" + subFieldName
 
 for subFieldName in subFieldNameList:
     rootDir = "/datasets/hsc/repo/rerun/private/lauren/DM-24024/" + fieldName + "/" + subFieldName

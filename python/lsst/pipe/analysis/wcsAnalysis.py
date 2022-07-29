@@ -19,7 +19,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import matplotlib
-matplotlib.use("Agg")  # noqa 402
+
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Patch, Polygon
 from matplotlib.ticker import FormatStrFormatter
@@ -41,6 +41,8 @@ from lsst.pipe.tasks.parquetTable import ParquetTable
 from lsst.pipe.tasks.postprocess import VisitDataIdContainer
 from .plotUtils import bboxToXyCoordLists
 from .utils import findCcdKey
+
+matplotlib.use("Agg")  # noqa 402
 
 
 class WcsAnalysisConfig(Config):
@@ -110,7 +112,7 @@ class WcsAnalysisTask(CmdLineTask):
         distanceToFpCenterSquaredList = []
         cameraFpCenter = camera.getFpBBox().getCenter()
         for iCcd, ccd in enumerate(camera):
-            ccdCenterFp = ccd.getCenter(cameraGeom.FOCAL_PLANE)
+            # ccdCenterFp = ccd.getCenter(cameraGeom.FOCAL_PLANE)
             distanceToFpCenterSquaredList.append(
                 cameraFpCenter.distanceSquared(ccd.getCenter(cameraGeom.FOCAL_PLANE)))
         distanceToFpCenterSquaredList.sort()
@@ -119,7 +121,7 @@ class WcsAnalysisTask(CmdLineTask):
         for dataRef in dataRefExistsList:
             dataRefStruct = getDataRefInfo(dataRef, camera, log=self.log)
             if dataRefStruct is not None:
-                ccdCenterFp = ccd.getCenter(cameraGeom.FOCAL_PLANE)
+                # ccdCenterFp = ccd.getCenter(cameraGeom.FOCAL_PLANE)
                 distanceToFpCenterSquared = cameraFpCenter.distanceSquared(
                     dataRefStruct.ccd.getCenter(cameraGeom.FOCAL_PLANE))
                 if distanceToFpCenterSquared <= nthDistanceToFpCenter:
@@ -128,7 +130,8 @@ class WcsAnalysisTask(CmdLineTask):
                     else:
                         if dataRefStructTemplate.calexpWcs is None and dataRefStruct.calexpWcs is not None:
                             dataRefStructTemplate = dataRefStruct
-                        if dataRefStructTemplate.jointcalWcs is None and dataRefStruct.jointcalWcs is not None:
+                        if (dataRefStructTemplate.jointcalWcs is None
+                           and dataRefStruct.jointcalWcs is not None):
                             dataRefStructTemplate = dataRefStruct
                 rowEntry, tractCorners, focalPlaneCorners, tractCenter, focalPlaneCenter = (
                     self.run(camera, dataRefStruct, tract, tractWcs))
@@ -208,29 +211,33 @@ class WcsAnalysisTask(CmdLineTask):
             xMaxInd = np.nanargmax(abs(maxDiffTractJointcalXsGood))
             ccdMaxDiffTractX = outputDataList[xMaxInd][dfColumns.index("ccdId")]
             visitMaxDiffTractPixX = maxDiffTractJointcalXsGood[xMaxInd]
-            visitMeanDiffTractPixX = np.nanmean(maxDiffTractJointcalXsGood)
+            # visitMeanDiffTractPixX = np.nanmean(maxDiffTractJointcalXsGood)
             visitMedianDiffTractPixX = np.nanmedian(maxDiffTractJointcalXsGood)
-            visitStdDiffTractPixX = np.nanstd(maxDiffTractJointcalXsGood)
+            # visitStdDiffTractPixX = np.nanstd(maxDiffTractJointcalXsGood)
             yMaxInd = np.nanargmax(abs(maxDiffTractJointcalYsGood))
             ccdMaxDiffTractY = outputDataList[yMaxInd][dfColumns.index("ccdId")]
             visitMaxDiffTractPixY = maxDiffTractJointcalYsGood[yMaxInd]
-            visitMeanDiffTractPixY = np.nanmean(maxDiffTractJointcalYsGood)
+            # visitMeanDiffTractPixY = np.nanmean(maxDiffTractJointcalYsGood)
             visitMedianDiffTractPixY = np.nanmedian(maxDiffTractJointcalYsGood)
-            visitStdDiffTractPixY = np.nanstd(maxDiffTractJointcalYsGood)
+            # visitStdDiffTractPixY = np.nanstd(maxDiffTractJointcalYsGood)
 
             xMaxInd = np.nanargmax(abs(maxDiffFocalPlaneJointcalXsGood))
             ccdMaxDiffFocalPlaneX = outputDataList[xMaxInd][dfColumns.index("ccdId")]
             visitMaxDiffFocalPlanePixX = maxDiffFocalPlaneJointcalXsGood[xMaxInd]
-            visitMeanDiffFocalPlanePixX = np.nanmean(maxDiffFocalPlaneJointcalXsGood)
+            # visitMeanDiffFocalPlanePixX
+            # = np.nanmean(maxDiffFocalPlaneJointcalXsGood)
             visitMedianDiffFocalPlanePixX = np.nanmedian(maxDiffFocalPlaneJointcalXsGood)
-            visitStdDiffFocalPlanePixX = np.nanstd(maxDiffFocalPlaneJointcalXsGood)
+            # visitStdDiffFocalPlanePixX
+            # = np.nanstd(maxDiffFocalPlaneJointcalXsGood)
             yMaxInd = np.nanargmax(abs(maxDiffFocalPlaneJointcalYsGood))
             ccdMaxDiffFocalPlaneY = outputDataList[yMaxInd][dfColumns.index("ccdId")]
             visitMaxDiffFocalPlanePixY = maxDiffFocalPlaneJointcalYsGood[
                 np.nanargmax(abs(maxDiffFocalPlaneJointcalYsGood))]
-            visitMeanDiffFocalPlanePixY = np.nanmean(maxDiffFocalPlaneJointcalYsGood)
+            # visitMeanDiffFocalPlanePixY
+            # = np.nanmean(maxDiffFocalPlaneJointcalYsGood)
             visitMedianDiffFocalPlanePixY = np.nanmedian(maxDiffFocalPlaneJointcalYsGood)
-            visitStdDiffFocalPlanePixY = np.nanstd(maxDiffFocalPlaneJointcalYsGood)
+            # visitStdDiffFocalPlanePixY
+            # = np.nanstd(maxDiffFocalPlaneJointcalYsGood)
             focalPlanePixelScale = dataRefStructTemplate.jointcalWcs.getPixelScale(
                 dataRefStructTemplate.ccd.getCenter(cameraGeom.PIXELS)).asArcseconds()
 
@@ -242,30 +249,34 @@ class WcsAnalysisTask(CmdLineTask):
             xMaxInd = np.nanargmax(abs(maxDiffTractCalexpXsGood))
             ccdMaxDiffTractX = outputDataList[xMaxInd][dfColumns.index("ccdId")]
             visitMaxDiffTractPixX = maxDiffTractCalexpXsGood[np.nanargmax(abs(maxDiffTractCalexpXsGood))]
-            visitMeanDiffTractPixX = np.nanmean(maxDiffTractCalexpXsGood)
+            # visitMeanDiffTractPixX = np.nanmean(maxDiffTractCalexpXsGood)
             visitMedianDiffTractPixX = np.nanmedian(maxDiffTractCalexpXsGood)
-            visitStdDiffTractPixX = np.nanstd(maxDiffTractCalexpXsGood)
+            # visitStdDiffTractPixX = np.nanstd(maxDiffTractCalexpXsGood)
             yMaxInd = np.nanargmax(abs(maxDiffTractCalexpYsGood))
             ccdMaxDiffTractY = outputDataList[yMaxInd][dfColumns.index("ccdId")]
             visitMaxDiffTractPixY = maxDiffTractCalexpYsGood[np.nanargmax(abs(maxDiffTractCalexpYsGood))]
-            visitMeanDiffTractPixY = np.nanmean(maxDiffTractCalexpYsGood)
+            # visitMeanDiffTractPixY = np.nanmean(maxDiffTractCalexpYsGood)
             visitMedianDiffTractPixY = np.nanmedian(maxDiffTractCalexpYsGood)
-            visitStdDiffTractPixY = np.nanstd(maxDiffTractCalexpYsGood)
+            # visitStdDiffTractPixY = np.nanstd(maxDiffTractCalexpYsGood)
 
             xMaxInd = np.nanargmax(abs(maxDiffFocalPlaneCalexpXsGood))
             ccdMaxDiffFocalPlaneX = outputDataList[xMaxInd][dfColumns.index("ccdId")]
             visitMaxDiffFocalPlanePixX = maxDiffFocalPlaneCalexpXsGood[
                 np.nanargmax(abs(maxDiffFocalPlaneCalexpXsGood))]
-            visitMeanDiffFocalPlanePixX = np.nanmean(maxDiffFocalPlaneCalexpXsGood)
+            # visitMeanDiffFocalPlanePixX
+            # = np.nanmean(maxDiffFocalPlaneCalexpXsGood)
             visitMedianDiffFocalPlanePixX = np.nanmedian(maxDiffFocalPlaneCalexpXsGood)
-            visitStdDiffFocalPlanePixX = np.nanstd(maxDiffFocalPlaneCalexpXsGood)
+            # visitStdDiffFocalPlanePixX
+            # = np.nanstd(maxDiffFocalPlaneCalexpXsGood)
             visitMaxDiffFocalPlanePixY = maxDiffFocalPlaneCalexpYsGood[
                 np.nanargmax(abs(maxDiffFocalPlaneCalexpYsGood))]
             yMaxInd = np.nanargmax(abs(maxDiffFocalPlaneCalexpYsGood))
             ccdMaxDiffFocalPlaneY = outputDataList[yMaxInd][dfColumns.index("ccdId")]
-            visitMeanDiffFocalPlanePixY = np.nanmean(maxDiffFocalPlaneCalexpYsGood)
+            # visitMeanDiffFocalPlanePixY
+            # = np.nanmean(maxDiffFocalPlaneCalexpYsGood)
             visitMedianDiffFocalPlanePixY = np.nanmedian(maxDiffFocalPlaneCalexpYsGood)
-            visitStdDiffFocalPlanePixY = np.nanstd(maxDiffFocalPlaneCalexpYsGood)
+            # visitStdDiffFocalPlanePixY
+            # = np.nanstd(maxDiffFocalPlaneCalexpYsGood)
             focalPlanePixelScale = dataRefStructTemplate.calexpWcs.getPixelScale(
                 dataRefStructTemplate.ccd.getCenter(cameraGeom.PIXELS)).asArcseconds()
             maxVecInd = np.nanargmax(calexpFpCenterVectorLengthGood)
@@ -311,9 +322,10 @@ class WcsAnalysisTask(CmdLineTask):
             plotMedStr = "med {}-raw offset x, y (pix): {:7.2f} {:7.2f}".format(
                 wcsStr, visitMedianDiffFocalPlanePixX, visitMedianDiffFocalPlanePixY)
             focalPlanePlot = plotWcsOutlinesFocalPlane(
-                focalPlaneCornersList, focalPlaneCenterList, dataRefStructTemplate.rawWcs, plotTitle=plotTitle,
-                rerun=rerun, tractInfo=tractInfo, plotMaxStr=plotMaxStr, plotMedStr=plotMedStr, log=self.log,
-                ccdMaxX=ccdMaxDiffFocalPlaneX, ccdMaxY=ccdMaxDiffFocalPlaneY, ccdMaxVec=ccdMaxVec)
+                focalPlaneCornersList, focalPlaneCenterList, dataRefStructTemplate.rawWcs,
+                plotTitle=plotTitle, rerun=rerun, tractInfo=tractInfo, plotMaxStr=plotMaxStr,
+                plotMedStr=plotMedStr, log=self.log, ccdMaxX=ccdMaxDiffFocalPlaneX,
+                ccdMaxY=ccdMaxDiffFocalPlaneY, ccdMaxVec=ccdMaxVec)
             dataRefList[0].put(focalPlanePlot, "plotWcsOutlines", description="wcsOutlines",
                                style="focalPlane")
             plt.close(focalPlanePlot)
@@ -344,9 +356,11 @@ class WcsAnalysisTask(CmdLineTask):
                     offsetsStruct.fpSkyOriginCalexp.getDec().asDegrees(),
                     offsetsStruct.fpSkyOriginJointcal.getRa().asDegrees(),
                     offsetsStruct.fpSkyOriginJointcal.getDec().asDegrees(),
-                    # offsetsStruct.rawVsCalexpOffsetRadians, offsetsStruct.rawVsCalexpOffsetDegrees,
+                    # offsetsStruct.rawVsCalexpOffsetRadians,
+                    # offsetsStruct.rawVsCalexpOffsetDegrees,
                     offsetsStruct.rawVsCalexpOffsetArcsec,
-                    # offsetsStruct.rawVsJointcalOffsetRadians, offsetsStruct.rawVsJointcalOffsetDegrees,
+                    # offsetsStruct.rawVsJointcalOffsetRadians,
+                    # offsetsStruct.rawVsJointcalOffsetDegrees,
                     offsetsStruct.rawVsJointcalOffsetArcsec,
                     offsetsStruct.anyBadFlag, offsetsStruct.rawBadFlag, offsetsStruct.calexpBadFlag,
                     offsetsStruct.jointcalBadFlag, dataRefStruct.airmass]
@@ -387,10 +401,8 @@ def getDataRefInfo(dataRef, camera, log=None):
     airmass = raw.getInfo().getVisitInfo().getBoresightAirmass()
     try:
         calexpWcs = dataRef.get("calexp_wcs")
-        calexpMd = dataRef.get("calexp_md")
-        boreRotAng = calexpMd.getScalar("BORE-ROTANG")
-        # print(boreRotAng)
-        # input()
+        # calexpMd = dataRef.get("calexp_md")
+        # boreRotAng = calexpMd.getScalar("BORE-ROTANG")
     except NoResults:
         if log is not None:
             log.info("No calexp wcs found for tract: {} visit: {} filter: {} ccd: {}".
@@ -463,6 +475,7 @@ def computeFpSkyOrigin(ccd, wcs):
     fpSkyOrigin = wcs.pixelToSky(fpPixelOrigin)
     return fpSkyOrigin
 
+
 def computeSkyToFpPixel(ccd, wcs, skyCoordList):
     fpToSky = ccd.getTransform(cameraGeom.FOCAL_PLANE, cameraGeom.PIXELS).then(wcs.getTransform())
     fpMm = fpToSky.applyInverse(skyCoordList)
@@ -474,6 +487,7 @@ def computeSkyToFpPixel(ccd, wcs, skyCoordList):
         point[1] = point[1]/ccd.getPixelSize().getY()
     fpPixel = fpPixel[0] if len(fpPixel) == 1 else fpPixel
     return fpPixel
+
 
 def computeCoordToDistortedFpPixel(camera, ccd, coordList, wcs=None):
     focalPlaneToFieldAngle = camera.getTransformMap().getTransform(cameraGeom.FOCAL_PLANE,
@@ -499,6 +513,7 @@ def computeCoordToDistortedFpPixel(camera, ccd, coordList, wcs=None):
         point[1] = point[1]/ccd.getPixelSize().getY()
     distortedFpPixel = distortedFpPixel[0] if len(distortedFpPixel) == 1 else distortedFpPixel
     return distortedFpPixel
+
 
 def computePixelToFpPixel(ccd, pixCoordList):
     pixelToFocalPlane = ccd.getTransform(cameraGeom.PIXELS, cameraGeom.FOCAL_PLANE)
@@ -568,13 +583,14 @@ def computeWcsOffsets(camera, ccd, bbox, tractWcs, rawWcs, calexpWcs=None, joint
     rawSkyCenter = rawWcs.pixelToSky(ccd.getCenter(cameraGeom.PIXELS))
     rawSkyCorners = rawWcs.pixelToSky(ccd.getCorners(cameraGeom.PIXELS))
 
-    ccdFocalPlaneCenter = computePixelToFpPixel(ccd, ccd.getCenter(cameraGeom.PIXELS))
+    # ccdFocalPlaneCenter = computePixelToFpPixel(ccd,
+    #                           ccd.getCenter(cameraGeom.PIXELS))
     ccdFocalPlaneCorners = computePixelToFpPixel(ccd, ccd.getCorners(cameraGeom.PIXELS))
     ccdFocalPlaneCorners, rawBadFlag = orderCoordsToCc(ccdFocalPlaneCorners)
-    ccdDistortedFpCenter = computeCoordToDistortedFpPixel(camera, ccd, ccd.getCenter(cameraGeom.PIXELS),
-                                                          wcs=None)
-    ccdDistortedCornersFp = computeCoordToDistortedFpPixel(camera, ccd, ccd.getCorners(cameraGeom.PIXELS),
-                                                           wcs=None)
+    # ccdDistortedFpCenter = computeCoordToDistortedFpPixel(camera, ccd,
+    #                              ccd.getCenter(cameraGeom.PIXELS), wcs=None)
+    # ccdDistortedCornersFp = computeCoordToDistortedFpPixel(camera, ccd,
+    #                     ccd.getCorners(cameraGeom.PIXELS), wcs=None)
     # rawFocalPlaneCenter = computeSkyToFpPixel(ccd, rawWcs, rawSkyCenter)
     # rawFocalPlaneCorners = computeSkyToFpPixel(ccd, rawWcs, rawSkyCorners)
     # rawFocalPlaneCorners, rawBadFlag = orderCoordsToCc(rawFocalPlaneCorners)
@@ -591,11 +607,14 @@ def computeWcsOffsets(camera, ccd, bbox, tractWcs, rawWcs, calexpWcs=None, joint
     if calexpWcs is not None or jointcalWcs is not None:
         if calexpWcs is not None:
             # calexpPixelCenter = calexpWcs.skyToPixel(rawSkyCenter)
-            # calexpFocalPlaneCenter = computePixelToFpPixel(ccd, calexpPixelCenter)
+            # calexpFocalPlaneCenter = computePixelToFpPixel(ccd,
+            #                                       calexpPixelCenter)
             # calexpPixelCorners = calexpWcs.skyToPixel(rawSkyCorners)
-            # calexpFocalPlaneCorners = computePixelToFpPixel(ccd, calexpPixelCorners)
-            # calexpFocalPlaneCorners, calexpBadFlag = orderCoordsToCc(calexpFocalPlaneCorners,
-            #                                                          ccdId=ccd.getId())
+            # calexpFocalPlaneCorners = computePixelToFpPixel(ccd,
+            #                                      calexpPixelCorners)
+            # calexpFocalPlaneCorners, calexpBadFlag =
+            #                 orderCoordsToCc(calexpFocalPlaneCorners,
+            #                                 ccdId=ccd.getId())
             calexpDistortedFpCenter = computeCoordToDistortedFpPixel(camera, ccd, rawSkyCenter, wcs=calexpWcs)
             diffFpCenterX = calexpDistortedFpCenter[0] - rawDistortedFpCenter[0]
             diffFpCenterY = calexpDistortedFpCenter[1] - rawDistortedFpCenter[1]
@@ -622,11 +641,14 @@ def computeWcsOffsets(camera, ccd, bbox, tractWcs, rawWcs, calexpWcs=None, joint
             maxDiffFocalPlanePixCalexpX, maxDiffFocalPlanePixCalexpY = np.nan, np.nan
         if jointcalWcs is not None:
             # jointcalPixelCenter = jointcalWcs.skyToPixel(rawSkyCenter)
-            # jointcalFocalPlaneCenter = computePixelToFpPixel(ccd, jointcalPixelCenter)
+            # jointcalFocalPlaneCenter = computePixelToFpPixel(ccd,
+            #                              jointcalPixelCenter)
             # jointcalPixelCorners = jointcalWcs.skyToPixel(rawSkyCorners)
-            # jointcalFocalPlaneCorners = computePixelToFpPixel(ccd, jointcalPixelCorners)
-            # jointcalFocalPlaneCorners, jointcalBadFlag = orderCoordsToCc(jointcalFocalPlaneCorners,
-            #                                                             ccdId=ccd.getId())
+            # jointcalFocalPlaneCorners = computePixelToFpPixel(ccd,
+            #                           jointcalPixelCorners)
+            # jointcalFocalPlaneCorners, jointcalBadFlag =
+            #               orderCoordsToCc(jointcalFocalPlaneCorners,
+            #                               ccdId=ccd.getId())
             jointcalDistortedFpCenter = computeCoordToDistortedFpPixel(camera, ccd, rawSkyCenter,
                                                                        wcs=jointcalWcs)
             diffFpCenterX = jointcalDistortedFpCenter[0] - rawDistortedFpCenter[0]
@@ -846,12 +868,11 @@ def plotWcsOutlines(cornersList, centerList, plotTitle=None, rerun=None, tractIn
         for patch in tractInfo:
             patchXs, patchYs = bboxToXyCoordLists(patch.inner_bbox, wcs=None, close=True)
             ax.plot(patchXs, patchYs, color="tab:orange", linestyle="dashed", linewidth=1, alpha=0.9)
-                    # label="tract {}".format(str(tractInfo.getId())))
+            # label="tract {}".format(str(tractInfo.getId())))
             ax.annotate(patch.sequential_index,
                         xy=(np.min(patchXs) + 0.5*np.abs(np.max(patchXs) - np.min(patchXs)),
                             np.min(patchYs) + 0.5*np.abs(np.max(patchYs) - np.min(patchYs))),
                         fontsize=7, color="tab:orange", alpha=1.0)
-
 
     ax.set_xlim(xTractLims)
     ax.set_ylim(yTractLims)
@@ -899,7 +920,7 @@ def plotWcsOutlines(cornersList, centerList, plotTitle=None, rerun=None, tractIn
         ccdInt = int(ccdIds[ic])
         ccdColor = "black"
         if ccdMaxX == ccdMaxY:
-            ccdColor = "mediumblue" if (ccdInt == ccdMaxX)  else ccdColor
+            ccdColor = "mediumblue" if (ccdInt == ccdMaxX) else ccdColor
         else:
             ccdColor = "mediumblue" if (ccdInt == ccdMaxX and ccdInt != ccdMaxY) else ccdColor
             ccdColor = "darkviolet" if (ccdInt != ccdMaxX and ccdInt == ccdMaxY) else ccdColor
@@ -909,6 +930,7 @@ def plotWcsOutlines(cornersList, centerList, plotTitle=None, rerun=None, tractIn
 
     fig.set_dpi(120)
     return plt.gcf()
+
 
 def plotWcsOutlinesFocalPlane(cornersList, centerList, rawWcs, plotTitle=None, rerun=None, tractInfo=None,
                               plotMaxStr=None, plotMedStr=None, log=None, ccdMaxX=-99, ccdMaxY=-99,
