@@ -1914,7 +1914,7 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, catDataset="src", do
         isGen3 = True
     isCoadd = True if "patch" in dataId else False
     try:
-        if isGen3 and isCoadd:
+        if isGen3:  # and isCoadd:
             filterName = dataId["band"]
         else:
             filterName = dataId["filter"]
@@ -1977,13 +1977,14 @@ def getRepoInfo(dataRef, coaddName=None, coaddDataset=None, catDataset="src", do
         else:
             photoCalibDataset = "fcr_hsc" if hscRun else externalPhotoCalibName + "_photoCalib"
     skyWcsDataset = None
-    if doApplyExternalSkyWcs:
-        if isGen3:
+    if isGen3:
+        if doApplyExternalSkyWcs:
             skyWcsDataset = externalSkyWcsName + "SkyWcsCatalog"
-            skymap = skymap if skymap else butler.get("skyMap")
-        else:
+        skymap = skymap if skymap else butler.get("skyMap")
+    else:
+        if doApplyExternalSkyWcs:
             skyWcsDataset = "wcs_hsc" if hscRun else externalSkyWcsName + "_wcs"
-            skymap = skymap if skymap else butler.get("deepCoadd_skyMap")
+        skymap = skymap if skymap else butler.get("deepCoadd_skyMap")
     try:
         tractInfo = skymap[dataId["tract"]]
     except KeyError:
@@ -2075,9 +2076,13 @@ def getDataExistsRefList(dataRefList, dataset, doCheckPhotoCalibNotNone=False, l
         dataExistsRefList = list(set(dataExistsRefList))
         dataExistsCcdList = list(set(dataExistsCcdList))
     else:
+        uriPrinted = False
         for dataRef in dataRefList:
             dataId = dataRef["dataId"]
             try:
+                if not uriPrinted:
+                    print(dataRef["butler"].getURI(dataset, dataId=dataId))
+                    uriPrinted = True
                 dataRef["butler"].getURI(dataset, dataId=dataId)
                 dataExistsRefList.append(dataRef)
                 dataExistsCcdList.append(dataRef["dataId"]["detector"])

@@ -30,6 +30,7 @@ from collections import defaultdict
 
 import lsst.afw.table as afwTable
 import lsst.daf.butler as dafButler
+from lsst.daf.persistence import NoResults
 from lsst.daf.persistence.butler import Butler
 from lsst.pex.config import Field, ChoiceField
 from lsst.pipe.base import ArgumentParser, TaskRunner, TaskError, Struct
@@ -37,8 +38,9 @@ from lsst.meas.base.forcedPhotCcd import PerTractCcdDataIdContainer
 from .analysis import Analysis
 from .coaddAnalysis import (FLAGCOLORS, CoaddAnalysisConfig, CoaddAnalysisTask, CompareCoaddAnalysisConfig,
                             CompareCoaddAnalysisTask)
-from .utils import (matchAndJoinCatalogs, makeBadArray, calibrateSourceCatalogMosaic,
-                    calibrateSourceCatalogPhotoCalib, calibrateSourceCatalog, andCatalog, writeParquet,
+from .utils import (concatenateCatalogs, matchAndJoinCatalogs, makeBadArray, calibrateSourceCatalogMosaic,
+                    calibrateSourceCatalogPhotoCalib, addIntFloatOrStrColumn, calibrateSourceCatalog,
+                    andCatalog, writeParquet,
                     getRepoInfo, findCcdKey, getCcdNameRefList, getDataExistsRefList, addPreComputedColumns,
                     updateVerifyJob, savePlots, getSchema, computeAreaDict)
 from .plotUtils import annotateAxes, labelVisit, labelCamera, plotText, getPlotInfo
@@ -263,8 +265,9 @@ class VisitAnalysisRunner(TaskRunner):
             repoRootDir = "/repo/dc2" if parsedCmd.instrument == "LSSTCam-imSim" else "/repo/main"
             if parsedCmd.instrument is None:
                 raise RuntimeError("Must provide --instrument command line option for gen3 repos.")
+            skyMapName = "hsc_rings_v1" if parsedCmd.instrument == "HSC" else "DC2"
             butlerGen3 = dafButler.Butler(repoRootDir, collections=parsedCmd.collection,
-                                          instrument=parsedCmd.instrument)
+                                          instrument=parsedCmd.instrument, skymap=skyMapName)
             butlerGen2 = parsedCmd.butler
             parsedCmd.butler = butlerGen3
             kwargs["butlerGen2"] = butlerGen2
@@ -287,10 +290,15 @@ class VisitAnalysisRunner(TaskRunner):
                 pIdList = pIdList*len(ccdList)
             for pId, rerunCcdId in zip(pIdList, ccdList):
                 pIdCopy = copy.deepcopy(pId)
+                pIdCopy["skymap"] = skyMapName
+                print("pIdCopy = ", pIdCopy)
+                input()
                 if "ccd" in pIdCopy:
                     pIdCopy["detector"] = pIdCopy.pop("ccd")
                 else:
                     pIdCopy["detector"] = rerunCcdId
+                if "filter" in pIdCopy:
+                    pIdCopy["band"] = pIdCopy.pop("filter")
                 try:
                     butlerGen3.getURI("calexp", dataId=pIdCopy)
                     gen3RefList.append({"butler": butlerGen3, "camera": parsedCmd.instrument,
@@ -572,9 +580,15 @@ class VisitAnalysisTask(CoaddAnalysisTask):
                 if self.config.doPlotSkyObjects and skySrcCat is not None:
                     plotList.append(self.plotSkyObjects(skySrcCat, "skySources", plotInfoDict, areaDict))
                 if self.config.doPlotPsfFluxSnHists:
-                    plotList.append(self.plotPsfFluxSnHists(commonZpCat, "base_PsfFlux_raw",
-                                                            plotInfoDict, areaDict, zpLabel="raw"))
-                    plotList.append(self.plotPsfFluxSnHists(catalog, "base_PsfFlux_cal",
+                    icCat = self.readIcSrcCatalogs(dataRefList, repoInfo, dataset="icSrc")
+
+                    plotList.append(self.plotPsfFluxSnHists(icCat,  # commonZpCat,
+                                                            # "base_GausssianFlux_raw",
+                                                            "base_PsfFlux_raw",
+                                                            plotInfoDict, areaDict, zpLabel="raw icSrc"))
+                    plotList.append(self.plotPsfFluxSnHists(catalog,
+                                                            # "base_GausssianFlux_cal",
+                                                            "base_PsfFlux_cal",
                                                             plotInfoDict, areaDict, zpLabel=self.zpLabel))
                 plotKwargs = dict(zpLabel=self.zpLabel, forcedStr=self.catLabel)
                 if self.config.doPlotFootprintArea:
@@ -700,17 +714,60 @@ class VisitAnalysisTask(CoaddAnalysisTask):
         if not repoInfo.isGen3:
             verifyJobFilename = repoInfo.butler.get("visitAnalysis_verify_job_filename",
                                                     dataId=repoInfo.dataId)[0]
-        else:
-            verifyJobFilename = butlerGen2.get("visitAnalysis_verify_job_filename", dataId=repoInfo.dataId)[0]
+        # else:
+        #     verifyJobFilename = butlerGen2.get("visitAnalysis_verify_job_filename", dataId=repoInfo.dataId)[0]
         if plotList:
             if repoInfo.isGen3:
+                repoInfo.dataId["filter"] = repoInfo.dataId["band"]
                 savePlots(plotList, "plotVisit", repoInfo.dataId, butlerGen2, subdir=subdir)
             else:
                 savePlots(plotList, "plotVisit", repoInfo.dataId, repoInfo.butler, subdir=subdir)
 
         # TODO: DM-26758 (or DM-14768) should make the following line a proper
         # butler.put by directly persisting json files.
-        self.verifyJob.write(verifyJobFilename)
+        if not repoInfo.isGen3:
+            self.verifyJob.write(verifyJobFilename)
+
+    def readIcSrcCatalogs(self, dataRefList, repoInfo, dataset="icSrc"):
+        catList = []
+        dataRefExistsList = []
+        if not repoInfo.isGen3:
+            for dataRef in dataRefList:
+                if dataRef.datasetExists(dataset):
+                    dataRefExistsList.append(dataRef)
+        else:
+            for dataRef in dataRefList:
+                dataId = dataRef["dataId"]
+                try:
+                    repoInfo.butler.getURI(dataset, dataId=dataId)
+                    dataRefExistsList.append(dataRef)
+                except LookupError:
+                    print("No URI for ", dataId)
+
+        catFlags = afwTable.SOURCE_IO_NO_FOOTPRINTS
+        for dataRef in dataRefExistsList:
+            dataId = dataRef["dataId"] if repoInfo.isGen3 else dataRef.dataId
+            if not repoInfo.isGen3:
+                cat = dataRef.get(dataset, immediate=True, flags=catFlags)
+                try:
+                    exp = dataRef.get("icExp", immediate=True)
+                except NoResults:
+                    exp = dataRef.get("raw", immediate=True)
+                wcs = exp.getWcs()
+            else:
+                butler = dataRef["butler"]
+                cat = butler.get(dataset, dataId=dataId)
+                wcs = butler.get("icExp.wcs", dataId=dataId)
+            afwTable.updateSourceCoords(wcs, cat)
+            schema = getSchema(cat)
+            cat = addIntFloatOrStrColumn(cat, dataId[repoInfo.ccdKey], "ccdId",
+                                         "Id of CCD on which source was detected")
+            catList.append(cat)
+        if not catList:
+            raise TaskError("No catalogs read: %s" % ([dataId for dataRef in dataRefList]))
+
+        return concatenateCatalogs(catList)
+
 
     def calibrateCatalogs(self, dataRef, catalog, fluxMag0, repoInfo, doApplyExternalPhotoCalib,
                           doApplyExternalSkyWcs, useMeasMosaic, iCat=None):
@@ -962,8 +1019,9 @@ class CompareVisitAnalysisRunner(TaskRunner):
         if parsedCmd.collection is not None:
             if parsedCmd.instrument is None:
                 raise RuntimeError("Must provide --instrument command line option for gen3 repos.")
+            skyMapName = "hsc_rings_v1" if parsedCmd.instrument == "HSC" else "DC2"
             butler2 = dafButler.Butler(parsedCmd.rerun2, collections=parsedCmd.collection,
-                                       instrument=parsedCmd.instrument)
+                                       instrument=parsedCmd.instrument, skymap=skyMapName)
         else:
             butlerArgs = dict(root=os.path.join(rootDir, "rerun", parsedCmd.rerun2))
             if parsedCmd.calib is not None:
@@ -994,10 +1052,13 @@ class CompareVisitAnalysisRunner(TaskRunner):
                 pIdList = pIdList*len(rerunCcdList)
             for pId, rerunCcdId in zip(pIdList, rerunCcdList):
                 pIdCopy = copy.deepcopy(pId)
+                pIdCopy["skymap"] = skyMapName
                 if "ccd" in pIdCopy:
                     pIdCopy["detector"] = pIdCopy.pop("ccd")
                 else:
                     pIdCopy["detector"] = rerunCcdId
+                if "filter" in pIdCopy:
+                    pIdCopy["band"] = pIdCopy.pop("filter")
                 try:
                     butler2.getURI("calexp", dataId=pIdCopy)
                     rerun2RefList.append({"butler": butler2, "camera": parsedCmd.instrument,

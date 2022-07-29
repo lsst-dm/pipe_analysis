@@ -756,7 +756,8 @@ def computeAngularDistance(ra1, dec1, ra2, dec2):
 
 
 def plotWcsOutlines(cornersList, centerList, plotTitle=None, rerun=None, tractInfo=None,
-                    plotMaxStr=None, plotMedStr=None, log=None, ccdMaxX=-99, ccdMaxY=-99):
+                    plotMaxStr=None, plotMedStr=None, log=None, ccdMaxX=-99, ccdMaxY=-99,
+                    useTractLimits=False):
     """Plot the outlines of the ccds in ccdList for various wcs.
 
     The plots are in Tract pixels.
@@ -808,6 +809,12 @@ def plotWcsOutlines(cornersList, centerList, plotTitle=None, rerun=None, tractIn
         yaxLimMin = np.nanmin([yMinRaw, yMinCalexp, yMinJointcal, yaxLimMin])
         yaxLimMax = np.nanmax([yMaxRaw, yMaxCalexp, yMaxJointcal, yaxLimMax])
 
+    if useTractLimits:  # Set limits to include full tract outline
+        xaxLimMin = min(xaxLimMin, tractInfo.getBBox().minX)
+        xaxLimMax = max(xaxLimMax, tractInfo.getBBox().maxX)
+        yaxLimMin = min(yaxLimMin, tractInfo.getBBox().minY)
+        yaxLimMax = max(yaxLimMax, tractInfo.getBBox().maxY)
+
     padPixels = abs(int(0.07*max(xaxLimMax - xaxLimMin, yaxLimMax - yaxLimMin)))
     xTractLims = (xaxLimMin - padPixels, xaxLimMax + padPixels)
     yTractLims = (yaxLimMin - padPixels, yaxLimMax + padPixels)
@@ -836,6 +843,15 @@ def plotWcsOutlines(cornersList, centerList, plotTitle=None, rerun=None, tractIn
                 label="tract {}".format(str(tractInfo.getId())))
         legendPatches.append(Patch(facecolor="white", edgecolor="tab:orange", alpha=0.9, linestyle="dotted",
                                    linewidth=0.6, label="tract {}".format(str(tractInfo.getId()))))
+        for patch in tractInfo:
+            patchXs, patchYs = bboxToXyCoordLists(patch.inner_bbox, wcs=None, close=True)
+            ax.plot(patchXs, patchYs, color="tab:orange", linestyle="dashed", linewidth=1, alpha=0.9)
+                    # label="tract {}".format(str(tractInfo.getId())))
+            ax.annotate(patch.sequential_index,
+                        xy=(np.min(patchXs) + 0.5*np.abs(np.max(patchXs) - np.min(patchXs)),
+                            np.min(patchYs) + 0.5*np.abs(np.max(patchYs) - np.min(patchYs))),
+                        fontsize=7, color="tab:orange", alpha=1.0)
+
 
     ax.set_xlim(xTractLims)
     ax.set_ylim(yTractLims)

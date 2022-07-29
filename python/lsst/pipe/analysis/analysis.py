@@ -675,10 +675,10 @@ class Analysis(object):
         """Plot histogram of quantity.
         """
         fig, axes = plt.subplots(1, 1)
-        axes.axvline(0, linestyle="--", color="0.6")
+        axes.axvline(0, linestyle="--", color="0.8")
         if vertLineList:
             for xLine in vertLineList:
-                axes.axvline(xLine, linestyle="--", color="0.6")
+                axes.axvline(xLine, linestyle="--", color="0.8")
         numMin = 0 if density else 0.9
         numMax = 1
         alpha = 0.4
@@ -722,11 +722,17 @@ class Analysis(object):
                 addDataLabelList = ["" for i in len(addDataList)]
             for i, extraData in enumerate(addDataList):
                 axes.hist(extraData, bins=numBins, range=(self.qMin, self.qMax), density=density,
-                          log=logPlot, color=addColors[i], alpha=0.65, label=addDataLabelList[i],
+                          log=logPlot, color=addColors[i], alpha=0.5, label=addDataLabelList[i],
                           histtype="step", hatch=hatches[i%4])
+                axes.hist(extraData, bins=numBins, range=(self.qMin, self.qMax), density=density,
+                          log=logPlot, color=addColors[i], alpha=1, # label=addDataLabelList[i],
+                          histtype="step")
 
         axes.tick_params(axis="both", which="both", direction="in", labelsize=8)
         axes.set_xlim(self.qMin, self.qMax)
+        if cumulative and axes2 is not None:
+            axes.set_xlim(0, self.qMax)
+            axes2.set_xlim(0, self.qMax)
         axes.set_ylim(numMin, numMax)
         if filterStr is None:
             filterStr = ""
@@ -745,14 +751,15 @@ class Analysis(object):
         axes.legend(loc="upper right", fontsize=8)
         xOff = 0.0
         if plotInfoDict["cameraName"] is not None:
-            xOff = max(0.12, 0.04*len(plotInfoDict["cameraName"]))
+            # xOff = max(0.12, 0.04*len(plotInfoDict["cameraName"]))
+            xOff = min(0.25, max(0.12, 0.04*len(plotInfoDict["cameraName"])))
             labelCamera(plotInfoDict, plt.gcf(), axes, 0.5 - xOff, 1.04, fontSize=9)
         labelVisit(plotInfoDict, plt.gcf(), axes, 0.5 + xOff, 1.04, fontSize=9)
         if self.config.doLabelRerun:
             plotText("rerun: " + plotInfoDict["rerun"], plt, axes, 0.5, 1.1, fontSize=7, color="purple")
         if zpLabel is not None:
             prefix = "" if "GalExt" in zpLabel else "zp: "
-            plotText(zpLabel, plt, axes, 0.14, -0.10, prefix=prefix, fontSize=7, color="green")
+            plotText(zpLabel, plt, axes, 0.14, -0.11, prefix=prefix, fontSize=7, color="green")
         if uberCalLabel:
             plotText(uberCalLabel, plt, axes, 0.14, -0.13, fontSize=7, color="green")
         if forcedStr is not None:

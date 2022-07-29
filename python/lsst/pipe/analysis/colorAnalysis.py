@@ -427,8 +427,9 @@ class ColorAnalysisRunner(TaskRunner):
             repoRootDir = "/repo/dc2" if parsedCmd.instrument == "LSSTCam-imSim" else "/repo/main"
             if parsedCmd.instrument is None:
                 raise RuntimeError("Must provide --instrument command line option for gen3 repos.")
+            skyMapName = "hsc_rings_v1" if parsedCmd.instrument == "HSC" else "DC2"
             butlerGen3 = dafButler.Butler(repoRootDir, collections=parsedCmd.collection,
-                                          instrument=parsedCmd.instrument)
+                                          instrument=parsedCmd.instrument, skymap=skyMapName)
             butlerGen2 = parsedCmd.butler
             parsedCmd.butler = butlerGen3
             kwargs["butlerGen2"] = butlerGen2
@@ -465,7 +466,7 @@ class ColorAnalysisRunner(TaskRunner):
                     if gen3Pid["filter"] == physical_filter:
                         gen3PidCopy = copy.deepcopy(gen3Pid)
                         if "filter" in gen3PidCopy:
-                            gen3PidCopy["physical_filter"] = gen3PidCopy["filter"]
+                            gen3PidCopy["physical_filter"] = gen3PidCopy.pop("filter")
                             if parsedCmd.instrument == "HSC":
                                 gen3PidCopy["band"] = filterToBandMap[gen3PidCopy["physical_filter"]]
                                 gen3PidCopy["skymap"] = "hsc_rings_v1"
@@ -477,7 +478,7 @@ class ColorAnalysisRunner(TaskRunner):
                         gen3PidCopy["patchId"] = patchId
                         gen3PidCopy["patch"] = patchIdToGen3Map[patchId]
                         gen3PidCopy["dataId"]["patch"] = patchIdToGen3Map[patchId]
-                        gen3PidCopy["dataId"]["patchId"] = patchId
+                        # gen3PidCopy["dataId"]["patchId"] = patchId
                         gen3PidCopy["camera"] = parsedCmd.instrument
                         gen3RefList.append(gen3PidCopy)
                 tractFilterRefs[tract][physical_filter] = gen3RefList
@@ -644,7 +645,7 @@ class ColorAnalysisTask(CmdLineTask):
                         patchList.append(dataRef.dataId["patch"])
                         patchIdList.append(dataRef.dataId["patch"])
                 else:
-                    if dataRef["dataId"]["filter"] == self.fluxFilter:
+                    if dataRef["dataId"]["physical_filter"] == self.fluxFilter:
                         try:
                             repoInfo.butler.getURI(self.config.coaddName + dataset, dataRef["dataId"])
                             patchList.append(dataRef["dataId"]["patch"])
@@ -687,7 +688,8 @@ class ColorAnalysisTask(CmdLineTask):
                 if len(fullCoveragePatchRefList) == 0:
                     for patchRef in patchRefList:
                         dataId = patchRef["dataId"] if repoInfo.isGen3 else patchRef.dataId
-                        if dataId["patchId"] in fullCoveragePatchList:
+                        patchId = dataId["patch"] if repoInfo.isGen3 else dataId["patchId"]
+                        if patchId in fullCoveragePatchList:
                             fullCoveragePatchRefList.append(patchRef)
 
                 areaDict, _ = computeAreaDict(repoInfo, fullCoveragePatchRefList,
@@ -892,7 +894,7 @@ class ColorAnalysisTask(CmdLineTask):
             if not repoInfo.isGen3:
                 parquetCat = dataRef.get(dataset, immediate=True)
             else:
-                parquetCat = repoInfo.butler.get(dataset, dataId=dataId, immediate=True)
+                parquetCat = repoInfo.butler.get(dataset, dataId=dataId)
             # Some obj tables do not contain data for all filters
             if not any(dfDataset == dfName for dfName in ["forced_src", "meas", "ref"]):
                 raise RuntimeError("Must specify a dfDataset for multilevel parquet tables")
@@ -1055,16 +1057,14 @@ class ColorAnalysisTask(CmdLineTask):
                 cat = patchRef.get(dataset, immediate=True, flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
             else:
                 butler = patchRef["butler"]
-                cat = butler.get(dataset, dataId=dataId, immediate=True,
-                                 flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+                cat = butler.get(dataset, dataId=dataId)
             schema = getSchema(cat)
             if dataset != self.config.coaddName + "Coadd_meas":
                 if not repoInfo.isGen3:
                     refCat = patchRef.get(self.config.coaddName + "Coadd_ref", immediate=True,
                                           flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
                 else:
-                    refCat = butler.get(self.config.coaddName + "Coadd_ref", dataId=dataId, immediate=True,
-                                        flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+                    refCat = butler.get(self.config.coaddName + "Coadd_ref", dataId=dataId)
                 refCatSchema = getSchema(refCat)
                 refColList = []
                 for strPrefix in self.config.columnsToCopyFromRef:
@@ -1077,8 +1077,7 @@ class ColorAnalysisTask(CmdLineTask):
                     measCat = patchRef.get(self.config.coaddName + "Coadd_meas", immediate=True,
                                            flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
                 else:
-                    measCat = butler.get(self.config.coaddName + "Coadd_meas", dataId=dataId, immediate=True,
-                                         flags=afwTable.SOURCE_IO_NO_HEAVY_FOOTPRINTS)
+                    measCat = butler.get(self.config.coaddName + "Coadd_meas", dataId=dataId)
                 measCatSchema = getSchema(measCat)
                 measColList = []
                 for strPrefix in self.config.columnsToCopyFromMeas:

@@ -305,8 +305,13 @@ class CoaddAnalysisRunner(TaskRunner):
             repoRootDir = "/repo/dc2" if parsedCmd.instrument == "LSSTCam-imSim" else "/repo/main"
             if parsedCmd.instrument is None:
                 raise RuntimeError("Must provide --instrument command line option for gen3 repos.")
+            skyMapName = "hsc_rings_v1" if parsedCmd.instrument == "HSC" else "DC2"
+            if "ci_hsc" in parsedCmd.collection:
+                repoRootDir = "/home/lauren/LSST/ci_hsc_gen3/DATA"
+                skyMapName = "discrete/ci_hsc"
+
             butlerGen3 = dafButler.Butler(repoRootDir, collections=parsedCmd.collection,
-                                          instrument=parsedCmd.instrument)
+                                          instrument=parsedCmd.instrument, skymap=skyMapName)
             butlerGen2 = parsedCmd.butler
             parsedCmd.butler = butlerGen3
             kwargs["butlerGen2"] = butlerGen2
@@ -334,12 +339,11 @@ class CoaddAnalysisRunner(TaskRunner):
                 if "filter" in gen3PidCopy:
                     gen3PidCopy["physical_filter"] = gen3PidCopy.pop("filter")
                     physical_filter = gen3PidCopy["physical_filter"]
+                    gen3PidCopy["skymap"] = skyMapName
                     if parsedCmd.instrument == "HSC":
                         gen3PidCopy["band"] = filterToBandMap[gen3PidCopy["physical_filter"]]
-                        gen3PidCopy["skymap"] = "hsc_rings_v1"
                     elif parsedCmd.instrument == "LSSTCam-imSim":
                         gen3PidCopy["band"] = gen3PidCopy["physical_filter"]
-                        gen3PidCopy["skymap"] = "DC2"
                     else:
                         raise RuntimeError("Unknown instrument {}. Currently only know HSC and "
                                            "LSSTCam-imSim.".format(parsedCmd.instrument))
@@ -455,7 +459,6 @@ class CoaddAnalysisTask(CmdLineTask):
             if not patchRefList[0].datasetExists(self.config.coaddName + dataset):
                 raise TaskError("No data exists in patRefList: %s" %
                                 ([patchRef.dataId for patchRef in patchRefList]))
-
         repoInfo = getRepoInfo(patchRefExistsList[0], coaddName=self.config.coaddName, coaddDataset=dataset)
         # Explicit input file was checked in CoaddAnalysisRunner, so a check
         # on datasetExists is sufficient here (modulo the case where a forced
@@ -463,7 +466,6 @@ class CoaddAnalysisTask(CmdLineTask):
         # but does not exist in the input directory as the former will be
         # found).
         dataId = patchRefExistsList[0]["dataId"] if repoInfo.isGen3 else patchRefExistsList[0].dataId
-
         forcedStr = "forced" if haveForced else "unforced"
         if self.config.doBackoutApCorr:
             self.log.info("Backing out aperture corrections from all fluxes")
@@ -926,7 +928,7 @@ class CoaddAnalysisTask(CmdLineTask):
                 parquetCat = dataRef.get(dataset, immediate=True)
             else:
                 butler = dataRef["butler"]
-                parquetCat = butler.get(dataset, dataId=dataId, immediate=True)
+                parquetCat = butler.get(dataset, dataId=dataId) # , immediate=True)
             isMulti = (isinstance(parquetCat, MultilevelParquetTable)
                        or isinstance(parquetCat.columns, pd.MultiIndex))
             if isMulti and not any(dfDataset == dfName for dfName in ["forced_src", "meas", "ref"]):
@@ -1905,14 +1907,26 @@ class CoaddAnalysisTask(CmdLineTask):
         yield
         schema = getSchema(catalog)
         stats = None
-        shortName = "psfInstFlux" if zpLabel == "raw" else "psfCalFlux"
+        shortName = "psfInstFlux" if "raw" in zpLabel else "psfCalFlux"
+        if "icSrc" in zpLabel:
+            shortName += "_icSrc"
         self.log.info("shortName = {:s}".format(shortName))
         # want "raw" flux
         factor = 10.0**(0.4*self.config.analysis.commonZp) if zpLabel == "raw" else NANOJANSKYS_PER_AB_FLUX
-        psfFlux = catalog["base_PsfFlux_instFlux"]*factor
-        psfFluxErr = catalog["base_PsfFlux_instFluxErr"]*factor
+        if "icSrc" in zpLabel:
+            factor = 1.0
+        psfFluxCol = "base_PsfFlux_instFlux"  # "base_GaussianFlux_instFlux"
+        psfFluxStr = "psfInstFlux"
+        psfFluxCalStr = "psfCalFlux"  # "gaussianCalFlux"
+        psfFlux = catalog[psfFluxCol]*factor
+        psfFluxErr = catalog[psfFluxCol + "Err"]*factor
         # Cull here so that all subsets get the same culling
-        bad = makeBadArray(catalog, flagList=self.config.analysis.flags)
+        if "icSrc" not in zpLabel:
+            bad = makeBadArray(catalog, flagList=self.config.analysis.flags)
+        else:
+            bad = np.zeros(len(catalog), dtype=bool)
+            for flag in self.config.analysis.flags:
+                bad |= catalog[flag]
         psfFlux = psfFlux[~bad]
         psfFluxErr = psfFluxErr[~bad]
         psfSn = psfFlux/psfFluxErr
@@ -1938,9 +1952,9 @@ class CoaddAnalysisTask(CmdLineTask):
         psfSnFluxGtLow = psfSn[goodFlux]
         goodFlux = psfFlux > highFlux
         psfSnFluxGtHigh = psfSn[goodFlux]
-        psfUsedCat = catalog[catalog["calib_psf_used"]]
-        psfUsedPsfFlux = psfUsedCat["base_PsfFlux_instFlux"]*factor
-        psfUsedPsfFluxErr = psfUsedCat["base_PsfFlux_instFluxErr"]*factor
+        psfUsedCat = catalog[catalog["calib_psf_used"]].copy(deep=True)
+        psfUsedPsfFlux = psfUsedCat[psfFluxCol]*factor
+        psfUsedPsfFluxErr = psfUsedCat[psfFluxCol + "Err"]*factor
         psfUsedPsfSn = psfUsedPsfFlux/psfUsedPsfFluxErr
 
         if "lsst" in plotInfoDict["cameraName"]:
@@ -1949,7 +1963,7 @@ class CoaddAnalysisTask(CmdLineTask):
             filterStr = plotInfoDict["filter"]
         yield from self.AnalysisClass(catalog[~bad], psfFlux, "%s" % shortName, shortName,
                                       self.config.analysis, qMin=0,
-                                      qMax=int(min(99999, max(4.0*np.median(psfFlux), 0.25*np.max(psfFlux)))),
+                                      qMax=int(min(50000, max(3.0*np.median(psfFlux), 0.25*np.max(psfFlux)))),
                                       labeller=AllLabeller()
                                       ).plotHistogram(description, plotInfoDict, numBins="sqrt", stats=stats,
                                                       zpLabel=zpLabel, forcedStr=forcedStr,
@@ -1962,11 +1976,15 @@ class CoaddAnalysisTask(CmdLineTask):
                                                       addDataLabelList=["S/N>{:.1f}".format(lowSn),
                                                                         "S/N>{:.1f}".format(highSn),
                                                                         "psf_used"])
-        shortName = "psfInstFlux/psfInstFluxErr" if zpLabel == "raw" else "psfCalFlux/psfCalFluxErr"
+        if "raw" in zpLabel:
+            shortName = psfFluxStr + "/" + psfFluxStr + "Err"
+        else:
+            shortName = psfFluxCalStr + "/" + psfFluxCalStr + "Err"
         description = description.replace("Flux", "FluxSn")
         self.log.info("shortName = {:s}".format(shortName))
         yield from self.AnalysisClass(catalog[~bad], psfSn, "%s" % "S/N = " + shortName, shortName,
-                                      self.config.analysis, qMin=0, qMax=4*highSn, labeller=AllLabeller()
+                                      self.config.analysis, qMin=0, qMax=3*highSn,
+                                      labeller=AllLabeller()
                                       ).plotHistogram(description, plotInfoDict, numBins="sqrt", stats=stats,
                                                       zpLabel=zpLabel, forcedStr=forcedStr,
                                                       filterStr=filterStr,
@@ -2438,10 +2456,11 @@ class CompareCoaddAnalysisRunner(TaskRunner):
         rootDir = parsedCmd.input.split("rerun")[0] if len(parsedCmd.rerun) == 2 else parsedCmd.input
         butlerArgs = dict(root=os.path.join(rootDir, "rerun", parsedCmd.rerun2))
         if parsedCmd.collection is not None:
+            skyMapName = "hsc_rings_v1" if parsedCmd.instrument == "HSC" else "DC2"
             if parsedCmd.instrument is None:
                 raise RuntimeError("Must provide --instrument command line option for gen3 repos.")
             butler2 = dafButler.Butler(parsedCmd.rerun2, collections=parsedCmd.collection,
-                                       instrument=parsedCmd.instrument)
+                                       instrument=parsedCmd.instrument, skymap=skyMapName)
         else:
             butlerArgs = dict(root=os.path.join(rootDir, "rerun", parsedCmd.rerun2))
             if parsedCmd.calib is not None:
